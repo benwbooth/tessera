@@ -8,6 +8,7 @@
 
 #include <QtCore/QPointer>
 #include <QtCore/QSocketNotifier>
+#include <QtCore/QTimer>
 #include <QtCore/QVariantMap>
 #include <QtCore/QVector>
 #include <QtGui/QColor>
@@ -47,6 +48,27 @@ class TerminalItem : public QQuickItem {
     Q_PROPERTY(qreal lineHeight READ lineHeight WRITE setLineHeight NOTIFY fontChanged)
     Q_PROPERTY(qreal paddingSize READ paddingSize WRITE setPaddingSize NOTIFY metricsChanged)
     Q_PROPERTY(bool copyOnSelect READ copyOnSelect WRITE setCopyOnSelect NOTIFY copyOnSelectChanged)
+    // Profile settings applied by the view.
+    Q_PROPERTY(QString command MEMBER m_command NOTIFY optionsChanged)
+    Q_PROPERTY(QString termName MEMBER m_termName NOTIFY optionsChanged)
+    Q_PROPERTY(QString startupInput MEMBER m_startupInput NOTIFY optionsChanged)
+    Q_PROPERTY(QString optionsJson READ optionsJson WRITE setOptionsJson NOTIFY optionsChanged)
+    Q_PROPERTY(qreal faintOpacity READ faintOpacity WRITE setFaintOpacity NOTIFY optionsChanged)
+    Q_PROPERTY(qreal charSpacing READ charSpacing WRITE setCharSpacing NOTIFY optionsChanged)
+    Q_PROPERTY(bool cursorBlink READ cursorBlink WRITE setCursorBlink NOTIFY optionsChanged)
+    Q_PROPERTY(bool cursorGuide READ cursorGuide WRITE setCursorGuide NOTIFY optionsChanged)
+    Q_PROPERTY(bool boldFont READ boldFont WRITE setBoldFont NOTIFY optionsChanged)
+    Q_PROPERTY(bool italicText READ italicText WRITE setItalicText NOTIFY optionsChanged)
+    Q_PROPERTY(qreal transparency READ transparency WRITE setTransparency NOTIFY optionsChanged)
+    Q_PROPERTY(bool keepBackgroundsOpaque READ keepBackgroundsOpaque WRITE setKeepBackgroundsOpaque NOTIFY optionsChanged)
+    Q_PROPERTY(bool visualBell MEMBER m_visualBell NOTIFY optionsChanged)
+    Q_PROPERTY(bool silenceBell MEMBER m_silenceBell NOTIFY optionsChanged)
+    Q_PROPERTY(bool middleClickPastes MEMBER m_middleClickPastes NOTIFY optionsChanged)
+    Q_PROPERTY(bool rightClickPastes MEMBER m_rightClickPastes NOTIFY optionsChanged)
+    Q_PROPERTY(bool focusFollowsMouse MEMBER m_focusFollowsMouse NOTIFY optionsChanged)
+    // Other views that receive this one's typing (Broadcast Input).
+    Q_PROPERTY(QVariantList broadcastTo MEMBER m_broadcastTo NOTIFY optionsChanged)
+    Q_PROPERTY(bool logging READ logging NOTIFY loggingChanged)
 
 public:
     explicit TerminalItem(QQuickItem* parent = nullptr);
@@ -96,6 +118,22 @@ public:
     Q_INVOKABLE void scrollToBottom();
     Q_INVOKABLE void selectAll();
     Q_INVOKABLE void clearScrollback();
+    Q_INVOKABLE void copyWithStyles();
+    Q_INVOKABLE void copyWithControlSequences();
+    Q_INVOKABLE void pasteSelection();
+    Q_INVOKABLE void pasteSlowly();
+    Q_INVOKABLE void pasteText(const QString& text);
+    Q_INVOKABLE QString selectedText() const;
+    Q_INVOKABLE QString contentsText() const;
+    Q_INVOKABLE void resetTerminal();
+    Q_INVOKABLE void restart();
+    Q_INVOKABLE void showMessage(const QString& text);
+    Q_INVOKABLE bool startLogging(const QString& path);
+    Q_INVOKABLE void stopLogging();
+    Q_INVOKABLE void findCursor();
+    // Broadcast Input: replay another view's typing here.
+    Q_INVOKABLE void receiveKey(int key, int mods, const QString& text, bool release);
+    Q_INVOKABLE void receiveText(const QString& text);
 
 signals:
     void attachIdChanged();
@@ -119,6 +157,9 @@ signals:
     void scrollbackChanged();
     void copyOnSelectChanged();
     void contextMenuRequested(qreal x, qreal y);
+    void optionsChanged();
+    void loggingChanged();
+    void activity();
 
 protected:
     void componentComplete() override;
@@ -137,6 +178,7 @@ protected:
     void wheelEvent(QWheelEvent* e) override;
     void focusInEvent(QFocusEvent* e) override;
     void focusOutEvent(QFocusEvent* e) override;
+    void hoverEnterEvent(QHoverEvent* e) override;
 
 private:
     struct RunData {
@@ -195,6 +237,47 @@ private:
     QVector<bool> m_rowUpload;
     bool m_rebuildNodes = true;
     int m_wheelAccum = 0;
+
+    QString optionsJson() const { return m_optionsJson; }
+    void setOptionsJson(const QString& v);
+    qreal faintOpacity() const { return m_faintOpacity; }
+    void setFaintOpacity(qreal v) { m_faintOpacity = v; repaintAll(); emit optionsChanged(); }
+    qreal charSpacing() const { return m_charSpacing; }
+    void setCharSpacing(qreal v);
+    bool cursorBlink() const { return m_cursorBlink; }
+    void setCursorBlink(bool v);
+    bool cursorGuide() const { return m_cursorGuide; }
+    void setCursorGuide(bool v) { m_cursorGuide = v; repaintAll(); emit optionsChanged(); }
+    bool boldFont() const { return m_boldFont; }
+    void setBoldFont(bool v) { m_boldFont = v; repaintAll(); emit optionsChanged(); }
+    bool italicText() const { return m_italicText; }
+    void setItalicText(bool v) { m_italicText = v; repaintAll(); emit optionsChanged(); }
+    qreal transparency() const { return m_transparency; }
+    void setTransparency(qreal v) { m_transparency = qBound<qreal>(0, v, 0.9); repaintAll(); emit optionsChanged(); }
+    bool keepBackgroundsOpaque() const { return m_keepOpaque; }
+    void setKeepBackgroundsOpaque(bool v) { m_keepOpaque = v; repaintAll(); emit optionsChanged(); }
+    bool logging() const;
+
+    void repaintAll();
+    void repaintRow(int row);
+    void forwardKey(QKeyEvent* e, bool release);
+
+    QVector<QVector<RunData>> m_rowRuns;
+    QString m_command, m_termName, m_startupInput, m_optionsJson;
+    qreal m_faintOpacity = 0.6;
+    qreal m_charSpacing = 1.0;
+    bool m_cursorBlink = false, m_blinkOn = true, m_cursorGuide = false;
+    bool m_boldFont = true, m_italicText = true;
+    qreal m_transparency = 0;
+    bool m_keepOpaque = true;
+    bool m_visualBell = true, m_silenceBell = false;
+    bool m_middleClickPastes = true, m_rightClickPastes = false, m_focusFollowsMouse = false;
+    QVariantList m_broadcastTo;
+    QTimer* m_blinkTimer = nullptr;
+    QTimer* m_pasteTimer = nullptr;
+    QByteArray m_slowPaste;
+    qint64 m_flashUntil = 0;
+    qint64 m_findCursorUntil = 0;
 
     QString m_themeJson;
     int m_cursorShape = 0;

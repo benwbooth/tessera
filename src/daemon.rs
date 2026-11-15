@@ -26,6 +26,7 @@ struct Shared {
 
 struct DSession {
     id: String,
+    shell_pid: Option<u32>,
     created: u64,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
@@ -105,23 +106,37 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
     let pair = pty
         .openpty(PtySize { rows: c.rows.max(1), cols: c.cols.max(1), pixel_width: 0, pixel_height: 0 })
         .map_err(ioe)?;
-    let mut cmd = CommandBuilder::new_default_prog();
+    let mut cmd = if c.command.trim().is_empty() {
+        CommandBuilder::new_default_prog()
+    } else {
+        // A profile's command, run through the user's shell so PATH and the
+        // like are set up as in a normal session.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let mut b = CommandBuilder::new(shell);
+        b.args(["-l", "-c", c.command.as_str()]);
+        b
+    };
     let cwd = if !c.cwd.is_empty() && std::path::Path::new(&c.cwd).is_dir() {
         c.cwd.clone()
     } else {
         std::env::var("HOME").unwrap_or_else(|_| "/".into())
     };
     cmd.cwd(cwd);
-    cmd.env("TERM", "xterm-256color");
+    cmd.env("TERM", if c.term.is_empty() { "xterm-256color" } else { c.term.as_str() });
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "Tessera");
     cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
     let child = pair.slave.spawn_command(cmd).map_err(ioe)?;
+    let shell_pid = child.process_id();
     drop(pair.slave);
     let reader = pair.master.try_clone_reader().map_err(ioe)?;
-    let writer = pair.master.take_writer().map_err(ioe)?;
+    let mut writer = pair.master.take_writer().map_err(ioe)?;
+    if !c.input.is_empty() {
+        let _ = writer.write_all(c.input.as_bytes());
+    }
     let s = Arc::new(DSession {
         id: new_id(),
+        shell_pid,
         created: now(),
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
@@ -174,6 +189,15 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
     sh.client = None;
 }
 
+/// The foreground process group's program, when it isn't the shell.
+fn foreground_job(s: &DSession) -> String {
+    let Some(pgid) = s.master.lock().unwrap().process_group_leader() else { return String::new() };
+    if Some(pgid as u32) == s.shell_pid {
+        return String::new();
+    }
+    std::fs::read_to_string(format!("/proc/{pgid}/comm")).map(|c| c.trim().to_string()).unwrap_or_default()
+}
+
 fn resize(s: &DSession, cols: u16, rows: u16) {
     let _ = s.master.lock().unwrap().resize(PtySize {
         rows: rows.max(1),
@@ -198,6 +222,12 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
                 })
                 .collect();
             return write_json(&mut stream, T_SESSIONS, &list);
+        }
+        T_JOB => {
+            let id: String = serde_json::from_slice(&payload)?;
+            let found = registry.lock().unwrap().get(&id).cloned();
+            let job = found.map(|s| foreground_job(&s)).unwrap_or_default();
+            return write_json(&mut stream, T_JOB_REPLY, &job);
         }
         T_CREATE => {
             let c: Create = serde_json::from_slice(&payload)?;

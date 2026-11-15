@@ -59,7 +59,29 @@ pub mod ffi {
             cell_w: u32,
             cell_h: u32,
             scrollback: u32,
+            command: &str,
+            term: &str,
+            startup_input: &str,
         ) -> Result<Box<Session>>;
+
+        /// Show a line of text in the terminal itself (not sent to the program).
+        fn show_message(self: &mut Session, text: &str);
+
+        /// Profile/global options that apply live (JSON: mouse_reporting,
+        /// alternate_scroll, allow_title, bracketed_paste, alt_mode,
+        /// word_chars, triple_click_wrapped, clipboard_access,
+        /// copy_trailing_newline).
+        fn set_options(self: &mut Session, json: &str);
+        /// Full reset (RIS), for a terminal left in a strange state.
+        fn reset(self: &mut Session);
+        /// Start (non-empty path) or stop (empty) logging output to a file.
+        fn log_to_file(self: &mut Session, path: &str) -> bool;
+        fn is_logging(self: &Session) -> bool;
+        /// The selection with colors as HTML, and as VT control sequences.
+        fn selected_html(self: &Session) -> String;
+        fn selected_vt(self: &Session) -> String;
+        /// Everything in the scrollback and on screen, as plain text.
+        fn contents_text(self: &Session) -> String;
 
         /// Apply a color theme (settings::Theme JSON).
         fn set_theme(self: &mut Session, theme_json: &str);
@@ -154,6 +176,43 @@ pub mod ffi {
         /// Change one preference: `value` is JSON. Saved right away.
         #[qinvokable]
         fn set_setting(self: Pin<&mut Controller>, key: &QString, value: &QString) -> bool;
+        /// One profile, fully resolved (the default one if there's no such profile).
+        #[qinvokable]
+        fn profile(self: &Controller, name: &QString) -> QString;
+        /// Change one field of a profile (`value` is JSON).
+        #[qinvokable]
+        fn set_profile(self: Pin<&mut Controller>, name: &QString, key: &QString, value: &QString) -> bool;
+        /// New profile copied from `from` (empty: a fresh one). Returns its name.
+        #[qinvokable]
+        fn add_profile(self: Pin<&mut Controller>, from: &QString) -> QString;
+        #[qinvokable]
+        fn remove_profile(self: Pin<&mut Controller>, name: &QString);
+        /// Saved window arrangements as a JSON object (name -> layout).
+        #[qinvokable]
+        fn arrangements(self: &Controller) -> QString;
+        #[qinvokable]
+        fn save_arrangement(self: Pin<&mut Controller>, name: &QString, layout: &QString);
+        #[qinvokable]
+        fn delete_arrangement(self: Pin<&mut Controller>, name: &QString);
+        /// The layout saved when the window last closed (restored at start).
+        #[qinvokable]
+        fn last_layout(self: &Controller) -> QString;
+        #[qinvokable]
+        fn save_last_layout(self: &Controller, layout: &QString);
+        /// Write text to a file (path or file:// URL).
+        #[qinvokable]
+        fn write_file(self: &Controller, path: &QString, text: &QString) -> bool;
+        /// The program running in a daemon session's foreground, if it isn't
+        /// the shell itself ("" when the shell is idle).
+        #[qinvokable]
+        fn session_job(self: &Controller, id: &QString) -> QString;
+        /// Open another window (a new process that starts fresh, restoring nothing).
+        #[qinvokable]
+        fn new_window(self: &Controller);
+        /// False in a window opened with New Window (it mustn't take over the
+        /// first window's sessions).
+        #[qinvokable]
+        fn restore_allowed(self: &Controller) -> bool;
         /// Every theme (built in, then imported) as a JSON array.
         #[qinvokable]
         fn themes(self: &Controller) -> QString;
@@ -215,15 +274,102 @@ impl ffi::Controller {
         qs(&serde_json::to_string(&crate::settings::load()).unwrap())
     }
 
-    fn set_setting(mut self: Pin<&mut Self>, key: &ffi::QString, value: &ffi::QString) -> bool {
+    fn set_setting(self: Pin<&mut Self>, key: &ffi::QString, value: &ffi::QString) -> bool {
         let mut s = crate::settings::load();
         if !crate::settings::set(&mut s, &key.to_string(), &value.to_string()) {
             return false;
         }
         let ok = crate::settings::save(&s).is_ok();
+        self.bump();
+        ok
+    }
+
+    fn bump(mut self: Pin<&mut Self>) {
         let r = self.as_ref().rust().revision + 1;
         self.as_mut().set_revision(r);
+    }
+
+    fn profile(&self, name: &ffi::QString) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::settings::load().profile(&name.to_string())).unwrap())
+    }
+
+    fn set_profile(self: Pin<&mut Self>, name: &ffi::QString, key: &ffi::QString, value: &ffi::QString) -> bool {
+        let mut s = crate::settings::load();
+        if !s.set_profile_field(&name.to_string(), &key.to_string(), &value.to_string()) {
+            return false;
+        }
+        let ok = crate::settings::save(&s).is_ok();
+        self.bump();
         ok
+    }
+
+    fn add_profile(self: Pin<&mut Self>, from: &ffi::QString) -> ffi::QString {
+        let mut s = crate::settings::load();
+        let from = from.to_string();
+        let name = s.add_profile(if from.is_empty() { None } else { Some(&from) });
+        let _ = crate::settings::save(&s);
+        self.bump();
+        qs(&name)
+    }
+
+    fn remove_profile(self: Pin<&mut Self>, name: &ffi::QString) {
+        let mut s = crate::settings::load();
+        s.remove_profile(&name.to_string());
+        let _ = crate::settings::save(&s);
+        self.bump();
+    }
+
+    fn arrangements(&self) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::settings::arrangements()).unwrap())
+    }
+
+    fn save_arrangement(self: Pin<&mut Self>, name: &ffi::QString, layout: &ffi::QString) {
+        let mut m = crate::settings::arrangements();
+        if let Ok(v) = serde_json::from_str(&layout.to_string()) {
+            m.insert(name.to_string(), v);
+            let _ = crate::settings::save_arrangements(&m);
+        }
+        self.bump();
+    }
+
+    fn delete_arrangement(self: Pin<&mut Self>, name: &ffi::QString) {
+        let mut m = crate::settings::arrangements();
+        m.remove(&name.to_string());
+        let _ = crate::settings::save_arrangements(&m);
+        self.bump();
+    }
+
+    fn last_layout(&self) -> ffi::QString {
+        qs(&crate::settings::last_layout())
+    }
+
+    fn save_last_layout(&self, layout: &ffi::QString) {
+        crate::settings::save_last_layout(&layout.to_string());
+    }
+
+    fn write_file(&self, path: &ffi::QString, text: &ffi::QString) -> bool {
+        let p = path.to_string();
+        let p = percent_decode(p.strip_prefix("file://").unwrap_or(&p));
+        std::fs::write(p, text.to_string()).is_ok()
+    }
+
+    fn session_job(&self, id: &ffi::QString) -> ffi::QString {
+        qs(&crate::client::session_job(&id.to_string()).unwrap_or_default())
+    }
+
+    fn new_window(&self) {
+        if let Ok(exe) = std::env::current_exe() {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg("--new-window");
+            for k in ["TESSERA_SCREENSHOT", "TESSERA_RUN", "TESSERA_THEN", "TESSERA_PREFS"] {
+                cmd.env_remove(k);
+            }
+            let _ = cmd.spawn();
+        }
+    }
+
+    fn restore_allowed(&self) -> bool {
+        std::env::var_os("TESSERA_NO_RESTORE").is_none()
     }
 
     fn themes(&self) -> ffi::QString {

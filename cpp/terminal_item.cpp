@@ -5,7 +5,11 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QDateTime>
+#include <QtCore/QMimeData>
+#include <QtCore/QUrl>
 #include <QtGui/QClipboard>
+#include <QtWidgets/QApplication>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGlyphRun>
@@ -37,6 +41,7 @@ QRgb blend(QRgb a, QRgb b, qreal t)
 class TerminalNode : public QSGNode {
 public:
     QSGRectangleNode* bg = nullptr;
+    QSGRectangleNode* overlay = nullptr;
     QVector<QSGImageNode*> rows;
     ~TerminalNode() override
     {
@@ -68,6 +73,21 @@ TerminalItem::TerminalItem(QQuickItem* parent)
     const QFont fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     m_fontFamily = fixed.family();
     m_fontPointSize = fixed.pointSizeF() > 0 ? fixed.pointSizeF() : 11;
+    m_blinkTimer = new QTimer(this);
+    m_blinkTimer->setInterval(530);
+    connect(m_blinkTimer, &QTimer::timeout, this, [this] {
+        m_blinkOn = !m_blinkOn;
+        if (m_cursorY >= 0) repaintRow(m_cursorY);
+    });
+    m_pasteTimer = new QTimer(this);
+    m_pasteTimer->setInterval(125);
+    connect(m_pasteTimer, &QTimer::timeout, this, [this] {
+        // Paste Slowly: 16 bytes at a time.
+        if (!m_session || m_slowPaste.isEmpty()) { m_pasteTimer->stop(); return; }
+        const QByteArray chunk = m_slowPaste.left(16);
+        m_slowPaste.remove(0, chunk.size());
+        m_session->send_text(rs(chunk));
+    });
 }
 
 TerminalItem::~TerminalItem()
@@ -120,6 +140,56 @@ void TerminalItem::setFontPointSize(qreal v)
     m_fontPointSize = v;
     updateMetrics();
     emit fontChanged();
+}
+
+void TerminalItem::setOptionsJson(const QString& v)
+{
+    if (v == m_optionsJson) return;
+    m_optionsJson = v;
+    if (m_session) {
+        const QByteArray b = v.toUtf8();
+        m_session->set_options(rs(b));
+    }
+    emit optionsChanged();
+}
+
+void TerminalItem::setCharSpacing(qreal v)
+{
+    v = qBound<qreal>(0.8, v, 1.5);
+    if (qFuzzyCompare(v, m_charSpacing)) return;
+    m_charSpacing = v;
+    updateMetrics();
+    emit optionsChanged();
+}
+
+void TerminalItem::setCursorBlink(bool v)
+{
+    if (v == m_cursorBlink) return;
+    m_cursorBlink = v;
+    m_blinkOn = true;
+    if (v && hasActiveFocus()) m_blinkTimer->start();
+    else m_blinkTimer->stop();
+    if (m_cursorY >= 0) repaintRow(m_cursorY);
+    emit optionsChanged();
+}
+
+bool TerminalItem::logging() const { return m_session && m_session->is_logging(); }
+
+void TerminalItem::repaintRow(int row)
+{
+    if (row < 0 || row >= m_rows || row >= m_rowRuns.size()) return;
+    paintRow(row, m_rowRuns[row]);
+    m_rowUpload[row] = true;
+    update();
+}
+
+void TerminalItem::repaintAll()
+{
+    for (int r = 0; r < m_rows && r < m_rowRuns.size(); ++r) {
+        paintRow(r, m_rowRuns[r]);
+        m_rowUpload[r] = true;
+    }
+    update();
 }
 
 void TerminalItem::setThemeJson(const QString& v)
@@ -198,14 +268,14 @@ void TerminalItem::itemChange(ItemChange change, const ItemChangeData& value)
 QFont TerminalItem::fontFor(quint32 flags) const
 {
     QFont f = m_font;
-    if (flags & FLAG_BOLD) f.setWeight(QFont::Bold);
-    if (flags & FLAG_ITALIC) f.setItalic(true);
+    if ((flags & FLAG_BOLD) && m_boldFont) f.setWeight(QFont::Bold);
+    if ((flags & FLAG_ITALIC) && m_italicText) f.setItalic(true);
     return f;
 }
 
 const QRawFont& TerminalItem::rawFont(quint32 flags)
 {
-    const int i = ((flags & FLAG_BOLD) ? 1 : 0) | ((flags & FLAG_ITALIC) ? 2 : 0);
+    const int i = ((flags & FLAG_BOLD) && m_boldFont ? 1 : 0) | ((flags & FLAG_ITALIC) && m_italicText ? 2 : 0);
     if (!m_rawValid[i]) {
         m_raw[i] = QRawFont::fromFont(fontFor(flags));
         m_rawValid[i] = true;
@@ -225,7 +295,7 @@ void TerminalItem::updateMetrics()
     m_font.setKerning(false);
     for (bool& v : m_rawValid) v = false;
     const QFontMetricsF fm(m_font);
-    m_cw = qMax(1, qRound(fm.horizontalAdvance(QLatin1Char('M'))));
+    m_cw = qMax(1, qRound(fm.horizontalAdvance(QLatin1Char('M')) * m_charSpacing));
     const int glyphH = qCeil(fm.ascent() + fm.descent());
     m_ch = qMax(glyphH, qRound(glyphH * m_lineHeight));
     m_ascent = qRound(fm.ascent()) + (m_ch - glyphH) / 2;
@@ -244,14 +314,22 @@ void TerminalItem::open()
     const int rows = qMax(1, int((height() * m_dpr - 2 * m_pad) / m_ch));
     try {
         const QByteArray a = m_attachId.toUtf8(), t = m_tmuxPane.toUtf8(), c = m_cwd.toUtf8();
+        const QByteArray cmd = m_command.toUtf8(), term = m_termName.toUtf8();
+        // Startup text only for a new shell, not one being reattached.
+        const QByteArray input = m_attachId.isEmpty() && m_tmuxPane.isEmpty() && !m_startupInput.isEmpty()
+            ? (m_startupInput + QStringLiteral("\n")).toUtf8() : QByteArray();
         auto box = tessera::session_open(rs(a), rs(t), rs(c), uint16_t(cols), uint16_t(rows), uint32_t(m_cw),
-                                         uint32_t(m_ch), uint32_t(qMax(0, m_scrollback)));
+                                         uint32_t(m_ch), uint32_t(qMax(0, m_scrollback)), rs(cmd), rs(term), rs(input));
         m_session = box.into_raw();
         if (!m_themeJson.isEmpty()) {
             const QByteArray b = m_themeJson.toUtf8();
             m_session->set_theme(rs(b));
         }
         if (m_cursorShape != 0) m_session->set_cursor_style(uint8_t(m_cursorShape));
+        if (!m_optionsJson.isEmpty()) {
+            const QByteArray o = m_optionsJson.toUtf8();
+            m_session->set_options(rs(o));
+        }
     } catch (const std::exception& e) {
         m_exited = true;
         emit openFailed(QString::fromUtf8(e.what()));
@@ -274,7 +352,10 @@ void TerminalItem::onReadable()
     if (!m_session) return;
     const quint32 sig = m_session->on_readable();
     if (sig & SIG_EVENTS) handleEvents();
-    if (sig & SIG_DIRTY) polish();
+    if (sig & SIG_DIRTY) {
+        polish();
+        emit activity();
+    }
     if (sig & SIG_EXITED) {
         m_notifier->setEnabled(false);
         polish();
@@ -303,7 +384,15 @@ void TerminalItem::handleEvents()
             m_sessionId = e.value(u"id").toString();
             emit sessionIdChanged();
         } else if (type == u"bell") {
+            if (m_visualBell) {
+                m_flashUntil = QDateTime::currentMSecsSinceEpoch() + 140;
+                update();
+                QTimer::singleShot(150, this, [this] { update(); });
+            }
+            if (!m_silenceBell) QApplication::beep();
             emit bell();
+        } else if (type == u"clipboard") {
+            QGuiApplication::clipboard()->setText(e.value(u"text").toString());
         } else if (type == u"grid") {
             m_forceFull = true;
         } else {
@@ -380,11 +469,18 @@ void TerminalItem::pullFrame(bool full)
     for (const tessera::Run& r : f.runs) {
         byRow[r.row].append(RunData{r.col, r.width, qs(r.text), QRgb(r.fg), QRgb(r.bg), r.flags});
     }
+    if (m_rowRuns.size() != m_rows) m_rowRuns.resize(m_rows);
     for (uint16_t row : f.dirty_rows) {
         if (row < m_rows) {
-            paintRow(row, byRow.value(row));
+            m_rowRuns[row] = byRow.value(row);
+            paintRow(row, m_rowRuns[row]);
             m_rowUpload[row] = true;
         }
+    }
+    if (m_cursorBlink && hasActiveFocus() && !f.dirty_rows.empty()) {
+        // Typing shows the cursor at once and restarts the blink.
+        m_blinkOn = true;
+        m_blinkTimer->start();
     }
     update();
 }
@@ -393,9 +489,17 @@ void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
 {
     const QSize size(qMax(1, m_cols * m_cw), m_ch);
     QImage& img = m_rowImages[row];
-    if (img.size() != size) img = QImage(size, QImage::Format_RGB32);
-    img.fill(m_bg);
+    if (img.size() != size || img.format() != QImage::Format_ARGB32_Premultiplied)
+        img = QImage(size, QImage::Format_ARGB32_Premultiplied);
+    QColor base = m_bg;
+    base.setAlphaF(1 - m_transparency);
+    img.fill(base);
     QPainter p(&img);
+    if (m_cursorGuide && row == m_cursorY && m_cursorVisible) {
+        QColor g = m_fg;
+        g.setAlphaF(0.08);
+        p.fillRect(QRect(0, 0, size.width(), m_ch), g);
+    }
     p.setRenderHint(QPainter::TextAntialiasing);
 
     const qreal lineW = qMax<qreal>(1, qRound(m_dpr));
@@ -427,10 +531,16 @@ void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
     for (const RunData& r : runs) {
         const int x = r.col * m_cw;
         const int w = r.width * m_cw;
-        if (r.flags & FLAG_HAS_BG) p.fillRect(x, 0, w, m_ch, QColor::fromRgb(r.bg));
+        if (r.flags & FLAG_HAS_BG) {
+            QColor bgc = QColor::fromRgb(r.bg);
+            if (!m_keepOpaque) bgc.setAlphaF(1 - m_transparency);
+            p.setCompositionMode(QPainter::CompositionMode_Source);
+            p.fillRect(x, 0, w, m_ch, bgc);
+            p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        }
         if (r.flags & FLAG_INVISIBLE) continue;
         QRgb fg = r.fg;
-        if (r.flags & FLAG_FAINT) fg = blend(fg, (r.flags & FLAG_HAS_BG) ? r.bg : m_bg.rgb(), 0.4);
+        if (r.flags & FLAG_FAINT) fg = blend(fg, (r.flags & FLAG_HAS_BG) ? r.bg : m_bg.rgb(), 1 - m_faintOpacity);
         const bool blank = r.text.trimmed().isEmpty();
         if (!blank) drawText(x, r.text, fg, r.flags, r.width);
         if (r.flags & FLAG_UNDERLINE)
@@ -438,7 +548,8 @@ void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
         if (r.flags & FLAG_STRIKE) p.fillRect(QRectF(x, m_ascent * 0.65, w, lineW), QColor::fromRgb(fg));
     }
 
-    if (m_cursorVisible && row == m_cursorY && m_cursorX >= 0) {
+    const bool blinkHidden = m_cursorBlink && hasActiveFocus() && !m_blinkOn;
+    if (m_cursorVisible && !blinkHidden && row == m_cursorY && m_cursorX >= 0) {
         const QRectF cell(m_cursorX * m_cw, 0, (m_cursorWide ? 2 : 1) * m_cw, m_ch);
         const QColor cc = QColor::fromRgb(m_cursorColor);
         const bool focused = hasActiveFocus();
@@ -469,7 +580,9 @@ QSGNode* TerminalItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
         m_rebuildNodes = true;
     }
     node->bg->setRect(boundingRect());
-    node->bg->setColor(m_bg);
+    QColor base = m_bg;
+    base.setAlphaF(1 - m_transparency);
+    node->bg->setColor(base);
 
     if (m_rebuildNodes || node->rows.size() != m_rows) {
         node->clearRows();
@@ -498,6 +611,30 @@ QSGNode* TerminalItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
         n->setRect(QRectF(pad, pad + i * m_ch / m_dpr, img.width() / m_dpr, img.height() / m_dpr));
         n->setSourceRect(QRectF(0, 0, img.width(), img.height()));
     }
+
+    // Visual bell flash and Find Cursor highlight, on top.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!node->overlay) {
+        node->overlay = win->createRectangleNode();
+        node->appendChildNode(node->overlay);
+    } else {
+        // Keep it last (row nodes may have joined since).
+        node->removeChildNode(node->overlay);
+        node->appendChildNode(node->overlay);
+    }
+    if (now < m_flashUntil) {
+        node->overlay->setRect(boundingRect());
+        node->overlay->setColor(QColor(255, 255, 255, 38));
+    } else if (now < m_findCursorUntil && m_cursorX >= 0) {
+        const QRectF c((m_pad + m_cursorX * m_cw) / m_dpr, (m_pad + m_cursorY * m_ch) / m_dpr, m_cw / m_dpr, m_ch / m_dpr);
+        node->overlay->setRect(c.adjusted(-30, -30, 30, 30));
+        QColor a = QColor::fromRgb(m_cursorColor);
+        a.setAlpha(70);
+        node->overlay->setColor(a);
+    } else {
+        node->overlay->setRect(QRectF());
+        node->overlay->setColor(Qt::transparent);
+    }
     return node;
 }
 
@@ -509,6 +646,7 @@ void TerminalItem::keyPressEvent(QKeyEvent* e)
     const QByteArray text = e->text().toUtf8();
     if (m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), false, e->nativeVirtualKey())) {
         e->accept();
+        forwardKey(e, false);
         if (m_hasSelection && !(e->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
             && e->key() < Qt::Key_Shift) {
             // Typing clears the highlight (the copied text stays on the clipboard).
@@ -527,7 +665,30 @@ void TerminalItem::keyReleaseEvent(QKeyEvent* e)
     if (!m_session || m_exited) return QQuickItem::keyReleaseEvent(e);
     const QByteArray text = e->text().toUtf8();
     m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), true, e->nativeVirtualKey());
+    forwardKey(e, true);
     e->accept();
+}
+
+void TerminalItem::forwardKey(QKeyEvent* e, bool release)
+{
+    for (const QVariant& v : std::as_const(m_broadcastTo)) {
+        auto* peer = qobject_cast<TerminalItem*>(v.value<QObject*>());
+        if (peer && peer != this) peer->receiveKey(e->key(), int(e->modifiers()), e->text(), release);
+    }
+}
+
+void TerminalItem::receiveKey(int key, int mods, const QString& text, bool release)
+{
+    if (!m_session || m_exited) return;
+    const QByteArray t = text.toUtf8();
+    m_session->key_event(key, uint32_t(mods), rs(t), release, 0);
+}
+
+void TerminalItem::receiveText(const QString& text)
+{
+    if (!m_session || m_exited) return;
+    const QByteArray t = text.toUtf8();
+    m_session->send_text(rs(t));
 }
 
 void TerminalItem::inputMethodEvent(QInputMethodEvent* e)
@@ -535,6 +696,10 @@ void TerminalItem::inputMethodEvent(QInputMethodEvent* e)
     if (m_session && !e->commitString().isEmpty()) {
         const QByteArray t = e->commitString().toUtf8();
         m_session->send_text(rs(t));
+        for (const QVariant& v : std::as_const(m_broadcastTo)) {
+            auto* peer = qobject_cast<TerminalItem*>(v.value<QObject*>());
+            if (peer && peer != this) peer->receiveText(e->commitString());
+        }
     }
     e->accept();
 }
@@ -577,8 +742,15 @@ void TerminalItem::mouse(int action, int button, QPointF pos, Qt::KeyboardModifi
 void TerminalItem::mousePressEvent(QMouseEvent* e)
 {
     forceActiveFocus(Qt::MouseFocusReason);
-    if (e->button() == Qt::RightButton && !(m_session && m_session->wants_mouse(uint32_t(e->modifiers())))) {
-        emit contextMenuRequested(e->position().x(), e->position().y());
+    const bool appWantsMouse = m_session && m_session->wants_mouse(uint32_t(e->modifiers()));
+    if (e->button() == Qt::RightButton && !appWantsMouse) {
+        if (m_rightClickPastes) paste();
+        else emit contextMenuRequested(e->position().x(), e->position().y());
+        e->accept();
+        return;
+    }
+    if (e->button() == Qt::MiddleButton && !appWantsMouse) {
+        if (m_middleClickPastes) pasteSelection();
         e->accept();
         return;
     }
@@ -639,9 +811,17 @@ void TerminalItem::publishSelection()
     }
 }
 
+void TerminalItem::hoverEnterEvent(QHoverEvent* e)
+{
+    if (m_focusFollowsMouse && !hasActiveFocus()) forceActiveFocus(Qt::MouseFocusReason);
+    QQuickItem::hoverEnterEvent(e);
+}
+
 void TerminalItem::focusInEvent(QFocusEvent* e)
 {
     QQuickItem::focusInEvent(e);
+    m_blinkOn = true;
+    if (m_cursorBlink) m_blinkTimer->start();
     if (m_session) m_session->focus(true);
     m_forceFull = true;
     polish();
@@ -650,6 +830,8 @@ void TerminalItem::focusInEvent(QFocusEvent* e)
 void TerminalItem::focusOutEvent(QFocusEvent* e)
 {
     QQuickItem::focusOutEvent(e);
+    m_blinkTimer->stop();
+    m_blinkOn = true;
     if (m_session) m_session->focus(false);
     m_forceFull = true;
     polish();
@@ -664,11 +846,106 @@ void TerminalItem::copy()
     if (!text.isEmpty()) QGuiApplication::clipboard()->setText(text);
 }
 
-void TerminalItem::paste()
+void TerminalItem::paste() { pasteText(QGuiApplication::clipboard()->text()); }
+
+void TerminalItem::pasteText(const QString& text)
+{
+    if (!m_session || text.isEmpty()) return;
+    const QByteArray t = text.toUtf8();
+    m_session->paste(rs(t));
+    for (const QVariant& v : std::as_const(m_broadcastTo)) {
+        auto* peer = qobject_cast<TerminalItem*>(v.value<QObject*>());
+        if (peer && peer != this && peer->m_session) peer->m_session->paste(rs(t));
+    }
+}
+
+void TerminalItem::pasteSelection()
+{
+    const QClipboard::Mode mode = QGuiApplication::clipboard()->supportsSelection() ? QClipboard::Selection : QClipboard::Clipboard;
+    pasteText(QGuiApplication::clipboard()->text(mode));
+}
+
+void TerminalItem::pasteSlowly()
+{
+    m_slowPaste += QGuiApplication::clipboard()->text().toUtf8();
+    m_pasteTimer->start();
+}
+
+QString TerminalItem::selectedText() const { return m_session ? qs(m_session->selected_text()) : QString(); }
+
+QString TerminalItem::contentsText() const { return m_session ? qs(m_session->contents_text()) : QString(); }
+
+void TerminalItem::copyWithStyles()
 {
     if (!m_session) return;
-    const QByteArray t = QGuiApplication::clipboard()->text().toUtf8();
-    if (!t.isEmpty()) m_session->paste(rs(t));
+    auto* mime = new QMimeData;
+    mime->setHtml(qs(m_session->selected_html()));
+    mime->setText(qs(m_session->selected_text()));
+    QGuiApplication::clipboard()->setMimeData(mime);
+}
+
+void TerminalItem::copyWithControlSequences()
+{
+    if (!m_session) return;
+    QGuiApplication::clipboard()->setText(qs(m_session->selected_vt()));
+}
+
+void TerminalItem::resetTerminal()
+{
+    if (!m_session) return;
+    m_session->reset();
+    m_forceFull = true;
+    polish();
+}
+
+void TerminalItem::restart()
+{
+    delete m_notifier;
+    m_notifier = nullptr;
+    if (m_session) {
+        m_session->kill();
+        rust::Box<tessera::Session>::from_raw(m_session);
+        m_session = nullptr;
+    }
+    m_attachId.clear();
+    m_tmuxPane.clear();
+    m_exited = false;
+    emit exitedChanged();
+    open();
+}
+
+void TerminalItem::showMessage(const QString& text)
+{
+    if (!m_session) return;
+    const QByteArray t = text.toUtf8();
+    m_session->show_message(rs(t));
+    m_forceFull = true;
+    polish();
+}
+
+bool TerminalItem::startLogging(const QString& path)
+{
+    if (!m_session) return false;
+    QString p = path;
+    if (p.startsWith(u"file://")) p = QUrl(p).toLocalFile();
+    const QByteArray b = p.toUtf8();
+    const bool ok = m_session->log_to_file(rs(b));
+    emit loggingChanged();
+    return ok;
+}
+
+void TerminalItem::stopLogging()
+{
+    if (!m_session) return;
+    m_session->log_to_file(rs(QByteArray()));
+    emit loggingChanged();
+}
+
+void TerminalItem::findCursor()
+{
+    m_findCursorUntil = QDateTime::currentMSecsSinceEpoch() + 900;
+    update();
+    QTimer::singleShot(950, this, [this] { update(); });
 }
 
 void TerminalItem::sendText(const QString& text)

@@ -3,15 +3,21 @@ import QtQuick.Shapes
 import Tessera
 
 // One tab in the strip. The current tab is the terminal's own color and
-// runs into it (rounded top corners, flared bottom corners); the others sit
-// flat on the strip with thin separators between them.
+// runs into it (rounded corners away from the terminal, flared corners where
+// it meets it); the others sit flat on the strip with thin separators.
 Item {
     id: tab
     property string text: ""
+    property int number: 0               // shown when > 0 (Alt+number selects it)
     property bool current: false
     property bool nextIsCurrent: false   // hide the separator next to the current tab
     property bool tmux: false
-    property color surface: Theme.bg    // the terminal background
+    property bool activity: false        // new output while in the background
+    property bool bell: false
+    property color tabColor: "transparent"
+    property bool closeAlways: false
+    property bool flipped: false         // tabs below the terminal
+    property color surface: Theme.bg     // the terminal background
     signal clicked()
     signal closeClicked()
 
@@ -25,12 +31,11 @@ Item {
     TapHandler { onTapped: tab.clicked() }
     TapHandler { acceptedButtons: Qt.MiddleButton; onTapped: tab.closeClicked() }
 
-    // Tab body: rounded top, flared bottom (drawn for the current tab, and
-    // faintly on hover).
     Shape {
         anchors.fill: parent
         visible: tab.current || tab.hovered
         preferredRendererType: Shape.CurveRenderer
+        transform: Scale { origin.y: tab.height / 2; yScale: tab.flipped ? -1 : 1 }
         ShapePath {
             id: sp
             strokeWidth: -1
@@ -50,7 +55,17 @@ Item {
         }
     }
 
-    // Separator at the right edge, between two plain tabs.
+    // Tab color: a band along the outer edge.
+    Rectangle {
+        visible: tab.tabColor.a > 0
+        x: tab.flare * 2
+        width: tab.width - tab.flare * 4
+        height: 3
+        radius: 1.5
+        y: tab.flipped ? tab.height - height - 1 : 1
+        color: tab.tabColor
+    }
+
     Rectangle {
         anchors.right: parent.right
         anchors.rightMargin: tab.flare / 2
@@ -68,14 +83,30 @@ Item {
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
         spacing: 7
+        Text {
+            id: num
+            visible: tab.number > 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: tab.number
+            color: Theme.textDim
+            font.pixelSize: 10
+        }
         Rectangle {
-            visible: tab.tmux
+            id: dot
+            visible: tab.tmux || tab.activity
             anchors.verticalCenter: parent.verticalCenter
             width: 6; height: 6; radius: 3
-            color: Theme.tmux
+            color: tab.activity ? Theme.accent : Theme.tmux
         }
         Text {
-            width: parent.width - (tab.tmux ? 13 : 0)
+            id: bellIcon
+            visible: tab.bell
+            anchors.verticalCenter: parent.verticalCenter
+            text: "\u{1F514}"
+            font.pixelSize: 10
+        }
+        Text {
+            width: parent.width - (num.visible ? num.width + 7 : 0) - (dot.visible ? 13 : 0) - (bellIcon.visible ? bellIcon.width + 7 : 0)
             text: tab.text
             color: tab.current ? Theme.text : Theme.textDim
             elide: Text.ElideRight
@@ -90,7 +121,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: 18; height: 18; radius: 9
         color: closeHover.hovered ? Theme.divider : "transparent"
-        opacity: tab.hovered || tab.current ? 1 : 0
+        opacity: tab.hovered || tab.current || tab.closeAlways ? 1 : 0
         Text {
             anchors.centerIn: parent
             anchors.verticalCenterOffset: -1

@@ -85,6 +85,42 @@ pub struct Session {
     sel_bg: Option<u32>,
     sel_fg: Option<u32>,
     force_full: bool,
+    opts: Options2,
+    selected_html: String,
+    selected_vt: String,
+    log: Option<std::fs::File>,
+    clipboard: Rc<RefCell<Option<String>>>,
+}
+
+/// Behaviors from the profile and global settings.
+#[derive(serde::Deserialize, Clone)]
+#[serde(default)]
+struct Options2 {
+    mouse_reporting: bool,
+    alternate_scroll: bool,
+    allow_title: bool,
+    bracketed_paste: bool,
+    alt_mode: String,
+    word_chars: String,
+    triple_click_wrapped: bool,
+    clipboard_access: bool,
+    copy_trailing_newline: bool,
+}
+
+impl Default for Options2 {
+    fn default() -> Self {
+        Self {
+            mouse_reporting: true,
+            alternate_scroll: true,
+            allow_title: true,
+            bracketed_paste: true,
+            alt_mode: "esc".into(),
+            word_chars: "/-+\\~_.".into(),
+            triple_click_wrapped: true,
+            clipboard_access: true,
+            copy_trailing_newline: false,
+        }
+    }
 }
 
 pub fn session_open(
@@ -96,6 +132,9 @@ pub fn session_open(
     cell_w: u32,
     cell_h: u32,
     scrollback: u32,
+    command: &str,
+    term_name: &str,
+    startup_input: &str,
 ) -> Result<Box<Session>, String> {
     let (cols, rows) = (cols.max(2), rows.max(1));
     let backend = if !tmux_pane.is_empty() {
@@ -107,7 +146,7 @@ pub fn session_open(
     } else {
         let mut stream = crate::client::connect().map_err(|e| format!("daemon: {e}"))?;
         if attach_id.is_empty() {
-            write_json(&mut stream, T_CREATE, &Create { cols, rows, cwd: cwd.to_string() })
+            write_json(&mut stream, T_CREATE, &Create { cols, rows, cwd: cwd.to_string(), command: command.to_string(), term: term_name.to_string(), input: startup_input.to_string() })
         } else {
             write_json(&mut stream, T_ATTACH, &Attach { id: attach_id.to_string(), cols, rows })
         }
@@ -168,6 +207,17 @@ pub fn session_open(
         })
     })
     .map_err(e)?;
+    let clipboard: Rc<RefCell<Option<String>>> = Rc::default();
+    {
+        let clip = clipboard.clone();
+        term.on_clipboard_write(move |_t, w| {
+            if let Some(c) = w.contents().find(|c| c.mime.starts_with("text/plain")).or_else(|| w.contents().next()) {
+                *clip.borrow_mut() = Some(c.data.to_string());
+            }
+            Ok(())
+        })
+        .map_err(e)?;
+    }
     term.on_xtversion(|_t| Some(concat!("Tessera ", env!("CARGO_PKG_VERSION")))).map_err(e)?;
 
     let mut press = PressEvent::new().map_err(e)?;
@@ -205,6 +255,11 @@ pub fn session_open(
         sel_bg: None,
         sel_fg: None,
         force_full: true,
+        opts: Options2::default(),
+        selected_html: String::new(),
+        selected_vt: String::new(),
+        log: None,
+        clipboard,
     });
     // A tmux pane may already have its captured contents waiting.
     if matches!(s.backend, Backend::Tmux { .. }) {
@@ -308,6 +363,9 @@ impl Session {
                             }
                         }
                         T_OUTPUT => {
+                            if let Some(f) = self.log.as_mut() {
+                                let _ = f.write_all(&payload);
+                            }
                             self.process_output(&payload);
                             sig |= SIG_DIRTY;
                         }
@@ -337,6 +395,9 @@ impl Session {
                     sig |= SIG_DIRTY;
                 }
                 if !data.is_empty() {
+                    if let Some(f) = self.log.as_mut() {
+                        let _ = f.write_all(&data);
+                    }
                     self.term.vt_write(&data);
                     sig |= SIG_DIRTY;
                 }
@@ -351,8 +412,13 @@ impl Session {
         if !out.is_empty() && self.gateway.is_none() && matches!(self.backend, Backend::Daemon { .. }) {
             self.write_input(&out);
         }
-        if self.title_changed.replace(false) {
+        if self.title_changed.replace(false) && self.opts.allow_title {
             self.events.push(json!({"type": "title", "title": self.title()}));
+        }
+        if let Some(text) = self.clipboard.borrow_mut().take() {
+            if self.opts.clipboard_access {
+                self.events.push(json!({"type": "clipboard", "text": text}));
+            }
         }
         if self.pwd_changed.replace(false) {
             self.events.push(json!({"type": "pwd", "pwd": self.pwd()}));
@@ -471,7 +537,11 @@ impl Session {
             .set_unshifted_codepoint(ucp)
             .set_utf8(if printable && !release { Some(text) } else { None });
         let mut out = Vec::new();
-        let _ = self.key_enc.set_options_from_terminal(&self.term).encode_to_vec(&self.key_ev, &mut out);
+        let alt_esc = self.opts.alt_mode != "normal";
+        let _ = self.key_enc
+            .set_options_from_terminal(&self.term)
+            .set_alt_esc_prefix(alt_esc)
+            .encode_to_vec(&self.key_ev, &mut out);
         if out.is_empty() && printable && !release {
             out.extend_from_slice(text.as_bytes());
         }
@@ -483,7 +553,7 @@ impl Session {
     }
 
     pub fn paste(&mut self, text: &str) {
-        let bracketed = self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
+        let bracketed = self.opts.bracketed_paste && self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false);
         let mut data = text.replace("\r\n", "\r").replace('\n', "\r").into_bytes();
         let mut out = vec![0u8; data.len() + 16];
         let n = libghostty_vt::paste::encode(&mut data, bracketed, &mut out).unwrap_or(0);
@@ -519,7 +589,7 @@ impl Session {
         pad: u32,
     ) -> bool {
         let mods = keymap::mods(qt_mods);
-        let tracking = self.term.is_mouse_tracking().unwrap_or(false);
+        let tracking = self.opts.mouse_reporting && self.term.is_mouse_tracking().unwrap_or(false);
         let report = tracking && !mods.contains(key::Mods::SHIFT);
         match action {
             0 if button > 0 && button < 4 => self.buttons |= 1 << button,
@@ -531,6 +601,9 @@ impl Session {
         // full-screen programs (alternate scroll, like iTerm2).
         if (button == 4 || button == 5) && !report {
             let alt = matches!(self.term.active_screen(), Ok(Screen::Alternate));
+            if alt && !self.opts.alternate_scroll {
+                return false;
+            }
             if alt {
                 let seq: &[u8] = if button == 4 { b"\x1b[A" } else { b"\x1b[B" };
                 let app = self.term.mode(Mode::DECCKM).unwrap_or(false);
@@ -620,7 +693,9 @@ impl Session {
                     .and_then(|d| d.apply(&mut self.gesture, &self.term, grid, geometry));
                 if let Ok(sel) = sel {
                     let _ = self.term.set_selection(sel.as_ref());
-                    self.selected = sel.map(|s| format_selection(&self.term, &s)).unwrap_or_default();
+                    self.selected = sel.as_ref().map(|s| format_selection(&self.term, s)).unwrap_or_default();
+                    self.selected_html = sel.as_ref().map(|s| format_selection_as(&self.term, s, Format::Html, true)).unwrap_or_default();
+                    self.selected_vt = sel.as_ref().map(|s| format_selection_as(&self.term, s, Format::Vt, true)).unwrap_or_default();
                 }
                 true
             }
@@ -630,22 +705,95 @@ impl Session {
                 self.selecting = false;
                 true
             }
+            // (Rich copies are made when the selection is finished: see
+            // finish_selection, called by the view on release.)
         }
     }
 
     pub fn selected_text(&self) -> String {
-        self.selected.clone()
+        if self.opts.copy_trailing_newline {
+            self.selected.clone()
+        } else {
+            self.selected.trim_end_matches(['\n', '\r']).to_string()
+        }
+    }
+
+    pub fn selected_html(&self) -> String {
+        self.selected_html.clone()
+    }
+
+    pub fn selected_vt(&self) -> String {
+        self.selected_vt.clone()
+    }
+
+    pub fn contents_text(&self) -> String {
+        match self.term.select_all() {
+            Ok(Some(sel)) => format_selection_as(&self.term, &sel, Format::Plain, false),
+            _ => String::new(),
+        }
+    }
+
+    pub fn set_options(&mut self, json: &str) {
+        if let Ok(o) = serde_json::from_str::<Options2>(json) {
+            self.opts = o;
+            let chars: Vec<char> = self.opts.word_chars.chars().collect();
+            let _ = self.press.set_word_boundary_codepoints(&boundary_chars(&chars));
+            let _ = self.drag.set_word_boundary_codepoints(&boundary_chars(&chars));
+            use libghostty_vt::selection::gesture::{Behavior, Behaviors};
+            let b = Behaviors::new()
+                .with_single_click_behavior(Behavior::Cell)
+                .with_double_click_behavior(Behavior::Word)
+                .with_triple_click_behavior(Behavior::Line);
+            let _ = self.press.set_behaviors(&b);
+        }
+    }
+
+    pub fn show_message(&mut self, text: &str) {
+        self.term.vt_write(text.replace('\n', "\r\n").as_bytes());
+        self.force_full = true;
+    }
+
+    pub fn reset(&mut self) {
+        self.term.reset();
+        self.force_full = true;
+        if self.gateway.is_none() {
+            self.write_input(b"\x0c");
+        }
+    }
+
+    pub fn log_to_file(&mut self, path: &str) -> bool {
+        if path.is_empty() {
+            self.log = None;
+            return true;
+        }
+        match std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            Ok(f) => {
+                self.log = Some(f);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub fn is_logging(&self) -> bool {
+        self.log.is_some()
     }
 
     pub fn select_all(&mut self) {
-        let text = match self.term.select_all() {
+        let (text, html, vt) = match self.term.select_all() {
             Ok(Some(sel)) => {
                 let _ = self.term.set_selection(Some(&sel));
-                format_selection(&self.term, &sel)
+                (
+                    format_selection(&self.term, &sel),
+                    format_selection_as(&self.term, &sel, Format::Html, true),
+                    format_selection_as(&self.term, &sel, Format::Vt, true),
+                )
             }
-            _ => String::new(),
+            _ => Default::default(),
         };
         self.selected = text;
+        self.selected_html = html;
+        self.selected_vt = vt;
     }
 
     /// Like iTerm2's Clear Buffer: drop the scrollback and clear the screen
@@ -721,7 +869,9 @@ impl Session {
     }
 
     pub fn wants_mouse(&self, qt_mods: u32) -> bool {
-        self.term.is_mouse_tracking().unwrap_or(false) && !keymap::mods(qt_mods).contains(key::Mods::SHIFT)
+        self.opts.mouse_reporting
+            && self.term.is_mouse_tracking().unwrap_or(false)
+            && !keymap::mods(qt_mods).contains(key::Mods::SHIFT)
     }
 
     pub fn tmux_pane_id(&self) -> i32 {
@@ -910,6 +1060,21 @@ impl Session {
         }
         true
     }
+}
+
+/// Word boundaries for double-click: the usual separators, minus the
+/// characters the user counts as part of words.
+fn boundary_chars(word_chars: &[char]) -> Vec<char> {
+    " \t'\"`()[]{}<>|;:,.=!?*&^%$#@~/\\+-_"
+        .chars()
+        .filter(|c| !word_chars.contains(c))
+        .collect()
+}
+
+fn format_selection_as(term: &Terminal<'static, 'static>, sel: &Selection<'_>, fmt: Format, style: bool) -> String {
+    let opts = FormatterOptions::new().with_format(fmt).with_selection(sel).with_trim(true).with_unwrap(true).with_style(style);
+    let Ok(mut f) = Formatter::new(term, opts) else { return String::new() };
+    f.format_alloc(None).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
 }
 
 fn format_selection(term: &Terminal<'static, 'static>, sel: &Selection<'_>) -> String {

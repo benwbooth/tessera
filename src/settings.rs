@@ -6,47 +6,264 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Global preferences (iTerm2's General, Appearance, Pointer panels) plus
+/// the profiles.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
-    /// Empty = the system's monospace font.
-    pub font_family: String,
-    /// 0 = the system monospace size.
-    pub font_size: f64,
-    /// Row height as a multiple of the font's own line height.
-    pub line_height: f64,
-    /// "fixed" uses `theme`; "system" follows the desktop's light/dark mode.
-    pub theme_mode: String,
-    pub theme: String,
-    pub theme_light: String,
-    pub theme_dark: String,
-    /// "block", "bar" or "underline".
-    pub cursor_style: String,
-    pub scrollback: u32,
+    // -- General > Startup / Closing
+    /// Reopen the shells (and their layout) that were open when the window
+    /// closed. Off: closing the window ends them.
+    pub restore_sessions: bool,
+    pub confirm_close_multiple: bool,
+    pub confirm_quit: bool,
+    // -- General > Selection
     pub copy_on_select: bool,
-    pub dim_inactive: bool,
-    /// Space around the text, in pixels.
-    pub padding: f64,
-    /// Show the tab strip with a single tab.
+    pub copy_trailing_newline: bool,
+    /// Programs may set the clipboard (OSC 52).
+    pub clipboard_access: bool,
+    pub triple_click_wrapped: bool,
+    /// Characters besides letters and digits that count as part of a word.
+    pub word_chars: String,
+    // -- General > Window
+    /// A program's title escape changes only its own tab's title.
+    pub tab_titles_per_tab: bool,
+    // -- Appearance > Tabs
     pub always_show_tabs: bool,
+    /// "top" or "bottom".
+    pub tab_position: String,
+    pub show_tab_numbers: bool,
+    pub tab_close_buttons: bool,
+    pub show_activity: bool,
+    pub stretch_tabs: bool,
+    // -- Appearance > Panes / Dimming
+    pub pane_titles: bool,
+    pub dim_inactive: bool,
+    pub dim_amount: f64,
+    pub dim_background_windows: bool,
+    // -- Pointer
+    pub middle_click_pastes: bool,
+    /// "menu" or "paste".
+    pub right_click: String,
+    pub focus_follows_mouse: bool,
+    // -- Edit > Paste Special
+    pub warn_multiline_paste: bool,
+    // -- Profiles
+    pub default_profile: String,
+    pub profiles: Vec<Profile>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            font_family: String::new(),
-            font_size: 0.0,
-            line_height: 1.1,
+            restore_sessions: true,
+            confirm_close_multiple: true,
+            confirm_quit: false,
+            copy_on_select: true,
+            copy_trailing_newline: false,
+            clipboard_access: true,
+            triple_click_wrapped: true,
+            word_chars: "/-+\\~_.".into(),
+            tab_titles_per_tab: true,
+            always_show_tabs: true,
+            tab_position: "top".into(),
+            show_tab_numbers: false,
+            tab_close_buttons: false,
+            show_activity: true,
+            stretch_tabs: false,
+            pane_titles: false,
+            dim_inactive: true,
+            dim_amount: 0.22,
+            dim_background_windows: false,
+            middle_click_pastes: true,
+            right_click: "menu".into(),
+            focus_follows_mouse: false,
+            warn_multiline_paste: false,
+            default_profile: "Default".into(),
+            profiles: vec![Profile::default()],
+        }
+    }
+}
+
+/// One profile (iTerm2's Profiles panel, tab by tab).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct Profile {
+    // -- General
+    pub name: String,
+    /// "login" (the login shell) or "custom" (`command`, run through the shell).
+    pub command_mode: String,
+    pub command: String,
+    /// "home", "recycle" (the current tab's directory) or "custom".
+    pub initial_dir_mode: String,
+    pub directory: String,
+    /// Typed into new sessions once they start (a newline is added).
+    pub send_text: String,
+    /// Empty: the program's title, else the folder name.
+    pub tab_title: String,
+    pub badge: String,
+    // -- Colors
+    pub theme_mode: String,
+    pub theme: String,
+    pub theme_light: String,
+    pub theme_dark: String,
+    pub faint_opacity: f64,
+    pub cursor_guide: bool,
+    // -- Text
+    pub font_family: String,
+    pub font_size: f64,
+    pub line_height: f64,
+    pub char_spacing: f64,
+    pub cursor_style: String,
+    pub cursor_blink: bool,
+    pub bold_font: bool,
+    pub italic: bool,
+    pub blink_text: bool,
+    // -- Window
+    /// 0 (opaque) to 0.9.
+    pub transparency: f64,
+    pub keep_backgrounds_opaque: bool,
+    pub columns: u32,
+    pub rows: u32,
+    pub padding: f64,
+    // -- Terminal
+    pub scrollback: u32,
+    pub unlimited_scrollback: bool,
+    pub term: String,
+    pub silence_bell: bool,
+    pub visual_bell: bool,
+    pub bell_icon: bool,
+    pub notify_bell: bool,
+    pub mouse_reporting: bool,
+    pub alternate_scroll: bool,
+    pub allow_title: bool,
+    pub bracketed_paste: bool,
+    // -- Session
+    /// "close", "restart" or "keep".
+    pub on_exit: String,
+    /// "never", "always" or "jobs" (when something besides the shell runs).
+    pub confirm_close: String,
+    /// Shell jobs that don't count as running jobs for "jobs".
+    pub ignored_jobs: String,
+    // -- Keys
+    /// Alt sends Esc+key ("esc") or the key itself ("normal").
+    pub alt_mode: String,
+}
+
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            name: "Default".into(),
+            command_mode: "login".into(),
+            command: String::new(),
+            initial_dir_mode: "recycle".into(),
+            directory: String::new(),
+            send_text: String::new(),
+            tab_title: String::new(),
+            badge: String::new(),
             theme_mode: "system".into(),
             theme: "Tessera Dark".into(),
             theme_light: "Tessera Light".into(),
             theme_dark: "Tessera Dark".into(),
+            faint_opacity: 0.6,
+            cursor_guide: false,
+            font_family: String::new(),
+            font_size: 0.0,
+            line_height: 1.1,
+            char_spacing: 1.0,
             cursor_style: "block".into(),
-            scrollback: 10_000,
-            copy_on_select: true,
-            dim_inactive: true,
+            cursor_blink: false,
+            bold_font: true,
+            italic: true,
+            blink_text: true,
+            transparency: 0.0,
+            keep_backgrounds_opaque: true,
+            columns: 100,
+            rows: 30,
             padding: 6.0,
-            always_show_tabs: true,
+            scrollback: 10_000,
+            unlimited_scrollback: false,
+            term: "xterm-256color".into(),
+            silence_bell: false,
+            visual_bell: true,
+            bell_icon: true,
+            notify_bell: false,
+            mouse_reporting: true,
+            alternate_scroll: true,
+            allow_title: true,
+            bracketed_paste: true,
+            on_exit: "close".into(),
+            confirm_close: "jobs".into(),
+            ignored_jobs: "rlogin, ssh, slogin, telnet, sh, bash, zsh, fish, nu, tmux, screen".into(),
+            alt_mode: "esc".into(),
+        }
+    }
+}
+
+impl Settings {
+    pub fn profile(&self, name: &str) -> Profile {
+        self.profiles
+            .iter()
+            .find(|p| p.name == name)
+            .or_else(|| self.profiles.iter().find(|p| p.name == self.default_profile))
+            .or(self.profiles.first())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn unique_name(&self, base: &str) -> String {
+        if !self.profiles.iter().any(|p| p.name == base) {
+            return base.to_string();
+        }
+        (2..).map(|n| format!("{base} {n}")).find(|n| !self.profiles.iter().any(|p| &p.name == n)).unwrap()
+    }
+
+    /// Add a profile copied from `from` (or a fresh one). Returns its name.
+    pub fn add_profile(&mut self, from: Option<&str>) -> String {
+        let mut p = match from {
+            Some(f) => self.profile(f),
+            None => Profile::default(),
+        };
+        p.name = self.unique_name(if from.is_some() { &p.name } else { "New Profile" });
+        let name = p.name.clone();
+        self.profiles.push(p);
+        name
+    }
+
+    pub fn remove_profile(&mut self, name: &str) {
+        if self.profiles.len() > 1 {
+            self.profiles.retain(|p| p.name != name);
+            if self.default_profile == name {
+                self.default_profile = self.profiles[0].name.clone();
+            }
+        }
+    }
+
+    /// Set one profile field (JSON value). Renaming keeps the default pointing at it.
+    pub fn set_profile_field(&mut self, name: &str, key: &str, value: &str) -> bool {
+        let Some(i) = self.profiles.iter().position(|p| p.name == name) else { return false };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(value) else { return false };
+        if key == "name" {
+            let Some(new) = v.as_str().map(str::trim).filter(|n| !n.is_empty()) else { return false };
+            if new != name && self.profiles.iter().any(|p| p.name == new) {
+                return false;
+            }
+            if self.default_profile == name {
+                self.default_profile = new.to_string();
+            }
+        }
+        let mut obj = serde_json::to_value(&self.profiles[i]).unwrap();
+        let map = obj.as_object_mut().unwrap();
+        if !map.contains_key(key) {
+            return false;
+        }
+        map.insert(key.into(), v);
+        match serde_json::from_value::<Profile>(obj) {
+            Ok(p) => {
+                self.profiles[i] = p;
+                true
+            }
+            Err(_) => false,
         }
     }
 }
@@ -88,10 +305,68 @@ fn themes_dir() -> PathBuf {
 }
 
 pub fn load() -> Settings {
-    std::fs::read(settings_path())
+    let Some(bytes) = std::fs::read(settings_path()).ok() else { return Settings::default() };
+    let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return Settings::default() };
+    let mut s: Settings = serde_json::from_value(raw.clone()).unwrap_or_default();
+    // Settings from before profiles: the per-terminal fields lived at the top.
+    if raw.get("profiles").is_none() {
+        if let Some(obj) = raw.as_object() {
+            let mut p = serde_json::to_value(Profile::default()).unwrap();
+            for (k, v) in obj {
+                if let Some(slot) = p.get_mut(k) {
+                    *slot = v.clone();
+                }
+            }
+            if let Ok(p) = serde_json::from_value::<Profile>(p) {
+                s.profiles = vec![p];
+            }
+        }
+    }
+    if s.profiles.is_empty() {
+        s.profiles.push(Profile::default());
+    }
+    s
+}
+
+// ---- window arrangements -------------------------------------------------
+
+fn arrangements_path() -> PathBuf {
+    config_dir().join("arrangements.json")
+}
+
+/// Saved arrangements: name -> layout JSON (written by the QML side).
+pub fn arrangements() -> serde_json::Map<String, serde_json::Value> {
+    std::fs::read(arrangements_path())
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
+}
+
+pub fn save_arrangements(m: &serde_json::Map<String, serde_json::Value>) -> std::io::Result<()> {
+    std::fs::create_dir_all(config_dir())?;
+    std::fs::write(arrangements_path(), serde_json::to_vec_pretty(m).unwrap())
+}
+
+/// The layout to bring back at the next start (state, not a preference).
+fn last_layout_path() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("tessera")
+        .join("last-layout.json")
+}
+
+pub fn last_layout() -> String {
+    std::fs::read_to_string(last_layout_path()).unwrap_or_default()
+}
+
+pub fn save_last_layout(json: &str) {
+    let p = last_layout_path();
+    if let Some(d) = p.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(p, json);
 }
 
 pub fn save(s: &Settings) -> std::io::Result<()> {
@@ -334,9 +609,23 @@ mod tests {
     #[test]
     fn set_field() {
         let mut s = Settings::default();
-        assert!(set(&mut s, "font_size", "13.5"));
-        assert_eq!(s.font_size, 13.5);
+        assert!(set(&mut s, "dim_amount", "0.3"));
+        assert_eq!(s.dim_amount, 0.3);
         assert!(!set(&mut s, "nope", "1"));
-        assert!(!set(&mut s, "font_size", "\"big\""));
+        assert!(!set(&mut s, "dim_amount", "\"big\""));
+    }
+
+    #[test]
+    fn profiles() {
+        let mut s = Settings::default();
+        let n = s.add_profile(Some("Default"));
+        assert_eq!(n, "Default 2");
+        assert!(s.set_profile_field(&n, "font_size", "14"));
+        assert_eq!(s.profile(&n).font_size, 14.0);
+        assert!(s.set_profile_field("Default", "name", "\"Main\""));
+        assert_eq!(s.default_profile, "Main");
+        assert!(!s.set_profile_field("Main", "name", "\"Default 2\""));
+        s.remove_profile("Main");
+        assert_eq!(s.default_profile, "Default 2");
     }
 }

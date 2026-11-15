@@ -29,6 +29,7 @@ fn main() {
                 }
                 i += 1;
             }
+            "--new-window" => std::env::set_var("TESSERA_NO_RESTORE", "1"),
             "--prefs" => {
                 if let Some(c) = args.get(i + 1) {
                     std::env::set_var("TESSERA_PREFS", c);

@@ -66,3 +66,15 @@ pub fn list_sessions() -> std::io::Result<Vec<SessionInfo>> {
     }
     Ok(serde_json::from_slice(&payload)?)
 }
+
+/// The foreground program of a session when it isn't the shell ("" if idle).
+pub fn session_job(id: &str) -> std::io::Result<String> {
+    let mut s = UnixStream::connect(socket_path())?;
+    s.set_read_timeout(Some(Duration::from_millis(500)))?;
+    write_json(&mut s, T_JOB, &id)?;
+    let (tag, payload) = read_frame(&mut s)?;
+    if tag != T_JOB_REPLY {
+        return Ok(String::new());
+    }
+    Ok(serde_json::from_slice(&payload).unwrap_or_default())
+}
