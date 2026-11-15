@@ -3,10 +3,11 @@ mod client;
 mod daemon;
 mod keymap;
 mod proto;
+mod settings;
 mod session;
 mod tmux;
 
-use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+use cxx_qt_lib::{QQmlApplicationEngine, QString, QUrl};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -28,6 +29,12 @@ fn main() {
                 }
                 i += 1;
             }
+            "--prefs" => {
+                if let Some(c) = args.get(i + 1) {
+                    std::env::set_var("TESSERA_PREFS", c);
+                }
+                i += 1;
+            }
             "--then" => {
                 if let Some(c) = args.get(i + 1) {
                     std::env::set_var("TESSERA_THEN", c);
@@ -46,8 +53,7 @@ fn main() {
     }
 
     std::env::set_var("QT_QUICK_CONTROLS_STYLE", std::env::var("TESSERA_STYLE").unwrap_or_else(|_| "Basic".into()));
-    bridge::ffi::tessera_prepare_qt();
-    let mut app = QGuiApplication::new();
+    bridge::ffi::tessera_create_app();
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         if let Some(qml) = option_env!("TESSERA_QT_QML") {
@@ -57,6 +63,6 @@ fn main() {
         }
         engine.load(&QUrl::from("qrc:/qt/qml/Tessera/qml/Main.qml"));
     }
-    let code = app.as_mut().map(|a| a.exec()).unwrap_or(1);
+    let code = bridge::ffi::tessera_exec();
     std::process::exit(code);
 }

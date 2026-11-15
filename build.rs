@@ -27,12 +27,14 @@ fn main() {
         QmlFile::from("qml/TerminalPane.qml"),
         QmlFile::from("qml/PaneSplit.qml"),
         QmlFile::from("qml/TabButtonX.qml"),
+        QmlFile::from("qml/Preferences.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include")
     .qt_module("Quick")
     .qt_module("QuickControls2")
     .qt_module("QuickShapes")
+    .qt_module("Widgets")
     .cpp_file("include/terminal_item.h")
     .cpp_file("cpp/terminal_item.cpp")
     .files(["src/bridge.rs"])

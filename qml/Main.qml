@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import Qt.labs.platform as P
 import Tessera
 import Tessera.Native
 
@@ -16,12 +17,41 @@ ApplicationWindow {
     property var tabs: []
     property int currentTab: 0
     property var activeView: null
-    property real fontSize: 0      // 0 = the system monospace size
+    property real fontSize: 0      // a zoom (Ctrl+=/-) over the preference; 0 = none
     property var tmuxGateways: ({}) // gateway key -> gateway TerminalView
 
     Controller { id: controller }
 
-    Component { id: paneComp; TerminalPane {} }
+    // ---- preferences and theme -------------------------------------------
+
+    readonly property int rev: controller.revision
+    readonly property var settings: { rev; return JSON.parse(controller.settings()) }
+    readonly property bool systemDark: Qt.styleHints.colorScheme !== Qt.ColorScheme.Light
+    readonly property string themeName: settings.theme_mode === "system"
+        ? (systemDark ? settings.theme_dark : settings.theme_light) : settings.theme
+    readonly property var theme: { rev; return JSON.parse(controller.theme(themeName)) }
+    readonly property string themeJson: JSON.stringify(theme)
+    readonly property int cursorShape: ({ block: 0, bar: 1, underline: 2 })[settings.cursor_style] || 0
+    Binding { target: Theme; property: "term"; value: win.theme }
+
+    function setSetting(key, value) { controller.setSetting(key, JSON.stringify(value)) }
+
+    Component {
+        id: paneComp
+        TerminalPane {
+            themeJson: win.themeJson
+            fontFamily: win.settings.font_family
+            fontPointSize: win.fontSize > 0 ? win.fontSize : win.settings.font_size
+            lineHeight: win.settings.line_height
+            paddingSize: win.settings.padding
+            cursorShape: win.cursorShape
+            scrollback: win.settings.scrollback
+            copyOnSelect: win.settings.copy_on_select
+            dimInactive: win.settings.dim_inactive
+            onContextMenu: (v) => { win.contextView = v; contextMenu.open() }
+        }
+    }
+    property var contextView: null
     Component { id: splitComp; PaneSplit {} }
     Component {
         id: tabComp
@@ -62,10 +92,8 @@ ApplicationWindow {
     }
 
     function makePane(host, props) {
-        if (fontSize > 0) props.fontPointSize = fontSize
         const p = paneComp.createObject(null, props)
         p.host = host
-        if (fontSize > 0) p.view.fontPointSize = fontSize
         p.view.activeFocusChanged.connect(function() {
             if (p.view.activeFocus) {
                 activeView = p.view
@@ -269,11 +297,13 @@ ApplicationWindow {
         focusPane(p)
     }
 
-    function setFontSize(sz) {
-        fontSize = sz
-        for (const t of tabs)
-            for (const p of panesIn(t.root, [])) p.view.fontPointSize = sz
+    function zoomBy(d) {
+        const base = fontSize > 0 ? fontSize : (activeView ? activeView.fontPointSize : 11)
+        fontSize = Math.max(6, Math.min(48, base + d))
     }
+
+    function closeActivePane() { if (activeView) closePane(paneOf(activeView), true) }
+    function splitActive(o) { if (activeView) splitPane(paneOf(activeView), o) }
 
     // ---- tmux control mode -----------------------------------------------
 
@@ -365,16 +395,101 @@ ApplicationWindow {
 
     Item { id: holder; visible: false }
 
+    // ---- menus (the desktop's own: Breeze icons and look on KDE) ---------
+
+    P.Menu {
+        id: appMenu
+        P.MenuItem { icon.name: "tab-new"; text: "New Tab\tCtrl+Shift+T"; onTriggered: newTab({}) }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "view-split-left-right"; text: "Split Right\tCtrl+Shift+D"; onTriggered: splitActive(Qt.Horizontal) }
+        P.MenuItem { icon.name: "view-split-top-bottom"; text: "Split Down\tCtrl+Shift+E"; onTriggered: splitActive(Qt.Vertical) }
+        P.MenuItem { icon.name: "view-close"; text: "Close Pane\tCtrl+Shift+W"; onTriggered: closeActivePane() }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "edit-copy"; text: "Copy\tCtrl+Shift+C"; enabled: activeView !== null && activeView.hasSelection; onTriggered: activeView.copy() }
+        P.MenuItem { icon.name: "edit-paste"; text: "Paste\tCtrl+Shift+V"; onTriggered: if (activeView) activeView.paste() }
+        P.MenuItem { icon.name: "edit-select-all"; text: "Select All\tCtrl+Shift+A"; onTriggered: if (activeView) activeView.selectAll() }
+        P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Buffer\tCtrl+Shift+K"; onTriggered: if (activeView) activeView.clearScrollback() }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "zoom-in"; text: "Bigger Text\tCtrl+="; onTriggered: zoomBy(1) }
+        P.MenuItem { icon.name: "zoom-out"; text: "Smaller Text\tCtrl+-"; onTriggered: zoomBy(-1) }
+        P.MenuItem { icon.name: "zoom-original"; text: "Actual Size\tCtrl+0"; enabled: fontSize > 0; onTriggered: fontSize = 0 }
+        P.Menu {
+            id: themeMenu
+            title: "Color Theme"
+            icon.name: "color-management"
+            P.MenuItemGroup { id: themeGroup }
+            Instantiator {
+                model: { win.rev; return JSON.parse(controller.themes()) }
+                delegate: P.MenuItem {
+                    text: modelData.name
+                    checkable: true
+                    checked: modelData.name === win.themeName
+                    group: themeGroup
+                    onTriggered: pickTheme(modelData)
+                }
+                onObjectAdded: (i, o) => themeMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => themeMenu.removeItem(o)
+            }
+            P.MenuSeparator {}
+            P.MenuItem { icon.name: "configure"; text: "More Themes…"; onTriggered: prefs.showPage("appearance") }
+        }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "go-next"; text: "Next Tab\tCtrl+PgDown"; enabled: tabs.length > 1; onTriggered: focusTab((currentTab + 1) % tabs.length) }
+        P.MenuItem { icon.name: "go-previous"; text: "Previous Tab\tCtrl+PgUp"; enabled: tabs.length > 1; onTriggered: focusTab((currentTab + tabs.length - 1) % tabs.length) }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
+        P.MenuItem { icon.name: "help-about"; text: "About Tessera"; onTriggered: prefs.showPage("about") }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "application-exit"; text: "Quit\tCtrl+Shift+Q"; onTriggered: Qt.quit() }
+    }
+
+    // Right click in a terminal (when the program isn't taking the mouse).
+    P.Menu {
+        id: contextMenu
+        P.MenuItem { icon.name: "edit-copy"; text: "Copy\tCtrl+Shift+C"; enabled: contextView !== null && contextView.hasSelection; onTriggered: contextView.copy() }
+        P.MenuItem { icon.name: "edit-paste"; text: "Paste\tCtrl+Shift+V"; onTriggered: contextView.paste() }
+        P.MenuItem { icon.name: "edit-select-all"; text: "Select All\tCtrl+Shift+A"; onTriggered: contextView.selectAll() }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "view-split-left-right"; text: "Split Right\tCtrl+Shift+D"; onTriggered: splitPane(paneOf(contextView), Qt.Horizontal) }
+        P.MenuItem { icon.name: "view-split-top-bottom"; text: "Split Down\tCtrl+Shift+E"; onTriggered: splitPane(paneOf(contextView), Qt.Vertical) }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Buffer\tCtrl+Shift+K"; onTriggered: contextView.clearScrollback() }
+        P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "view-close"; text: "Close Pane\tCtrl+Shift+W"; onTriggered: closePane(paneOf(contextView), true) }
+    }
+
+    // Picking a theme: with "follow the system" it becomes the light or dark
+    // theme (by its colors); otherwise the one theme.
+    function pickTheme(t) {
+        if (settings.theme_mode === "system") setSetting(t.dark ? "theme_dark" : "theme_light", t.name)
+        else setSetting("theme", t.name)
+    }
+
+    Preferences {
+        id: prefs
+        controller: controller
+        settings: win.settings
+        themeName: win.themeName
+        systemDark: win.systemDark
+        transientParent: win
+        onPick: (t) => win.pickTheme(t)
+        onChange: (k, v) => win.setSetting(k, v)
+    }
+
     // ---- shortcuts (iTerm2's, with Ctrl+Shift for Cmd) --------------------
 
+    // The menus show these keys in their text; the keys themselves live here
+    // (one place, and Close Pane doesn't auto-repeat when held).
     Shortcut { sequence: "Ctrl+Shift+T"; onActivated: newTab({}) }
-    Shortcut { sequence: "Ctrl+Shift+N"; onActivated: newTab({}) }
-    Shortcut { sequence: "Ctrl+Shift+W"; onActivated: if (activeView) closePane(paneOf(activeView), true) }
-    Shortcut { sequence: "Ctrl+Shift+D"; onActivated: if (activeView) splitPane(paneOf(activeView), Qt.Horizontal) }
-    Shortcut { sequence: "Ctrl+Shift+E"; onActivated: if (activeView) splitPane(paneOf(activeView), Qt.Vertical) }
+    Shortcut { sequence: "Ctrl+Shift+W"; autoRepeat: false; onActivated: closeActivePane() }
+    Shortcut { sequence: "Ctrl+Shift+D"; autoRepeat: false; onActivated: splitActive(Qt.Horizontal) }
+    Shortcut { sequence: "Ctrl+Shift+E"; autoRepeat: false; onActivated: splitActive(Qt.Vertical) }
     Shortcut { sequence: "Ctrl+Shift+C"; onActivated: if (activeView) activeView.copy() }
     Shortcut { sequence: "Ctrl+Shift+V"; onActivated: if (activeView) activeView.paste() }
     Shortcut { sequence: "Shift+Insert"; onActivated: if (activeView) activeView.paste() }
+    Shortcut { sequence: "Ctrl+Shift+A"; onActivated: if (activeView) activeView.selectAll() }
+    Shortcut { sequence: "Ctrl+Shift+K"; autoRepeat: false; onActivated: if (activeView) activeView.clearScrollback() }
     Shortcut { sequence: "Ctrl+PgDown"; onActivated: focusTab((currentTab + 1) % tabs.length) }
     Shortcut { sequence: "Ctrl+PgUp"; onActivated: focusTab((currentTab + tabs.length - 1) % tabs.length) }
     Shortcut { sequence: "Ctrl+Tab"; onActivated: focusTab((currentTab + 1) % tabs.length) }
@@ -383,9 +498,11 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Alt+Right"; onActivated: moveFocus(1, 0) }
     Shortcut { sequence: "Ctrl+Alt+Up"; onActivated: moveFocus(0, -1) }
     Shortcut { sequence: "Ctrl+Alt+Down"; onActivated: moveFocus(0, 1) }
-    Shortcut { sequence: "Ctrl+="; onActivated: setFontSize((fontSize || (activeView ? activeView.fontPointSize : 11)) + 1) }
-    Shortcut { sequence: "Ctrl++"; onActivated: setFontSize((fontSize || (activeView ? activeView.fontPointSize : 11)) + 1) }
-    Shortcut { sequence: "Ctrl+-"; onActivated: setFontSize(Math.max(6, (fontSize || (activeView ? activeView.fontPointSize : 11)) - 1)) }
+    Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; onActivated: zoomBy(1) }
+    Shortcut { sequence: "Ctrl+-"; onActivated: zoomBy(-1) }
+    Shortcut { sequence: "Ctrl+0"; onActivated: fontSize = 0 }
+    Shortcut { sequence: "Ctrl+,"; onActivated: prefs.showPage("") }
+    Shortcut { sequence: "Ctrl+Shift+Q"; autoRepeat: false; onActivated: Qt.quit() }
     Repeater {
         model: 9
         delegate: Item {
@@ -406,18 +523,38 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.preferredHeight: 40
             color: Theme.chrome
-            visible: tabs.length > 1 || tabs.some(t => t.tmuxWindow >= 0)
+            visible: settings.always_show_tabs || tabs.length > 1 || tabs.some(t => t.tmuxWindow >= 0)
+
+            // ☰ The app menu.
+            Rectangle {
+                id: menuButton
+                anchors.left: parent.left
+                anchors.leftMargin: 6
+                anchors.verticalCenter: tabRow.verticalCenter
+                width: 30; height: 28; radius: 6
+                color: menuHover.hovered ? Theme.tabHover : "transparent"
+                Item {
+                    anchors.centerIn: parent
+                    width: 16; height: 12
+                    Repeater {
+                        model: 3
+                        Rectangle { y: index * 5; width: 16; height: 2; radius: 1; color: Theme.textDim }
+                    }
+                }
+                HoverHandler { id: menuHover }
+                TapHandler { onTapped: appMenu.open(menuButton) }
+            }
 
             // Tabs sit on the bottom edge so the current one joins the
             // terminal; neighbours overlap by their flares.
             Row {
                 id: tabRow
-                anchors.left: parent.left
-                anchors.leftMargin: 4
+                anchors.left: menuButton.right
+                anchors.leftMargin: 2
                 anchors.bottom: parent.bottom
                 spacing: -8
                 readonly property real tabWidth: Math.max(90, Math.min(240,
-                    (parent.width - 60 + 8 * tabs.length) / Math.max(1, tabs.length)))
+                    (parent.width - 100 + 8 * tabs.length) / Math.max(1, tabs.length)))
                 Repeater {
                     model: tabs
                     delegate: TabButtonX {
@@ -427,7 +564,7 @@ ApplicationWindow {
                         current: index === currentTab
                         nextIsCurrent: index + 1 === currentTab
                         tmux: modelData.tmuxWindow >= 0
-                        surface: activeView ? activeView.background : Theme.bg
+                        surface: Theme.bg
                         onClicked: focusTab(index)
                         onCloseClicked: closeTab(modelData)
                     }
@@ -465,6 +602,7 @@ ApplicationWindow {
         const cmd = controller.startupCommand()
         if (cmd !== "") runTimer.start()
         if (controller.thenCommand() !== "") thenTimer.start()
+        if (controller.prefsPage() !== "") prefs.showPage(controller.prefsPage())
         if (controller.screenshotPath() !== "") shotTimer.start()
     }
 
@@ -484,7 +622,8 @@ ApplicationWindow {
         id: shotTimer
         interval: controller.screenshotDelay()
         onTriggered: {
-            const ok = rootLayout.grabToImage(function(r) {
+            const target = controller.prefsPage() !== "" ? prefs.contentRoot : rootLayout
+            const ok = target.grabToImage(function(r) {
                 r.saveToFile(controller.screenshotPath())
                 Qt.quit()
             })

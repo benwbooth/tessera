@@ -99,9 +99,11 @@ void TerminalItem::setCwd(const QString& v)
     emit cwdChanged();
 }
 
-void TerminalItem::setFontFamily(const QString& v)
+void TerminalItem::setFontFamily(const QString& in)
 {
-    if (v.isEmpty() || v == m_fontFamily) return;
+    // Empty = the system's monospace font.
+    const QString v = in.isEmpty() ? QFontDatabase::systemFont(QFontDatabase::FixedFont).family() : in;
+    if (v == m_fontFamily) return;
     m_fontFamily = v;
     updateMetrics();
     emit fontChanged();
@@ -109,10 +111,70 @@ void TerminalItem::setFontFamily(const QString& v)
 
 void TerminalItem::setFontPointSize(qreal v)
 {
-    if (v <= 0 || qFuzzyCompare(v, m_fontPointSize)) return;
+    // 0 = the system's monospace size.
+    if (v <= 0) {
+        const QFont fixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        v = fixed.pointSizeF() > 0 ? fixed.pointSizeF() : 11;
+    }
+    if (qFuzzyCompare(v, m_fontPointSize)) return;
     m_fontPointSize = v;
     updateMetrics();
     emit fontChanged();
+}
+
+void TerminalItem::setThemeJson(const QString& v)
+{
+    if (v == m_themeJson) return;
+    m_themeJson = v;
+    if (m_session) {
+        const QByteArray b = v.toUtf8();
+        m_session->set_theme(rs(b));
+        m_forceFull = true;
+        polish();
+    }
+    emit themeJsonChanged();
+}
+
+void TerminalItem::setCursorShape(int v)
+{
+    if (v == m_cursorShape) return;
+    m_cursorShape = v;
+    if (m_session) {
+        m_session->set_cursor_style(uint8_t(v));
+        polish();
+    }
+    emit cursorShapeChanged();
+}
+
+void TerminalItem::setScrollback(int v)
+{
+    if (v == m_scrollback) return;
+    m_scrollback = v; // applies to terminals opened from now on
+    emit scrollbackChanged();
+}
+
+void TerminalItem::setLineHeight(qreal v)
+{
+    v = qBound<qreal>(0.8, v, 2.0);
+    if (qFuzzyCompare(v, m_lineHeight)) return;
+    m_lineHeight = v;
+    updateMetrics();
+    emit fontChanged();
+}
+
+void TerminalItem::setPaddingSize(qreal v)
+{
+    v = qBound<qreal>(0, v, 40);
+    if (qFuzzyCompare(v + 1, m_paddingSize + 1)) return;
+    m_paddingSize = v;
+    updateMetrics();
+}
+
+void TerminalItem::setCopyOnSelect(bool v)
+{
+    if (v == m_copyOnSelect) return;
+    m_copyOnSelect = v;
+    emit copyOnSelectChanged();
 }
 
 int TerminalItem::tmuxPaneId() const { return m_session ? m_session->tmux_pane_id() : -1; }
@@ -165,9 +227,9 @@ void TerminalItem::updateMetrics()
     const QFontMetricsF fm(m_font);
     m_cw = qMax(1, qRound(fm.horizontalAdvance(QLatin1Char('M'))));
     const int glyphH = qCeil(fm.ascent() + fm.descent());
-    m_ch = qMax(1, glyphH + qRound(m_dpr)); // a little leading
+    m_ch = qMax(glyphH, qRound(glyphH * m_lineHeight));
     m_ascent = qRound(fm.ascent()) + (m_ch - glyphH) / 2;
-    m_pad = qRound(5 * m_dpr);
+    m_pad = qRound(m_paddingSize * m_dpr);
     emit metricsChanged();
     m_forceFull = true;
     m_rebuildNodes = true;
@@ -183,8 +245,13 @@ void TerminalItem::open()
     try {
         const QByteArray a = m_attachId.toUtf8(), t = m_tmuxPane.toUtf8(), c = m_cwd.toUtf8();
         auto box = tessera::session_open(rs(a), rs(t), rs(c), uint16_t(cols), uint16_t(rows), uint32_t(m_cw),
-                                         uint32_t(m_ch));
+                                         uint32_t(m_ch), uint32_t(qMax(0, m_scrollback)));
         m_session = box.into_raw();
+        if (!m_themeJson.isEmpty()) {
+            const QByteArray b = m_themeJson.toUtf8();
+            m_session->set_theme(rs(b));
+        }
+        if (m_cursorShape != 0) m_session->set_cursor_style(uint8_t(m_cursorShape));
     } catch (const std::exception& e) {
         m_exited = true;
         emit openFailed(QString::fromUtf8(e.what()));
@@ -510,6 +577,11 @@ void TerminalItem::mouse(int action, int button, QPointF pos, Qt::KeyboardModifi
 void TerminalItem::mousePressEvent(QMouseEvent* e)
 {
     forceActiveFocus(Qt::MouseFocusReason);
+    if (e->button() == Qt::RightButton && !(m_session && m_session->wants_mouse(uint32_t(e->modifiers())))) {
+        emit contextMenuRequested(e->position().x(), e->position().y());
+        e->accept();
+        return;
+    }
     m_selecting = e->button() == Qt::LeftButton;
     mouse(0, buttonCode(e->button()), e->position(), e->modifiers());
     e->accept();
@@ -555,8 +627,9 @@ void TerminalItem::publishSelection()
     const QString text = qs(m_session->selected_text());
     const bool has = !text.isEmpty();
     if (has) {
-        // Copy on select, as iTerm2 does by default; also the X/Wayland primary.
-        QGuiApplication::clipboard()->setText(text, QClipboard::Clipboard);
+        // Copy on select (iTerm2's default, a preference); the X/Wayland
+        // primary selection always.
+        if (m_copyOnSelect) QGuiApplication::clipboard()->setText(text, QClipboard::Clipboard);
         if (QGuiApplication::clipboard()->supportsSelection())
             QGuiApplication::clipboard()->setText(text, QClipboard::Selection);
     }
@@ -615,6 +688,22 @@ void TerminalItem::tmuxCommand(const QString& command)
     if (!m_session) return;
     const QByteArray c = command.toUtf8();
     m_session->tmux_command(rs(c));
+}
+
+void TerminalItem::selectAll()
+{
+    if (!m_session) return;
+    m_session->select_all();
+    publishSelection();
+    polish();
+}
+
+void TerminalItem::clearScrollback()
+{
+    if (!m_session) return;
+    m_session->clear_scrollback();
+    m_forceFull = true;
+    polish();
 }
 
 void TerminalItem::scrollToBottom()

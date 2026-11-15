@@ -81,6 +81,10 @@ pub struct Session {
     last_full_size: (u16, u16),
     selected: String,
     t0: Instant,
+    /// Selection colors from the theme (None: reverse video).
+    sel_bg: Option<u32>,
+    sel_fg: Option<u32>,
+    force_full: bool,
 }
 
 pub fn session_open(
@@ -91,6 +95,7 @@ pub fn session_open(
     rows: u16,
     cell_w: u32,
     cell_h: u32,
+    scrollback: u32,
 ) -> Result<Box<Session>, String> {
     let (cols, rows) = (cols.max(2), rows.max(1));
     let backend = if !tmux_pane.is_empty() {
@@ -115,7 +120,7 @@ pub fn session_open(
         Backend::Tmux { shared, .. } => shared.borrow().grid,
         _ => (cols, rows),
     };
-    let mut term = Terminal::new(Options { cols, rows, max_scrollback: SCROLLBACK }).map_err(|e| e.to_string())?;
+    let mut term = Terminal::new(Options { cols, rows, max_scrollback: if scrollback > 0 { scrollback as usize } else { SCROLLBACK } }).map_err(|e| e.to_string())?;
     term.resize(cols, rows, cell_w.max(1), cell_h.max(1)).map_err(|e| e.to_string())?;
 
     let outbox: Rc<RefCell<Vec<u8>>> = Rc::default();
@@ -197,6 +202,9 @@ pub fn session_open(
         last_full_size: (0, 0),
         selected: String::new(),
         t0: Instant::now(),
+        sel_bg: None,
+        sel_fg: None,
+        force_full: true,
     });
     // A tmux pane may already have its captured contents waiting.
     if matches!(s.backend, Backend::Tmux { .. }) {
@@ -629,6 +637,26 @@ impl Session {
         self.selected.clone()
     }
 
+    pub fn select_all(&mut self) {
+        let text = match self.term.select_all() {
+            Ok(Some(sel)) => {
+                let _ = self.term.set_selection(Some(&sel));
+                format_selection(&self.term, &sel)
+            }
+            _ => String::new(),
+        };
+        self.selected = text;
+    }
+
+    /// Like iTerm2's Clear Buffer: drop the scrollback and clear the screen
+    /// (the shell redraws its prompt on Ctrl+L).
+    pub fn clear_scrollback(&mut self) {
+        self.term.vt_write(b"\x1b[H\x1b[2J\x1b[3J");
+        if self.gateway.is_none() {
+            self.write_input(b"\x0c");
+        }
+    }
+
     pub fn clear_selection(&mut self) {
         let _ = self.term.set_selection(None);
         self.selected.clear();
@@ -658,6 +686,42 @@ impl Session {
             Backend::Daemon { stream, .. } => write_blocking(stream, T_KILL, b""),
             Backend::Tmux { gw, pane, .. } => gw.borrow_mut().user_command(&format!("kill-pane -t %{pane}")),
         }
+    }
+
+    pub fn set_theme(&mut self, theme_json: &str) {
+        let Ok(th) = serde_json::from_str::<crate::settings::Theme>(theme_json) else { return };
+        use crate::settings::hex_rgb;
+        let _ = self.term.set_default_fg_color(hex_rgb(&th.foreground));
+        let _ = self.term.set_default_bg_color(hex_rgb(&th.background));
+        let _ = self.term.set_default_cursor_color(hex_rgb(&th.cursor));
+        if let Ok(mut pal) = self.term.default_color_palette() {
+            for (i, c) in th.ansi.iter().take(16).enumerate() {
+                if let Some(c) = hex_rgb(c) {
+                    pal.0[i] = c;
+                }
+            }
+            let _ = self.term.set_default_color_palette(Some(pal));
+        }
+        self.sel_bg = hex_rgb(&th.selection_background).map(rgb);
+        self.sel_fg = hex_rgb(&th.selection_foreground).map(rgb);
+        self.force_full = true;
+    }
+
+    pub fn set_cursor_style(&mut self, style: u8) {
+        use libghostty_vt::terminal::CursorStyle;
+        let st = match style {
+            1 => CursorStyle::Bar,
+            2 => CursorStyle::Underline,
+            _ => CursorStyle::Block,
+        };
+        let _ = self.term.set_default_cursor_style(Some(st));
+        // Apply it now too (as a DECSCUSR reset would), unless a program set its own.
+        self.term.vt_write(b"\x1b[0 q");
+        self.force_full = true;
+    }
+
+    pub fn wants_mouse(&self, qt_mods: u32) -> bool {
+        self.term.is_mouse_tracking().unwrap_or(false) && !keymap::mods(qt_mods).contains(key::Mods::SHIFT)
     }
 
     pub fn tmux_pane_id(&self) -> i32 {
@@ -696,7 +760,7 @@ impl Session {
         let dirty = snap.dirty().unwrap_or(Dirty::Full);
         let cols = snap.cols().unwrap_or(0);
         let rows = snap.rows().unwrap_or(0);
-        let full = force_full || dirty == Dirty::Full || self.last_full_size != (cols, rows);
+        let full = force_full || std::mem::take(&mut self.force_full) || dirty == Dirty::Full || self.last_full_size != (cols, rows);
         let colors = match snap.colors() {
             Ok(c) => c,
             Err(_) => return false,
@@ -789,7 +853,15 @@ impl Session {
                             }
                         }
                         if cell.is_selected().unwrap_or(false) {
-                            std::mem::swap(&mut fg, &mut bg);
+                            match self.sel_bg {
+                                Some(sb) => {
+                                    bg = sb;
+                                    if let Some(sf) = self.sel_fg {
+                                        fg = sf;
+                                    }
+                                }
+                                None => std::mem::swap(&mut fg, &mut bg),
+                            }
                             has_bg = true;
                         }
                         if has_bg {

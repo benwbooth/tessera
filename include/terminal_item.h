@@ -41,6 +41,12 @@ class TerminalItem : public QQuickItem {
     Q_PROPERTY(qreal padding READ padding NOTIFY metricsChanged)
     Q_PROPERTY(QColor background READ background NOTIFY backgroundChanged)
     Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged)
+    Q_PROPERTY(QString themeJson READ themeJson WRITE setThemeJson NOTIFY themeJsonChanged)
+    Q_PROPERTY(int cursorShape READ cursorShape WRITE setCursorShape NOTIFY cursorShapeChanged)
+    Q_PROPERTY(int scrollback READ scrollback WRITE setScrollback NOTIFY scrollbackChanged)
+    Q_PROPERTY(qreal lineHeight READ lineHeight WRITE setLineHeight NOTIFY fontChanged)
+    Q_PROPERTY(qreal paddingSize READ paddingSize WRITE setPaddingSize NOTIFY metricsChanged)
+    Q_PROPERTY(bool copyOnSelect READ copyOnSelect WRITE setCopyOnSelect NOTIFY copyOnSelectChanged)
 
 public:
     explicit TerminalItem(QQuickItem* parent = nullptr);
@@ -69,6 +75,18 @@ public:
     qreal padding() const { return m_pad / m_dpr; }
     QColor background() const { return m_bg; }
     bool hasSelection() const { return m_hasSelection; }
+    QString themeJson() const { return m_themeJson; }
+    void setThemeJson(const QString& v);
+    int cursorShape() const { return m_cursorShape; }
+    void setCursorShape(int v);
+    int scrollback() const { return m_scrollback; }
+    void setScrollback(int v);
+    qreal lineHeight() const { return m_lineHeight; }
+    void setLineHeight(qreal v);
+    qreal paddingSize() const { return m_paddingSize; }
+    void setPaddingSize(qreal v);
+    bool copyOnSelect() const { return m_copyOnSelect; }
+    void setCopyOnSelect(bool v);
 
     Q_INVOKABLE void copy();
     Q_INVOKABLE void paste();
@@ -76,6 +94,8 @@ public:
     Q_INVOKABLE void killSession();
     Q_INVOKABLE void tmuxCommand(const QString& command);
     Q_INVOKABLE void scrollToBottom();
+    Q_INVOKABLE void selectAll();
+    Q_INVOKABLE void clearScrollback();
 
 signals:
     void attachIdChanged();
@@ -94,6 +114,11 @@ signals:
     void bell();
     void tmuxEvent(const QVariantMap& event);
     void openFailed(const QString& message);
+    void themeJsonChanged();
+    void cursorShapeChanged();
+    void scrollbackChanged();
+    void copyOnSelectChanged();
+    void contextMenuRequested(qreal x, qreal y);
 
 protected:
     void componentComplete() override;
@@ -170,4 +195,11 @@ private:
     QVector<bool> m_rowUpload;
     bool m_rebuildNodes = true;
     int m_wheelAccum = 0;
+
+    QString m_themeJson;
+    int m_cursorShape = 0;
+    int m_scrollback = 10000;
+    qreal m_lineHeight = 1.1;
+    qreal m_paddingSize = 6;
+    bool m_copyOnSelect = true;
 };
