@@ -647,35 +647,47 @@ Window {
                             Layout.margins: 24
                             spacing: 12
 
-                            Row2 {
-                                label: "Color theme"
+                            ToggleRow {
+                                label: "Use separate themes for light and dark mode"
                                 hint: prefs.prof.theme_mode === "system"
-                                      ? "Separate light and dark themes, switched with the desktop. Pick one of each."
-                                      : "One theme all the time."
-                                Segmented {
-                                    options: [{ label: "Follow system", value: "system" }, { label: "Always the same", value: "fixed" }]
-                                    value: prefs.prof.theme_mode
-                                    onPicked: (v) => prefs.setP("theme_mode", v)
-                                }
-                                Item { Layout.fillWidth: true }
+                                      ? "Switches with the desktop, which is " + (prefs.systemDark ? "dark" : "light") + " now."
+                                      : "Off: one theme all the time."
+                                checked: prefs.prof.theme_mode === "system"
+                                onToggled: (on) => prefs.setP("theme_mode", on ? "system" : "fixed")
                             }
-                            Flow {
-                                Layout.fillWidth: true
-                                Layout.topMargin: 4
-                                spacing: 12
-                                Repeater {
-                                    model: prefs.themes
-                                    delegate: ThemeCard {
-                                        theme: modelData
-                                        readonly property bool isLight: prefs.prof.theme_light === modelData.name
-                                        readonly property bool isDark: prefs.prof.theme_dark === modelData.name
-                                        selected: prefs.prof.theme_mode === "system" ? (isLight || isDark) : prefs.prof.theme === modelData.name
-                                        badge: prefs.prof.theme_mode === "system" ? (isDark ? "DARK" : (isLight ? "LIGHT" : "")) : ""
-                                        onClicked: {
-                                            if (prefs.prof.theme_mode === "system") prefs.setP(modelData.dark ? "theme_dark" : "theme_light", modelData.name)
-                                            else prefs.setP("theme", modelData.name)
+                            Repeater {
+                                // One gallery, or one each for dark and light mode.
+                                model: prefs.prof.theme_mode === "system"
+                                       ? [{ key: "theme_dark", label: "When the desktop is dark", dark: true },
+                                          { key: "theme_light", label: "When the desktop is light", dark: false }]
+                                       : [{ key: "theme", label: "", dark: null }]
+                                delegate: ColumnLayout {
+                                    id: gallery
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    readonly property var slot: modelData
+                                    Text {
+                                        visible: gallery.slot.label !== ""
+                                        text: gallery.slot.label + ((gallery.slot.dark === prefs.systemDark) ? "  \u2022  in use now" : "")
+                                        color: Theme.text
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        Layout.topMargin: 8
+                                    }
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        spacing: 12
+                                        Repeater {
+                                            // Themes of the matching kind first; every theme is allowed.
+                                            model: gallery.slot.dark === null ? prefs.themes
+                                                   : prefs.themes.filter(t => t.dark === gallery.slot.dark).concat(prefs.themes.filter(t => t.dark !== gallery.slot.dark))
+                                            delegate: ThemeCard {
+                                                theme: modelData
+                                                selected: prefs.prof[gallery.slot.key] === modelData.name
+                                                onClicked: prefs.setP(gallery.slot.key, modelData.name)
+                                                onRemoveClicked: prefs.controller.deleteTheme(modelData.name)
+                                            }
                                         }
-                                        onRemoveClicked: prefs.controller.deleteTheme(modelData.name)
                                     }
                                 }
                             }

@@ -4,9 +4,12 @@ import Tessera
 
 // One tab. The current tab is cut from the terminal's own surface and runs
 // into it (rounded corners away from the terminal, flared corners where it
-// meets it, a hairline outline and a soft shadow); the others sit flat on the
-// strip. Tabs can be dragged: along the strip to reorder, onto another
-// window's strip to move there, or anywhere else to become a window of their own.
+// meets it); the others sit flat on the strip.
+//
+// Dragging: along the bar the tab follows the pointer and the others slide
+// out of its way (the bar handles that from dragMoved); pulled out of the bar
+// it becomes a real drag-and-drop, to another window's bar or, dropped
+// anywhere else, a window of its own.
 Item {
     id: tab
     property string text: ""
@@ -22,18 +25,22 @@ Item {
     property color surface: Theme.bg     // the terminal background
     property var tabItem: null           // the tab this button shows (for drops)
     property var payload: null           // function() -> JSON for dragging it out
-    property bool dragging: false
+    property bool canTearOff: true
+    property bool lifted: false          // being dragged along the bar
+    property bool external: false        // being dragged out of the bar
     signal clicked()
     signal closeClicked()
+    signal dragMoved(real dx, real dy)
+    signal dragReleased()
     signal dragFinished(int action)
 
-    readonly property real flare: 9
+    readonly property real flare: 6
     readonly property bool hovered: hover.hovered
     readonly property color fill: current ? surface : (hovered ? Theme.tabHover : Theme.chrome)
 
-    implicitHeight: 36
-    implicitWidth: 220
-    opacity: dragging ? 0.45 : 1
+    implicitHeight: 26
+    implicitWidth: 170
+    opacity: external ? 0.4 : 1
 
     HoverHandler { id: hover }
     TapHandler { onTapped: tab.clicked() }
@@ -45,23 +52,26 @@ Item {
     Drag.proposedAction: Qt.MoveAction
     Drag.onDragFinished: (action) => {
         tab.Drag.active = false
-        tab.dragging = false
+        tab.external = false
         tab.dragFinished(action)
+    }
+    function startExternalDrag() {
+        if (external) return
+        external = true
+        tab.grabToImage(function(r) {
+            tab.Drag.imageSource = r.url
+            tab.Drag.hotSpot.x = tab.width / 2
+            tab.Drag.hotSpot.y = tab.height / 2
+            tab.Drag.mimeData = { "application/x-tessera-tab": tab.payload ? tab.payload() : "" }
+            tab.Drag.active = true
+        })
     }
     DragHandler {
         id: dh
         target: null
-        dragThreshold: 8
-        onActiveChanged: if (active && !tab.dragging) {
-            tab.dragging = true
-            tab.Drag.hotSpot.x = centroid.pressPosition.x
-            tab.Drag.hotSpot.y = centroid.pressPosition.y
-            tab.grabToImage(function(r) {
-                tab.Drag.imageSource = r.url
-                tab.Drag.mimeData = { "application/x-tessera-tab": tab.payload ? tab.payload() : "" }
-                tab.Drag.active = true
-            })
-        }
+        dragThreshold: 6
+        onTranslationChanged: if (active && !tab.external) tab.dragMoved(activeTranslation.x, activeTranslation.y)
+        onActiveChanged: if (!active && !tab.external) tab.dragReleased()
     }
 
     // ---- body -----------------------------------------------------------------
@@ -69,36 +79,15 @@ Item {
         anchors.fill: parent
         transform: Scale { origin.y: tab.height / 2; yScale: tab.flipped ? -1 : 1 }
 
-        // Soft shadow around the current tab.
         Shape {
             anchors.fill: parent
-            visible: tab.current
-            preferredRendererType: Shape.CurveRenderer
-            opacity: Theme.dark ? 0.35 : 0.12
-            ShapePath {
-                strokeWidth: 4
-                strokeColor: "black"
-                fillColor: "transparent"
-                joinStyle: ShapePath.RoundJoin
-                startX: sh.r; startY: sh.h
-                PathLine { x: sh.r; y: sh.r + 1 }
-                PathQuad { x: 2 * sh.r; y: 1; controlX: sh.r; controlY: 1 }
-                PathLine { x: sh.w - 2 * sh.r; y: 1 }
-                PathQuad { x: sh.w - sh.r; y: sh.r + 1; controlX: sh.w - sh.r; controlY: 1 }
-                PathLine { x: sh.w - sh.r; y: sh.h }
-            }
-            QtObject { id: sh; readonly property real w: tab.width; readonly property real h: tab.height; readonly property real r: tab.flare }
-        }
-
-        Shape {
-            anchors.fill: parent
-            visible: tab.current || tab.hovered
+            visible: tab.current || tab.hovered || tab.lifted
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 id: sp
-                strokeWidth: tab.current ? 1 : -1
-                strokeColor: Qt.rgba(Theme.divider.r, Theme.divider.g, Theme.divider.b, 0.7)
-                fillColor: tab.current ? tab.surface : Theme.tabHover
+                strokeWidth: tab.current || tab.lifted ? 1 : -1
+                strokeColor: Qt.rgba(Theme.divider.r, Theme.divider.g, Theme.divider.b, Theme.dark ? 0.9 : 0.6)
+                fillColor: tab.current || tab.lifted ? tab.surface : Theme.tabHover
                 readonly property real w: tab.width
                 readonly property real h: tab.height + 1   // past the edge: no outline along the join
                 readonly property real r: tab.flare
@@ -113,14 +102,14 @@ Item {
             }
         }
 
-        // Tab color: a band along the outer edge.
+        // Tab color: a short bar along the outer edge.
         Rectangle {
             visible: tab.tabColor.a > 0
-            x: tab.flare * 2
-            width: tab.width - tab.flare * 4
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(48, tab.width - 4 * tab.flare)
             height: 3
             radius: 1.5
-            y: 2
+            y: 1
             color: tab.tabColor
         }
     }
@@ -130,52 +119,44 @@ Item {
         anchors.rightMargin: tab.flare / 2
         anchors.verticalCenter: parent.verticalCenter
         width: 1
-        height: 14
+        height: 12
         color: Theme.divider
-        opacity: 0.7
-        visible: !tab.current && !tab.hovered && !tab.nextIsCurrent
+        visible: !tab.current && !tab.hovered && !tab.nextIsCurrent && !tab.lifted
     }
 
     // ---- contents ---------------------------------------------------------
-    Item {
-        id: badge
+    Text {
+        id: glyph
         anchors.left: parent.left
-        anchors.leftMargin: tab.flare + 11
+        anchors.leftMargin: tab.flare + 7
         anchors.verticalCenter: parent.verticalCenter
-        width: 18; height: 18
-        Rectangle {
-            anchors.fill: parent
-            radius: 5
-            color: tab.tabColor.a > 0 ? tab.tabColor : (tab.tmux ? Theme.tmux : Theme.accent)
-            opacity: tab.current ? 0.95 : 0.55
-        }
-        Text {
-            anchors.centerIn: parent
-            anchors.horizontalCenterOffset: tab.number > 0 ? 0 : 0.5
-            text: tab.number > 0 ? tab.number : (tab.tmux ? "∷" : "❯")
-            color: Theme.dark ? Theme.chrome : "white"
-            font.pixelSize: tab.number > 0 ? 11 : 10
-            font.weight: Font.Bold
-        }
+        anchors.verticalCenterOffset: tab.flipped ? -1 : 1
+        width: 10
+        horizontalAlignment: Text.AlignHCenter
+        text: tab.number > 0 ? tab.number : (tab.tmux ? "∷" : "❯")
+        color: tab.tabColor.a > 0 ? tab.tabColor : (tab.tmux ? Theme.tmux : (tab.current ? Theme.accent : Theme.textDim))
+        font.pixelSize: tab.number > 0 ? 10 : 9
+        font.weight: Font.Bold
     }
 
     Text {
         id: title
-        anchors.left: badge.right
-        anchors.leftMargin: 8
+        anchors.left: glyph.right
+        anchors.leftMargin: 5
         anchors.right: tail.left
-        anchors.rightMargin: 4
+        anchors.rightMargin: 2
         anchors.verticalCenter: parent.verticalCenter
         text: tab.text
         color: tab.current ? Theme.text : Theme.textDim
-        font.pixelSize: 13
-        font.weight: tab.current ? Font.DemiBold : Font.Normal
+        font.pixelSize: 12
+        font.weight: tab.current ? Font.Medium : Font.Normal
+        anchors.verticalCenterOffset: tab.flipped ? -1 : 1
         clip: true
         // Fade the end of a long title instead of an ellipsis.
         Rectangle {
             visible: title.implicitWidth > title.width
             anchors.right: parent.right
-            width: 22
+            width: 18
             height: parent.height
             gradient: Gradient {
                 orientation: Gradient.Horizontal
@@ -189,20 +170,21 @@ Item {
     Item {
         id: tail
         anchors.right: parent.right
-        anchors.rightMargin: tab.flare + 6
+        anchors.rightMargin: tab.flare + 3
         anchors.verticalCenter: parent.verticalCenter
-        width: 20; height: 20
+        anchors.verticalCenterOffset: tab.flipped ? -1 : 1
+        width: 16; height: 16
         readonly property bool showClose: tab.hovered || tab.closeAlways || (tab.current && !tab.activity && !tab.bell)
 
         Rectangle {
             anchors.centerIn: parent
             visible: !tail.showClose && (tab.activity || tab.bell)
-            width: 7; height: 7; radius: 3.5
+            width: 6; height: 6; radius: 3
             color: tab.bell ? "#e8853d" : Theme.accent
         }
         Rectangle {
             anchors.fill: parent
-            radius: 10
+            radius: 8
             visible: tail.showClose
             color: closeHover.hovered ? Theme.divider : "transparent"
             Text {
@@ -210,7 +192,7 @@ Item {
                 anchors.verticalCenterOffset: -1
                 text: "×"
                 color: closeHover.hovered ? Theme.text : Theme.textDim
-                font.pixelSize: 15
+                font.pixelSize: 13
             }
             HoverHandler { id: closeHover }
             TapHandler { onTapped: tab.closeClicked() }

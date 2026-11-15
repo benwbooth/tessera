@@ -182,7 +182,8 @@ click in a terminal opens a context menu.
 | Margins | ✅ | per profile (Window tab) |
 | Dim inactive split panes, dimming amount, dim background windows | ✅ | |
 | Dimming affects only text | 🔜 | |
-| Hide scrollbars | 🔜 | scrollbar itself 🔜 |
+| Scrollbars | ✅ | overlay: shows while scrolling or near the edge; drag the thumb, click the track to page; touchpad scrolling glides on with momentum |
+| Hide scrollbars | 🔜 | |
 | Window number in title, proxy icon, Dock options | ➖ | |
 
 ### Profiles
@@ -198,11 +199,11 @@ Profiles: add, remove, duplicate, rename, set default ✅.
 | | Badge | ✅ | {title}, {cwd}, {profile} |
 | | Shortcut key, tags, icon, subtitle, URL schemes, SSH | 🔜 | |
 | Colors | Color presets, import .itermcolors | ✅ | 14 built in |
-| | Separate light/dark colors | ✅ | follow the desktop |
+| | Use separate colors for light and dark mode | ✅ | off by default, as in iTerm2; on, it shows a gallery for each mode |
 | | Faint text opacity | ✅ | |
 | | Cursor guide | ✅ | |
 | | Selection colors | ✅ | from the theme |
-| | Editing individual colors, cursor boost, minimum contrast, bold color, underline color, tab color | 🔜 | |
+| | Editing individual colors, cursor boost, minimum contrast, bold color, underline color, tab color | 🔜 | minimum contrast first (light themes' "white" text) |
 | Text | Cursor shape, blink | ✅ | |
 | | Font, size, line and character spacing | ✅ | |
 | | Draw bold in bold font, italic | ✅ | |

@@ -591,6 +591,14 @@ impl Session {
         self.term.scroll_viewport(ScrollViewport::Delta(delta as isize));
     }
 
+    pub fn scroll_to_row(&mut self, row: u64) {
+        self.term.scroll_viewport(ScrollViewport::Row(row as usize));
+    }
+
+    pub fn scrolls_locally(&self, qt_mods: u32) -> bool {
+        !self.wants_mouse(qt_mods) && !matches!(self.term.active_screen(), Ok(Screen::Alternate))
+    }
+
     pub fn scroll_to_bottom(&mut self) {
         self.term.scroll_viewport(ScrollViewport::Bottom);
     }

@@ -112,6 +112,11 @@ pub mod ffi {
         fn send_text(self: &mut Session, text: &str);
         fn scroll_lines(self: &mut Session, delta: i32);
         fn scroll_to_bottom(self: &mut Session);
+        /// Put this row (0 = top of the scrollback) at the top of the view.
+        fn scroll_to_row(self: &mut Session, row: u64);
+        /// Whether wheel/touchpad scrolling moves through the scrollback here
+        /// (not sent to a program as mouse or arrow keys).
+        fn scrolls_locally(self: &Session, qt_mods: u32) -> bool;
         /// action 0 press, 1 release, 2 move; button 0 none, 1 left, 2 right, 3 middle,
         /// 4/5 wheel up/down. Returns true when the frame changed (selection).
         fn mouse_event(

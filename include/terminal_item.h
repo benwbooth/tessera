@@ -69,6 +69,10 @@ class TerminalItem : public QQuickItem {
     // Other views that receive this one's typing (Broadcast Input).
     Q_PROPERTY(QVariantList broadcastTo MEMBER m_broadcastTo NOTIFY optionsChanged)
     Q_PROPERTY(bool logging READ logging NOTIFY loggingChanged)
+    // Scrollback position, for the scrollbar (rows).
+    Q_PROPERTY(qreal scrollTotal READ scrollTotal NOTIFY scrollChanged)
+    Q_PROPERTY(qreal scrollOffset READ scrollOffset NOTIFY scrollChanged)
+    Q_PROPERTY(qreal scrollLength READ scrollLength NOTIFY scrollChanged)
 
 public:
     explicit TerminalItem(QQuickItem* parent = nullptr);
@@ -140,6 +144,7 @@ public:
     Q_INVOKABLE int findRefresh();
     Q_INVOKABLE int findIndex() const;
     Q_INVOKABLE void endFind();
+    Q_INVOKABLE void scrollToRow(qreal row);
 
 signals:
     void attachIdChanged();
@@ -168,6 +173,7 @@ signals:
     void activity();
     // The session was attached by another window (a tab dragged there).
     void takenOver();
+    void scrollChanged();
 
 protected:
     void componentComplete() override;
@@ -286,6 +292,17 @@ private:
     QByteArray m_slowPaste;
     qint64 m_flashUntil = 0;
     qint64 m_findCursorUntil = 0;
+
+    qreal scrollTotal() const { return m_scrollTotal; }
+    qreal scrollOffset() const { return m_scrollOffset; }
+    qreal scrollLength() const { return m_scrollLength; }
+    void scrollPixels(qreal dy);
+    qreal m_scrollTotal = 0, m_scrollOffset = 0, m_scrollLength = 0;
+    // Touchpad scrolling: leftover fraction of a row, and momentum.
+    qreal m_scrollRemainder = 0;
+    qreal m_velocity = 0;          // logical px per ms
+    qint64 m_lastWheelMs = 0;
+    QTimer* m_momentum = nullptr;
 
     QString m_themeJson;
     int m_cursorShape = 0;

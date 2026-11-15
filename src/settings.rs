@@ -11,6 +11,8 @@ use std::path::PathBuf;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    /// Format version (2: profiles default to one theme, as in iTerm2).
+    pub version: u32,
     // -- General > Startup / Closing
     /// Reopen the shells (and their layout) that were open when the window
     /// closed. Off: closing the window ends them.
@@ -56,6 +58,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            version: 0,
             restore_sessions: true,
             confirm_close_multiple: true,
             confirm_quit: false,
@@ -161,7 +164,7 @@ impl Default for Profile {
             send_text: String::new(),
             tab_title: String::new(),
             badge: String::new(),
-            theme_mode: "system".into(),
+            theme_mode: "fixed".into(),
             theme: "Tessera Dark".into(),
             theme_light: "Tessera Light".into(),
             theme_dark: "Tessera Dark".into(),
@@ -324,6 +327,25 @@ pub fn load() -> Settings {
     }
     if s.profiles.is_empty() {
         s.profiles.push(Profile::default());
+    }
+    if s.version < 2 {
+        // Version 1 followed the desktop's light/dark mode by default, so a
+        // light theme picked on a dark desktop never showed. Use the theme
+        // the person picked as the one theme (like iTerm2's default).
+        for p in &mut s.profiles {
+            if p.theme_mode == "system" {
+                p.theme = if p.theme_light != "Tessera Light" {
+                    p.theme_light.clone()
+                } else if p.theme_dark != "Tessera Dark" {
+                    p.theme_dark.clone()
+                } else {
+                    "Tessera Dark".into()
+                };
+                p.theme_mode = "fixed".into();
+            }
+        }
+        s.version = 2;
+        let _ = save(&s);
     }
     s
 }
@@ -613,6 +635,23 @@ mod tests {
         assert_eq!(s.dim_amount, 0.3);
         assert!(!set(&mut s, "nope", "1"));
         assert!(!set(&mut s, "dim_amount", "\"big\""));
+    }
+
+    #[test]
+    fn old_follow_system_becomes_the_picked_theme() {
+        let mut p = Profile::default();
+        p.theme_mode = "system".into();
+        p.theme_light = "Solarized Light".into();
+        let mut s = Settings { profiles: vec![p], ..Settings::default() };
+        s.version = 1;
+        let dir = std::env::temp_dir().join(format!("tessera-test-{}", std::process::id()));
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+        save(&s).unwrap();
+        let l = load();
+        assert_eq!(l.version, 2);
+        assert_eq!(l.profiles[0].theme_mode, "fixed");
+        assert_eq!(l.profiles[0].theme, "Solarized Light");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

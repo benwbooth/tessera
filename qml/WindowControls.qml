@@ -19,8 +19,8 @@ Row {
         property string glyph
         property bool danger: false
         signal hit()
-        width: wc.look === "windows" ? 46 : 24
-        height: wc.look === "windows" ? wc.height : 24
+        width: wc.look === "windows" ? 42 : 20
+        height: wc.look === "windows" ? wc.height : 20
         anchors.verticalCenter: parent.verticalCenter
         readonly property bool hot: area.containsMouse
         // Windows: a full-height block that lights up (red for close).
@@ -40,7 +40,7 @@ Row {
         Canvas {
             id: cv
             anchors.centerIn: parent
-            width: 16; height: 16
+            width: 14; height: 14
             readonly property color ink: wc.look === "breeze"
                 ? (b.hot ? (b.danger ? "white" : Theme.chrome) : Theme.text)
                 : (b.hot && b.danger ? "white" : Theme.text)
@@ -49,6 +49,7 @@ Row {
             onPaint: {
                 const c = getContext("2d")
                 c.reset()
+                c.scale(width / 16, height / 16)
                 c.strokeStyle = ink
                 c.lineWidth = wc.look === "windows" ? 1 : 1.5
                 c.lineCap = "round"

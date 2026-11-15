@@ -79,6 +79,18 @@ TerminalItem::TerminalItem(QQuickItem* parent)
         m_blinkOn = !m_blinkOn;
         if (m_cursorY >= 0) repaintRow(m_cursorY);
     });
+    // Momentum: after a touchpad flick the view keeps gliding and slows down.
+    m_momentum = new QTimer(this);
+    m_momentum->setInterval(16);
+    connect(m_momentum, &QTimer::timeout, this, [this] {
+        m_velocity *= 0.95;
+        if (std::abs(m_velocity) < 0.02) {
+            m_momentum->stop();
+            m_velocity = 0;
+            return;
+        }
+        scrollPixels(m_velocity * 16);
+    });
     m_pasteTimer = new QTimer(this);
     m_pasteTimer->setInterval(125);
     connect(m_pasteTimer, &QTimer::timeout, this, [this] {
@@ -458,6 +470,12 @@ void TerminalItem::pullFrame(bool full)
         m_rebuildNodes = true;
         emit gridChanged();
     }
+    if (f.scroll_total != m_scrollTotal || f.scroll_offset != m_scrollOffset || f.scroll_len != m_scrollLength) {
+        m_scrollTotal = f.scroll_total;
+        m_scrollOffset = f.scroll_offset;
+        m_scrollLength = f.scroll_len;
+        emit scrollChanged();
+    }
     m_cursorVisible = f.cursor_visible;
     m_cursorX = f.cursor_x;
     m_cursorY = f.cursor_y;
@@ -784,8 +802,64 @@ void TerminalItem::hoverMoveEvent(QHoverEvent* e)
     QQuickItem::hoverMoveEvent(e);
 }
 
+void TerminalItem::scrollPixels(qreal dy)
+{
+    // dy > 0: content moves down (towards older output).
+    if (!m_session) return;
+    m_scrollRemainder += dy;
+    const qreal rowH = m_ch / m_dpr;
+    const int rows = int(m_scrollRemainder / rowH);
+    if (rows != 0) {
+        m_scrollRemainder -= rows * rowH;
+        m_session->scroll_lines(-rows);
+        polish();
+    }
+}
+
+void TerminalItem::scrollToRow(qreal row)
+{
+    if (!m_session) return;
+    m_momentum->stop();
+    m_session->scroll_to_row(uint64_t(qMax<qreal>(0, row)));
+    polish();
+}
+
 void TerminalItem::wheelEvent(QWheelEvent* e)
 {
+    // Scrollback, smoothly: touchpads scroll by pixels and glide on after a
+    // flick; a mouse wheel moves three rows a notch. Programs that take the
+    // mouse (or full-screen ones) get wheel events/arrow keys as before.
+    if (m_session && m_session->scrolls_locally(uint32_t(e->modifiers()))) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const bool touchpad = !e->pixelDelta().isNull();
+        if (e->phase() == Qt::ScrollBegin || (!touchpad && e->phase() == Qt::NoScrollPhase)) m_momentum->stop();
+        if (touchpad) {
+            const qreal dy = e->pixelDelta().y();
+            if (e->phase() == Qt::ScrollEnd) {
+                if (std::abs(m_velocity) > 0.15 && now - m_lastWheelMs < 80) m_momentum->start();
+                else m_velocity = 0;
+            } else if (e->phase() == Qt::ScrollMomentum) {
+                scrollPixels(dy);   // the platform's own momentum (macOS)
+            } else {
+                m_momentum->stop();
+                const qreal dt = qMax<qint64>(1, now - m_lastWheelMs);
+                const qreal v = dy / dt;
+                m_velocity = dt > 100 ? v : 0.6 * v + 0.4 * m_velocity;
+                m_lastWheelMs = now;
+                scrollPixels(dy);
+            }
+        } else {
+            m_wheelAccum += e->angleDelta().y();
+            while (std::abs(m_wheelAccum) >= 120) {
+                const bool up = m_wheelAccum > 0;
+                m_wheelAccum += up ? -120 : 120;
+                m_session->scroll_lines(up ? -3 : 3);
+            }
+            polish();
+        }
+        e->accept();
+        return;
+    }
     m_wheelAccum += e->angleDelta().y();
     while (std::abs(m_wheelAccum) >= 120) {
         const bool up = m_wheelAccum > 0;

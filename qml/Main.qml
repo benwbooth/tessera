@@ -739,6 +739,17 @@ ApplicationWindow {
         })
     }
 
+    function moveTabToIndex(t, j) {
+        const i = tabs.indexOf(t)
+        if (i < 0 || j === i) return
+        const cur = tabs[currentTab]
+        tabs.splice(i, 1)
+        tabs.splice(Math.max(0, Math.min(tabs.length, j)), 0, t)
+        tabs = tabs.slice()
+        currentTab = tabs.indexOf(cur)
+        treeRev++
+    }
+
     function moveTabTo(t, index) {
         const i = tabs.indexOf(t)
         if (i < 0) return
@@ -1170,7 +1181,7 @@ ApplicationWindow {
 
     readonly property bool tabsAtBottom: settings.tab_position === "bottom"
     readonly property bool showTabs: settings.always_show_tabs || tabs.length > 1 || tabs.some(t => t.tmuxWindow >= 0)
-    readonly property real barHeight: 44
+    readonly property real barHeight: 32
 
     // The tab row (with the + button and the drop target for dragged tabs),
     // used in the top bar or, with tabs at the bottom, below the terminal.
@@ -1181,21 +1192,58 @@ ApplicationWindow {
             property bool flipped: false
             property real dropX: -1   // where a dragged tab would land
 
-            Row {
+            // Tabs are placed by slot (not a Row) so a dragged tab can follow
+            // the pointer while the others slide out of its way.
+            Item {
                 id: tabRow
                 anchors.left: parent.left
-                anchors.bottom: box.flipped ? undefined : parent.bottom
-                anchors.top: box.flipped ? parent.top : undefined
-                spacing: -8
-                readonly property real available: box.width - 40 + 8 * tabs.length
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: tabs.length > 0 ? (tabs.length - 1) * step + tabWidth : 0
+                readonly property real overlap: 5
+                readonly property real available: box.width - 44
                 readonly property real tabWidth: settings.stretch_tabs
-                    ? Math.max(100, available / Math.max(1, tabs.length))
-                    : Math.max(100, Math.min(250, available / Math.max(1, tabs.length)))
+                    ? Math.max(72, (available + overlap * (tabs.length - 1)) / Math.max(1, tabs.length))
+                    : Math.max(72, Math.min(180, (available + overlap * (tabs.length - 1)) / Math.max(1, tabs.length)))
+                readonly property real step: tabWidth - overlap
+                property int dragFrom: -1
+                property int dragTo: -1
+                property real dragX: 0
+                property bool settling: false
+                Behavior on dragX { enabled: tabRow.settling; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+
+                function finishDrag() {
+                    const from = dragFrom, to = dragTo
+                    if (from < 0) return
+                    const t = tabs[from]
+                    settling = true
+                    dragX = to * step
+                    win.later(130, function() {
+                        tabRow.dragFrom = -1
+                        tabRow.settling = false
+                        if (to !== from) win.moveTabToIndex(t, to)
+                    })
+                }
+
                 Repeater {
                     model: tabs
                     delegate: TabButtonX {
+                        id: tb
                         width: tabRow.tabWidth
-                        z: index === currentTab ? 2 : (hovered ? 1 : 0)
+                        height: 26
+                        y: box.flipped ? 0 : tabRow.height - height
+                        readonly property bool isDragged: index === tabRow.dragFrom
+                        readonly property int slot: {
+                            const f = tabRow.dragFrom, t = tabRow.dragTo
+                            if (f < 0 || isDragged) return index
+                            if (f < t && index > f && index <= t) return index - 1
+                            if (f > t && index >= t && index < f) return index + 1
+                            return index
+                        }
+                        x: isDragged ? tabRow.dragX : slot * tabRow.step
+                        Behavior on x { enabled: !tb.isDragged; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                        z: isDragged ? 10 : (index === currentTab ? 2 : (hovered ? 1 : 0))
+                        lifted: isDragged
                         text: modelData.tabTitle
                         number: settings.show_tab_numbers && index < 9 ? index + 1 : 0
                         current: index === currentTab
@@ -1208,9 +1256,27 @@ ApplicationWindow {
                         flipped: box.flipped
                         surface: Theme.bg
                         tabItem: modelData
+                        canTearOff: modelData.tmuxWindow < 0
                         payload: function() { return win.tabPayload(modelData) }
                         onClicked: focusTab(index)
                         onCloseClicked: closeTab(modelData)
+                        onDragMoved: (dx, dy) => {
+                            if (tabRow.settling) return
+                            if (tabRow.dragFrom < 0) {
+                                tabRow.dragFrom = index
+                                tabRow.dragTo = index
+                                focusTab(index)
+                            }
+                            const maxX = (tabs.length - 1) * tabRow.step
+                            tabRow.dragX = Math.max(0, Math.min(maxX, index * tabRow.step + dx))
+                            tabRow.dragTo = Math.max(0, Math.min(tabs.length - 1, Math.round(tabRow.dragX / tabRow.step)))
+                            // Pulled out of the bar: drag it to another window, or off on its own.
+                            if (Math.abs(dy) > 34 && tb.canTearOff) {
+                                tabRow.dragFrom = -1
+                                tb.startExternalDrag()
+                            }
+                        }
+                        onDragReleased: if (tb.isDragged) tabRow.finishDrag()
                         onDragFinished: (action) => win.onTabDragFinished(modelData, action)
                     }
                 }
@@ -1219,10 +1285,11 @@ ApplicationWindow {
                 id: plus
                 anchors.left: tabRow.right
                 anchors.leftMargin: 6
-                anchors.verticalCenter: tabRow.verticalCenter
-                width: 28; height: 28; radius: 8
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: box.flipped ? -2 : 2
+                width: 22; height: 22; radius: 6
                 color: plusHover.hovered ? Theme.tabHover : "transparent"
-                Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: plusHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 18 }
+                Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: plusHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 15 }
                 HoverHandler { id: plusHover }
                 TapHandler { onTapped: newTab({}) }
             }
@@ -1242,11 +1309,10 @@ ApplicationWindow {
                 anchors.fill: parent
                 keys: ["application/x-tessera-tab"]
                 function slot(x) {
-                    const step = tabRow.tabWidth - 8
-                    return Math.max(0, Math.min(tabs.length, Math.round((x - tabRow.x) / step)))
+                    return Math.max(0, Math.min(tabs.length, Math.round((x - tabRow.x) / tabRow.step)))
                 }
                 onEntered: (drag) => drag.accept(drag.source ? Qt.CopyAction : Qt.MoveAction)
-                onPositionChanged: (drag) => { box.dropX = tabRow.x + slot(drag.x) * (tabRow.tabWidth - 8) + 4 }
+                onPositionChanged: (drag) => { box.dropX = tabRow.x + slot(drag.x) * tabRow.step + 3 }
                 onExited: box.dropX = -1
                 onDropped: (drop) => {
                     box.dropX = -1
@@ -1298,17 +1364,17 @@ ApplicationWindow {
             Rectangle {
                 id: menuButton
                 anchors.left: parent.left
-                anchors.leftMargin: win.macOS ? 78 : 8
+                anchors.leftMargin: win.macOS ? 78 : 6
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: (showTabs && !tabsAtBottom) ? 2 : 0
-                width: 32; height: 30; radius: 8
+                width: 26; height: 22; radius: 6
                 color: menuHover.hovered ? Theme.tabHover : "transparent"
                 Item {
                     anchors.centerIn: parent
-                    width: 16; height: 12
+                    width: 14; height: 10
                     Repeater {
                         model: 3
-                        Rectangle { y: index * 5; width: 16; height: 2; radius: 1; color: menuHover.hovered ? Theme.text : Theme.textDim }
+                        Rectangle { y: index * 4; width: 14; height: 1.6; radius: 0.8; color: menuHover.hovered ? Theme.text : Theme.textDim }
                     }
                 }
                 HoverHandler { id: menuHover }
@@ -1322,7 +1388,7 @@ ApplicationWindow {
                 anchors.right: controls.left
                 anchors.rightMargin: 12
                 anchors.bottom: parent.bottom
-                height: 36
+                height: 28
                 sourceComponent: tabRowComp
             }
 
@@ -1360,7 +1426,7 @@ ApplicationWindow {
         Rectangle {
             Layout.row: 2
             Layout.fillWidth: true
-            Layout.preferredHeight: showTabs && tabsAtBottom ? 40 : 0
+            Layout.preferredHeight: showTabs && tabsAtBottom ? 30 : 0
             visible: showTabs && tabsAtBottom
             color: Theme.chrome
             Loader {

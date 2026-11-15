@@ -83,6 +83,75 @@ Item {
         font.weight: Font.Bold
     }
 
+    // Overlay scrollbar: shows while scrolling or near the right edge.
+    Item {
+        id: sbar
+        z: 4
+        anchors.top: term.top
+        anchors.bottom: term.bottom
+        anchors.right: term.right
+        anchors.topMargin: 2
+        anchors.bottomMargin: 2
+        width: 14
+        readonly property real total: term.scrollTotal
+        readonly property real len: term.scrollLength
+        readonly property bool scrollable: total > len + 0.5
+        readonly property bool hot: barHover.hovered || thumbDrag.active
+        property bool recent: false
+        visible: scrollable
+        opacity: hot || recent ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+
+        Connections {
+            target: term
+            function onScrollChanged() { sbar.recent = true; hideTimer.restart() }
+        }
+        Timer { id: hideTimer; interval: 1100; onTriggered: sbar.recent = false }
+        HoverHandler { id: barHover }
+
+        // The track (only while hovered), click to page.
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 2
+            radius: width / 2
+            color: Theme.fg
+            opacity: sbar.hot ? 0.06 : 0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+            TapHandler {
+                onTapped: (pt) => {
+                    const page = Math.max(1, sbar.len - 1)
+                    const up = pt.position.y < thumb.y
+                    term.scrollToRow(Math.max(0, term.scrollOffset + (up ? -page : page)))
+                }
+            }
+        }
+        Rectangle {
+            id: thumb
+            readonly property real span: sbar.height - height
+            width: sbar.hot ? 8 : 5
+            anchors.right: parent.right
+            anchors.rightMargin: 3
+            radius: width / 2
+            height: Math.max(28, sbar.height * sbar.len / Math.max(1, sbar.total))
+            y: sbar.total > sbar.len ? span * term.scrollOffset / (sbar.total - sbar.len) : 0
+            color: Theme.fg
+            opacity: thumbDrag.active ? 0.6 : (sbar.hot ? 0.45 : 0.32)
+            Behavior on width { NumberAnimation { duration: 120 } }
+            property real startOffset: 0
+            DragHandler {
+                id: thumbDrag
+                target: null
+                yAxis.enabled: true
+                xAxis.enabled: false
+                onActiveChanged: if (active) thumb.startOffset = term.scrollOffset
+                onTranslationChanged: if (active && thumb.span > 0) {
+                    const rows = activeTranslation.y / thumb.span * (sbar.total - sbar.len)
+                    term.scrollToRow(Math.round(Math.max(0, Math.min(sbar.total - sbar.len, thumb.startOffset + rows))))
+                }
+            }
+        }
+    }
+
     property alias findBar: findBar
     FindBar {
         id: findBar
