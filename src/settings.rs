@@ -111,6 +111,9 @@ pub struct Profile {
     pub theme_light: String,
     pub theme_dark: String,
     pub faint_opacity: f64,
+    /// 0 (off) to 1: text too close to its background is moved toward
+    /// black or white until it reaches the contrast this asks for.
+    pub minimum_contrast: f64,
     pub cursor_guide: bool,
     // -- Text
     pub font_family: String,
@@ -169,6 +172,7 @@ impl Default for Profile {
             theme_light: "Tessera Light".into(),
             theme_dark: "Tessera Dark".into(),
             faint_opacity: 0.6,
+            minimum_contrast: 0.1,
             cursor_guide: false,
             font_family: String::new(),
             font_size: 0.0,

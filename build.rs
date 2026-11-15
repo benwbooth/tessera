@@ -29,6 +29,7 @@ fn main() {
         QmlFile::from("qml/TabButtonX.qml"),
         QmlFile::from("qml/Preferences.qml"),
         QmlFile::from("qml/FindBar.qml"),
+        QmlFile::from("qml/Sheet.qml"),
         QmlFile::from("qml/WindowControls.qml"),
     ]))
     .crate_include_root(None)

@@ -14,7 +14,7 @@ use libghostty_vt::{
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator},
     screen::{CellWide, Screen},
     selection::{
-        gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
+        gesture::{Autoscroll, AutoscrollTickEvent, DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
         Selection,
     },
     style::RgbColor,
@@ -70,6 +70,7 @@ pub struct Session {
     press: PressEvent<'static>,
     release: ReleaseEvent<'static>,
     drag: DragEvent<'static>,
+    autotick: AutoscrollTickEvent<'static>,
     selecting: bool,
     buttons: u8,
     outbox: Rc<RefCell<Vec<u8>>>,
@@ -97,6 +98,8 @@ pub struct Session {
     clipboard: Rc<RefCell<Option<String>>>,
     find: Option<FindState>,
     taken: bool,
+    /// Minimum-contrast results per (fg, bg) pair.
+    contrast_cache: std::collections::HashMap<(u32, u32), u32>,
 }
 
 struct FindState {
@@ -118,6 +121,8 @@ struct Options2 {
     triple_click_wrapped: bool,
     clipboard_access: bool,
     copy_trailing_newline: bool,
+    /// iTerm2's Minimum Contrast, 0 (off) to 1.
+    minimum_contrast: f64,
 }
 
 impl Default for Options2 {
@@ -132,6 +137,7 @@ impl Default for Options2 {
             triple_click_wrapped: true,
             clipboard_access: true,
             copy_trailing_newline: false,
+            minimum_contrast: 0.0,
         }
     }
 }
@@ -250,6 +256,7 @@ pub fn session_open(
         press,
         release: ReleaseEvent::new().map_err(e)?,
         drag: DragEvent::new().map_err(e)?,
+        autotick: AutoscrollTickEvent::new().map_err(e)?,
         selecting: false,
         buttons: 0,
         outbox,
@@ -275,6 +282,7 @@ pub fn session_open(
         clipboard,
         find: None,
         taken: false,
+        contrast_cache: std::collections::HashMap::new(),
     });
     // A tmux pane may already have its captured contents waiting.
     if matches!(s.backend, Backend::Tmux { .. }) {
@@ -739,6 +747,40 @@ impl Session {
         }
     }
 
+    /// While a selection is dragged past the top or bottom, scroll a row
+    /// and extend the selection. Returns false once there's nothing to do.
+    #[allow(clippy::too_many_arguments)]
+    pub fn autoscroll_tick(&mut self, x: f32, y: f32, width: u32, height: u32, cell_w: u32, cell_h: u32, pad: u32, rows_per_tick: u32) -> bool {
+        if !self.selecting {
+            return false;
+        }
+        let up = match self.gesture.autoscroll(&self.term) {
+            Ok(Autoscroll::Up) => true,
+            Ok(Autoscroll::Down) => false,
+            _ => return false,
+        };
+        let n = rows_per_tick.clamp(1, 40) as isize;
+        self.term.scroll_viewport(ScrollViewport::Delta(if up { -n } else { n }));
+        let (cols, rows) = (self.term.cols().unwrap_or(1), self.term.rows().unwrap_or(1));
+        let cx = ((x - pad as f32).max(0.0) / cell_w.max(1) as f32).min(cols as f32 - 1.0) as u16;
+        let cy = if up { 0 } else { rows as u32 - 1 };
+        let rect = false;
+        let geometry = Geometry { columns: cols as u32, cell_width: cell_w.max(1), padding_left: pad, screen_height: height.max(1) };
+        let _ = (width, cell_h);
+        let sel = self
+            .autotick
+            .set_rectangle(rect)
+            .and_then(|t| t.set_position(x as f64, y as f64))
+            .and_then(|t| t.apply(&mut self.gesture, &self.term, PointCoordinate { x: cx, y: cy }, geometry));
+        if let Ok(sel) = sel {
+            let _ = self.term.set_selection(sel.as_ref());
+            self.selected = sel.as_ref().map(|s| format_selection(&self.term, s)).unwrap_or_default();
+            self.selected_html = sel.as_ref().map(|s| format_selection_as(&self.term, s, Format::Html, true)).unwrap_or_default();
+            self.selected_vt = sel.as_ref().map(|s| format_selection_as(&self.term, s, Format::Vt, true)).unwrap_or_default();
+        }
+        true
+    }
+
     pub fn selected_text(&self) -> String {
         if self.opts.copy_trailing_newline {
             self.selected.clone()
@@ -764,6 +806,10 @@ impl Session {
 
     pub fn set_options(&mut self, json: &str) {
         if let Ok(o) = serde_json::from_str::<Options2>(json) {
+            if o.minimum_contrast != self.opts.minimum_contrast {
+                self.contrast_cache.clear();
+                self.force_full = true;
+            }
             self.opts = o;
             let chars: Vec<char> = self.opts.word_chars.chars().collect();
             let _ = self.press.set_word_boundary_codepoints(&boundary_chars(&chars));
@@ -958,6 +1004,7 @@ impl Session {
             }
             let _ = self.term.set_default_color_palette(Some(pal));
         }
+        self.contrast_cache.clear();
         self.sel_bg = hex_rgb(&th.selection_background).map(rgb);
         self.sel_fg = hex_rgb(&th.selection_foreground).map(rgb);
         self.force_full = true;
@@ -1136,6 +1183,13 @@ impl Session {
                                 None => std::mem::swap(&mut fg, &mut bg),
                             }
                             has_bg = true;
+                        }
+                        let target = crate::contrast::target(self.opts.minimum_contrast);
+                        if target > 1.0 && flags & FLAG_INVISIBLE == 0 {
+                            fg = *self
+                                .contrast_cache
+                                .entry((fg, bg))
+                                .or_insert_with(|| crate::contrast::ensure(fg, bg, target));
                         }
                         if let Some(&(_, _, cur)) = row_matches.iter().find(|(a, b, _)| *a <= x && x < *b) {
                             bg = if cur { MATCH_CURRENT_BG } else { MATCH_BG };

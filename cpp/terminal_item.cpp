@@ -91,6 +91,36 @@ TerminalItem::TerminalItem(QQuickItem* parent)
         }
         scrollPixels(m_velocity * 16);
     });
+    m_autoscroll = new QTimer(this);
+    m_autoscroll->setInterval(40);
+    connect(m_autoscroll, &QTimer::timeout, this, [this] {
+        if (!m_session || !m_selecting) { m_autoscroll->stop(); return; }
+        const QPointF p = m_lastPointer;
+        // Faster the farther past the edge (and it keeps accelerating there).
+        const qreal rowH = m_ch / m_dpr;
+        const qreal top = m_pad / m_dpr, bottom = height() - m_pad / m_dpr;
+        const qreal dist = p.y() < top ? top - p.y() : qMax<qreal>(0, p.y() - bottom);
+        const uint32_t rows = uint32_t(qBound<qreal>(1, 1 + std::pow(dist / rowH, 1.4), 30));
+        if (!m_session->autoscroll_tick(float(p.x() * m_dpr), float(p.y() * m_dpr), uint32_t(width() * m_dpr),
+                                        uint32_t(height() * m_dpr), uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad), rows))
+            m_autoscroll->stop();
+        polish();
+    });
+    // Mouse wheel: each notch adds three rows of travel, eased out frame by
+    // frame, so wheel scrolling glides like a touchpad's.
+    m_smooth = new QTimer(this);
+    m_smooth->setInterval(16);
+    connect(m_smooth, &QTimer::timeout, this, [this] {
+        const qreal rowH = m_ch / m_dpr;
+        qreal stepPx = m_smoothPending * 0.22;
+        if (std::abs(stepPx) < rowH * 0.25) stepPx = std::copysign(qMin(std::abs(m_smoothPending), rowH * 0.25), m_smoothPending);
+        m_smoothPending -= stepPx;
+        scrollPixels(stepPx);
+        if (std::abs(m_smoothPending) < 0.5) {
+            m_smoothPending = 0;
+            m_smooth->stop();
+        }
+    });
     m_pasteTimer = new QTimer(this);
     m_pasteTimer->setInterval(125);
     connect(m_pasteTimer, &QTimer::timeout, this, [this] {
@@ -782,12 +812,19 @@ void TerminalItem::mousePressEvent(QMouseEvent* e)
 void TerminalItem::mouseMoveEvent(QMouseEvent* e)
 {
     mouse(2, 0, e->position(), e->modifiers());
+    m_lastPointer = e->position();
+    // Dragging a selection past the top or bottom keeps scrolling.
+    if (m_selecting) {
+        const bool outside = e->position().y() < m_pad / m_dpr || e->position().y() > height() - m_pad / m_dpr;
+        if (outside && !m_autoscroll->isActive()) m_autoscroll->start();
+    }
     e->accept();
 }
 
 void TerminalItem::mouseReleaseEvent(QMouseEvent* e)
 {
     mouse(1, buttonCode(e->button()), e->position(), e->modifiers());
+    m_autoscroll->stop();
     if (e->button() == Qt::LeftButton && m_selecting) {
         m_selecting = false;
         publishSelection();
@@ -849,13 +886,9 @@ void TerminalItem::wheelEvent(QWheelEvent* e)
                 scrollPixels(dy);
             }
         } else {
-            m_wheelAccum += e->angleDelta().y();
-            while (std::abs(m_wheelAccum) >= 120) {
-                const bool up = m_wheelAccum > 0;
-                m_wheelAccum += up ? -120 : 120;
-                m_session->scroll_lines(up ? -3 : 3);
-            }
-            polish();
+            // Three rows a notch (fractions for high-resolution wheels), eased.
+            m_smoothPending += e->angleDelta().y() / 120.0 * 3 * (m_ch / m_dpr);
+            if (!m_smooth->isActive()) m_smooth->start();
         }
         e->accept();
         return;

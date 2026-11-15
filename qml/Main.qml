@@ -71,7 +71,8 @@ ApplicationWindow {
             mouse_reporting: p.mouse_reporting, alternate_scroll: p.alternate_scroll,
             allow_title: p.allow_title, bracketed_paste: p.bracketed_paste, alt_mode: p.alt_mode,
             word_chars: settings.word_chars, triple_click_wrapped: settings.triple_click_wrapped,
-            clipboard_access: settings.clipboard_access, copy_trailing_newline: settings.copy_trailing_newline
+            clipboard_access: settings.clipboard_access, copy_trailing_newline: settings.copy_trailing_newline,
+            minimum_contrast: p.minimum_contrast
         })
     }
 
@@ -94,7 +95,7 @@ ApplicationWindow {
             badge: prof.badge
             broadcasting: win.broadcastMode !== "off" && win.broadcastTargets(tp).length > 1
             onContextMenu: (v) => { win.contextView = v; contextMenu.open() }
-            Binding { target: tp.view; property: "command"; value: tp.prof.command_mode === "custom" ? tp.prof.command : "" }
+            Binding { target: tp.view; property: "command"; value: tp.commandOverride !== "" ? tp.commandOverride : (tp.prof.command_mode === "custom" ? tp.prof.command : "") }
             Binding { target: tp.view; property: "termName"; value: tp.prof.term }
             Binding { target: tp.view; property: "startupInput"; value: tp.prof.send_text }
             Binding { target: tp.view; property: "optionsJson"; value: win.optionsFor(tp.prof) }
@@ -126,6 +127,7 @@ ApplicationWindow {
             property int tmuxWindow: -1
             property string fixedTitle: ""  // tmux window name
             property string customTitle: "" // Window > Edit Tab Title
+            property string launchTitle: "" // what the + menu started (a shell, ssh host)
             property string profile: ""
             property color tabColor: "transparent"
             property bool activity: false
@@ -136,6 +138,7 @@ ApplicationWindow {
                 : fixedTitle !== "" ? fixedTitle
                 : prof.tab_title !== "" ? prof.tab_title
                 : (win.settings.tab_titles_per_tab && lastView && lastView.title ? lastView.title
+                   : launchTitle !== "" ? launchTitle
                    : (lastView && lastView.pwd ? lastView.pwd.split("/").filter(x => x).pop() || "/" : prof.name))
             PaneSplit {
                 id: rootSplit
@@ -404,6 +407,8 @@ ApplicationWindow {
             if (t.root.count === 0) { t.destroy(); return null }
         } else if (!opts.tmux) {
             const props = { profileName: prof.name }
+            if (opts.command) props.commandOverride = opts.command
+            if (opts.title) t.launchTitle = opts.title
             if (opts.attachId) props.attachId = opts.attachId
             const cwd = opts.cwd !== undefined ? opts.cwd : cwdFor(prof, active)
             if (cwd) props.cwd = cwd
@@ -516,53 +521,15 @@ ApplicationWindow {
 
     function closeActivePane() { if (activePane) requestClosePane(activePane) }
 
-    property var pendingYes: null
-    function confirm(title, text, yes) {
-        pendingYes = yes
-        confirmDialog.title = title
-        confirmDialog.text = text
-        confirmDialog.open()
+    // Confirmations and prompts: a sheet in the theme's colors.
+    function confirm(title, text, yes, okText) {
+        sheet.ask({ title: title, message: text, okText: okText || title.split(" ")[0],
+                    destructive: /^(Close|Quit|Restart)/.test(title), onAccept: function() { yes() } })
     }
-    MessageDialog {
-        id: confirmDialog
-        buttons: MessageDialog.Ok | MessageDialog.Cancel
-        onAccepted: { const f = win.pendingYes; win.pendingYes = null; if (f) f() }
-        onRejected: win.pendingYes = null
-    }
-
-    // A one-line text prompt (titles, arrangement names).
-    property var pendingText: null
     function askText(title, label, initial, done) {
-        pendingText = done
-        textPrompt.title = title
-        promptLabel.text = label
-        promptField.text = initial
-        textPrompt.open()
-        promptField.selectAll()
-        promptField.forceActiveFocus()
+        sheet.ask({ title: title, message: label, input: true, value: initial, okText: "OK", onAccept: done })
     }
-    Dialog {
-        id: textPrompt
-        anchors.centerIn: parent
-        modal: true
-        width: 380
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        palette.window: Theme.panel
-        palette.windowText: Theme.text
-        palette.base: Theme.field
-        palette.text: Theme.text
-        palette.button: Theme.field
-        palette.buttonText: Theme.text
-        palette.highlight: Theme.accent
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 8
-            Label { id: promptLabel; color: Theme.text }
-            TextField { id: promptField; Layout.fillWidth: true; onAccepted: textPrompt.accept() }
-        }
-        onAccepted: { const f = win.pendingText; win.pendingText = null; if (f) f(promptField.text) }
-        onRejected: win.pendingText = null
-    }
+    Sheet { id: sheet }
 
     onClosing: (close) => {
         if (allowClose) { finishClose(); return }
@@ -592,7 +559,7 @@ ApplicationWindow {
 
     function serializeNode(n, withIds) {
         if (n.view !== undefined)
-            return { t: "pane", profile: n.profileName, cwd: n.view.pwd || n.view.cwd,
+            return { t: "pane", profile: n.profileName, cwd: n.view.pwd || n.view.cwd, cmd: n.commandOverride,
                      id: withIds ? n.view.sessionId : "", w: n.width, h: n.height }
         const c = []
         for (let i = 0; i < n.count; ++i) c.push(serializeNode(n.itemAt(i), withIds))
@@ -613,7 +580,7 @@ ApplicationWindow {
     function buildSavedTree(t, node, alive) {
         function build(n, host) {
             if (n.t === "pane") {
-                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "" }
+                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "" }
                 if (alive) {
                     if (!n.id || !alive[n.id]) return null
                     props.attachId = n.id
@@ -1143,6 +1110,127 @@ ApplicationWindow {
         P.MenuItem { icon.name: "application-exit"; text: "Quit Tessera\tCtrl+Shift+Q"; onTriggered: win.close() }
     }
 
+    // The + button's menu: profiles, the shells installed, ssh hosts.
+    property var launchData: ({ shells: [], ssh_hosts: [] })
+    P.Menu {
+        id: launchMenu
+        onAboutToShow: win.launchData = JSON.parse(controller.launchers())
+        P.MenuItem { enabled: false; text: "Profiles" }
+        Instantiator {
+            model: win.profileList
+            delegate: P.MenuItem {
+                icon.name: "bookmarks"
+                text: modelData.name + (modelData.name === win.settings.default_profile ? "  (default)" : "")
+                onTriggered: newTab({ profile: modelData.name })
+            }
+            onObjectAdded: (i, o) => launchMenu.insertItem(1 + i, o)
+            onObjectRemoved: (i, o) => launchMenu.removeItem(o)
+        }
+        P.MenuSeparator {}
+        P.MenuItem { id: shellsHeader; enabled: false; text: "Shells" }
+        Instantiator {
+            model: win.launchData.shells
+            delegate: P.MenuItem {
+                icon.name: "utilities-terminal"
+                text: modelData.name + "\t" + modelData.path
+                onTriggered: newTab({ command: modelData.path, title: modelData.name })
+            }
+            onObjectAdded: (i, o) => launchMenu.insertItem(win.profileList.length + 3 + i, o)
+            onObjectRemoved: (i, o) => launchMenu.removeItem(o)
+        }
+        P.MenuSeparator {}
+        P.MenuItem { enabled: false; text: "SSH" }
+        Instantiator {
+            model: win.launchData.ssh_hosts
+            delegate: P.MenuItem {
+                icon.name: "network-server"
+                text: modelData
+                onTriggered: newTab({ command: "ssh " + modelData, title: modelData })
+            }
+            onObjectAdded: (i, o) => launchMenu.insertItem(win.profileList.length + win.launchData.shells.length + 5 + i, o)
+            onObjectRemoved: (i, o) => launchMenu.removeItem(o)
+        }
+        P.MenuItem {
+            icon.name: "network-connect"
+            text: "New SSH Connection\u2026"
+            onTriggered: askText("New SSH Connection", "user@host (and any ssh options)", "", function(t) {
+                t = t.trim()
+                if (t !== "") newTab({ command: "ssh " + t, title: t.split(/\s+/).pop() })
+            })
+        }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "configure"; text: "Edit Profiles\u2026"; onTriggered: prefs.showProfile(activeProfile.name) }
+    }
+
+    // Right click on a tab.
+    property var menuTab: null
+    function renameTab(t) {
+        if (t.tmuxWindow >= 0) {
+            askText("Rename tmux Window", "Name", t.fixedTitle, function(s) {
+                const g = tmuxGateways[t.gateway]
+                if (g && s.trim() !== "") g.tmuxCommand("rename-window -t @" + t.tmuxWindow + " '" + s.replace(/'/g, "'\\''") + "'")
+            })
+        } else {
+            askText("Tab Title", "Title (empty: automatic)", t.customTitle, function(s) { t.customTitle = s; treeRev++ })
+        }
+    }
+    function closeTabs(list) {
+        list = list.filter(t => t)
+        if (list.length === 0) return
+        const local = list.filter(t => t.tmuxWindow < 0)
+        const count = local.reduce((n, t) => n + panesIn(t.root, []).length, 0)
+        const doIt = function() {
+            for (const t of list) {
+                if (t.tmuxWindow >= 0) { closeTab(t); continue }
+                for (const p of panesIn(t.root, [])) p.view.killSession()
+                removeTab(t)
+            }
+        }
+        if (settings.confirm_close_multiple && count > 1)
+            confirm("Close Tabs", "Close " + list.length + (list.length === 1 ? " tab" : " tabs") + " and " + count + " sessions?", doIt)
+        else doIt()
+    }
+    function moveToNewWindow(t) {
+        if (!t || t.tmuxWindow >= 0 || tabs.length < 2) return
+        const json = tabPayload(t)
+        removeTab(t)
+        controller.newWindowWithTab(json)
+    }
+    P.Menu {
+        id: tabMenu
+        readonly property var t: win.menuTab
+        readonly property int at: tabs.indexOf(t)
+        P.MenuItem { icon.name: "tab-new"; text: "New Tab\tCtrl+Shift+T"; onTriggered: newTab({}) }
+        P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Tab"; enabled: tabMenu.t !== null && tabMenu.t.tmuxWindow < 0
+            onTriggered: newTab({ layout: serializeTab(tabMenu.t, false), profile: tabMenu.t.profile }) }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "edit-rename"; text: "Rename Tab\u2026"; onTriggered: renameTab(tabMenu.t) }
+        P.Menu {
+            id: tabMenuColor
+            title: "Tab Color"
+            icon.name: "color-management"
+            P.MenuItem { text: "No Color"; onTriggered: tabMenu.t.tabColor = "transparent" }
+            P.MenuSeparator {}
+            Instantiator {
+                model: [["Red", "#e5534b"], ["Orange", "#e8853d"], ["Yellow", "#d9b43b"], ["Green", "#57ab5a"], ["Blue", "#4a90e2"], ["Purple", "#986ee2"], ["Gray", "#8b949e"]]
+                delegate: P.MenuItem { text: modelData[0]; onTriggered: { tabMenu.t.tabColor = modelData[1]; treeRev++ } }
+                onObjectAdded: (i, o) => tabMenuColor.insertItem(i + 2, o)
+                onObjectRemoved: (i, o) => tabMenuColor.removeItem(o)
+            }
+        }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "arrow-left"; text: "Move Tab Left"; enabled: tabMenu.at > 0; onTriggered: moveTabToIndex(tabMenu.t, tabMenu.at - 1) }
+        P.MenuItem { icon.name: "arrow-right"; text: "Move Tab Right"; enabled: tabMenu.at >= 0 && tabMenu.at < tabs.length - 1; onTriggered: moveTabToIndex(tabMenu.t, tabMenu.at + 1) }
+        P.MenuItem { icon.name: "window-new"; text: "Move Tab to New Window"; enabled: tabMenu.t !== null && tabMenu.t.tmuxWindow < 0 && tabs.length > 1
+            onTriggered: moveToNewWindow(tabMenu.t) }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "tab-close"; text: "Close Tab"; onTriggered: closeTab(tabMenu.t) }
+        P.MenuItem { icon.name: "tab-close-other"; text: "Close Other Tabs"; enabled: tabs.length > 1
+            onTriggered: closeTabs(tabs.filter(x => x !== tabMenu.t)) }
+        P.MenuItem { icon.name: "tab-close"; text: "Close Tabs to the Right"; enabled: tabMenu.at >= 0 && tabMenu.at < tabs.length - 1
+            onTriggered: closeTabs(tabs.slice(tabMenu.at + 1)) }
+    }
+
     // Right click in a terminal (when the program isn't taking the mouse).
     P.Menu {
         id: contextMenu
@@ -1260,6 +1348,7 @@ ApplicationWindow {
                         payload: function() { return win.tabPayload(modelData) }
                         onClicked: focusTab(index)
                         onCloseClicked: closeTab(modelData)
+                        onMenuRequested: { win.menuTab = modelData; tabMenu.open() }
                         onDragMoved: (dx, dy) => {
                             if (tabRow.settling) return
                             if (tabRow.dragFrom < 0) {
@@ -1292,6 +1381,17 @@ ApplicationWindow {
                 Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: plusHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 15 }
                 HoverHandler { id: plusHover }
                 TapHandler { onTapped: newTab({}) }
+            }
+            // ⌄ More ways to start a tab: profiles, shells, ssh hosts.
+            Rectangle {
+                anchors.left: plus.right
+                anchors.leftMargin: 1
+                anchors.verticalCenter: plus.verticalCenter
+                width: 16; height: 22; radius: 5
+                color: launchHover.hovered ? Theme.tabHover : "transparent"
+                Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -2; text: "\u2304"; color: launchHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 13 }
+                HoverHandler { id: launchHover }
+                TapHandler { onTapped: launchMenu.open(parent) }
             }
 
             // Where a dragged tab would go.

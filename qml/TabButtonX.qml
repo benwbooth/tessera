@@ -30,6 +30,7 @@ Item {
     property bool external: false        // being dragged out of the bar
     signal clicked()
     signal closeClicked()
+    signal menuRequested()
     signal dragMoved(real dx, real dy)
     signal dragReleased()
     signal dragFinished(int action)
@@ -45,6 +46,7 @@ Item {
     HoverHandler { id: hover }
     TapHandler { onTapped: tab.clicked() }
     TapHandler { acceptedButtons: Qt.MiddleButton; onTapped: tab.closeClicked() }
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: tab.menuRequested() }
 
     // ---- dragging -----------------------------------------------------------
     Drag.dragType: Drag.Automatic

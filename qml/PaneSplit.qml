@@ -19,6 +19,8 @@ SplitView {
         implicitWidth: 1
         implicitHeight: 1
         color: SplitHandle.pressed || SplitHandle.hovered ? Theme.accent : Theme.divider
+        // The two-headed resize arrow, not the terminal's text cursor.
+        HoverHandler { cursorShape: split.orientation === Qt.Horizontal ? Qt.SplitHCursor : Qt.SplitVCursor }
         // A wider invisible grab area.
         containmentMask: Item {
             x: split.orientation === Qt.Horizontal ? -4 : 0

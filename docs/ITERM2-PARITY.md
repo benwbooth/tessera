@@ -125,6 +125,7 @@ click in a terminal opens a context menu.
 |---|---|---|
 | Minimize, Zoom | ✅ | |
 | Edit Window Title / Edit Tab Title | ✅ | |
+| Tab context menu (right-click a tab) | ✅ | new, duplicate, rename, color, move left/right, move to new window, close, close others, close to the right |
 | Select Next/Previous Tab | ✅ | Ctrl+PgDn / Ctrl+PgUp, Ctrl+Tab, Alt+1…9 |
 | Move Tab Left/Right | ✅ | Ctrl+Shift+PgUp / PgDn; or drag the tab |
 | Drag a tab out to a new window / onto another window | ✅ | its shells move with it (the daemon reattaches them) |
@@ -203,7 +204,8 @@ Profiles: add, remove, duplicate, rename, set default ✅.
 | | Faint text opacity | ✅ | |
 | | Cursor guide | ✅ | |
 | | Selection colors | ✅ | from the theme |
-| | Editing individual colors, cursor boost, minimum contrast, bold color, underline color, tab color | 🔜 | minimum contrast first (light themes' "white" text) |
+| | Minimum contrast | ✅ | default 0.1: only near-invisible text changes |
+| | Editing individual colors, cursor boost, bold color, underline color, tab color | 🔜 | |
 | Text | Cursor shape, blink | ✅ | |
 | | Font, size, line and character spacing | ✅ | |
 | | Draw bold in bold font, italic | ✅ | |

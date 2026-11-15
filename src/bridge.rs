@@ -133,6 +133,8 @@ pub mod ffi {
             pad: u32,
         ) -> bool;
         fn selected_text(self: &Session) -> String;
+        /// Selection dragged past the top/bottom: scroll a row and extend it.
+        fn autoscroll_tick(self: &mut Session, x: f32, y: f32, width: u32, height: u32, cell_w: u32, cell_h: u32, pad: u32, rows_per_tick: u32) -> bool;
         /// Find in scrollback: number of matches (-1: bad regex).
         fn find(self: &mut Session, query: &str, regex: bool) -> i32;
         fn find_refresh(self: &mut Session) -> i32;
@@ -234,6 +236,9 @@ pub mod ffi {
         /// first window's sessions).
         #[qinvokable]
         fn restore_allowed(self: &Controller) -> bool;
+        /// For the + menu: {shells: [{name, path}], ssh_hosts: [..]}.
+        #[qinvokable]
+        fn launchers(self: &Controller) -> QString;
         /// Every theme (built in, then imported) as a JSON array.
         #[qinvokable]
         fn themes(self: &Controller) -> QString;
@@ -419,6 +424,10 @@ impl ffi::Controller {
 
     fn restore_allowed(&self) -> bool {
         std::env::var_os("TESSERA_NO_RESTORE").is_none()
+    }
+
+    fn launchers(&self) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::launchers::launchers()).unwrap())
     }
 
     fn themes(&self) -> ffi::QString {

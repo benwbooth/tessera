@@ -303,6 +303,10 @@ private:
     qreal m_velocity = 0;          // logical px per ms
     qint64 m_lastWheelMs = 0;
     QTimer* m_momentum = nullptr;
+    QTimer* m_autoscroll = nullptr;   // selection dragged past an edge
+    QTimer* m_smooth = nullptr;       // eases mouse-wheel scrolling
+    qreal m_smoothPending = 0;        // logical px still to scroll
+    QPointF m_lastPointer;
 
     QString m_themeJson;
     int m_cursorShape = 0;

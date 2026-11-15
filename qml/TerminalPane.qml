@@ -13,6 +13,7 @@ Item {
     property alias cwd: term.cwd
     property string profileName: ""
     property bool taken: false         // its session moved to another window
+    property string commandOverride: "" // a shell or ssh picked from the + menu
     property alias themeJson: term.themeJson
     property alias fontFamily: term.fontFamily
     property alias fontPointSize: term.fontPointSize

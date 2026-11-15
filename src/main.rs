@@ -1,8 +1,10 @@
 mod bridge;
 mod client;
+mod contrast;
 mod daemon;
 mod find;
 mod keymap;
+mod launchers;
 mod proto;
 mod settings;
 mod session;

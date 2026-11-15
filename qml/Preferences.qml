@@ -698,6 +698,13 @@ Window {
                             }
                             SectionTitle { text: "Text" }
                             SliderRow {
+                                label: "Minimum contrast"
+                                hint: "Text too close to its background is moved toward black or white until it's readable. 0 leaves every color as the theme has it."
+                                from: 0; to: 1; stepSize: 0.05
+                                value: prefs.prof.minimum_contrast
+                                onMoved: (v) => prefs.setP("minimum_contrast", v)
+                            }
+                            SliderRow {
                                 label: "Faint text opacity"
                                 from: 0.1; to: 1; stepSize: 0.05
                                 value: prefs.prof.faint_opacity
