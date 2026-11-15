@@ -1,0 +1,14 @@
+target/
+shots/
+.qt-env
+result
+result-*
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+.env
+.env.*
+oauth-clients.json
+*.local.json
+aqtinstall.log
