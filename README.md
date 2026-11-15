@@ -17,7 +17,12 @@ shortcuts. Preferences mirror iTerm2's panels: General, Appearance,
 Arrangements, Pointer. [docs/ITERM2-PARITY.md](docs/ITERM2-PARITY.md) lists
 every iTerm2 menu item and setting with its status here.
 
-Highlights: profiles, 14 color themes plus .itermcolors import (separate
+The tab bar is the title bar (KDE-style window buttons on Linux, Windows' on
+Windows, the native ones on macOS). Drag tabs to reorder them, out of the
+window to make a new one, or onto another window to move them there; their
+shells move along.
+
+Highlights: profiles, find in scrollback, 14 color themes plus .itermcolors import (separate
 light/dark themes following the desktop), broadcast input, maximize pane,
 window arrangements, tab colors, badges, cursor guide, transparency, session
 logging, confirm-close when a job is running, restore sessions with their
@@ -35,6 +40,7 @@ iTerm2's Cmd shortcuts become Ctrl+Shift.
 | Maximize pane | Ctrl+Shift+Enter |
 | Copy / paste | Ctrl+Shift+C / Ctrl+Shift+V (selecting also copies; Shift+Insert or middle click pastes the selection) |
 | Select all / clear buffer | Ctrl+Shift+A / Ctrl+Shift+K |
+| Find / next / previous | Ctrl+Shift+F / F3 / Shift+F3 (Enter / Shift+Enter in the find bar) |
 | Next / previous tab | Ctrl+PgDn / Ctrl+PgUp, Ctrl+Tab, Alt+1…9 |
 | Move tab | Ctrl+Shift+PgUp / Ctrl+Shift+PgDn |
 | Move between panes | Ctrl+Alt+arrows, Ctrl+Shift+] / [ |

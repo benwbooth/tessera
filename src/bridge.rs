@@ -128,6 +128,13 @@ pub mod ffi {
             pad: u32,
         ) -> bool;
         fn selected_text(self: &Session) -> String;
+        /// Find in scrollback: number of matches (-1: bad regex).
+        fn find(self: &mut Session, query: &str, regex: bool) -> i32;
+        fn find_refresh(self: &mut Session) -> i32;
+        /// Previous (-1, upward) / next (+1) match; returns its index or -1.
+        fn find_step(self: &mut Session, dir: i32) -> i32;
+        fn find_index(self: &Session) -> i32;
+        fn find_clear(self: &mut Session);
         fn select_all(self: &mut Session);
         fn clear_scrollback(self: &mut Session);
         fn clear_selection(self: &mut Session);
@@ -158,6 +165,8 @@ pub mod ffi {
         /// native text rendering, and QML registration of TerminalView.
         fn tessera_create_app();
         fn tessera_exec() -> i32;
+        /// The app icon for window decorations that read it from the window.
+        fn tessera_set_icon(path: &QString);
         /// Fixed-pitch font families installed, as a JSON array.
         fn tessera_monospace_families() -> QString;
     }
@@ -206,6 +215,13 @@ pub mod ffi {
         /// the shell itself ("" when the shell is idle).
         #[qinvokable]
         fn session_job(self: &Controller, id: &QString) -> QString;
+        /// Open a window holding this tab (JSON layout with session ids): a
+        /// tab torn off by dragging it out of the tab bar.
+        #[qinvokable]
+        fn new_window_with_tab(self: &Controller, tab: &QString);
+        /// The tab a torn-off window starts with (JSON), or empty.
+        #[qinvokable]
+        fn initial_tab(self: &Controller) -> QString;
         /// Open another window (a new process that starts fresh, restoring nothing).
         #[qinvokable]
         fn new_window(self: &Controller);
@@ -249,6 +265,9 @@ pub mod ffi {
         fn then_command(self: &Controller) -> QString;
         #[qinvokable]
         fn screenshot_delay(self: &Controller) -> i32;
+        /// Testing: open the find bar with this query (--find).
+        #[qinvokable]
+        fn find_query(self: &Controller) -> QString;
         /// Testing: open Preferences at this page (--prefs).
         #[qinvokable]
         fn prefs_page(self: &Controller) -> QString;
@@ -368,6 +387,31 @@ impl ffi::Controller {
         }
     }
 
+    fn new_window_with_tab(&self, tab: &ffi::QString) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        let file = dir.join(format!("tessera-tab-{}-{}.json", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        if std::fs::write(&file, tab.to_string()).is_err() {
+            return;
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg("--new-window").arg("--tab").arg(&file);
+            for k in ["TESSERA_SCREENSHOT", "TESSERA_RUN", "TESSERA_THEN", "TESSERA_PREFS"] {
+                cmd.env_remove(k);
+            }
+            let _ = cmd.spawn();
+        }
+    }
+
+    fn initial_tab(&self) -> ffi::QString {
+        let Some(path) = std::env::var_os("TESSERA_TAB_FILE") else { return qs("") };
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_file(&path);
+        qs(&text)
+    }
+
     fn restore_allowed(&self) -> bool {
         std::env::var_os("TESSERA_NO_RESTORE").is_none()
     }
@@ -436,6 +480,10 @@ impl ffi::Controller {
 
     fn then_command(&self) -> ffi::QString {
         ffi::QString::from(&std::env::var("TESSERA_THEN").unwrap_or_default())
+    }
+
+    fn find_query(&self) -> ffi::QString {
+        ffi::QString::from(&std::env::var("TESSERA_FIND").unwrap_or_default())
     }
 
     fn prefs_page(&self) -> ffi::QString {

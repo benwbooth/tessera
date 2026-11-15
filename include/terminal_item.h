@@ -134,6 +134,12 @@ public:
     // Broadcast Input: replay another view's typing here.
     Q_INVOKABLE void receiveKey(int key, int mods, const QString& text, bool release);
     Q_INVOKABLE void receiveText(const QString& text);
+    // Find in scrollback.
+    Q_INVOKABLE int find(const QString& query, bool regex);
+    Q_INVOKABLE int findStep(int dir);
+    Q_INVOKABLE int findRefresh();
+    Q_INVOKABLE int findIndex() const;
+    Q_INVOKABLE void endFind();
 
 signals:
     void attachIdChanged();
@@ -160,6 +166,8 @@ signals:
     void optionsChanged();
     void loggingChanged();
     void activity();
+    // The session was attached by another window (a tab dragged there).
+    void takenOver();
 
 protected:
     void componentComplete() override;

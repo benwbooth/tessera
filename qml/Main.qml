@@ -13,6 +13,12 @@ ApplicationWindow {
     height: 700
     visible: true
     color: useTransparency && activeProfile.transparency > 0 ? "transparent" : Theme.bg
+    // A unified title bar: the tab strip *is* the title bar. macOS keeps its
+    // own traffic lights inside it; elsewhere the window has no system frame
+    // and the bar draws KDE (Breeze) or Windows buttons and moves the window.
+    readonly property bool macOS: Qt.platform.os === "osx"
+    flags: macOS ? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
+                 : (Qt.Window | Qt.FramelessWindowHint)
     title: customTitle !== "" ? customTitle : (activeView && activeView.title ? activeView.title : "Tessera")
 
     property var tabs: []
@@ -165,8 +171,13 @@ ApplicationWindow {
                 if (t) t.lastView = p.view
             }
         })
+        p.view.takenOver.connect(function() {
+            // Dragged into another window, which now shows this session.
+            p.taken = true
+            Qt.callLater(closePane, p, false)
+        })
         p.view.exitedChanged.connect(function() {
-            if (!p.view.exited || p.view.tmuxPane !== "") return
+            if (!p.view.exited || p.view.tmuxPane !== "" || p.taken) return
             const action = profileFor(p.profileName).on_exit
             if (action === "restart") Qt.callLater(function() { p.view.restart() })
             else if (action === "keep") p.view.showMessage("\n\u001b[2m[Process completed]\u001b[0m\n")
@@ -682,6 +693,83 @@ ApplicationWindow {
     // Reads the clipboard for pasteInto (QML has no direct clipboard API).
     TextEdit { id: clipHelper; visible: false }
 
+    // ---- tab dragging: reorder, tear off, move between windows ---------------
+
+    // Run fn a moment later, outside the drag-and-drop loop (the dragged tab's
+    // button must not be destroyed while the drag is still finishing).
+    function later(ms, fn) {
+        const t = Qt.createQmlObject('import QtQuick; Timer {}', win)
+        t.interval = ms
+        t.triggered.connect(function() { fn(); t.destroy() })
+        t.start()
+    }
+
+    function tabPayload(t) {
+        return t.tmuxWindow >= 0 ? "" : JSON.stringify(serializeTab(t, true))
+    }
+
+    function onTabDragFinished(t, action) {
+        if (action === Qt.MoveAction) {
+            // Another window took it (and reattaches its sessions).
+            later(30, function() { removeTab(t) })
+        } else if (action === Qt.IgnoreAction && tabs.length > 1 && t.tmuxWindow < 0) {
+            // Dropped away from any tab bar: it becomes a window of its own.
+            const json = tabPayload(t)
+            later(30, function() {
+                removeTab(t)
+                controller.newWindowWithTab(json)
+            })
+        }
+    }
+
+    function sessionIds(node, out) {
+        if (node.t === "pane") { if (node.id) out[node.id] = true }
+        else for (const c of node.c) sessionIds(c, out)
+        return out
+    }
+
+    // A tab dropped in from another window: take over its sessions.
+    function receiveTab(json, index) {
+        let tl = null
+        try { tl = JSON.parse(json) } catch (e) { return }
+        if (!tl || !tl.root) return
+        later(300, function() {
+            const t = newTab({ layout: tl, alive: sessionIds(tl.root, {}), profile: tl.profile })
+            if (t && index >= 0 && index < tabs.length - 1) moveTabTo(t, index)
+        })
+    }
+
+    function moveTabTo(t, index) {
+        const i = tabs.indexOf(t)
+        if (i < 0) return
+        let j = Math.max(0, Math.min(tabs.length - 1, index > i ? index - 1 : index))
+        if (j === i) return
+        const cur = tabs[currentTab]
+        tabs.splice(i, 1)
+        tabs.splice(j, 0, t)
+        tabs = tabs.slice()
+        currentTab = tabs.indexOf(cur)
+        treeRev++
+    }
+
+    // ---- find ------------------------------------------------------------
+
+    function openFind(urls) {
+        const p = activePane
+        if (!p) return
+        if (urls) p.findBar.findUrls()
+        else p.findBar.open()
+    }
+    function findStep(dir) {
+        const p = activePane
+        if (p && p.findBar.visible) p.findBar.step(dir)
+        else openFind(false)
+    }
+
+    function toggleMaximized() {
+        win.visibility === Window.Maximized ? win.showNormal() : win.showMaximized()
+    }
+
     // ---- tmux control mode -----------------------------------------------
 
     function tmuxTab(gateway, window) {
@@ -816,6 +904,9 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+0"; onActivated: fontSize = 0 }
     Shortcut { sequence: "Ctrl+,"; onActivated: prefs.showPage("") }
     Shortcut { sequence: "Ctrl+Shift+Q"; autoRepeat: false; onActivated: win.close() }
+    Shortcut { sequence: "Ctrl+Shift+F"; onActivated: openFind(false) }
+    Shortcut { sequence: "F3"; onActivated: findStep(-1) }
+    Shortcut { sequence: "Shift+F3"; onActivated: findStep(1) }
     Repeater {
         model: 9
         delegate: Item {
@@ -894,6 +985,16 @@ ApplicationWindow {
             }
             P.MenuSeparator {}
             P.MenuItem { icon.name: "edit-select-all"; text: "Select All\tCtrl+Shift+A"; onTriggered: if (activeView) activeView.selectAll() }
+            P.MenuSeparator {}
+            P.Menu {
+                title: "Find"
+                icon.name: "edit-find"
+                P.MenuItem { icon.name: "edit-find"; text: "Find\u2026\tCtrl+Shift+F"; onTriggered: openFind(false) }
+                P.MenuItem { icon.name: "go-up"; text: "Find Next\tF3"; onTriggered: findStep(-1) }
+                P.MenuItem { icon.name: "go-down"; text: "Find Previous\tShift+F3"; onTriggered: findStep(1) }
+                P.MenuSeparator {}
+                P.MenuItem { icon.name: "link"; text: "Find URLs"; onTriggered: openFind(true) }
+            }
             P.MenuSeparator {}
             P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Buffer\tCtrl+Shift+K"; onTriggered: if (activeView) activeView.clearScrollback() }
             P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Scrollback Buffer"; onTriggered: if (activeView) activeView.showMessage("\u001b[3J") }
@@ -1037,6 +1138,7 @@ ApplicationWindow {
         P.MenuItem { icon.name: "edit-copy"; text: "Copy\tCtrl+Shift+C"; enabled: contextView !== null && contextView.hasSelection; onTriggered: contextView.copy() }
         P.MenuItem { icon.name: "edit-paste"; text: "Paste\tCtrl+Shift+V"; onTriggered: pasteClipboard(contextView) }
         P.MenuItem { icon.name: "edit-select-all"; text: "Select All\tCtrl+Shift+A"; onTriggered: contextView.selectAll() }
+        P.MenuItem { icon.name: "edit-find"; text: "Find\u2026\tCtrl+Shift+F"; onTriggered: { const p = paneOf(contextView); if (p) p.findBar.open() } }
         P.MenuSeparator {}
         P.MenuItem { icon.name: "view-split-left-right"; text: "Split Right\tCtrl+Shift+D"; onTriggered: splitPane(paneOf(contextView), Qt.Horizontal) }
         P.MenuItem { icon.name: "view-split-top-bottom"; text: "Split Down\tCtrl+Shift+E"; onTriggered: splitPane(paneOf(contextView), Qt.Vertical) }
@@ -1067,56 +1169,28 @@ ApplicationWindow {
     // ---- layout ----------------------------------------------------------
 
     readonly property bool tabsAtBottom: settings.tab_position === "bottom"
+    readonly property bool showTabs: settings.always_show_tabs || tabs.length > 1 || tabs.some(t => t.tmuxWindow >= 0)
+    readonly property real barHeight: 44
 
-    GridLayout {
-        id: rootLayout
-        anchors.fill: parent
-        // A thousandth of a pixel keeps text off exact half pixels at 130%.
-        anchors.topMargin: 0.001
-        columns: 1
-        rowSpacing: 0
+    // The tab row (with the + button and the drop target for dragged tabs),
+    // used in the top bar or, with tabs at the bottom, below the terminal.
+    Component {
+        id: tabRowComp
+        Item {
+            id: box
+            property bool flipped: false
+            property real dropX: -1   // where a dragged tab would land
 
-        Rectangle {
-            id: tabStrip
-            Layout.row: win.tabsAtBottom ? 1 : 0
-            Layout.fillWidth: true
-            Layout.preferredHeight: visible ? 40 : 0
-            color: Theme.chrome
-            visible: settings.always_show_tabs || tabs.length > 1 || tabs.some(t => t.tmuxWindow >= 0)
-
-            // ☰ The app menu.
-            Rectangle {
-                id: menuButton
-                anchors.left: parent.left
-                anchors.leftMargin: 6
-                anchors.verticalCenter: tabRow.verticalCenter
-                width: 30; height: 28; radius: 6
-                color: menuHover.hovered ? Theme.tabHover : "transparent"
-                Item {
-                    anchors.centerIn: parent
-                    width: 16; height: 12
-                    Repeater {
-                        model: 3
-                        Rectangle { y: index * 5; width: 16; height: 2; radius: 1; color: Theme.textDim }
-                    }
-                }
-                HoverHandler { id: menuHover }
-                TapHandler { onTapped: appMenu.open(menuButton) }
-            }
-
-            // Tabs sit on the edge next to the terminal so the current one
-            // joins it; neighbours overlap by their flares.
             Row {
                 id: tabRow
-                anchors.left: menuButton.right
-                anchors.leftMargin: 2
-                anchors.bottom: win.tabsAtBottom ? undefined : parent.bottom
-                anchors.top: win.tabsAtBottom ? parent.top : undefined
+                anchors.left: parent.left
+                anchors.bottom: box.flipped ? undefined : parent.bottom
+                anchors.top: box.flipped ? parent.top : undefined
                 spacing: -8
-                readonly property real available: tabStrip.width - 100 + 8 * tabs.length
+                readonly property real available: box.width - 40 + 8 * tabs.length
                 readonly property real tabWidth: settings.stretch_tabs
-                    ? Math.max(90, available / Math.max(1, tabs.length))
-                    : Math.max(90, Math.min(240, available / Math.max(1, tabs.length)))
+                    ? Math.max(100, available / Math.max(1, tabs.length))
+                    : Math.max(100, Math.min(250, available / Math.max(1, tabs.length)))
                 Repeater {
                     model: tabs
                     delegate: TabButtonX {
@@ -1131,31 +1205,195 @@ ApplicationWindow {
                         bell: modelData.bell
                         tabColor: modelData.tabColor
                         closeAlways: settings.tab_close_buttons
-                        flipped: win.tabsAtBottom
+                        flipped: box.flipped
                         surface: Theme.bg
+                        tabItem: modelData
+                        payload: function() { return win.tabPayload(modelData) }
                         onClicked: focusTab(index)
                         onCloseClicked: closeTab(modelData)
+                        onDragFinished: (action) => win.onTabDragFinished(modelData, action)
                     }
                 }
             }
             Rectangle {
+                id: plus
                 anchors.left: tabRow.right
-                anchors.leftMargin: 4
+                anchors.leftMargin: 6
                 anchors.verticalCenter: tabRow.verticalCenter
-                width: 26; height: 26; radius: 13
+                width: 28; height: 28; radius: 8
                 color: plusHover.hovered ? Theme.tabHover : "transparent"
-                Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: Theme.textDim; font.pixelSize: 17 }
+                Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: plusHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 18 }
                 HoverHandler { id: plusHover }
                 TapHandler { onTapped: newTab({}) }
+            }
+
+            // Where a dragged tab would go.
+            Rectangle {
+                visible: box.dropX >= 0
+                x: box.dropX - 1
+                y: 6
+                width: 2
+                height: parent.height - 12
+                radius: 1
+                color: Theme.accent
+            }
+
+            DropArea {
+                anchors.fill: parent
+                keys: ["application/x-tessera-tab"]
+                function slot(x) {
+                    const step = tabRow.tabWidth - 8
+                    return Math.max(0, Math.min(tabs.length, Math.round((x - tabRow.x) / step)))
+                }
+                onEntered: (drag) => drag.accept(drag.source ? Qt.CopyAction : Qt.MoveAction)
+                onPositionChanged: (drag) => { box.dropX = tabRow.x + slot(drag.x) * (tabRow.tabWidth - 8) + 4 }
+                onExited: box.dropX = -1
+                onDropped: (drop) => {
+                    box.dropX = -1
+                    const at = slot(drop.x)
+                    if (drop.source && drop.source.tabItem) {
+                        // One of this window's tabs: reorder.
+                        const t = drop.source.tabItem
+                        drop.accept(Qt.CopyAction)
+                        win.later(30, function() { win.moveTabTo(t, at) })
+                        return
+                    }
+                    const json = drop.getDataAsString("application/x-tessera-tab")
+                    if (!json) return
+                    drop.accept(Qt.MoveAction)
+                    win.receiveTab(json, at)
+                }
+            }
+        }
+    }
+
+    GridLayout {
+        id: rootLayout
+        anchors.fill: parent
+        // A thousandth of a pixel keeps text off exact half pixels at 130%.
+        anchors.topMargin: 0.001
+        columns: 1
+        rowSpacing: 0
+
+        // ---- the top bar: title bar, menu, tabs and window buttons ----------
+        Rectangle {
+            id: topBar
+            Layout.row: 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: win.visibility === Window.FullScreen && !showTabs ? 0 : barHeight
+            color: Theme.chrome
+            clip: true
+
+            // Drag the bar to move the window; double-click to maximize.
+            DragHandler {
+                target: null
+                onActiveChanged: if (active) win.startSystemMove()
+            }
+            TapHandler {
+                gesturePolicy: TapHandler.DragThreshold
+                onDoubleTapped: win.toggleMaximized()
+            }
+
+            // ☰ The app menu.
+            Rectangle {
+                id: menuButton
+                anchors.left: parent.left
+                anchors.leftMargin: win.macOS ? 78 : 8
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: (showTabs && !tabsAtBottom) ? 2 : 0
+                width: 32; height: 30; radius: 8
+                color: menuHover.hovered ? Theme.tabHover : "transparent"
+                Item {
+                    anchors.centerIn: parent
+                    width: 16; height: 12
+                    Repeater {
+                        model: 3
+                        Rectangle { y: index * 5; width: 16; height: 2; radius: 1; color: menuHover.hovered ? Theme.text : Theme.textDim }
+                    }
+                }
+                HoverHandler { id: menuHover }
+                TapHandler { onTapped: appMenu.open(menuButton) }
+            }
+
+            Loader {
+                active: showTabs && !tabsAtBottom
+                anchors.left: menuButton.right
+                anchors.leftMargin: 2
+                anchors.right: controls.left
+                anchors.rightMargin: 12
+                anchors.bottom: parent.bottom
+                height: 36
+                sourceComponent: tabRowComp
+            }
+
+            // Without a tab row up here: the window title.
+            Text {
+                visible: !(showTabs && !tabsAtBottom)
+                anchors.centerIn: parent
+                width: Math.min(implicitWidth, parent.width - 2 * (controls.width + 60))
+                text: win.title
+                color: win.active ? Theme.text : Theme.textDim
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                elide: Text.ElideMiddle
+            }
+
+            WindowControls {
+                id: controls
+                visible: !win.macOS
+                width: win.macOS ? 0 : implicitWidth
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                window: win
             }
         }
 
         Item {
             id: stack
-            Layout.row: win.tabsAtBottom ? 0 : 1
+            Layout.row: 1
             Layout.fillWidth: true
             Layout.fillHeight: true
         }
+
+        // Tabs below the terminal (Appearance > Tab bar location).
+        Rectangle {
+            Layout.row: 2
+            Layout.fillWidth: true
+            Layout.preferredHeight: showTabs && tabsAtBottom ? 40 : 0
+            visible: showTabs && tabsAtBottom
+            color: Theme.chrome
+            Loader {
+                active: parent.visible
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                sourceComponent: tabRowComp
+                onLoaded: item.flipped = true
+            }
+        }
+    }
+
+    // Without the system frame, these strips along the edges resize the window.
+    Item {
+        id: edges
+        anchors.fill: parent
+        z: 10000
+        visible: !win.macOS && win.visibility !== Window.Maximized && win.visibility !== Window.FullScreen
+        readonly property int grip: 5
+        component Edge: MouseArea {
+            property int edgesToMove
+            hoverEnabled: true
+            onPressed: win.startSystemResize(edgesToMove)
+        }
+        Edge { x: edges.grip; width: parent.width - 2 * edges.grip; height: edges.grip; edgesToMove: Qt.TopEdge; cursorShape: Qt.SizeVerCursor }
+        Edge { x: edges.grip; y: parent.height - edges.grip; width: parent.width - 2 * edges.grip; height: edges.grip; edgesToMove: Qt.BottomEdge; cursorShape: Qt.SizeVerCursor }
+        Edge { y: edges.grip; width: edges.grip; height: parent.height - 2 * edges.grip; edgesToMove: Qt.LeftEdge; cursorShape: Qt.SizeHorCursor }
+        Edge { x: parent.width - edges.grip; y: edges.grip; width: edges.grip; height: parent.height - 2 * edges.grip; edgesToMove: Qt.RightEdge; cursorShape: Qt.SizeHorCursor }
+        Edge { width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.TopEdge | Qt.LeftEdge; cursorShape: Qt.SizeFDiagCursor }
+        Edge { x: parent.width - edges.grip * 2; width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.TopEdge | Qt.RightEdge; cursorShape: Qt.SizeBDiagCursor }
+        Edge { y: parent.height - edges.grip * 2; width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.BottomEdge | Qt.LeftEdge; cursorShape: Qt.SizeBDiagCursor }
+        Edge { x: parent.width - edges.grip * 2; y: parent.height - edges.grip * 2; width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.BottomEdge | Qt.RightEdge; cursorShape: Qt.SizeFDiagCursor }
     }
 
     // Dim background windows (Appearance > Dimming).
@@ -1171,7 +1409,14 @@ ApplicationWindow {
     Component.onCompleted: {
         let alive = {}
         let restored = false
-        if (controller.restoreAllowed()) {
+        const torn = controller.initialTab()
+        if (torn !== "") {
+            try {
+                const tl = JSON.parse(torn)
+                newTab({ layout: tl, alive: sessionIds(tl.root, {}), profile: tl.profile })
+                restored = tabs.length > 0
+            } catch (e) {}
+        } else if (controller.restoreAllowed()) {
             const ids = JSON.parse(controller.restorableSessions())
             for (const id of ids) alive[id] = true
             if (settings.restore_sessions && ids.length > 0) {
@@ -1197,6 +1442,7 @@ ApplicationWindow {
         if (cmd !== "") runTimer.start()
         if (controller.thenCommand() !== "") thenTimer.start()
         if (controller.prefsPage() !== "") prefs.showPage(controller.prefsPage())
+        if (controller.findQuery() !== "") findTimer.start()
         if (controller.screenshotPath() !== "") shotTimer.start()
     }
 
@@ -1209,7 +1455,7 @@ ApplicationWindow {
             if (!v || v.cellWidth <= 0) return
             const p = activeProfile
             win.width = Math.round(p.columns * v.cellWidth + 2 * v.padding)
-            win.height = Math.round(p.rows * v.cellHeight + 2 * v.padding + (tabStrip.visible ? 40 : 0))
+            win.height = Math.round(p.rows * v.cellHeight + 2 * v.padding + barHeight)
         }
     }
 
@@ -1217,6 +1463,12 @@ ApplicationWindow {
         id: runTimer
         interval: 600
         onTriggered: if (activeView) activeView.sendText(controller.startupCommand() + "\n")
+    }
+
+    Timer {
+        id: findTimer
+        interval: 2200
+        onTriggered: if (activePane) activePane.findBar.open(controller.findQuery())
     }
 
     Timer {

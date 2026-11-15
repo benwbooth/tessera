@@ -249,7 +249,8 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
     // with respect to the output pump so nothing is lost or duplicated.
     {
         let mut sh = session.shared.lock().unwrap();
-        if let Some(old) = sh.client.take() {
+        if let Some(mut old) = sh.client.take() {
+            let _ = write_frame(&mut old, T_TAKEN, b"");
             let _ = old.shutdown(std::net::Shutdown::Both);
         }
         let mut out = stream.try_clone()?;

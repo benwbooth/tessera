@@ -24,6 +24,8 @@ pub const T_EXITED: u8 = 103;
 pub const T_SESSIONS: u8 = 104;
 pub const T_ERROR: u8 = 105;
 pub const T_JOB_REPLY: u8 = 106;
+/// Another window attached the session: this client is no longer it.
+pub const T_TAKEN: u8 = 107;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Create {

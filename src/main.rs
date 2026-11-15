@@ -1,6 +1,7 @@
 mod bridge;
 mod client;
 mod daemon;
+mod find;
 mod keymap;
 mod proto;
 mod settings;
@@ -30,6 +31,18 @@ fn main() {
                 i += 1;
             }
             "--new-window" => std::env::set_var("TESSERA_NO_RESTORE", "1"),
+            "--find" => {
+                if let Some(q) = args.get(i + 1) {
+                    std::env::set_var("TESSERA_FIND", q);
+                }
+                i += 1;
+            }
+            "--tab" => {
+                if let Some(f) = args.get(i + 1) {
+                    std::env::set_var("TESSERA_TAB_FILE", f);
+                }
+                i += 1;
+            }
             "--prefs" => {
                 if let Some(c) = args.get(i + 1) {
                     std::env::set_var("TESSERA_PREFS", c);
@@ -55,6 +68,7 @@ fn main() {
 
     std::env::set_var("QT_QUICK_CONTROLS_STYLE", std::env::var("TESSERA_STYLE").unwrap_or_else(|_| "Basic".into()));
     bridge::ffi::tessera_create_app();
+    bridge::ffi::tessera_set_icon(&QString::from(concat!(env!("CARGO_MANIFEST_DIR"), "/icons/tessera.svg")));
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         if let Some(qml) = option_env!("TESSERA_QT_QML") {

@@ -66,7 +66,9 @@ click in a terminal opens a context menu.
 | Select All | ✅ | Ctrl+Shift+A |
 | Clear Buffer | ✅ | Ctrl+Shift+K |
 | Clear Scrollback Buffer | ✅ | |
-| Find (find, next/previous, globally, URLs, filter, select matches) | 🔜 | next big item |
+| Find › Find, Find Next / Previous | ✅ | Ctrl+Shift+F, F3 / Shift+F3 (Enter / Shift+Enter in the bar); smart case, regex; searches upward like iTerm2; all matches highlighted, kept current as output arrives |
+| Find › Find URLs | ✅ | |
+| Find › Find Globally, Select Matches, Filter, Pick Result to Open | 🔜 | |
 | Copy Mode | 🔜 | |
 | Open Selection, Jump to Selection | 🔜 | |
 | Select Output of Last Command / Current Command | 🔜 | needs shell integration (OSC 133; libghostty already tracks it) |
@@ -124,7 +126,8 @@ click in a terminal opens a context menu.
 | Minimize, Zoom | ✅ | |
 | Edit Window Title / Edit Tab Title | ✅ | |
 | Select Next/Previous Tab | ✅ | Ctrl+PgDn / Ctrl+PgUp, Ctrl+Tab, Alt+1…9 |
-| Move Tab Left/Right | ✅ | Ctrl+Shift+PgUp / PgDn |
+| Move Tab Left/Right | ✅ | Ctrl+Shift+PgUp / PgDn; or drag the tab |
+| Drag a tab out to a new window / onto another window | ✅ | its shells move with it (the daemon reattaches them) |
 | Select Split Pane › Above/Below/Left/Right, Next/Previous | ✅ | Ctrl+Alt+arrows, Ctrl+Shift+] / [ |
 | Arrangements › Save, Restore, Manage | ✅ | |
 | Arrangements › Load from file | 🔜 | |
@@ -166,6 +169,7 @@ click in a terminal opens a context menu.
 | Setting | | Notes |
 |---|---|---|
 | Theme (window chrome) | ✅ | follows the terminal theme, light or dark |
+| Unified title bar (Minimal/Compact themes) | ✅ | the tab bar is the title bar: KDE Breeze buttons on Linux, Windows buttons on Windows, native traffic lights on macOS |
 | Tab bar location | ✅ | top or bottom (left/right 🔜) |
 | Show tab bar with one tab | ✅ | |
 | Show tab numbers | ✅ | |

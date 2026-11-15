@@ -391,6 +391,8 @@ void TerminalItem::handleEvents()
             }
             if (!m_silenceBell) QApplication::beep();
             emit bell();
+        } else if (type == u"taken") {
+            emit takenOver();
         } else if (type == u"clipboard") {
             QGuiApplication::clipboard()->setText(e.value(u"text").toString());
         } else if (type == u"grid") {
@@ -939,6 +941,40 @@ void TerminalItem::stopLogging()
     if (!m_session) return;
     m_session->log_to_file(rs(QByteArray()));
     emit loggingChanged();
+}
+
+int TerminalItem::find(const QString& query, bool regex)
+{
+    if (!m_session) return 0;
+    const QByteArray q = query.toUtf8();
+    const int n = m_session->find(rs(q), regex);
+    polish();
+    return n;
+}
+
+int TerminalItem::findStep(int dir)
+{
+    if (!m_session) return -1;
+    const int i = m_session->find_step(dir);
+    polish();
+    return i;
+}
+
+int TerminalItem::findRefresh()
+{
+    if (!m_session) return 0;
+    const int n = m_session->find_refresh();
+    polish();
+    return n;
+}
+
+int TerminalItem::findIndex() const { return m_session ? m_session->find_index() : -1; }
+
+void TerminalItem::endFind()
+{
+    if (!m_session) return;
+    m_session->find_clear();
+    polish();
 }
 
 void TerminalItem::findCursor()

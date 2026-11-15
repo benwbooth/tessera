@@ -1,6 +1,7 @@
 // Process-wide Qt setup: the application object and QML registration.
 #pragma once
 
+#include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtGui/QFontDatabase>
@@ -32,6 +33,11 @@ inline void tessera_create_app()
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("tessera"),
                                                  QIcon::fromTheme(QStringLiteral("utilities-terminal"))));
     qmlRegisterType<TerminalItem>("Tessera.Native", 1, 0, "TerminalView");
+}
+
+inline void tessera_set_icon(const QString& path)
+{
+    if (QFile::exists(path)) QApplication::setWindowIcon(QIcon(path));
 }
 
 inline int tessera_exec() { return QApplication::exec(); }

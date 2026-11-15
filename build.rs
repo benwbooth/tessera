@@ -28,6 +28,8 @@ fn main() {
         QmlFile::from("qml/PaneSplit.qml"),
         QmlFile::from("qml/TabButtonX.qml"),
         QmlFile::from("qml/Preferences.qml"),
+        QmlFile::from("qml/FindBar.qml"),
+        QmlFile::from("qml/WindowControls.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include")

@@ -44,6 +44,11 @@ pub const FLAG_FAINT: u32 = 16;
 pub const FLAG_HAS_BG: u32 = 32;
 pub const FLAG_INVISIBLE: u32 = 64;
 
+/// Find highlight colors (as iTerm2: yellow matches, orange current one).
+const MATCH_BG: u32 = 0xf2cc60;
+const MATCH_CURRENT_BG: u32 = 0xff9632;
+const MATCH_FG: u32 = 0x1a1a1a;
+
 const SCROLLBACK: usize = 10_000;
 
 enum Backend {
@@ -90,6 +95,14 @@ pub struct Session {
     selected_vt: String,
     log: Option<std::fs::File>,
     clipboard: Rc<RefCell<Option<String>>>,
+    find: Option<FindState>,
+    taken: bool,
+}
+
+struct FindState {
+    re: regex::Regex,
+    matches: Vec<crate::find::Match>,
+    current: Option<usize>,
 }
 
 /// Behaviors from the profile and global settings.
@@ -260,6 +273,8 @@ pub fn session_open(
         selected_vt: String::new(),
         log: None,
         clipboard,
+        find: None,
+        taken: false,
     });
     // A tmux pane may already have its captured contents waiting.
     if matches!(s.backend, Backend::Tmux { .. }) {
@@ -370,6 +385,12 @@ impl Session {
                             sig |= SIG_DIRTY;
                         }
                         T_EXITED => self.exited = true,
+                        T_TAKEN => {
+                            // Moved to another window: not an exit of the shell.
+                            self.events.push(json!({"type": "taken"}));
+                            self.exited = true;
+                            self.taken = true;
+                        }
                         T_ERROR => {
                             let msg: String = serde_json::from_slice(&payload).unwrap_or_default();
                             self.term.vt_write(format!("\r\n[tessera: {msg}]\r\n").as_bytes());
@@ -836,6 +857,85 @@ impl Session {
         }
     }
 
+    /// Start or update a search. Returns the number of matches, or -1 when
+    /// the regex is invalid. The current match is the newest one on or above
+    /// the bottom of the view (iTerm2 searches upward).
+    pub fn find(&mut self, query: &str, regex: bool) -> i32 {
+        if query.is_empty() {
+            self.find_clear();
+            return 0;
+        }
+        let Ok(re) = crate::find::compile(query, regex) else { return -1 };
+        let matches = crate::find::search(&crate::find::rows(&self.term), &re);
+        let bottom = self.view_top() + self.term.rows().unwrap_or(1) as usize;
+        let current = matches.iter().rposition(|m| m.row < bottom).or(if matches.is_empty() { None } else { Some(0) });
+        let n = matches.len() as i32;
+        self.find = Some(FindState { re, matches, current });
+        self.reveal_current();
+        self.force_full = true;
+        n
+    }
+
+    /// Search again (new output), keeping the current match where it was.
+    pub fn find_refresh(&mut self) -> i32 {
+        let Some(f) = self.find.as_ref() else { return 0 };
+        let keep = f.current.map(|i| f.matches[i]);
+        let matches = crate::find::search(&crate::find::rows(&self.term), &f.re);
+        let current = keep
+            .and_then(|k| matches.iter().position(|m| *m == k))
+            .or_else(|| if matches.is_empty() { None } else { Some(matches.len() - 1) });
+        let n = matches.len() as i32;
+        if let Some(f) = self.find.as_mut() {
+            f.matches = matches;
+            f.current = current;
+        }
+        self.force_full = true;
+        n
+    }
+
+    /// Move to the previous (dir < 0, older, upward) or next match. Returns
+    /// its index (0 = oldest), or -1 with no matches.
+    pub fn find_step(&mut self, dir: i32) -> i32 {
+        let Some(f) = self.find.as_mut() else { return -1 };
+        if f.matches.is_empty() {
+            return -1;
+        }
+        let n = f.matches.len();
+        let i = match f.current {
+            Some(i) => (i as i64 + dir as i64).rem_euclid(n as i64) as usize,
+            None => n - 1,
+        };
+        f.current = Some(i);
+        self.reveal_current();
+        self.force_full = true;
+        i as i32
+    }
+
+    pub fn find_index(&self) -> i32 {
+        self.find.as_ref().and_then(|f| f.current).map(|i| i as i32).unwrap_or(-1)
+    }
+
+    pub fn find_clear(&mut self) {
+        if self.find.take().is_some() {
+            self.force_full = true;
+        }
+    }
+
+    /// Row of the top of the view, counted from the top of the scrollback.
+    fn view_top(&self) -> usize {
+        crate::find::screen_row(&self.term, Point::Viewport(PointCoordinate { x: 0, y: 0 })).unwrap_or(0)
+    }
+
+    /// Scroll so the current match is in view (centered when it wasn't).
+    fn reveal_current(&mut self) {
+        let Some(m) = self.find.as_ref().and_then(|f| f.current.map(|i| f.matches[i])) else { return };
+        let rows = self.term.rows().unwrap_or(1) as usize;
+        let top = self.view_top();
+        if m.row < top || m.row >= top + rows {
+            self.term.scroll_viewport(ScrollViewport::Row(m.row.saturating_sub(rows / 2)));
+        }
+    }
+
     pub fn set_theme(&mut self, theme_json: &str) {
         let Ok(th) = serde_json::from_str::<crate::settings::Theme>(theme_json) else { return };
         use crate::settings::hex_rgb;
@@ -906,6 +1006,7 @@ impl Session {
     pub fn frame(&mut self, out: &mut Frame, force_full: bool) -> bool {
         out.dirty_rows.clear();
         out.runs.clear();
+        let view_top = if self.find.is_some() { self.view_top() } else { 0 };
         let Ok(snap) = self.rs.update(&self.term) else { return false };
         let dirty = snap.dirty().unwrap_or(Dirty::Full);
         let cols = snap.cols().unwrap_or(0);
@@ -953,6 +1054,20 @@ impl Session {
                 || Some(y) == old_cursor_row;
             if want {
                 out.dirty_rows.push(y);
+                // Find matches on this row: (start, end, is_current).
+                let row_matches: Vec<(u16, u16, bool)> = match self.find.as_ref() {
+                    Some(f) => {
+                        let abs = view_top + y as usize;
+                        let first = f.matches.partition_point(|m| m.row < abs);
+                        f.matches[first..]
+                            .iter()
+                            .enumerate()
+                            .take_while(|(_, m)| m.row == abs)
+                            .map(|(k, m)| (m.start, m.end, f.current == Some(first + k)))
+                            .collect()
+                    }
+                    None => Vec::new(),
+                };
                 if let Ok(mut cell_it) = self.cells_it.update(row) {
                     let mut x: u16 = 0;
                     let mut cur: Option<Run> = None;
@@ -1014,6 +1129,11 @@ impl Session {
                             }
                             has_bg = true;
                         }
+                        if let Some(&(_, _, cur)) = row_matches.iter().find(|(a, b, _)| *a <= x && x < *b) {
+                            bg = if cur { MATCH_CURRENT_BG } else { MATCH_BG };
+                            fg = MATCH_FG;
+                            has_bg = true;
+                        }
                         if has_bg {
                             flags |= FLAG_HAS_BG;
                         }
@@ -1042,7 +1162,7 @@ impl Session {
                                 }
                             }
                         }
-                        x += width;
+                        x += 1; // the spacer cell after a wide character is its own (skipped) cell
                     }
                     if let Some(r) = cur.take() {
                         out.runs.push(r);

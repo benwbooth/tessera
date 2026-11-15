@@ -12,6 +12,7 @@ Item {
     property alias tmuxPane: term.tmuxPane
     property alias cwd: term.cwd
     property string profileName: ""
+    property bool taken: false         // its session moved to another window
     property alias themeJson: term.themeJson
     property alias fontFamily: term.fontFamily
     property alias fontPointSize: term.fontPointSize
@@ -80,6 +81,17 @@ Item {
         opacity: 0.18
         font.pixelSize: Math.max(18, Math.min(64, term.height / 6))
         font.weight: Font.Bold
+    }
+
+    property alias findBar: findBar
+    FindBar {
+        id: findBar
+        view: term
+        z: 5
+        anchors.top: term.top
+        anchors.right: term.right
+        anchors.topMargin: 8
+        anchors.rightMargin: 14
     }
 
     // Broadcast Input: the receiving panes get a red outline.
