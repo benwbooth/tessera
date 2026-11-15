@@ -111,7 +111,9 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
     } else {
         // A profile's command, run through the user's shell so PATH and the
         // like are set up as in a normal session.
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let shell = crate::client::login_shell()
+            .or_else(|| std::env::var("SHELL").ok())
+            .unwrap_or_else(|| "/bin/sh".into());
         let mut b = CommandBuilder::new(shell);
         b.args(["-l", "-c", c.command.as_str()]);
         b
