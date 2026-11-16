@@ -42,7 +42,9 @@ Item {
     property bool inputEditor: false
     property string editorKeys: "emacs"
     property bool editorPrompt: true
-    property var promptSegments: ["dir", "git", "status", "duration", "|", "host", "time"]
+    property string promptEngine: "auto"
+    property int shellPid: 0            // from the daemon (for the prompt's environment)
+    property var promptSegments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
     property var commandHistory: []
     property var controller: null
     // REPLs the editor also serves (the shell needs its integration's prompt marks).
@@ -50,6 +52,10 @@ Item {
     readonly property string replLang: {
         const j = pane.job.replace(/^.*\//, "")
         return replPrograms.some(r => j === r || j.startsWith("python")) && controller ? controller.languageFor(j) : ""
+    }
+    onEditorOnChanged: {
+        if (editorOn && term.activeFocus && preferEditor) compose.focusEditor()
+        else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
     readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || replLang !== "")      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
@@ -87,13 +93,15 @@ Item {
         anchors.top: titleBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: compose.visible ? compose.top : parent.bottom
+        // (Whether the editor should show, not whether it's on screen: a tab in
+        // the background has it hidden, and the terminal mustn't resize then.)
+        anchors.bottom: pane.editorOn ? compose.top : parent.bottom
         focus: true
         onContextMenuRequested: (x, y) => pane.contextMenu(term, x, y)
         // Type in the terminal (click it) or in the editor under it (click
         // there): the pane remembers which, and goes back to it when it gets
         // the keys again (switching tabs or panes).
-        onActiveFocusChanged: if (activeFocus && compose.visible && pane.preferEditor) Qt.callLater(compose.focusEditor)
+        onActiveFocusChanged: if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
         PointHandler { onActiveChanged: if (active) pane.preferEditor = false }
     }
 
@@ -112,6 +120,8 @@ Item {
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         cwd: term.pwd !== "" ? term.pwd : pane.procCwd
         showPrompt: pane.editorPrompt
+        shellPid: pane.shellPid
+        promptEngine: pane.promptEngine
         promptSegments: pane.promptSegments
         onSubmitted: (t) => {
             if (t.indexOf("\n") < 0) term.sendText(t + "\r")
@@ -120,10 +130,6 @@ Item {
         }
         onHandBack: term.forceActiveFocus()
         onKeysPicked: (k) => pane.editorKeysPicked(k)
-        onVisibleChanged: {
-            if (visible && term.activeFocus && pane.preferEditor) focusEditor()
-            else if (!visible && editing) term.forceActiveFocus()
-        }
         onEditingChanged: if (editing) pane.preferEditor = true
     }
 

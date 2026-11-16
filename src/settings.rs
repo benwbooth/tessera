@@ -59,6 +59,8 @@ pub struct Settings {
     // -- Tessera's prompt above the editor, and its segments in order ("|"
     // puts the rest on the right).
     pub editor_prompt: bool,
+    // -- "auto" (Starship when installed), "starship", or "builtin".
+    pub prompt_engine: String,
     pub prompt_segments: Vec<String>,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
@@ -100,7 +102,8 @@ impl Default for Settings {
             input_editor: true,
             editor_keys: "emacs".into(),
             editor_prompt: true,
-            prompt_segments: vec!["dir".into(), "git".into(), "status".into(), "duration".into(), "|".into(), "host".into(), "time".into()],
+            prompt_engine: "auto".into(),
+            prompt_segments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"].map(String::from).to_vec(),
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),

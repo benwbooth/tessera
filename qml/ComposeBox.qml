@@ -18,7 +18,9 @@ Rectangle {
     property var themeData: ({})       // the terminal's theme (ansi colors)
     property string cwd: ""            // the shell's folder (for path completion)
     property bool showPrompt: true     // Tessera's prompt bar above the editor
-    property var promptSegments: ["dir", "git", "status", "duration", "|", "host", "time"]
+    property int shellPid: 0
+    property string promptEngine: "auto"
+    property var promptSegments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
     signal submitted(string text)
     signal keysPicked(string keys)     // the corner switch: "emacs", "vi", "vscode"
     signal handBack()                  // Esc: type into the terminal instead
@@ -479,6 +481,8 @@ Rectangle {
         cwd: box.cwd
         themeData: box.themeData
         segments: box.promptSegments
+        shellPid: box.shellPid
+        engine: box.promptEngine
         fontFamily: edit.font.family
         fontSize: edit.font.pointSize
     }

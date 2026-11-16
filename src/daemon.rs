@@ -286,7 +286,7 @@ fn proc_info(s: &DSession) -> crate::client::ProcInfo {
     }
     // The shell is whatever runs at the prompt (a login bash may exec zsh).
     let shell = if job.is_empty() { pgid.or(s.shell_pid).map(comm).unwrap_or_default() } else { s.shell_pid.map(comm).unwrap_or_default() };
-    crate::client::ProcInfo { job, cwd: dir, shell }
+    crate::client::ProcInfo { job, cwd: dir, shell, pid: s.shell_pid.unwrap_or(0) }
 }
 
 fn foreground_job(s: &DSession) -> String {

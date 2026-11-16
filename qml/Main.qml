@@ -103,7 +103,8 @@ ApplicationWindow {
             inputEditor: win.settings.input_editor !== false
             editorKeys: win.settings.editor_keys || "emacs"
             editorPrompt: win.settings.editor_prompt !== false
-            promptSegments: win.settings.prompt_segments || ["dir", "git", "status", "duration", "|", "host", "time"]
+            promptEngine: win.settings.prompt_engine || "auto"
+            promptSegments: win.settings.prompt_segments || ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
             commandHistory: win.commandHistory
             controller: controller
             onEditorKeysPicked: (k) => win.setSetting("editor_keys", k)
@@ -1517,10 +1518,10 @@ ApplicationWindow {
         running: true
         repeat: true
         onTriggered: {
-            for (const t of tabs) {
-                const v = t.titleView
-                const p = v ? paneOf(v) : null
-                if (!p) continue
+            // (Every pane: titles, and each editor's prompt and REPL detection.)
+            for (const p of allPanes()) {
+                const v = p.view
+                if (!v) continue
                 let info = { job: "", cwd: "", shell: "" }
                 if (v.tmuxPane === "" && !v.exited && v.sessionId !== "") {
                     try { info = JSON.parse(controller.sessionInfo(v.sessionId)) } catch (e) {}
@@ -1528,6 +1529,7 @@ ApplicationWindow {
                 if (p.job !== info.job) p.job = info.job
                 if (p.procCwd !== info.cwd) p.procCwd = info.cwd
                 if (p.shellName !== info.shell) p.shellName = info.shell
+                if (info.pid && p.shellPid !== info.pid) p.shellPid = info.pid
             }
         }
     }

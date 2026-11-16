@@ -283,7 +283,15 @@ pub mod ffi {
         fn command_help_count(self: &Controller) -> i32;
         /// The prompt bar's facts about a folder (git, user, host), JSON.
         #[qinvokable]
-        fn prompt_info(self: &Controller, cwd: &QString) -> QString;
+        fn prompt_info(self: &Controller, cwd: &QString, pid: i32) -> QString;
+        #[qinvokable]
+        fn has_starship(self: &Controller) -> bool;
+        /// Ask Starship for the prompt (in the background); the answer comes
+        /// as starship_ready(key, json) (see prompt::starship).
+        #[qinvokable]
+        fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32);
+        #[qsignal]
+        fn starship_ready(self: Pin<&mut Controller>, key: QString, json: QString);
         /// Command history (Tessera's merged with the shells'), newest last, JSON array.
         #[qinvokable]
         fn history_all(self: &Controller, limit: i32) -> QString;
@@ -567,13 +575,21 @@ impl ffi::Controller {
         qs(&crate::history::search(&query.to_string()))
     }
 
-    fn prompt_info(&self, cwd: &ffi::QString) -> ffi::QString {
-        let cwd = cwd.to_string();
-        let cwd = match cwd.strip_prefix("file://") {
-            Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
-            None => cwd,
-        };
-        qs(&crate::prompt::info(&cwd))
+    fn prompt_info(&self, cwd: &ffi::QString, pid: i32) -> ffi::QString {
+        qs(&crate::prompt::info(&local_path(cwd), pid.max(0) as u32))
+    }
+
+    fn has_starship(&self) -> bool {
+        crate::prompt::has_starship()
+    }
+
+    fn request_starship(self: Pin<&mut Self>, key: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, width: i32, pid: i32) {
+        let (key, cwd) = (key.to_string(), local_path(cwd));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let json = crate::prompt::starship(&cwd, status, duration_ms.max(0.0) as u64, width.max(20) as u32, pid.max(0) as u32);
+            let _ = qt.queue(move |c| c.starship_ready(qs(&key), qs(&json)));
+        });
     }
 
     fn command_help_count(&self) -> i32 {
@@ -775,6 +791,17 @@ impl ffi::Controller {
     fn startup_command(&self) -> ffi::QString {
         ffi::QString::from(&std::env::var("TESSERA_RUN").unwrap_or_default())
     }
+}
+
+/// A folder from QML: an OSC 7 URL (file://host/path) or a plain path; home
+/// when empty.
+fn local_path(s: &ffi::QString) -> String {
+    let s = s.to_string();
+    let p = match s.strip_prefix("file://") {
+        Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
+        None => s,
+    };
+    if p.is_empty() { std::env::var("HOME").unwrap_or_default() } else { p }
 }
 
 fn percent_decode(s: &str) -> String {

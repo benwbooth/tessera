@@ -94,6 +94,9 @@ pub struct ProcInfo {
     pub job: String,
     pub cwd: String,
     pub shell: String,
+    /// The shell's process id (0 from an older daemon).
+    #[serde(default)]
+    pub pid: u32,
 }
 
 /// What a session is doing; from a daemon older than T_INFO, just the job.
