@@ -4,6 +4,7 @@ mod client;
 mod contrast;
 mod daemon;
 mod find;
+mod kde;
 mod keymap;
 mod net;
 mod procinfo;
@@ -108,6 +109,9 @@ fn main() {
     }
     let session = if wayland { std::fs::read_to_string(&session_file).unwrap_or_default().trim().to_string() } else { String::new() };
     bridge::ffi::tessera_create_app(&QString::from(session.as_str()));
+    if main_window {
+        kde::remember_window_position();
+    }
     bridge::ffi::tessera_set_icon(&QString::from(concat!(env!("CARGO_MANIFEST_DIR"), "/icons/tessera.svg")));
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
