@@ -640,6 +640,9 @@ impl ffi::Controller {
             "command" | "fix" => crate::ai::Options { max_tokens: 300, temperature: 0.2, timeout: std::time::Duration::from_secs(60) },
             _ => crate::ai::Options { max_tokens: 4096, temperature: 0.4, timeout: std::time::Duration::from_secs(600) },
         };
+        if std::env::var_os("TESSERA_AI_DEBUG").is_some() {
+            eprintln!("tessera ai: {task} with {}/{model} ({} messages)", provider.id, msgs.len());
+        }
         std::thread::spawn(move || {
             let stream = task == "chat";
             let q2 = qt.clone();
@@ -658,6 +661,9 @@ impl ffi::Controller {
                 if jobs.get(&key).is_some_and(|c| Arc::ptr_eq(c, &cancel)) {
                     jobs.remove(&key);
                 }
+            }
+            if std::env::var_os("TESSERA_AI_DEBUG").is_some() {
+                eprintln!("tessera ai: {task} done: {:?}", result.as_ref().map(|r| r.chars().take(80).collect::<String>()));
             }
             let (reply, err) = match result {
                 // (One command, for the tasks that want one.)

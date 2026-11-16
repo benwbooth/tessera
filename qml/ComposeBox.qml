@@ -617,7 +617,10 @@ Rectangle {
         anchors.verticalCenter: flick.verticalCenter
         anchors.verticalCenterOffset: 0.001
         visible: edit.text === "" && !(box.keys === "vi" && box.viNormal)
-        text: "Type a command — Enter runs it, Shift+Enter adds a line"
+        width: flick.width
+        elide: Text.ElideRight
+        text: box.aiNL && box.chatReady ? "Type a command, or # and what you want — Enter runs it, Shift+Enter adds a line"
+                                         : "Type a command — Enter runs it, Shift+Enter adds a line"
         color: Theme.textDim
         opacity: 0.55
         font: edit.font

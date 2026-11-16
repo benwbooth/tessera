@@ -57,6 +57,7 @@ fn main() {
         QmlFile::from("qml/MomentumWheel.qml"),
         QmlFile::from("qml/ComposeBox.qml"),
         QmlFile::from("qml/PromptBar.qml"),
+        QmlFile::from("qml/AssistantPanel.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");

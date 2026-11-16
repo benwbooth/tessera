@@ -15,7 +15,7 @@ A multi-line editor under the terminal while the shell waits at its prompt
 - History (Up/Down, Ctrl+P/N), Ctrl+C clears (or interrupts when empty),
   Shift+PgUp/PgDn scroll the terminal, Esc hands the keys to the terminal.
 
-## 2. Completion and language servers
+## 2. Completion and language servers — done (language servers to come)
 
 - A dropdown for commands, options and arguments with their descriptions:
   fish's completion files (thousands of commands), parsed `--help` and man
@@ -26,10 +26,11 @@ A multi-line editor under the terminal while the shell waits at its prompt
 - Unknown commands marked (like fish); Ctrl+R history search over every
   shell's history.
 
-## 3. AI
+## 3. AI — done
 
 - Providers: any OpenAI-compatible server (Ollama, llama.cpp, LM Studio,
-  OpenAI/Codex) and Anthropic; keys in the system keychain.
+  vLLM, LocalAI, OpenAI/Codex, Gemini, OpenRouter, Groq, Mistral, DeepSeek,
+  xAI) and Anthropic (Claude); keys in secrets.json (owner-only) or env vars.
 - Ghost-text completion (Tab accepts) from a small local model — on this
   machine `qwen3.5:4b` in Ollama; larger models for chat.
 - AI checking as you type: risky or wrong commands flagged inline with a

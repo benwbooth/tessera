@@ -51,6 +51,16 @@ Item {
             case "chevron":
                 c.moveTo(3.5, 5.5); c.lineTo(7, 9); c.lineTo(10.5, 5.5)
                 break
+            case "close":
+                c.moveTo(3.5, 3.5); c.lineTo(10.5, 10.5)
+                c.moveTo(10.5, 3.5); c.lineTo(3.5, 10.5)
+                break
+            case "spark":
+                // A four-pointed star.
+                c.moveTo(7, 1.5); c.quadraticCurveTo(7.6, 6.4, 12.5, 7); c.quadraticCurveTo(7.6, 7.6, 7, 12.5)
+                c.quadraticCurveTo(6.4, 7.6, 1.5, 7); c.quadraticCurveTo(6.4, 6.4, 7, 1.5)
+                c.closePath(); c.fill()
+                break
             case "menu":
                 c.moveTo(2.5, 3.5); c.lineTo(11.5, 3.5)
                 c.moveTo(2.5, 7); c.lineTo(11.5, 7)

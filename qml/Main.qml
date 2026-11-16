@@ -32,6 +32,13 @@ ApplicationWindow {
     property var activeView: null
     property real fontSize: 0          // a zoom (Ctrl+=/-) over the profile's size; 0 = none
     // The input editor's history (every shell's, merged), shared by the window's panes.
+    property bool assistantOpen: false
+    property real assistantWidth: 400
+    function toggleAssistant() {
+        assistantOpen = !assistantOpen
+        if (assistantOpen) Qt.callLater(assistant.focusInput)
+        else if (activeView) activeView.forceActiveFocus()
+    }
     property var commandHistory: { try { return JSON.parse(controller.historyAll(5000)) } catch (e) { return [] } }
     property real zoomBase: 11         // the profile's size when zooming started
     readonly property int zoomPercent: fontSize > 0 ? Math.round(100 * fontSize / zoomBase) : 100
@@ -1032,6 +1039,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+N"; autoRepeat: false; onActivated: controller.newWindow() }
     // Ctrl+W stays the shell's (delete a word).
     Shortcut { sequence: "Ctrl+Alt+W"; autoRepeat: false; onActivated: closeActivePane() }
+    Shortcut { sequence: "Ctrl+Shift+I"; onActivated: win.toggleAssistant() }
     Shortcut {
         sequence: "Ctrl+Shift+W"
         autoRepeat: false
@@ -1208,6 +1216,7 @@ ApplicationWindow {
             title: "View"
             icon.name: "view-visible"
             P.MenuItem { icon.name: "view-fullscreen"; text: "Toggle Full Screen\tF11"; onTriggered: toggleFullScreen() }
+            P.MenuItem { icon.name: "help-hint"; text: (win.assistantOpen ? "Hide" : "Show") + " Assistant\tCtrl+Shift+I"; onTriggered: win.toggleAssistant() }
             P.MenuSeparator {}
             P.MenuItem { icon.name: "zoom-in"; text: "Make Text Bigger\tCtrl+="; onTriggered: zoomBy(1) }
             P.MenuItem { icon.name: "zoom-out"; text: "Make Text Smaller\tCtrl+-"; onTriggered: zoomBy(-1) }
@@ -1565,6 +1574,7 @@ ApplicationWindow {
             }
         })
     }
+    Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
     Timer { id: composeTestTimer; interval: 4000; onTriggered: if (activePane) { activePane.compose.focusEditor(); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory() } }
     Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.open(menuButton); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
@@ -1900,19 +1910,31 @@ ApplicationWindow {
                 active: showTabs && !tabsAtBottom
                 anchors.left: menuButton.right
                 anchors.leftMargin: 2
-                anchors.right: zoomChip.visible ? zoomChip.left : controls.left
-                anchors.rightMargin: zoomChip.visible ? 6 : 12
+                anchors.right: zoomChip.visible ? zoomChip.left : aiButton.left
+                anchors.rightMargin: 6
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 sourceComponent: tabRowComp
+            }
+
+            // The AI assistant.
+            BarButton {
+                id: aiButton
+                anchors.right: controls.left
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                icon: "spark"
+                tip: "Assistant (Ctrl+Shift+I)"
+                open: win.assistantOpen
+                onClicked: win.toggleAssistant()
             }
 
             // The zoom, while it isn't 100%: click to go back (Ctrl+0).
             Rectangle {
                 id: zoomChip
                 visible: win.fontSize > 0
-                anchors.right: controls.left
-                anchors.rightMargin: 10
+                anchors.right: aiButton.left
+                anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 width: zoomText.implicitWidth + 14
                 height: 20
@@ -1961,11 +1983,39 @@ ApplicationWindow {
             }
         }
 
-        Item {
-            id: stack
+        RowLayout {
             Layout.row: 1
             Layout.fillWidth: true
             Layout.fillHeight: true
+            spacing: 0
+            Item {
+                id: stack
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+            }
+            // Drag to resize the assistant.
+            Item {
+                visible: win.assistantOpen
+                Layout.fillHeight: true
+                Layout.preferredWidth: 4
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.SplitHCursor
+                    property real startX: 0
+                    property real startW: 0
+                    onPressed: (m) => { startX = mapToItem(null, m.x, 0).x; startW = win.assistantWidth }
+                    onPositionChanged: (m) => { if (pressed) win.assistantWidth = Math.max(280, Math.min(win.width * 0.7, startW - (mapToItem(null, m.x, 0).x - startX))) }
+                }
+            }
+            AssistantPanel {
+                id: assistant
+                visible: win.assistantOpen
+                Layout.fillHeight: true
+                Layout.preferredWidth: win.assistantWidth
+                controller: controller
+                pane: win.activePane
+                onCloseRequested: win.toggleAssistant()
+            }
         }
 
         // Tabs below the terminal (Appearance > Tab bar location).
@@ -2062,6 +2112,7 @@ ApplicationWindow {
         if (controller.testEnv("ZOOM") !== "") zoomTestTimer.start()
         if (controller.testEnv("CONTEXT") !== "") contextTestTimer.start()
         if (controller.testEnv("COMPOSE") !== "") composeTestTimer.start()
+        if (controller.testEnv("ASSISTANT") !== "") assistantTestTimer.start()
         if (controller.daemonState() === "outdated") daemonTimer.start()
         controller.aiAutodetect()
         if (controller.screenshotPath() !== "") shotTimer.start()
