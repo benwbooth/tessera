@@ -118,6 +118,9 @@ pub struct Session {
     cell_image: Option<Vec<u8>>,
     exited: bool,
     last_cursor_row: Option<u16>,
+    /// And its column: a cursor moving along its row (backspacing over
+    /// blanks) changes nothing else, but must be drawn.
+    last_cursor_x: Option<u16>,
     last_full_size: (u16, u16),
     selected: String,
     t0: Instant,
@@ -335,6 +338,7 @@ pub fn session_open(
         cell_image: None,
         exited: false,
         last_cursor_row: None,
+        last_cursor_x: None,
         last_full_size: (0, 0),
         selected: String::new(),
         t0: Instant::now(),
@@ -1725,12 +1729,14 @@ impl Session {
         let cursor = snap.cursor_viewport().ok().flatten();
         let cursor_visible = snap.cursor_visible().unwrap_or(false) && cursor.is_some();
         let cursor_row = cursor.filter(|_| cursor_visible).map(|c| c.y);
-        let cursor_moved = cursor_row != self.last_cursor_row;
+        let cursor_x = cursor.filter(|_| cursor_visible).map(|c| c.x);
+        let cursor_moved = cursor_row != self.last_cursor_row || cursor_x != self.last_cursor_x;
         if !full && dirty == Dirty::Clean && !cursor_moved {
             return false;
         }
         let old_cursor_row = self.last_cursor_row;
         self.last_cursor_row = cursor_row;
+        self.last_cursor_x = cursor_x;
         self.last_full_size = (cols, rows);
 
         out.cols = cols;
