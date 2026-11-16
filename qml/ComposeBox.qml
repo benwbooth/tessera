@@ -226,14 +226,18 @@ Rectangle {
     property bool compChosen: false    // Up/Down used: Enter takes the item
     property int compIndex: 0
     property bool historyMode: false   // the dropdown lists history (Ctrl+R, the clock)
+    property string historyQuery: ""
     function openHistory() {
         historyMode = true; compOpen = true; compChosen = true; compIndex = 0
+        historyQuery = edit.text.trim()
+        historySearch.text = historyQuery
         requestComplete()
-        edit.forceActiveFocus()
+        historySearch.forceActiveFocus()
+        historySearch.selectAll()
     }
     function requestComplete() {
         if (!controller) return
-        const r = JSON.parse(historyMode ? controller.historySearch(edit.text)
+        const r = JSON.parse(historyMode ? controller.historySearch(historyQuery)
                                          : controller.complete(edit.text, edit.cursorPosition, box.cwd))
         comp = r
         if (compIndex >= r.items.length) compIndex = 0
@@ -245,7 +249,7 @@ Rectangle {
     function acceptComp(i) {
         const it = comp.items[i === undefined ? compIndex : i]
         if (!it) return
-        if (historyMode) { setText(it.insert); closeComp(); return }
+        if (historyMode) { setText(it.insert); closeComp(); edit.forceActiveFocus(); return }
         edit.remove(comp.start, comp.end)
         let ins = it.insert
         // A finished word gets its space; a folder or "--opt=" keeps going.
@@ -265,7 +269,7 @@ Rectangle {
             const p = edit.cursorPosition, t = edit.text
             const prev = t[p - 1] || " ", next = t[p] || " "
             const inWord = !/\s/.test(prev) && /\s/.test(next)
-            if (box.compOpen && box.historyMode) box.requestComplete()
+            if (box.compOpen && box.historyMode) return
             else if (box.compOpen) { if (inWord || prev === "/") box.requestComplete(); else box.closeComp() }
             else if (inWord && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete() }
         }
@@ -683,21 +687,90 @@ Rectangle {
     // The dropdown, above the editor at the word being completed.
     Rectangle {
         id: compPopup
-        visible: box.compOpen && box.comp.items.length > 0 && edit.activeFocus
+        // History: the editor's full width, with its own search field.
+        readonly property bool hist: box.historyMode
+        visible: box.compOpen && (hist || box.comp.items.length > 0) && (edit.activeFocus || historySearch.activeFocus)
         z: 50
         readonly property real rowH: Math.ceil(fm.height) + 6
-        readonly property int rows: Math.min(10, box.comp.items.length)
+        readonly property int rows: Math.max(hist ? 1 : 0, Math.min(hist ? 14 : 10, box.comp.items.length))
         readonly property var anchorRect: edit.positionToRectangle(box.comp.start)
-        width: Math.min(box.width - 16, 640)
-        height: rows * rowH + 8 + (docText.visible ? docText.implicitHeight + 12 : 0)
-        x: Math.max(8, Math.min(flick.x + anchorRect.x - 28, box.width - width - 8))
+        width: hist ? box.width - 16 : Math.min(box.width - 16, 640)
+        height: (hist ? searchRow.height + 6 : 0) + rows * rowH + 8 + (docText.visible ? docText.implicitHeight + 12 : 0)
+        x: hist ? 8 : Math.max(8, Math.min(flick.x + anchorRect.x - 28, box.width - width - 8))
         y: -height - 4
         radius: 8
         color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04)
         border.color: Theme.divider
+        Rectangle {
+            id: searchRow
+            visible: compPopup.hist
+            x: 6; y: 6
+            width: parent.width - 12
+            height: visible ? 30 : 0
+            radius: 6
+            color: Theme.mix(Theme.bg, Theme.fg, 0.04)
+            border.color: historySearch.activeFocus ? Theme.accent : Theme.divider
+            Text {
+                id: searchIcon
+                anchors.left: parent.left
+                anchors.leftMargin: 9
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\u2315"
+                color: Theme.textDim
+                font.pixelSize: 15
+            }
+            TextInput {
+                id: historySearch
+                anchors.left: searchIcon.right
+                anchors.leftMargin: 8
+                anchors.right: countText.left
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.text
+                selectionColor: Theme.accent
+                selectedTextColor: Theme.bg
+                font.family: edit.font.family
+                font.pointSize: edit.font.pointSize
+                renderType: Text.NativeRendering
+                clip: true
+                onTextChanged: if (box.historyMode) { box.historyQuery = text; box.compIndex = 0; box.requestComplete() }
+                Keys.onPressed: (e) => {
+                    if (e.key === Qt.Key_Escape) { box.closeComp(); edit.forceActiveFocus(); e.accepted = true; return }
+                    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { box.acceptComp(); e.accepted = true; return }
+                    if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_R) { box.compIndex = Math.min(box.comp.items.length - 1, box.compIndex + 1); e.accepted = true; return }
+                    e.accepted = box.compKey(e)
+                }
+                Text {
+                    visible: parent.text === ""
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Search history (every word, any order)"
+                    color: Theme.textDim
+                    opacity: 0.6
+                    font: parent.font
+                }
+            }
+            Text {
+                id: countText
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: box.comp.items.length >= 300 ? "300+" : box.comp.items.length + (box.comp.items.length === 1 ? " command" : " commands")
+                color: Theme.textDim
+                font.pixelSize: 11
+            }
+        }
+        Text {
+            visible: compPopup.hist && box.comp.items.length === 0
+            anchors.top: searchRow.bottom
+            anchors.topMargin: 8
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "No commands match."
+            color: Theme.textDim
+            font.pixelSize: 12
+        }
         ListView {
             id: compList
-            x: 4; y: 4
+            x: 4; y: compPopup.hist ? searchRow.height + 10 : 4
             width: parent.width - 8
             height: compPopup.rows * compPopup.rowH
             clip: true
@@ -706,6 +779,8 @@ Rectangle {
             highlightMoveDuration: 0
             boundsBehavior: Flickable.StopAtBounds
             onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+            ScrollBar.vertical: ScrollBar { policy: compList.contentHeight > compList.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+            MomentumWheel { flick: compList }
             delegate: Rectangle {
                 width: compList.width
                 height: compPopup.rowH
@@ -716,7 +791,7 @@ Rectangle {
                     x: 6
                     anchors.verticalCenter: parent.verticalCenter
                     width: 14
-                    text: ({ command: "\u276f", subcommand: "\u25b8", option: "\u2013", dir: "\u25a2", file: "\u25ab", branch: "\u2442", host: "@", variable: "$", value: "\u2022" })[modelData.kind] || "\u2022"
+                    text: ({ history: "\u21ba", command: "\u276f", subcommand: "\u25b8", option: "\u2013", dir: "\u25a2", file: "\u25ab", branch: "\u2442", host: "@", variable: "$", value: "\u2022" })[modelData.kind] || "\u2022"
                     color: ({ command: box.ansi(4, "#61afef"), subcommand: box.ansi(5, "#c678dd"), option: box.ansi(6, "#56b6c2"), dir: box.ansi(3, "#d19a66"), branch: box.ansi(2, "#98c379") })[modelData.kind] || Theme.textDim
                     font.pixelSize: 11
                     horizontalAlignment: Text.AlignHCenter
@@ -727,7 +802,9 @@ Rectangle {
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 0.001
-                    width: Math.min(implicitWidth, compList.width * 0.45)
+                    // (History: the whole command, with the time and folder to its right.)
+                    width: compPopup.hist ? compList.width - kindTag.width - 32 - Math.min(histDetail.implicitWidth, 260)
+                                          : Math.min(implicitWidth, compList.width * 0.45)
                     elide: Text.ElideRight
                     text: modelData.label
                     color: Theme.text
@@ -736,7 +813,8 @@ Rectangle {
                     renderType: Text.NativeRendering
                 }
                 Text {
-                    anchors.left: lbl.right
+                    id: histDetail
+                    anchors.left: compPopup.hist ? undefined : lbl.right
                     anchors.leftMargin: 14
                     anchors.right: parent.right
                     anchors.rightMargin: 8
@@ -750,6 +828,9 @@ Rectangle {
                 }
                 HoverHandler { id: rowHover }
                 TapHandler { onTapped: { box.compIndex = index; box.acceptComp(index); edit.forceActiveFocus() } }
+                ToolTip.visible: compPopup.hist && rowHover.hovered && lbl.truncated
+                ToolTip.text: modelData.insert
+                ToolTip.delay: 500
             }
         }
         // The chosen item's full help, under the list.

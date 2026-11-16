@@ -1564,7 +1564,7 @@ ApplicationWindow {
             }
         })
     }
-    Timer { id: composeTestTimer; interval: 4000; onTriggered: if (activePane) { activePane.compose.focusEditor(); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit() } }
+    Timer { id: composeTestTimer; interval: 4000; onTriggered: if (activePane) { activePane.compose.focusEditor(); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory() } }
     Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.open(menuButton); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
     P.Menu {
