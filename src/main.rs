@@ -1,6 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod bridge;
 mod client;
+mod complete;
 mod contrast;
 mod daemon;
 mod find;

@@ -113,6 +113,7 @@ Item {
         history: pane.commandHistory
         lang: pane.replLang !== "" ? pane.replLang : "bash"
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
+        cwd: term.pwd !== "" ? term.pwd : pane.procCwd
         onSubmitted: (t) => {
             if (t.indexOf("\n") < 0) term.sendText(t + "\r")
             else { term.pasteText(t); term.sendText("\r") }

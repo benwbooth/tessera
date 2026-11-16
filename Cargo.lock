@@ -758,6 +758,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "shell-words",
  "streaming-iterator",
  "tree-sitter",
  "tree-sitter-bash",

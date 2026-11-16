@@ -16,6 +16,7 @@ Rectangle {
     property string keys: "emacs"      // "emacs", "vi", "vscode"
     property var history: []           // oldest first (shared by the window)
     property var themeData: ({})       // the terminal's theme (ansi colors)
+    property string cwd: ""            // the shell's folder (for path completion)
     signal submitted(string text)
     signal handBack()                  // Esc: type into the terminal instead
 
@@ -203,6 +204,67 @@ Rectangle {
             insert(ch + pairs[ch])
             edit.cursorPosition = p + 1
             return true
+        }
+        return false
+    }
+
+    // ---- completion --------------------------------------------------------
+    // The dropdown: commands, subcommands, options with their help, paths,
+    // branches, hosts. Opens on Tab, and by itself while typing a word; Tab
+    // takes the choice (Enter too once you've moved through the list).
+    property var comp: ({ start: 0, end: 0, items: [], pending: false })
+    property bool compOpen: false
+    property bool compChosen: false    // Up/Down used: Enter takes the item
+    property int compIndex: 0
+    function requestComplete() {
+        if (!controller) return
+        const r = JSON.parse(controller.complete(edit.text, edit.cursorPosition, box.cwd))
+        comp = r
+        if (compIndex >= r.items.length) compIndex = 0
+        if (r.items.length === 0 && !r.pending) closeComp()
+        if (r.pending) compRetry.restart()
+    }
+    function openComp() { compOpen = true; compChosen = false; compIndex = 0; requestComplete() }
+    function closeComp() { compOpen = false; compChosen = false }
+    function acceptComp(i) {
+        const it = comp.items[i === undefined ? compIndex : i]
+        if (!it) return
+        edit.remove(comp.start, comp.end)
+        let ins = it.insert
+        // A finished word gets its space; a folder or "--opt=" keeps going.
+        const more = it.kind === "dir" || ins.endsWith("=") || ins.endsWith("/")
+        if (!more && edit.text[comp.start] !== " ") ins += " "
+        edit.insert(comp.start, ins)
+        edit.cursorPosition = comp.start + ins.length
+        if (more) { compIndex = 0; requestComplete() } else closeComp()
+    }
+    Timer { id: compRetry; interval: 250; onTriggered: if (box.compOpen) box.requestComplete() }
+    Timer {
+        id: compAuto
+        interval: 110
+        onTriggered: {
+            // Open by itself on a word being typed (not after a space, not in
+            // the middle of a word), and keep an open list up to date.
+            const p = edit.cursorPosition, t = edit.text
+            const prev = t[p - 1] || " ", next = t[p] || " "
+            const inWord = !/\s/.test(prev) && /\s/.test(next)
+            if (box.compOpen) { if (inWord || prev === "/") box.requestComplete(); else box.closeComp() }
+            else if (inWord && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete() }
+        }
+    }
+    function compKey(e) {
+        if (!compOpen || comp.items.length === 0) return false
+        const n = comp.items.length
+        switch (e.key) {
+        case Qt.Key_Down: compIndex = (compIndex + 1) % n; compChosen = true; return true
+        case Qt.Key_Up: compIndex = (compIndex - 1 + n) % n; compChosen = true; return true
+        case Qt.Key_PageDown: compIndex = Math.min(n - 1, compIndex + 8); compChosen = true; return true
+        case Qt.Key_PageUp: compIndex = Math.max(0, compIndex - 8); compChosen = true; return true
+        case Qt.Key_Tab: acceptComp(); return true
+        case Qt.Key_Escape: closeComp(); return true
+        case Qt.Key_Return: case Qt.Key_Enter:
+            if (compChosen && !(e.modifiers & Qt.ShiftModifier)) { acceptComp(); return true }
+            closeComp(); return false
         }
         return false
     }
@@ -431,10 +493,17 @@ Rectangle {
                 seen = text
                 idle.restart()
                 box.analyze(false)
+                compAuto.restart()
             }
             Keys.priority: Keys.BeforeItem
             Keys.onPressed: (e) => {
-                let done = box.commonKey(e)
+                let done = box.compKey(e)
+                if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
+                        && !/^\s*$/.test(text.substring(box.lineStart(cursorPosition), cursorPosition))) {
+                    box.openComp(); done = true
+                }
+                if (!done && e.key === Qt.Key_Space && (e.modifiers & Qt.ControlModifier)) { box.openComp(); done = true }
+                if (!done) done = box.commonKey(e)
                 if (!done && !(box.keys === "vi" && box.viNormal)) done = box.smartKey(e)
                 if (!done) {
                     if (box.keys === "vi") done = box.viKey(e)
@@ -511,4 +580,98 @@ Rectangle {
         })
     }
     onLangChanged: analyze(false)
+
+    // The dropdown, above the editor at the word being completed.
+    Rectangle {
+        id: compPopup
+        visible: box.compOpen && box.comp.items.length > 0 && edit.activeFocus
+        z: 50
+        readonly property real rowH: Math.ceil(fm.height) + 6
+        readonly property int rows: Math.min(10, box.comp.items.length)
+        readonly property var anchorRect: edit.positionToRectangle(box.comp.start)
+        width: Math.min(box.width - 16, 640)
+        height: rows * rowH + 8 + (docText.visible ? docText.implicitHeight + 12 : 0)
+        x: Math.max(8, Math.min(flick.x + anchorRect.x - 28, box.width - width - 8))
+        y: -height - 4
+        radius: 8
+        color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04)
+        border.color: Theme.divider
+        ListView {
+            id: compList
+            x: 4; y: 4
+            width: parent.width - 8
+            height: compPopup.rows * compPopup.rowH
+            clip: true
+            model: box.comp.items
+            currentIndex: box.compIndex
+            highlightMoveDuration: 0
+            boundsBehavior: Flickable.StopAtBounds
+            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+            delegate: Rectangle {
+                width: compList.width
+                height: compPopup.rowH
+                radius: 5
+                color: index === box.compIndex ? Theme.mix(Theme.bg, Theme.accent, 0.35) : (rowHover.hovered ? Theme.tabHover : "transparent")
+                Text {
+                    id: kindTag
+                    x: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 14
+                    text: ({ command: "\u276f", subcommand: "\u25b8", option: "\u2013", dir: "\u25a2", file: "\u25ab", branch: "\u2442", host: "@", variable: "$", value: "\u2022" })[modelData.kind] || "\u2022"
+                    color: ({ command: box.ansi(4, "#61afef"), subcommand: box.ansi(5, "#c678dd"), option: box.ansi(6, "#56b6c2"), dir: box.ansi(3, "#d19a66"), branch: box.ansi(2, "#98c379") })[modelData.kind] || Theme.textDim
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignHCenter
+                }
+                Text {
+                    id: lbl
+                    anchors.left: kindTag.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0.001
+                    width: Math.min(implicitWidth, compList.width * 0.45)
+                    elide: Text.ElideRight
+                    text: modelData.label
+                    color: Theme.text
+                    font.family: edit.font.family
+                    font.pointSize: edit.font.pointSize
+                    renderType: Text.NativeRendering
+                }
+                Text {
+                    anchors.left: lbl.right
+                    anchors.leftMargin: 14
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0.001
+                    text: modelData.detail
+                    elide: Text.ElideRight
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    renderType: Text.NativeRendering
+                }
+                HoverHandler { id: rowHover }
+                TapHandler { onTapped: { box.compIndex = index; box.acceptComp(index); edit.forceActiveFocus() } }
+            }
+        }
+        // The chosen item's full help, under the list.
+        Text {
+            id: docText
+            readonly property var item: box.comp.items[box.compIndex]
+            visible: item !== undefined && item.detail.length > 60
+            anchors.top: compList.bottom
+            anchors.topMargin: 6
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: 10
+            text: item ? item.detail : ""
+            wrapMode: Text.Wrap
+            maximumLineCount: 5
+            elide: Text.ElideRight
+            color: Theme.text
+            opacity: 0.85
+            font.pixelSize: 12
+            renderType: Text.NativeRendering
+            Rectangle { anchors.bottom: parent.top; anchors.bottomMargin: 3; width: parent.width; height: 1; color: Theme.divider }
+        }
+    }
 }

@@ -204,6 +204,8 @@ pub mod ffi {
         #[qproperty(i32, revision)]
         /// Progress of "Get All iTerm2-Color-Schemes" ("" when idle).
         #[qproperty(QString, pack_status)]
+        /// Progress of downloading fish's completions for command help.
+        #[qproperty(QString, help_status)]
         type Controller = super::ControllerRust;
 
         /// Download the complete iTerm2-Color-Schemes collection (background).
@@ -270,6 +272,15 @@ pub mod ffi {
         /// The input editor's language for the program at the prompt.
         #[qinvokable]
         fn language_for(self: &Controller, program: &QString) -> QString;
+        /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
+        #[qinvokable]
+        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString) -> QString;
+        /// Download fish's completion files (more commands and subcommands
+        /// get help text); progress in help_status.
+        #[qinvokable]
+        fn download_command_help(self: Pin<&mut Controller>);
+        #[qinvokable]
+        fn command_help_count(self: &Controller) -> i32;
         /// Windows: open an elevated window (the UAC prompt first).
         #[qinvokable]
         fn new_admin_window(self: &Controller);
@@ -355,6 +366,7 @@ use cxx_qt::Threading;
 pub struct ControllerRust {
     revision: i32,
     pack_status: ffi::QString,
+    help_status: ffi::QString,
 }
 
 use std::pin::Pin;
@@ -483,6 +495,36 @@ impl ffi::Controller {
 
     fn syntax(&self, lang: &ffi::QString, text: &ffi::QString) -> ffi::QString {
         qs(&crate::syntax::analyze(&lang.to_string(), &text.to_string()))
+    }
+
+    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString) -> ffi::QString {
+        let cwd = cwd.to_string();
+        // An OSC 7 URL (file://host/path) or a plain path.
+        let cwd = match cwd.strip_prefix("file://") {
+            Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
+            None => cwd,
+        };
+        let cwd = if cwd.is_empty() { std::env::var("HOME").unwrap_or_default() } else { cwd };
+        qs(&crate::complete::complete(&text.to_string(), cursor.max(0) as usize, &cwd))
+    }
+
+    fn download_command_help(mut self: Pin<&mut Self>) {
+        self.as_mut().set_help_status(qs("Downloading fish's completions\u{2026}"));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = crate::complete::download_fish_completions();
+            let _ = qt.queue(move |mut c| {
+                let msg = match result {
+                    Ok(n) => format!("Help for {n} commands from fish-shell."),
+                    Err(e) => format!("Couldn't download: {e}"),
+                };
+                c.as_mut().set_help_status(qs(&msg));
+            });
+        });
+    }
+
+    fn command_help_count(&self) -> i32 {
+        crate::complete::fish_completion_count() as i32
     }
 
     fn language_for(&self, program: &ffi::QString) -> ffi::QString {
