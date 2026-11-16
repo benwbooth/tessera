@@ -72,8 +72,17 @@ fn lang(name: &str) -> Option<&'static Lang> {
     static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<&'static Lang>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     let mut c = cache.lock().unwrap();
-    let name = if LANGUAGES.iter().any(|(n, _)| *n == name) || crate::grammars::available().iter().any(|n| n == name) { name } else { "bash" };
-    *c.entry(name.to_string()).or_insert_with(|| make(name).map(|l| &*Box::leak(Box::new(l))))
+    let name = if is_builtin(name) || crate::grammars::is_known(name) { name } else { "bash" };
+    if let Some(l) = c.get(name) {
+        return *l;
+    }
+    // (A language that isn't here yet isn't remembered as missing: it may
+    // be unpacked in a moment.)
+    let l = make(name).map(|l| &*Box::leak(Box::new(l)));
+    if l.is_some() || is_builtin(name) {
+        c.insert(name.to_string(), l);
+    }
+    l
 }
 
 /// The editor's language for the program at the prompt (a REPL), or "" when
@@ -140,11 +149,15 @@ pub fn detect_language(text: &str) -> &'static str {
     if best.1 >= 3 && best.1 * 2 >= lines.len() { best.0 } else { "" }
 }
 
+pub fn is_builtin(name: &str) -> bool {
+    LANGUAGES.iter().any(|(n, _)| *n == name)
+}
+
 /// The languages for the editor's menu (JSON [[name, label]]).
 pub fn languages_json() -> String {
     let mut out: Vec<[String; 2]> = LANGUAGES.iter().map(|(n, l)| [n.to_string(), l.to_string()]).collect();
-    for n in crate::grammars::available() {
-        if !LANGUAGES.iter().any(|(b, _)| b == n) && !["tsx"].contains(&n.as_str()) {
+    for n in crate::grammars::known() {
+        if !is_builtin(&n) && n != "tsx" {
             let mut label: String = n.replace(['-', '_'], " ");
             if let Some(f) = label.get_mut(0..1) {
                 f.make_ascii_uppercase();

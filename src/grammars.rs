@@ -1,6 +1,9 @@
 //! More languages for the editor, loaded when needed: Helix's tree-sitter
 //! collection (a compiled grammar and highlight queries for each of ~250
-//! languages), wherever Helix keeps its runtime.
+//! languages). From Helix's runtime when Helix is installed; otherwise the
+//! first language that's needed fetches Helix's release archive once (about
+//! 16 MB, kept compressed in the cache) and each language is unpacked from
+//! it only when it's used.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -16,7 +19,6 @@ pub fn runtime_dirs() -> &'static [PathBuf] {
         }
         if let Some(h) = std::env::var_os("HOME") {
             dirs.push(PathBuf::from(&h).join(".config/helix/runtime"));
-            dirs.push(PathBuf::from(&h).join(".local/share/tessera/helix-runtime"));
         }
         // Nix wraps hx with its runtime's path: read it from the wrapper.
         if let Some(path) = std::env::var_os("PATH") {
@@ -40,6 +42,11 @@ pub fn runtime_dirs() -> &'static [PathBuf] {
         dirs.push(PathBuf::from("/usr/lib/helix/runtime"));
         dirs.push(PathBuf::from("/usr/share/helix/runtime"));
         dirs.retain(|d| d.join("grammars").is_dir());
+        // Tessera's own (languages unpacked on demand) always counts.
+        let own = own_dir();
+        if !dirs.contains(&own) {
+            dirs.push(own);
+        }
         dirs.dedup();
         dirs
     })
@@ -51,10 +58,39 @@ fn grammar_file(name: &str) -> Option<PathBuf> {
         .or_else(|| runtime_dirs().iter().map(|d| d.join("grammars").join(format!("{name}.so"))).find(|p| p.is_file()))
 }
 
-/// Every language there's a grammar for, sorted.
-pub fn available() -> &'static [String] {
-    static LIST: OnceLock<Vec<String>> = OnceLock::new();
-    LIST.get_or_init(|| {
+/// Where languages unpacked on demand go.
+fn own_dir() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("tessera/helix-runtime")
+}
+
+/// Every language Helix has a grammar for (whether it's here yet or not).
+pub fn known() -> Vec<String> {
+    let mut out: Vec<String> = include_str!("helix_languages.txt").lines().map(str::to_string).collect();
+    for n in installed() {
+        if !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Whether a language can be had (here, or from Helix's archive).
+pub fn is_known(name: &str) -> bool {
+    include_str!("helix_languages.txt").lines().any(|l| l == name) || grammar_file(name).is_some()
+}
+
+/// The languages whose grammar is here now.
+pub fn available() -> Vec<String> {
+    installed()
+}
+
+fn installed() -> Vec<String> {
+    {
         let mut out: Vec<String> = Vec::new();
         for d in runtime_dirs() {
             if let Ok(rd) = std::fs::read_dir(d.join("grammars")) {
@@ -70,14 +106,33 @@ pub fn available() -> &'static [String] {
         }
         out.sort();
         out
-    })
+    }
 }
 
-/// Fetch Helix's grammars and queries (its latest release, for this
-/// computer) into Tessera's data folder. Returns how many languages.
-pub fn download() -> Result<usize, String> {
+pub fn count() -> usize {
+    known().len()
+}
+
+// ---- on demand ---------------------------------------------------------------------
+
+fn cache_dir() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("tessera")
+}
+
+/// Helix's release archive for this computer, fetched once and kept.
+fn archive() -> Result<PathBuf, String> {
     let (os, ext) = if cfg!(windows) { ("windows", "zip") } else if cfg!(target_os = "macos") { ("macos", "tar.xz") } else { ("linux", "tar.xz") };
     let arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+    let dir = cache_dir();
+    if let Some(have) = std::fs::read_dir(&dir).ok().and_then(|rd| {
+        rd.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("helix-") && n.to_string_lossy().ends_with(ext)))
+    }) {
+        return Ok(have);
+    }
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(600))).build().into();
     let release: serde_json::Value = agent
         .get("https://api.github.com/repos/helix-editor/helix/releases/latest")
@@ -87,55 +142,114 @@ pub fn download() -> Result<usize, String> {
         .body_mut()
         .read_json()
         .map_err(|e| e.to_string())?;
-    let url = release["assets"]
+    let (name, url) = release["assets"]
         .as_array()
         .and_then(|a| a.iter().find_map(|x| {
             let n = x["name"].as_str()?;
-            (n.contains(&format!("{arch}-{os}")) && n.ends_with(ext)).then(|| x["browser_download_url"].as_str().map(str::to_string)).flatten()
+            (n.contains(&format!("{arch}-{os}")) && n.ends_with(ext)).then(|| Some((n.to_string(), x["browser_download_url"].as_str()?.to_string()))).flatten()
         }))
         .ok_or("no Helix release for this computer")?;
-    let home = std::env::var_os("HOME").ok_or("no home folder")?;
-    let dest = PathBuf::from(home).join(".local/share/tessera/helix-runtime");
-    let tmp = std::env::temp_dir().join(format!("tessera-helix.{ext}"));
+    let _ = std::fs::create_dir_all(&dir);
+    let dest = dir.join(&name);
+    let part = dir.join(format!("{name}.part"));
     let mut resp = agent.get(&url).call().map_err(|e| e.to_string())?;
-    let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut f = std::fs::File::create(&part).map_err(|e| e.to_string())?;
     std::io::copy(&mut resp.body_mut().as_reader(), &mut f).map_err(|e| e.to_string())?;
     drop(f);
-    let unpack = std::env::temp_dir().join("tessera-helix");
-    let _ = std::fs::remove_dir_all(&unpack);
-    std::fs::create_dir_all(&unpack).map_err(|e| e.to_string())?;
-    let ok = std::process::Command::new("tar").arg("-xf").arg(&tmp).arg("-C").arg(&unpack).status().map_err(|e| format!("couldn't run tar: {e}"))?;
-    if !ok.success() {
-        return Err("couldn't unpack Helix's release".into());
-    }
-    // The archive's runtime folder (inside its top folder).
-    let runtime = std::fs::read_dir(&unpack).map_err(|e| e.to_string())?.flatten().map(|e| e.path().join("runtime")).find(|p| p.join("grammars").is_dir()).ok_or("no grammars in the release")?;
-    let _ = std::fs::remove_dir_all(&dest);
-    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-    for part in ["grammars", "queries"] {
-        copy_dir(&runtime.join(part), &dest.join(part)).map_err(|e| e.to_string())?;
-    }
-    let _ = std::fs::remove_dir_all(&unpack);
-    let _ = std::fs::remove_file(&tmp);
-    Ok(std::fs::read_dir(dest.join("grammars")).map(|r| r.count()).unwrap_or(0))
+    std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
+    Ok(dest)
 }
 
-fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for e in std::fs::read_dir(from)?.flatten() {
-        let p = e.path();
-        let t = to.join(e.file_name());
-        if p.is_dir() {
-            copy_dir(&p, &t)?;
-        } else {
-            std::fs::copy(&p, &t)?;
+/// The archive's file list (cached next to it).
+fn archive_index(archive: &Path) -> Result<Vec<String>, String> {
+    let idx = archive.with_extension("index");
+    if let Ok(t) = std::fs::read_to_string(&idx) {
+        return Ok(t.lines().map(str::to_string).collect());
+    }
+    let out = std::process::Command::new("tar").arg("-tf").arg(archive).output().map_err(|e| format!("couldn't run tar: {e}"))?;
+    if !out.status.success() {
+        return Err("couldn't read Helix's archive".into());
+    }
+    let list: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.contains("/runtime/grammars/") || l.contains("/runtime/queries/")).map(str::to_string).collect();
+    let _ = std::fs::write(&idx, list.join("\n"));
+    Ok(list)
+}
+
+/// Unpack these archive members into Tessera's runtime folder.
+fn unpack(archive: &Path, members: &[String]) -> Result<(), String> {
+    if members.is_empty() {
+        return Ok(());
+    }
+    let tmp = cache_dir().join(format!("helix-unpack-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let ok = std::process::Command::new("tar").arg("-xf").arg(archive).arg("-C").arg(&tmp).args(members).status().map_err(|e| e.to_string())?;
+    if !ok.success() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err("couldn't unpack from Helix's archive".into());
+    }
+    let own = own_dir();
+    for m in members {
+        let Some(i) = m.find("/runtime/") else { continue };
+        let rel = &m[i + "/runtime/".len()..];
+        let (from, to) = (tmp.join(m), own.join(rel));
+        if from.is_file() {
+            let _ = std::fs::create_dir_all(to.parent().unwrap());
+            std::fs::copy(&from, &to).map_err(|e| e.to_string())?;
         }
     }
+    let _ = std::fs::remove_dir_all(&tmp);
     Ok(())
 }
 
-pub fn count() -> usize {
-    available().len()
+/// Make a language usable: unpack its grammar and queries (and the queries
+/// they inherit) from Helix's archive, fetching that first if need be.
+/// Ok(true) when something was added.
+pub fn ensure(name: &str) -> Result<bool, String> {
+    if grammar_file(name).is_some() {
+        return Ok(false);
+    }
+    if !is_known(name) {
+        return Err(format!("no grammar for {name}"));
+    }
+    let archive = archive()?;
+    let index = archive_index(&archive)?;
+    let mut want: Vec<String> = Vec::new();
+    let mut queue = vec![name.to_string()];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(lang) = queue.pop() {
+        if !seen.insert(lang.clone()) {
+            continue;
+        }
+        for m in &index {
+            let is_grammar = lang == name && (m.ends_with(&format!("/runtime/grammars/{lang}.so")) || m.ends_with(&format!("/runtime/grammars/{lang}.dll")) || m.ends_with(&format!("/runtime/grammars/{lang}.dylib")));
+            if is_grammar || (m.contains(&format!("/runtime/queries/{lang}/")) && !m.ends_with('/')) {
+                want.push(m.clone());
+            }
+        }
+        // The queries it inherits, too.
+        unpack(&archive, &want.iter().filter(|m| m.ends_with(&format!("/queries/{lang}/highlights.scm"))).cloned().collect::<Vec<_>>())?;
+        if let Ok(t) = std::fs::read_to_string(own_dir().join("queries").join(&lang).join("highlights.scm")) {
+            for l in t.lines() {
+                if let Some(ps) = l.trim().strip_prefix("; inherits:") {
+                    queue.extend(ps.split(',').map(|p| p.trim().to_string()));
+                }
+            }
+        }
+    }
+    unpack(&archive, &want)?;
+    Ok(grammar_file(name).is_some())
+}
+
+/// Everything at once (for working offline): every grammar and query.
+pub fn ensure_all() -> Result<usize, String> {
+    let archive = archive()?;
+    let index = archive_index(&archive)?;
+    let members: Vec<String> = index.into_iter().filter(|m| !m.ends_with('/')).collect();
+    for chunk in members.chunks(400) {
+        unpack(&archive, chunk)?;
+    }
+    Ok(installed().len())
 }
 
 /// A highlights query with Helix's "; inherits: a,b" lines resolved (the
@@ -189,5 +303,22 @@ mod tests {
             let ok = l.as_ref().map(|l| tree_sitter::Query::new(l, &q).map(|q| q.capture_names().len()).map_err(|e| e.to_string()));
             println!("{n}: loaded {} query {:?}", l.is_some(), ok);
         }
+    }
+}
+
+#[cfg(test)]
+mod on_demand {
+    #[test]
+    #[ignore]
+    fn fetch_one() {
+        let t = std::time::Instant::now();
+        let r = super::ensure("haskell");
+        println!("ensure haskell: {r:?} in {:?}", t.elapsed());
+        let l = super::load("haskell").expect("loads");
+        let q = super::highlights("haskell");
+        println!("query compiles: {:?}", tree_sitter::Query::new(&l, &q).map(|q| q.capture_names().len()).map_err(|e| e.to_string()));
+        let t = std::time::Instant::now();
+        println!("ensure typescript (from the kept archive): {:?} in {:?}", super::ensure("tsx"), t.elapsed());
+        println!("installed: {:?}", super::available());
     }
 }

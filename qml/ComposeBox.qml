@@ -686,6 +686,7 @@ Rectangle {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: box.problem !== "" ? "\u26a0 " + box.problem
+                  : box.fetchingLang !== "" ? "getting " + box.fetchingLang + "\u2026"
                   : box.aiBusy !== "" ? "\u2726 " + (box.aiBusy === "fix" ? "fixing\u2026" : "writing the command\u2026")
                   : box.aiNote !== "" ? "\u2726 " + box.aiNote
                   : box.lspNote !== "" ? "\u26a0 " + box.lspNote
@@ -973,7 +974,24 @@ Rectangle {
             markup: box.ansi(4, "#61afef"),
         })
     }
-    onLangChanged: analyze(false)
+    // A language that isn't here yet is fetched (once) in the background.
+    property string fetchingLang: ""
+    onLangChanged: {
+        analyze(false)
+        if (controller && !controller.languageInstalled(lang)) {
+            fetchingLang = lang
+            controller.ensureLanguage(lang)
+        }
+    }
+    Connections {
+        target: box.controller
+        function onLanguageReady(name, error) {
+            if (name !== box.fetchingLang) return
+            box.fetchingLang = ""
+            if (error !== "") box.aiNote = error
+            else box.analyze(true)
+        }
+    }
 
     // The dropdown, above the editor at the word being completed.
     Rectangle {

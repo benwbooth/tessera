@@ -322,6 +322,14 @@ pub mod ffi {
         fn download_grammars(self: Pin<&mut Controller>);
         #[qinvokable]
         fn grammar_count(self: &Controller) -> i32;
+        /// Make a language usable (unpack it from Helix's archive, fetching
+        /// that once if need be), in the background: language_ready(name, error).
+        #[qinvokable]
+        fn ensure_language(self: Pin<&mut Controller>, name: &QString);
+        #[qinvokable]
+        fn language_installed(self: &Controller, name: &QString) -> bool;
+        #[qsignal]
+        fn language_ready(self: Pin<&mut Controller>, name: QString, error: QString);
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
         fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString) -> QString;
@@ -922,15 +930,39 @@ impl ffi::Controller {
         self.as_mut().set_help_status(qs("Downloading Helix's grammars\u{2026}"));
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let r = crate::grammars::download();
+            let r = crate::grammars::ensure_all();
             let _ = qt.queue(move |mut c| {
                 let msg = match r {
-                    Ok(n) => format!("{n} more languages \u{2014} available after Tessera restarts."),
+                    Ok(n) => format!("All {n} languages are here (for working offline)."),
                     Err(e) => format!("Couldn't download the grammars: {e}"),
                 };
                 c.as_mut().set_help_status(qs(&msg));
             });
         });
+    }
+
+    fn ensure_language(self: Pin<&mut Self>, name: &ffi::QString) {
+        let name = name.to_string();
+        // (One fetch at a time per language.)
+        static BUSY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        {
+            let mut b = BUSY.lock().unwrap();
+            if b.contains(&name) {
+                return;
+            }
+            b.push(name.clone());
+        }
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let r = crate::grammars::ensure(&name);
+            BUSY.lock().unwrap().retain(|n| n != &name);
+            let err = r.err().unwrap_or_default();
+            let _ = qt.queue(move |c| c.language_ready(qs(&name), qs(&err)));
+        });
+    }
+
+    fn language_installed(&self, name: &ffi::QString) -> bool {
+        crate::syntax::is_builtin(&name.to_string()) || crate::grammars::available().contains(&name.to_string())
     }
 
     fn grammar_count(&self) -> i32 {

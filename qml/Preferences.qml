@@ -727,9 +727,9 @@ Window {
                             Row2 {
                                 label: "Languages"
                                 hint: prefs.controller.helpStatus.indexOf("grammars") >= 0 || prefs.controller.helpStatus.indexOf("languages") >= 0 ? prefs.controller.helpStatus
-                                      : (18 + prefs.controller.grammarCount()) + " languages for highlighting and checks: 18 built in, the rest from Helix's tree-sitter grammars (~250)."
+                                      : (18 + prefs.controller.grammarCount()) + " languages for highlighting and checks: 18 built in, the rest from Helix's tree-sitter grammars, each fetched the first time it's used (Helix's archive, about 16 MB, once). Download All gets them all for working offline (about 185 MB)."
                                 PlainButton {
-                                    text: "Get More Languages"
+                                    text: "Download All"
                                     enabled2: !prefs.controller.helpStatus.startsWith("Downloading")
                                     onClicked: prefs.controller.downloadGrammars()
                                 }
