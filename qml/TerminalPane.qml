@@ -30,6 +30,7 @@ Item {
     property string badge: ""
     property real prefW: -1
     property real prefH: -1
+    property string job: ""            // the program running in it (empty at a prompt)
     property int zoomPercent: 100      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW

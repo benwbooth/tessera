@@ -106,7 +106,7 @@ ApplicationWindow {
                 win.contextView = v
                 win.contextLink = v.linkAt(x, y)
                 win.contextSelection = v.hasSelection ? v.selectedText() : ""
-                contextMenu.open()
+                win.openMenuAt(termMenu, v, x, y)
             }
             Binding { target: tp.view; property: "command"; value: tp.commandOverride !== "" ? tp.commandOverride : (tp.prof.command_mode === "custom" ? tp.prof.command : "") }
             Binding { target: tp.view; property: "termName"; value: tp.prof.term }
@@ -150,10 +150,14 @@ ApplicationWindow {
             property bool activity: false
             property bool bell: false
             property var lastView: null
+            readonly property var lastPane: lastView ? win.paneOf(lastView) : null
             readonly property var prof: win.profileFor(profile)
             readonly property string tabTitle: customTitle !== "" ? customTitle
                 : fixedTitle !== "" ? fixedTitle
                 : prof.tab_title !== "" ? prof.tab_title
+                // What's running in it (vim, htop, ssh...); at a prompt, the
+                // shell's own title or the folder.
+                : lastPane && lastPane.job !== "" ? lastPane.job
                 : (win.settings.tab_titles_per_tab && lastView && lastView.title ? lastView.title
                    : launchTitle !== "" ? launchTitle
                    : (lastView && lastView.pwd ? lastView.pwd.split("/").filter(x => x).pop() || "/" : prof.name))
@@ -244,6 +248,17 @@ ApplicationWindow {
 
     function focusPane(p) {
         if (p && p.view) Qt.callLater(function() { p.view.forceActiveFocus() })
+    }
+
+    // A native menu at a point in `item` (menus need an item to sit under:
+    // without one they open wherever the platform guesses, or not at all on
+    // Wayland).
+    Item { id: menuSpot; width: 1; height: 1; parent: win.contentItem; z: -1 }
+    function openMenuAt(menu, item, x, y) {
+        const pt = item.mapToItem(win.contentItem, x, y)
+        menuSpot.x = pt.x
+        menuSpot.y = pt.y - 1
+        menu.open(menuSpot)
     }
 
     function paneOf(view) {
@@ -1471,6 +1486,23 @@ ApplicationWindow {
         if (fontSize <= 0) zoomBase = activeView ? activeView.fontPointSize : 11
         fontSize = pct === 100 ? 0 : Math.max(6, Math.min(48, Math.round(zoomBase * pct / 10) / 10))
     }
+    // Each tab's running program, for its title: asked of the daemon once a
+    // second (the foreground process group of the pane's terminal).
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: {
+            for (const t of tabs) {
+                const v = t.lastView
+                const p = v ? paneOf(v) : null
+                if (!p) continue
+                const job = v.tmuxPane === "" && !v.exited && v.sessionId !== "" ? controller.sessionJob(v.sessionId) : ""
+                if (p.job !== job) p.job = job
+            }
+        }
+    }
+    Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.open(menuButton); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
     P.Menu {
         id: zoomMenu
@@ -1493,7 +1525,7 @@ ApplicationWindow {
     }
 
     P.Menu {
-        id: contextMenu
+        id: termMenu
         // -- what's under the pointer
         P.MenuItem { icon.name: "internet-services"; text: "Open “" + win.shortLabel(contextLink.replace(/^file:\/\//, "")) + "”"
             visible: contextLink !== ""; onTriggered: Qt.openUrlExternally(contextLink) }
@@ -1675,7 +1707,7 @@ ApplicationWindow {
                         payload: function() { return win.tabPayload(modelData) }
                         onClicked: focusTab(index)
                         onCloseClicked: closeTab(modelData)
-                        onMenuRequested: { win.menuTab = modelData; tabMenu.open() }
+                        onMenuRequested: (x, y) => { win.menuTab = modelData; win.openMenuAt(tabMenu, tb, x, y) }
                         onDragMoved: (dx, dy) => {
                             if (tabRow.settling) return
                             if (tabRow.dragFrom < 0) {
@@ -1963,6 +1995,7 @@ ApplicationWindow {
         if (controller.prefsPage() !== "") prefs.showPage(controller.prefsPage())
         if (controller.findQuery() !== "") findTimer.start()
         if (controller.testEnv("ZOOM") !== "") zoomTestTimer.start()
+        if (controller.testEnv("CONTEXT") !== "") contextTestTimer.start()
         if (controller.screenshotPath() !== "") shotTimer.start()
     }
 
