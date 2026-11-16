@@ -124,7 +124,6 @@ Window {
     palette.midlight: Theme.mix(Theme.panel, Theme.accent, 0.35)
     palette.mid: Theme.divider
     palette.dark: Theme.divider
-    palette.light: Theme.field
     palette.placeholderText: Theme.textDim
 
     // ---- small controls -------------------------------------------------
