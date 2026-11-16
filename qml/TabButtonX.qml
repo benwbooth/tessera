@@ -116,26 +116,20 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.right: parent.right
-        anchors.rightMargin: tab.flare / 2
-        anchors.verticalCenter: parent.verticalCenter
-        width: 1
-        height: 12
-        color: Theme.divider
-        visible: !tab.current && !tab.hovered && !tab.nextIsCurrent && !tab.lifted
-    }
+    // (No separators between tabs: the hover fill and the current tab's
+    // shape are enough, and quieter.)
 
     // ---- contents ---------------------------------------------------------
     Text {
         id: glyph
+        visible: tab.number > 0 || tab.tmux || tab.tabColor.a > 0
         anchors.left: parent.left
         anchors.leftMargin: tab.flare + 7
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: tab.flipped ? -1 : 1
         width: 10
         horizontalAlignment: Text.AlignHCenter
-        text: tab.number > 0 ? tab.number : (tab.tmux ? "∷" : "❯")
+        text: tab.number > 0 ? tab.number : (tab.tmux ? "\u2237" : "\u25cf")
         color: tab.tabColor.a > 0 ? tab.tabColor : (tab.tmux ? Theme.tmux : (tab.current ? Theme.accent : Theme.textDim))
         font.pixelSize: tab.number > 0 ? 10 : 9
         font.weight: Font.Bold
@@ -143,15 +137,15 @@ Item {
 
     Text {
         id: title
-        anchors.left: glyph.right
-        anchors.leftMargin: 5
+        anchors.left: glyph.visible ? glyph.right : parent.left
+        anchors.leftMargin: glyph.visible ? 5 : tab.flare + 10
         anchors.right: tail.left
         anchors.rightMargin: 2
         anchors.verticalCenter: parent.verticalCenter
         text: tab.text
-        color: tab.current ? Theme.text : Theme.textDim
+        color: tab.current ? Theme.text : (tab.hovered ? Theme.text : Theme.textDim)
         font.pixelSize: 12
-        font.weight: tab.current ? Font.Medium : Font.Normal
+        font.weight: Font.Normal
         anchors.verticalCenterOffset: tab.flipped ? -1 : 1
         clip: true
         // Fade the end of a long title instead of an ellipsis.

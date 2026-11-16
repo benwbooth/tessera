@@ -1294,51 +1294,67 @@ ApplicationWindow {
     P.Menu {
         id: launchMenu
         onAboutToShow: win.launchData = JSON.parse(controller.launchers())
-        P.MenuItem { enabled: false; text: "Profiles" }
         Instantiator {
             model: win.profileList
             delegate: P.MenuItem {
-                icon.name: "bookmarks"
-                text: modelData.name + (modelData.name === win.settings.default_profile ? "  (default)" : "")
+                icon.name: "utilities-terminal"
+                text: modelData.name + (index < 9 ? "\tCtrl+Shift+" + (index + 1) : "")
                 onTriggered: newTab({ profile: modelData.name })
             }
-            onObjectAdded: (i, o) => launchMenu.insertItem(1 + i, o)
+            onObjectAdded: (i, o) => launchMenu.insertItem(i, o)
             onObjectRemoved: (i, o) => launchMenu.removeItem(o)
         }
         P.MenuSeparator {}
-        P.MenuItem { id: shellsHeader; enabled: false; text: "Shells" }
-        Instantiator {
-            model: win.launchData.shells
-            delegate: P.MenuItem {
-                icon.name: "utilities-terminal"
-                text: modelData.name + "\t" + modelData.path
-                onTriggered: newTab({ command: modelData.path, title: modelData.name })
+        P.Menu {
+            id: shellsMenu
+            title: "Shells"
+            icon.name: "terminal"
+            enabled: win.launchData.shells.length > 0
+            Instantiator {
+                model: win.launchData.shells
+                delegate: P.MenuItem {
+                    text: modelData.name + "\t" + modelData.path
+                    onTriggered: newTab({ command: modelData.path, title: modelData.name })
+                }
+                onObjectAdded: (i, o) => shellsMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => shellsMenu.removeItem(o)
             }
-            onObjectAdded: (i, o) => launchMenu.insertItem(win.profileList.length + 3 + i, o)
-            onObjectRemoved: (i, o) => launchMenu.removeItem(o)
         }
-        P.MenuSeparator {}
-        P.MenuItem { enabled: false; text: "SSH" }
-        Instantiator {
-            model: win.launchData.ssh_hosts
-            delegate: P.MenuItem {
-                icon.name: "network-server"
-                text: modelData
-                onTriggered: newTab({ command: "ssh " + modelData, title: modelData })
+        P.Menu {
+            id: sshMenu
+            title: "SSH"
+            icon.name: "network-server"
+            Instantiator {
+                model: win.launchData.ssh_hosts
+                delegate: P.MenuItem {
+                    icon.name: "network-server"
+                    text: modelData
+                    onTriggered: newTab({ command: "ssh " + modelData, title: modelData })
+                }
+                onObjectAdded: (i, o) => sshMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => sshMenu.removeItem(o)
             }
-            onObjectAdded: (i, o) => launchMenu.insertItem(win.profileList.length + win.launchData.shells.length + 5 + i, o)
-            onObjectRemoved: (i, o) => launchMenu.removeItem(o)
-        }
-        P.MenuItem {
-            icon.name: "network-connect"
-            text: "New SSH Connection\u2026"
-            onTriggered: askText("New SSH Connection", "user@host (and any ssh options)", "", function(t) {
-                t = t.trim()
-                if (t !== "") newTab({ command: "ssh " + t, title: t.split(/\s+/).pop() })
-            })
+            P.MenuSeparator { visible: win.launchData.ssh_hosts.length > 0 }
+            P.MenuItem {
+                icon.name: "network-connect"
+                text: "New Connection\u2026"
+                onTriggered: askText("New SSH Connection", "user@host, and any ssh options", "", function(t) {
+                    t = t.trim()
+                    if (t !== "") newTab({ command: "ssh " + t, title: t.split(/\s+/).pop() })
+                })
+            }
         }
         P.MenuSeparator {}
         P.MenuItem { icon.name: "configure"; text: "Edit Profiles\u2026"; onTriggered: prefs.showProfile(activeProfile.name) }
+    }
+    Repeater {
+        model: 9
+        delegate: Item {
+            Shortcut {
+                sequence: "Ctrl+Shift+" + (index + 1)
+                onActivated: if (index < win.profileList.length) newTab({ profile: win.profileList[index].name })
+            }
+        }
     }
 
     // Right click on a tab.
@@ -1550,28 +1566,48 @@ ApplicationWindow {
                     }
                 }
             }
+            // New tab: + opens the default profile, ⌄ offers the others,
+            // installed shells and ssh hosts. One compact split button.
             Rectangle {
                 id: plus
                 anchors.left: tabRow.right
                 anchors.leftMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: box.flipped ? -2 : 2
-                width: 22; height: 22; radius: 6
-                color: plusHover.hovered ? Theme.tabHover : "transparent"
-                Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: plusHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 15 }
-                HoverHandler { id: plusHover }
-                TapHandler { onTapped: newTab({}) }
-            }
-            // ⌄ More ways to start a tab: profiles, shells, ssh hosts.
-            Rectangle {
-                anchors.left: plus.right
-                anchors.leftMargin: 1
-                anchors.verticalCenter: plus.verticalCenter
-                width: 16; height: 22; radius: 5
-                color: launchHover.hovered ? Theme.tabHover : "transparent"
-                Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -2; text: "\u2304"; color: launchHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 13 }
-                HoverHandler { id: launchHover }
-                TapHandler { onTapped: launchMenu.open(parent) }
+                anchors.verticalCenterOffset: box.flipped ? -1 : 1
+                width: 46; height: 22; radius: 6
+                color: "transparent"
+                border.width: 1
+                border.color: plusHover.hovered || launchHover.hovered ? Theme.divider : "transparent"
+                Rectangle {
+                    x: 1; y: 1; width: 26; height: parent.height - 2; radius: 5
+                    color: plusHover.hovered ? Theme.tabHover : "transparent"
+                    Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: plusHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 16 }
+                    HoverHandler { id: plusHover }
+                    TapHandler { onTapped: newTab({}) }
+                }
+                Rectangle {
+                    x: 27; y: 4; width: 1; height: parent.height - 8
+                    color: Theme.divider
+                    visible: plusHover.hovered || launchHover.hovered
+                }
+                Rectangle {
+                    id: launchButton
+                    x: 28; y: 1; width: parent.width - 29; height: parent.height - 2; radius: 5
+                    color: launchHover.hovered ? Theme.tabHover : "transparent"
+                    Canvas {
+                        anchors.centerIn: parent
+                        width: 8; height: 5
+                        property color ink: launchHover.hovered ? Theme.text : Theme.textDim
+                        onInkChanged: requestPaint()
+                        onPaint: {
+                            const c = getContext("2d"); c.reset()
+                            c.strokeStyle = ink; c.lineWidth = 1.4; c.lineCap = "round"; c.lineJoin = "round"
+                            c.beginPath(); c.moveTo(0.7, 0.7); c.lineTo(4, 4.2); c.lineTo(7.3, 0.7); c.stroke()
+                        }
+                    }
+                    HoverHandler { id: launchHover }
+                    TapHandler { onTapped: launchMenu.open(launchButton) }
+                }
             }
 
             // Where a dragged tab would go.
@@ -1630,6 +1666,16 @@ ApplicationWindow {
             color: Theme.chrome
             clip: true
 
+            // A hairline along the bottom; the current tab breaks through it.
+            Rectangle {
+                visible: showTabs && !tabsAtBottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: Theme.divider
+                opacity: 0.8
+            }
             // Drag the bar to move the window; double-click to maximize.
             DragHandler {
                 target: null

@@ -25,7 +25,7 @@ click in a terminal opens a context menu.
 | Toggle Debug Logging, Retrospective Logs, Performance Stats, Capture GPU Frame | 🔜 | a debug log to a file |
 | Secure Keyboard Entry | ➖ | macOS-only API (Wayland already isolates input) |
 | Make iTerm2 Default Term | 🔜 | as "Set as default terminal" (xdg-terminal-exec) |
-| Install Shell Integration | 🔜 | with shell integration (below) |
+| Install Shell Integration | ✅ | ☰ › Install Shell Integration › bash / zsh / fish (OSC 133 marks + OSC 7 folder); says what to add when the startup file is managed by Nix |
 | Companion Device, Claude Code Integration | ➖ | |
 
 ### Shell
@@ -41,7 +41,7 @@ click in a terminal opens a context menu.
 | Close | ✅ | Ctrl+Shift+W, asks when a job is running (per profile) |
 | Close All Panes in Tab | ✅ | |
 | Close Terminal Window | ✅ | |
-| Undo Close | 🔜 | keep the shell alive in the daemon for N seconds |
+| Undo Close | ✅ | Ctrl+Shift+Z; closed shells stay alive for N seconds (General) |
 | Archives (save/restore session archive) | 🔜 | |
 | Toggle Buffer Input | 🔜 | |
 | Broadcast Input (current only / all panes in all tabs / all panes in tab) | ✅ | receiving panes get a red outline |
@@ -63,6 +63,7 @@ click in a terminal opens a context menu.
 | Paste Special › Paste Slowly | ✅ | 16 bytes / 125 ms |
 | Paste Special › Warn Before Multi-Line Paste | ✅ | |
 | Paste Special › Advanced Paste, Base64 file, faster/slower, tabs→spaces, newline-at-prompt warnings | 🔜 | |
+| Paste History | ✅ | Edit › Paste History (last 20 copied/pasted) |
 | Select All | ✅ | Ctrl+Shift+A |
 | Clear Buffer | ✅ | Ctrl+Shift+K |
 | Clear Scrollback Buffer | ✅ | |
@@ -70,12 +71,15 @@ click in a terminal opens a context menu.
 | Find › Find URLs | ✅ | |
 | Find › Find Globally, Select Matches, Filter, Pick Result to Open | 🔜 | |
 | Copy Mode | 🔜 | |
-| Open Selection, Jump to Selection | 🔜 | |
-| Select Output of Last Command / Current Command | 🔜 | needs shell integration (OSC 133; libghostty already tracks it) |
-| Marks and Annotations | 🔜 | shell-integration marks first |
+| Open Selection, Jump to Selection | 🔜 | Ctrl+click opens links and files already (Pointer) |
+| Select Output of Last Command | ✅ | Ctrl+Shift+L (shell integration) |
+| Select Current Command | 🔜 | |
+| Marks › Previous / Next Prompt | ✅ | Ctrl+Shift+Up / Down (shell integration); mark indicators in the margin |
+| Set Mark / Jump to Mark, Annotations, mark alerts | 🔜 | |
 | Fold lines, Clear Instant Replay, Clear to mark/selection | 🔜 | |
 | Replace Selection (JSON, Base64, render Markdown) | 🔜 | |
-| Snippets, Actions | 🔜 | |
+| Snippets | ✅ | Edit › Snippets; Preferences › Snippets |
+| Actions | 🔜 | (key mappings can run named actions) |
 | AI items | ➖ | |
 
 ### View
@@ -90,7 +94,7 @@ click in a terminal opens a context menu.
 | Tab Color | ✅ | |
 | Show Tabs in Fullscreen | ✅ | the tab bar always shows |
 | Disable Transparency for Active Window | 🔜 | |
-| Toolbelt (profiles, paste history, command history, recent dirs, notes, jobs, captured output) | 🔜 | |
+| Toolbelt (profiles, paste history, command history, recent dirs, notes, jobs, captured output) | 🔜 | paste history is in the Edit menu |
 | Zoom In on Selection / Zoom Out | 🔜 | |
 | Show Timestamps | 🔜 | |
 | Open Quickly | 🔜 | |
@@ -108,8 +112,8 @@ click in a terminal opens a context menu.
 | Log › Log to File | ✅ | raw output |
 | Log › Import/Export Recording | 🔜 | |
 | Run/Stop Coprocess | 🔜 | |
-| Open Autocomplete, Command History, Recent Directories, Paste History | 🔜 | |
-| Triggers | 🔜 | |
+| Open Autocomplete, Command History, Recent Directories | 🔜 | |
+| Triggers | ✅ | Profiles › Advanced: highlight, notify, bell, send text (more actions 🔜) |
 | Make Screenshot | 🔜 | |
 | Bury Session | 🔜 | |
 
@@ -136,6 +140,13 @@ click in a terminal opens a context menu.
 | Password Manager | 🔜 | via the desktop keyring |
 | Notify on Status Change, Cockpit, AI Chat | ➖ | |
 
+### Tab bar (Tessera)
+| Item | | Notes |
+|---|---|---|
+| Right-click a tab | ✅ | new, duplicate, rename, color, move, move to new window, close, close others, close to the right |
+| + menu | ✅ | profiles (Ctrl+Shift+1…9), installed shells, ssh hosts from ~/.ssh/config, new ssh connection |
+| Drag tabs | ✅ | reorder live; out to a new window; onto another window |
+
 ### Help
 | Item | | Notes |
 |---|---|---|
@@ -146,7 +157,7 @@ click in a terminal opens a context menu.
 ### General
 | Setting | | Notes |
 |---|---|---|
-| Window restoration | ✅ | "Restore sessions": shells, tabs, splits and size come back (they never stopped: the daemon kept them) |
+| Window restoration | ✅ | "Restore sessions": shells, tabs, splits, size and position come back exactly (the daemon kept the shells and their screens); after a reboot, panes come back as new shells under their saved screens |
 | Open profiles window / restore to Spaces / always open a window | ➖ | |
 | Quit when all windows are closed | ✅ | always |
 | Confirm closing multiple sessions | ✅ | |
@@ -183,7 +194,7 @@ click in a terminal opens a context menu.
 | Margins | ✅ | per profile (Window tab) |
 | Dim inactive split panes, dimming amount, dim background windows | ✅ | |
 | Dimming affects only text | 🔜 | |
-| Scrollbars | ✅ | overlay: shows while scrolling or near the edge; drag the thumb, click the track to page; touchpad scrolling glides on with momentum |
+| Scrollbars | ✅ | overlay: shows while scrolling or near the edge; drag the thumb, click the track to page; momentum that builds (wheel and touchpad); selecting past an edge scrolls, faster over time |
 | Hide scrollbars | 🔜 | |
 | Window number in title, proxy icon, Dock options | ➖ | |
 
@@ -218,17 +229,22 @@ Profiles: add, remove, duplicate, rename, set default ✅.
 | | Mouse reporting, alternate scroll | ✅ | |
 | | Terminal may change title / enable paste bracketing | ✅ | |
 | | Silence bell, visual bell, bell icon in tabs | ✅ | |
-| | Notifications (desktop) | 🔜 | |
+| | Notifications (desktop): on bell, when a session ends | ✅ | trigger notifications too |
 | | Encoding, ENQ answerback, locale, report-window-title, printing, resize-window | 🔜 | UTF-8 only today |
-| | Shell integration marks, offscreen command line | 🔜 | |
+| | Show mark indicators | ✅ | |
+| | Offscreen command line | 🔜 | |
 | Session | After session ends: close / restart / keep | ✅ | |
 | | Prompt before closing: never / always / if jobs (with ignore list) | ✅ | |
-| | Undo-close window, automatic logging, timestamps, status bar, idle keepalive, archive | 🔜 | |
+| | Automatic session logging (folder) | ✅ | raw format (plain text / HTML / asciinema 🔜) |
+| | Undo-close time | ✅ | General › Undo Close |
+| | Timestamps, status bar, idle keepalive, archive | 🔜 | |
 | Keys | Alt as +Esc / Normal | ✅ | |
-| | Key mappings and presets | 🔜 | |
+| | Key mappings | ✅ | send text / hex / escape, ignore, run an action; key recorder |
+| | Key-mapping presets (xterm, Terminal.app), import/export | 🔜 | |
 | | Application keypad, CSI u / Kitty | ✅ | programs switch them on (libghostty) |
 | | Hotkey window | 🔜 | Wayland: global-shortcuts portal |
-| Advanced | Triggers, smart selection, automatic profile switching, semantic history | 🔜 | |
+| Advanced | Triggers | ✅ | |
+| | Smart selection, automatic profile switching, semantic history (open with editor) | 🔜 | |
 
 ### Keys (global)
 | Setting | | Notes |
@@ -249,7 +265,8 @@ Profiles: add, remove, duplicate, rename, set default ✅.
 | Middle click pastes selection | ✅ | |
 | Right click: menu or paste | ✅ | |
 | Focus follows mouse | ✅ | |
-| Ctrl/Alt-click actions, click opens URL/file, gesture bindings | 🔜 | |
+| Ctrl+click opens URL / file | ✅ | OSC 8 hyperlinks, URLs, existing files (file:line) |
+| Alt-click moves cursor, other click and gesture bindings | 🔜 | |
 
 ### Advanced
 Not mirrored: iTerm2's hundreds of hidden switches. Tessera adds settings as features need them.
