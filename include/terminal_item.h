@@ -291,6 +291,10 @@ public:
     QString aliases() const { return m_aliases; }
     QString richKind() const { return m_richKind; }
     Q_INVOKABLE QString lastOutput() const;
+    // Notebook cells (src/cells.rs).
+    Q_INVOKABLE QString cells() const;
+    Q_INVOKABLE QString cellOutput(quint64 id, const QString& format) const;
+    Q_SIGNAL void cellsChanged(quint64 id, bool done);
     Q_SIGNAL void aliasesChanged();
     qint64 lastDuration() const { return m_lastDuration; }
     Q_SIGNAL void commandFinished();

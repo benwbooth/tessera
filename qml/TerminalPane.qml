@@ -117,7 +117,7 @@ Item {
         controller: pane.controller
         keys: pane.editorKeys
         history: pane.commandHistory
-        lang: pane.replLang !== "" ? pane.replLang : "bash"
+        autoLang: pane.replLang !== "" ? pane.replLang : "bash"
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         cwd: term.pwd !== "" ? term.pwd : pane.procCwd
         showPrompt: pane.editorPrompt
@@ -136,6 +136,8 @@ Item {
         onHandBack: term.forceActiveFocus()
         onKeysPicked: (k) => pane.editorKeysPicked(k)
         onOpenRich: pane.openRich()
+        viewMode: pane.viewMode
+        onViewModePicked: (m) => pane.viewMode = m
         onEditingChanged: if (editing) pane.preferEditor = true
     }
 
@@ -265,6 +267,29 @@ Item {
 
     property alias findBar: findBar
     property alias compose: compose
+    // Terminal or notebook (each command a cell); the notebook steps aside for
+    // a full-screen program, or a command that runs for more than a moment.
+    property string viewMode: "terminal"
+    property bool runningLong: false
+    Timer { id: longTimer; interval: 700; onTriggered: pane.runningLong = true }
+    Connections {
+        target: term
+        function onCellsChanged(id, done) {
+            if (done) { longTimer.stop(); pane.runningLong = false }
+            else longTimer.restart()
+        }
+    }
+    NotebookView {
+        id: notebook
+        z: 15
+        anchors.fill: term
+        visible: pane.viewMode === "notebook" && !term.fullScreen && !pane.runningLong
+        view: term
+        controller: pane.controller
+        fontFamily: term.fontFamily
+        themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
+        onRerun: (cmd) => { compose.setText(cmd); compose.focusEditor() }
+    }
     // The last output's rich view, over the terminal.
     function openRich() {
         let o = {}

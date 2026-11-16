@@ -13,7 +13,13 @@ __tessera_precmd() {
     # terminal clears the old one first (no leftover prompt lines).
     printf '\e]133;A;redraw=1\a'
 }
-__tessera_preexec() { __tessera_running=1; printf '\e]133;C\a'; }
+__tessera_preexec() {
+    __tessera_running=1
+    # The command line (OSC 1337 TesseraCommand, base64), then the mark: in
+    # that order, so the notebook pairs each command with its output.
+    printf '\e]1337;TesseraCommand=%s\a' "$(print -rn -- "$1" | base64 | tr -d '\n')"
+    printf '\e]133;C\a'
+}
 add-zsh-hook precmd __tessera_precmd
 add-zsh-hook preexec __tessera_preexec
 # End of prompt / start of input, after whatever theme sets PS1.

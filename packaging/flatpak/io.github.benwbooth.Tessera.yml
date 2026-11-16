@@ -4,6 +4,8 @@ id: io.github.benwbooth.Tessera
 runtime: org.kde.Platform
 runtime-version: '@KDE@'
 sdk: org.kde.Sdk
+base: io.qt.qtwebengine.BaseApp
+base-version: '@KDE@'
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: tessera
@@ -19,6 +21,9 @@ finish-args:
   - --talk-name=org.freedesktop.Notifications
   # Session logs, saved output, dropped files and links into your files
   - --filesystem=home
+  - --env=QTWEBENGINEPROCESS_PATH=/app/bin/QtWebEngineProcess
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh
 modules:
   - name: tessera
     buildsystem: simple

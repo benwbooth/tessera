@@ -14,7 +14,13 @@ __tessera_prompt() {
 }
 __tessera_preexec() {
     [[ -n "${COMP_LINE-}" || "$BASH_COMMAND" == __tessera_* ]] && return
-    if [[ -z "${__tessera_running-}" ]]; then __tessera_running=1; printf '\e]133;C\a'; fi
+    if [[ -z "${__tessera_running-}" ]]; then
+        __tessera_running=1
+        # The command line (OSC 1337 TesseraCommand, base64), then the mark.
+        local line; line="$(HISTTIMEFORMAT= history 1 | sed 's/^ *[0-9]* *//')"
+        printf '\e]1337;TesseraCommand=%s\a' "$(printf '%s' "$line" | base64 | tr -d '\n')"
+        printf '\e]133;C\a'
+    fi
 }
 PROMPT_COMMAND="__tessera_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 PS1="$PS1"'\[\e]133;B\a\]'

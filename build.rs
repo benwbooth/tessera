@@ -59,6 +59,8 @@ fn main() {
         QmlFile::from("qml/PromptBar.qml"),
         QmlFile::from("qml/AssistantPanel.qml"),
         QmlFile::from("qml/RichViewer.qml"),
+        QmlFile::from("qml/NotebookView.qml"),
+        QmlFile::from("qml/Chip.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");
@@ -70,6 +72,7 @@ fn main() {
     .qt_module("QuickControls2")
     .qt_module("QuickShapes")
     .qt_module("Widgets")
+    .qt_module("WebEngineQuick")
     .cpp_file("include/terminal_item.h")
     .cpp_file("include/syntax_highlighter.h")
     .cpp_file("cpp/terminal_item.cpp")

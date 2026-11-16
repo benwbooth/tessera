@@ -9,7 +9,8 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      qtFor = pkgs: with pkgs.qt6; [ qtbase qtdeclarative qtsvg qtwayland ];
+      # (qtwebengine: rich output (HTML) in notebook cells.)
+      qtFor = pkgs: with pkgs.qt6; [ qtbase qtdeclarative qtsvg qtwayland qtwebengine qtwebchannel qtpositioning ];
       qtEnvFor = pkgs: pkgs.qt6.env "qt-tessera-${pkgs.qt6.qtbase.version}" ((builtins.tail (qtFor pkgs)) ++ [ pkgs.libGL ]);
     in
     {

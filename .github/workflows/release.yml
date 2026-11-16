@@ -37,6 +37,8 @@ permissions:
 env:
   # The newest Qt 6 release (Windows takes the newest one aqt can install).
   QT_VERSION: '6.*'
+  # Qt WebEngine: HTML output in notebook cells.
+  QT_MODULES: 'qtwebengine qtwebchannel qtpositioning'
   AQT_VERSION: '==3.3.*'
   # libghostty-vt builds Ghostty's terminal library with Zig.
   ZIG_VERSION: '0.15.2'
@@ -109,6 +111,7 @@ jobs:
         with:
           version: ${{ steps.qt.outputs.version }}
           arch: ${{ steps.qt.outputs.arch }}
+          modules: ${{ env.QT_MODULES }}
           aqtversion: ${{ env.AQT_VERSION }}
           cache: true
       - uses: dtolnay/rust-toolchain@stable
@@ -179,6 +182,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          modules: ${{ env.QT_MODULES }}
           aqtversion: ${{ env.AQT_VERSION }}
           cache: true
       - uses: dtolnay/rust-toolchain@stable
@@ -241,6 +245,7 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          modules: ${{ env.QT_MODULES }}
           aqtversion: ${{ env.AQT_VERSION }}
           cache: true
       - uses: dtolnay/rust-toolchain@stable
@@ -303,8 +308,11 @@ jobs:
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
       - name: Pick the KDE runtime
         run: |
-          kde=$(flatpak remote-ls --user flathub --runtime --columns=ref | sed -n 's#^runtime/org\.kde\.Sdk/x86_64/\(6\.[0-9]*\)$#\1#p' | sort -uV | tail -1)
-          [ -n "$kde" ] || { echo "no KDE 6 runtime"; exit 1; }
+          # The newest KDE SDK branch that also has a Qt WebEngine BaseApp.
+          sdk=$(flatpak remote-ls --user flathub --runtime --columns=ref | sed -n 's#^runtime/org\.kde\.Sdk/x86_64/\(6\.[0-9]*\)$#\1#p' | sort -u)
+          base=$(flatpak remote-ls --user flathub --app --columns=ref | sed -n 's#^app/io\.qt\.qtwebengine\.BaseApp/x86_64/\(6\.[0-9]*\)$#\1#p' | sort -u)
+          kde=$(comm -12 <(echo "$sdk") <(echo "$base") | sort -V | tail -1)
+          [ -n "$kde" ] || { echo "no KDE runtime with a WebEngine BaseApp"; exit 1; }
           echo "Using KDE runtime $kde"
           sed "s/@KDE@/$kde/g" packaging/flatpak/$APP_ID.yml > packaging/flatpak/build.yml
       - name: Signing key

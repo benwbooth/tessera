@@ -11,6 +11,7 @@
 #include <QtQml/qqml.h>
 #include <QtQuick/QQuickWindow>
 #include <QtWidgets/QApplication>
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
 #include "terminal_item.h"
 #include "syntax_highlighter.h"
@@ -23,6 +24,8 @@
 #define TESSERA_WAYLAND_RESTORE 1
 #endif
 #endif
+
+inline void tessera_webengine_initialize() { QtWebEngineQuick::initialize(); }
 
 inline void tessera_create_app(const QString& session)
 {

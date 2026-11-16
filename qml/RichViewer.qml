@@ -12,10 +12,19 @@ Rectangle {
     property string text: ""
     property string fontFamily: "monospace"
     property var themeData: ({})
+    // Inside a notebook cell: no header, and as tall as its content (up to
+    // maxHeight; then it scrolls).
+    property bool embedded: false
+    property real maxHeight: 420
+    readonly property real contentHeight: kind === "json" ? jsonList.contentHeight + 16
+                                        : (kind === "csv" || kind === "tsv") ? tableFlick.contentHeight
+                                        : (kind === "html" || kind === "markdown") ? docText.implicitHeight + 32
+                                        : kind === "svg" ? 320 : 100
+    implicitHeight: embedded ? Math.min(maxHeight, contentHeight) : 400
     signal closed()
 
-    color: Theme.bg
-    focus: visible
+    color: embedded ? "transparent" : Theme.bg
+    focus: visible && !embedded
     Keys.onEscapePressed: closed()
 
     function ansi(i, fallback) {
@@ -101,8 +110,9 @@ Rectangle {
     // ---- header -----------------------------------------------------------------
     Rectangle {
         id: head
+        visible: !viewer.embedded
         width: parent.width
-        height: 34
+        height: visible ? 34 : 0
         color: Theme.mix(Theme.bg, Theme.fg, 0.05)
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.divider }
         RowLayout {
@@ -145,7 +155,7 @@ Rectangle {
             visible: viewer.kind === "json"
             model: viewer.jsonRows
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar {}
+            ScrollBar.vertical: ScrollBar { policy: jsonList.contentHeight > jsonList.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
             MomentumWheel { flick: jsonList }
             delegate: Text {
                 required property var modelData

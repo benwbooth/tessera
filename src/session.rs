@@ -110,6 +110,12 @@ pub struct Session {
     /// finished one's: (kind, text).
     cmd_out: Option<Vec<u8>>,
     last_rich: (String, String),
+    /// Notebook cells (one per command), the next command's line (from the
+    /// shell integration), and the picture the running command printed.
+    cells: crate::cells::Cells,
+    pending_command: String,
+    command_buf: Option<Vec<u8>>,
+    cell_image: Option<Vec<u8>>,
     exited: bool,
     last_cursor_row: Option<u16>,
     last_full_size: (u16, u16),
@@ -323,6 +329,10 @@ pub fn session_open(
         output_starts: false,
         cmd_out: None,
         last_rich: (String::new(), String::new()),
+        cells: Default::default(),
+        pending_command: String::new(),
+        command_buf: None,
+        cell_image: None,
         exited: false,
         last_cursor_row: None,
         last_full_size: (0, 0),
@@ -631,6 +641,9 @@ impl Session {
                 if let Some(i) = find(&buf[from..], END) {
                     let i = from + i;
                     let img = crate::images::un_onlcr(&buf[..i]);
+                    if crate::images::is_image(&img) {
+                        self.cell_image = Some(img.clone());
+                    }
                     let tail = buf[i..].to_vec();
                     self.raw_image = None;
                     match crate::images::kitty_display(&img, cols.saturating_sub(2), self.size.get().2) {
@@ -709,33 +722,57 @@ impl Session {
         const START: &[u8] = b"\x1b]133;C";
         const END: &[u8] = b"\x1b]133;D";
         let find = |hay: &[u8], pat: &[u8]| hay.windows(pat.len()).position(|w| w == pat);
+        const CMD: &[u8] = b"\x1b]1337;TesseraCommand=";
         let mut rest = data;
         loop {
+            // A command-line report cut off by the last read: finish it.
+            if let Some(buf) = self.command_buf.as_mut() {
+                match rest.iter().position(|&b| b == 7 || b == 0x1b) {
+                    Some(e) => {
+                        buf.extend_from_slice(&rest[..e]);
+                        let b64 = self.command_buf.take().unwrap();
+                        self.pending_command = decode_b64_text(&b64);
+                        rest = &rest[e..];
+                    }
+                    None => {
+                        if buf.len() < 1 << 20 {
+                            buf.extend_from_slice(rest);
+                        } else {
+                            self.command_buf = None;
+                        }
+                        return;
+                    }
+                }
+            }
             if let Some(buf) = self.cmd_out.as_mut() {
                 match find(rest, END) {
                     Some(i) => {
                         buf.extend_from_slice(&rest[..i]);
                         let raw = self.cmd_out.take().unwrap();
-                        let mut text = crate::images::plain_text(&raw);
-                        // zsh's partial-line marker ("%" and padding) before its prompt.
-                        while let Some(last) = text.trim_end_matches('\n').rsplit('\n').next().map(str::to_string) {
-                            let t = last.trim();
-                            if (t == "%" || t == "#") && text.trim_end_matches('\n').len() >= last.len() {
-                                let keep = text.trim_end_matches('\n').len() - last.len();
-                                text.truncate(keep);
-                            } else {
-                                break;
-                            }
-                        }
+                        self.cells.output(&rest[..i]);
+                        let status: i64 = {
+                            let after = &rest[i + END.len()..];
+                            let digits: String = after.iter().skip_while(|&&c| c == b';').take_while(|c| c.is_ascii_digit()).map(|&c| c as char).collect();
+                            digits.parse().unwrap_or(0)
+                        };
+                        let text = strip_zsh_marker(crate::images::plain_text(&raw));
                         let kind = crate::images::detect_text(&text);
 
                         if !kind.is_empty() {
                             self.events.push(json!({"type": "rich", "kind": kind, "size": text.len()}));
                         }
                         self.last_rich = (kind.to_string(), text);
+                        let image = self.cell_image.take();
+                        if let Some(id) = self.cells.finish(status, kind) {
+                            if let Some(c) = self.cells.list.back_mut() {
+                                c.image = image;
+                            }
+                            self.events.push(json!({"type": "cell", "id": id, "done": true}));
+                        }
                         rest = &rest[i + END.len()..];
                     }
                     None => {
+                        self.cells.output(rest);
                         if buf.len() + rest.len() <= 4 << 20 {
                             buf.extend_from_slice(rest);
                         } else {
@@ -745,11 +782,31 @@ impl Session {
                     }
                 }
             }
-            match find(rest, START) {
+            // In stream order: a command's line comes just before its start.
+            let (c, s) = (find(rest, CMD), find(rest, START));
+            if let Some(c) = c.filter(|&c| s.is_none_or(|s| c < s)) {
+                let payload = &rest[c + CMD.len()..];
+                match payload.iter().position(|&b| b == 7 || b == 0x1b) {
+                    Some(e) => {
+                        self.pending_command = decode_b64_text(&payload[..e]);
+                        rest = &payload[e..];
+                    }
+                    None => {
+                        self.command_buf = Some(payload.to_vec());
+                        return;
+                    }
+                }
+                continue;
+            }
+            match s {
                 Some(s) => {
                     let after = &rest[s..];
                     let end = after.iter().position(|&b| b == 7).map(|i| i + 1).unwrap_or(after.len());
                     self.cmd_out = Some(Vec::new());
+                    let cmd = std::mem::take(&mut self.pending_command);
+                    let cwd = self.pwd();
+                    let id = self.cells.start(cmd, cwd);
+                    self.events.push(json!({"type": "cell", "id": id, "done": false}));
                     rest = &rest[s + end..];
                 }
                 None => return,
@@ -760,6 +817,25 @@ impl Session {
     /// The last finished command's output: {kind, text} (kind "" for plain).
     pub fn last_output(&self) -> String {
         json!({"kind": self.last_rich.0, "text": self.last_rich.1}).to_string()
+    }
+
+    /// Notebook cells: their facts (JSON list).
+    pub fn cells(&self) -> String {
+        self.cells.summary()
+    }
+
+    /// A cell's output: "html" (colors kept), "text", or "image" (base64 of
+    /// the picture it printed).
+    pub fn cell_output(&self, id: u64, format: &str) -> String {
+        let Some(c) = self.cells.get(id) else { return String::new() };
+        match format {
+            "image" => {
+                use base64::Engine;
+                c.image.as_ref().map(|i| base64::engine::general_purpose::STANDARD.encode(i)).unwrap_or_default()
+            }
+            "html" => crate::cells::to_html(&c.raw, self.size.get().0),
+            _ => strip_zsh_marker(crate::images::plain_text(&c.raw)),
+        }
     }
 
     fn process_output(&mut self, data: &[u8]) {
@@ -1843,6 +1919,26 @@ fn boundary_chars(word_chars: &[char]) -> Vec<char> {
         .chars()
         .filter(|c| !word_chars.contains(c))
         .collect()
+}
+
+fn decode_b64_text(b64: &[u8]) -> String {
+    use base64::Engine;
+    let clean: Vec<u8> = b64.iter().filter(|c| !c.is_ascii_whitespace()).copied().collect();
+    base64::engine::general_purpose::STANDARD.decode(clean).map(|r| String::from_utf8_lossy(&r).trim().to_string()).unwrap_or_default()
+}
+
+/// Without zsh's partial-line marker ("%" and padding) before its prompt.
+fn strip_zsh_marker(mut text: String) -> String {
+    while let Some(last) = text.trim_end_matches('\n').rsplit('\n').next().map(str::to_string) {
+        let t = last.trim();
+        if (t == "%" || t == "#") && text.trim_end_matches('\n').len() >= last.len() {
+            let keep = text.trim_end_matches('\n').len() - last.len();
+            text.truncate(keep);
+        } else {
+            break;
+        }
+    }
+    text
 }
 
 fn format_selection_as(term: &Terminal<'static, 'static>, sel: &Selection<'_>, fmt: Format, style: bool) -> String {

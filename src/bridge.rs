@@ -127,6 +127,10 @@ pub mod ffi {
         fn image_pixels(self: &Session, id: u32) -> ImagePixels;
         /// The last finished command's output as JSON {kind, text}.
         fn last_output(self: &Session) -> String;
+        /// Notebook cells: their facts, as JSON.
+        fn cells(self: &Session) -> String;
+        /// A cell's output: format "html", "text" or "image" (base64).
+        fn cell_output(self: &Session, id: u64, format: &str) -> String;
         /// The shell is at its prompt (from shell integration's marks).
         fn at_prompt(self: &Session) -> bool;
 
@@ -218,6 +222,8 @@ pub mod ffi {
         /// The application (QApplication, for the desktop's native menus),
         /// native text rendering, and QML registration of TerminalView.
         fn tessera_create_app(session: &QString);
+        /// Qt WebEngine (HTML output in notebook cells): before the app exists.
+        fn tessera_webengine_initialize();
         fn tessera_show_windows();
         fn tessera_test_wheel(x: f64, y: f64, dy: i32, px: i32, phase: i32);
         fn tessera_session_id() -> QString;
@@ -665,7 +671,7 @@ impl ffi::Controller {
         let ctx: serde_json::Value = serde_json::from_str(&ctx_json.to_string()).unwrap_or_default();
         let s = crate::settings::load();
         let model_ref = match task.as_str() {
-            "inline" => s.ai.inline_model.clone(),
+            "inline" | "classify" => s.ai.inline_model.clone(),
             "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
             _ => s.ai.chat_model.clone(),
         };
@@ -681,6 +687,7 @@ impl ffi::Controller {
         msgs.insert(0, serde_json::json!({"role": "system", "content": crate::ai::system_prompt(&task, &ctx)}));
         let opts = match task.as_str() {
             "inline" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(8) },
+            "classify" => crate::ai::Options { max_tokens: 8, temperature: 0.0, timeout: std::time::Duration::from_secs(10) },
             "check" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(15) },
             "command" | "fix" => crate::ai::Options { max_tokens: 300, temperature: 0.2, timeout: std::time::Duration::from_secs(60) },
             _ => crate::ai::Options { max_tokens: 4096, temperature: 0.4, timeout: std::time::Duration::from_secs(600) },
@@ -754,7 +761,7 @@ impl ffi::Controller {
     fn ai_ready(&self, task: &ffi::QString) -> bool {
         let s = crate::settings::load();
         let r = match task.to_string().as_str() {
-            "inline" => s.ai.inline_model.clone(),
+            "inline" | "classify" => s.ai.inline_model.clone(),
             "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
             _ => s.ai.chat_model.clone(),
         };

@@ -486,6 +486,8 @@ void TerminalItem::handleEvents()
         } else if (type == u"aliases") {
             m_aliases = QString::fromUtf8(QJsonDocument(e.value(u"map").toObject()).toJson(QJsonDocument::Compact));
             emit aliasesChanged();
+        } else if (type == u"cell") {
+            emit cellsChanged(quint64(e.value(u"id").toDouble()), e.value(u"done").toBool());
         } else if (type == u"rich") {
             m_richKind = e.value(u"kind").toString();
         } else if (type == u"command") {
@@ -1360,6 +1362,18 @@ void TerminalItem::copy()
 }
 
 void TerminalItem::paste() { pasteText(QGuiApplication::clipboard()->text()); }
+
+QString TerminalItem::cells() const
+{
+    return m_session ? qs(m_session->cells()) : QStringLiteral("[]");
+}
+
+QString TerminalItem::cellOutput(quint64 id, const QString& format) const
+{
+    if (!m_session) return QString();
+    const QByteArray f = format.toUtf8();
+    return qs(m_session->cell_output(id, rust::Str(f.constData(), size_t(f.size()))));
+}
 
 QString TerminalItem::lastOutput() const
 {

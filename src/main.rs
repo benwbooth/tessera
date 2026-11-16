@@ -1,6 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod ai;
 mod bridge;
+mod cells;
 mod client;
 mod complete;
 mod contrast;
@@ -114,6 +115,7 @@ fn main() {
         std::env::set_var("QT_WAYLAND_ENABLE_XX_SESSION_MANAGER", "1");
     }
     let session = if wayland { std::fs::read_to_string(&session_file).unwrap_or_default().trim().to_string() } else { String::new() };
+    bridge::ffi::tessera_webengine_initialize();
     bridge::ffi::tessera_create_app(&QString::from(session.as_str()));
     if main_window {
         kde::remember_window_position();

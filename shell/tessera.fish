@@ -14,6 +14,8 @@ function __tessera_prompt --on-event fish_prompt
 end
 function __tessera_preexec --on-event fish_preexec
     set -g __tessera_running 1
+    # The command line first (OSC 1337 TesseraCommand, base64), then the mark.
+    printf '\e]1337;TesseraCommand=%s\a' (printf '%s' "$argv[1]" | base64 | string join '')
     printf '\e]133;C\a'
 end
 # The aliases (OSC 1337 TesseraAliases, base64), when they change: help and

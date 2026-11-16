@@ -309,6 +309,10 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
              something destructive or risky they may not intend), reply with one short sentence naming it. Otherwise reply with exactly OK. \
              Commands that are fine but unusual, and anything you're not sure about, are OK."
         ),
+        "classify" => format!(
+            "{base} Say what kind of text the user shows you (a command's output). Reply with exactly one word from: \
+             json, csv, tsv, html, markdown, svg, yaml, xml, diff, log, code, text."
+        ),
         "fix" => format!(
             "{base} The user's last command failed. From the command, its exit status and output, reply with ONLY a corrected command, \
              no explanation, no code fence."

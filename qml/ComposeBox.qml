@@ -12,7 +12,12 @@ Rectangle {
     id: box
     property var view: null            // the TerminalView it types into
     property var controller: null
-    property string lang: "bash"
+    // The input language: picked from the corner (langOverride), or what the
+    // program at the prompt implies (autoLang).
+    property string autoLang: "bash"
+    property string langOverride: ""
+    readonly property string lang: langOverride !== "" ? langOverride : autoLang
+    readonly property var languages: [["bash", "Shell (bash/zsh)"], ["python", "Python"], ["javascript", "JavaScript"]]
     property string keys: "emacs"      // "emacs", "vi", "vscode"
     property var history: []           // oldest first (shared by the window)
     property var themeData: ({})       // the terminal's theme (ansi colors)
@@ -24,6 +29,8 @@ Rectangle {
     signal submitted(string text)
     signal keysPicked(string keys)     // the corner switch: "emacs", "vi", "vscode"
     signal openRich()                  // show the last output's rich view
+    property string viewMode: "terminal"
+    signal viewModePicked(string mode) // "terminal" or "notebook"
     signal handBack()                  // Esc: type into the terminal instead
 
     readonly property alias text: edit.text
@@ -657,7 +664,7 @@ Rectangle {
                   : box.aiBusy !== "" ? "\u2726 " + (box.aiBusy === "fix" ? "fixing\u2026" : "writing the command\u2026")
                   : box.aiNote !== "" ? "\u2726 " + box.aiNote
                   : box.lspNote !== "" ? "\u26a0 " + box.lspNote
-                  : box.keys === "vi" ? (box.viNormal ? "NORMAL" : "INSERT") : box.lang
+                  : box.keys === "vi" ? (box.viNormal ? "NORMAL" : "INSERT") : ""
             color: box.problem !== "" ? box.ansi(9, "#e05a5a") : (box.aiNote !== "" || box.lspNote !== "") ? box.ansi(3, "#e5c07b") : Theme.textDim
             width: Math.min(implicitWidth, box.width * 0.45)
             elide: Text.ElideRight
@@ -670,40 +677,61 @@ Rectangle {
             font.letterSpacing: 0.5
         }
         Chip {
+            base: box.color
             visible: box.view !== null && box.view.lastStatus !== 0 && edit.text === "" && box.chatReady && box.aiBusy === ""
             label: "\u2726 Fix"
             tip: "Ask the AI to correct the command that just failed"
             onClicked: box.askFix()
         }
         Chip {
+            base: box.color
             visible: box.view !== null && box.view.richKind !== ""
             label: "\u25eb " + (({ json: "JSON", csv: "Table", tsv: "Table", html: "HTML", markdown: "Markdown", svg: "SVG" })[box.view ? box.view.richKind : ""] || "View")
             tip: "Show the last command's output formatted"
             onClicked: box.openRich()
         }
-        Chip { label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
+        Chip {
+            id: langChip
+            base: box.color
+            label: box.lang + (box.langOverride !== "" ? "" : " \u00b7 auto")
+            tip: "Input language (highlighting, checks, completion)"
+            onClicked: langMenu.popup(langChip, 0, langChip.height + 2)
+        }
+        Chip {
+            id: modeChip
+            base: box.color
+            label: box.viewMode === "notebook" ? "\u25a4 Notebook" : "\u25ad Terminal"
+            tip: "Show this pane as a terminal or as a notebook (each command a cell)"
+            onClicked: modeMenu.popup(modeChip, 0, modeChip.height + 2)
+        }
+        Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {
             id: keysChip
+            base: box.color
             label: ({ emacs: "Emacs", vi: "vi", vscode: "VS Code" })[box.keys] || box.keys
             tip: "Editor keys"
             onClicked: keysMenu.popup(keysChip, 0, keysChip.height + 2)
         }
     }
-    component Chip: Rectangle {
-        id: chip
-        property string label
-        property string tip
-        signal clicked()
-        width: chipText.implicitWidth + 12
-        height: 18
-        radius: 5
-        color: chipHover.hovered ? Theme.mix(box.color, Theme.fg, 0.12) : Theme.mix(box.color, Theme.fg, 0.05)
-        Text { id: chipText; anchors.centerIn: parent; text: chip.label; color: Theme.textDim; font.pixelSize: 10; font.weight: Font.DemiBold }
-        HoverHandler { id: chipHover }
-        TapHandler { onTapped: chip.clicked() }
-        ToolTip.visible: chipHover.hovered && tip !== ""
-        ToolTip.text: tip
-        ToolTip.delay: 600
+    Menu {
+        id: langMenu
+        MenuItem { text: "Automatic (" + box.autoLang + ")"; checkable: true; checked: box.langOverride === ""; onTriggered: box.langOverride = "" }
+        MenuSeparator {}
+        Repeater {
+            model: box.languages
+            delegate: MenuItem {
+                required property var modelData
+                text: modelData[1]
+                checkable: true
+                checked: box.langOverride === modelData[0]
+                onTriggered: box.langOverride = modelData[0]
+            }
+        }
+    }
+    Menu {
+        id: modeMenu
+        MenuItem { text: "Terminal"; checkable: true; checked: box.viewMode !== "notebook"; onTriggered: box.viewModePicked("terminal") }
+        MenuItem { text: "Notebook"; checkable: true; checked: box.viewMode === "notebook"; onTriggered: box.viewModePicked("notebook") }
     }
     Menu {
         id: keysMenu
