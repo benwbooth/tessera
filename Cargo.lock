@@ -747,6 +747,7 @@ dependencies = [
 name = "tessera"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "cxx",
  "cxx-qt",
  "cxx-qt-build",

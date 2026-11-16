@@ -42,6 +42,8 @@ struct DSession {
     /// The PTY's current size: resizing to the same size is skipped (every
     /// resize makes the shell redraw its prompt).
     size: Mutex<(u16, u16)>,
+    /// Scrollback lines its emulator keeps (for a resumed one after an upgrade).
+    lines: u32,
 }
 
 type Registry = Arc<Mutex<HashMap<String, Arc<DSession>>>>;
@@ -80,8 +82,22 @@ pub fn lock_down_admin_dir(sock: &std::path::Path) -> std::io::Result<()> {
 
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
+/// This daemon's build (see proto::exe_identity), fixed at startup.
+static IDENTITY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+/// The listening socket's fd (handed to the next build on an upgrade).
+#[cfg(unix)]
+static LISTENER_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
 pub fn run() -> std::io::Result<()> {
+    IDENTITY.get_or_init(exe_identity);
     let path = socket_path();
+    // Started by the previous build's upgrade: take over its sockets and shells.
+    #[cfg(unix)]
+    if let Some(state) = std::env::args().skip_while(|a| a != "--resume").nth(1) {
+        let registry: Registry = Arc::default();
+        let listener = upgrade::resume(&state, &registry)?;
+        return serve(listener, registry, path);
+    }
     if std::env::var_os("TESSERA_ADMIN").is_some() {
         lock_down_admin_dir(&path)?;
     }
@@ -99,8 +115,15 @@ pub fn run() -> std::io::Result<()> {
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
     eprintln!("tessera daemon: listening at {}", path.display());
+    serve(listener, Arc::default(), path)
+}
 
-    let registry: Registry = Arc::default();
+fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        LISTENER_FD.store(listener.as_raw_fd(), Ordering::SeqCst);
+    }
 
     // Exit once nothing is left: no shells and nobody connected. The next GUI
     // start launches a fresh daemon (handy after a rebuild, too).
@@ -205,6 +228,7 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
         shared: Mutex::new(Shared { client: None, client_gen: 0 }),
         emu: Mutex::new(emu_tx),
         size: Mutex::new((c.cols.max(1), c.rows.max(1))),
+        lines: if c.scrollback > 0 { c.scrollback } else { 10_000 },
     });
     registry.lock().unwrap().insert(s.id.clone(), s.clone());
 
@@ -372,6 +396,29 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
             }
             return Ok(());
         }
+        T_VERSION => {
+            return write_json(&mut stream, T_VERSION_REPLY, IDENTITY.get_or_init(exe_identity));
+        }
+        T_UPGRADE => {
+            #[derive(serde::Deserialize)]
+            struct Up {
+                exe: String,
+            }
+            let up: Up = serde_json::from_slice(&payload)?;
+            #[cfg(unix)]
+            {
+                write_json(&mut stream, T_UPGRADE_REPLY, &"upgrading")?;
+                drop(stream);
+                let err = upgrade::exec_new_build(registry, &up.exe);
+                eprintln!("tessera daemon: upgrade failed: {err}");
+                return Ok(());
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = up;
+                return write_json(&mut stream, T_ERROR, &"upgrading a running daemon needs Unix");
+            }
+        }
         T_INFO => {
             let id: String = serde_json::from_slice(&payload)?;
             let found = registry.lock().unwrap().get(&id).cloned();
@@ -400,7 +447,6 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
         _ => return write_json(&mut stream, T_ERROR, &"expected create, attach or list"),
     };
 
-    static GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let my_gen = GEN.fetch_add(1, Ordering::SeqCst);
     // Attach: hand over the replay and become the live client, atomically
     // with respect to the output pump so nothing is lost or duplicated.
@@ -429,7 +475,14 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
         sh.client = Some(out);
         sh.client_gen = my_gen;
     }
+    attached_loop(&session, stream, my_gen);
+    Ok(())
+}
 
+static GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// An attached window's input (keys, resizes) until it goes away.
+fn attached_loop(session: &Arc<DSession>, mut stream: UnixStream, my_gen: u64) {
     loop {
         let (tag, payload) = match read_frame(&mut stream) {
             Ok(f) => f,
@@ -456,10 +509,267 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
     if sh.client.is_some() && sh.client_gen == my_gen {
         sh.client = None;
     }
-    Ok(())
 }
 
 
 fn ioe(e: impl std::fmt::Display) -> std::io::Error {
     std::io::Error::other(e.to_string())
+}
+
+/// Upgrading a running daemon to a new build without ending any shell: the
+/// old one hands its listening socket, every PTY and every attached window's
+/// connection to the new executable across exec (same process, so the shells
+/// stay its children), with each screen as a snapshot for the new emulators.
+#[cfg(unix)]
+mod upgrade {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+    use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+
+    #[derive(Serialize, Deserialize)]
+    struct SessionState {
+        id: String,
+        fd: RawFd,
+        pid: Option<u32>,
+        created: u64,
+        cols: u16,
+        rows: u16,
+        lines: u32,
+        snapshot: String,
+        client_fd: Option<RawFd>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct State {
+        listener_fd: RawFd,
+        sessions: Vec<SessionState>,
+    }
+
+    fn set_cloexec(fd: RawFd, on: bool) {
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags >= 0 {
+                let f = if on { flags | libc::FD_CLOEXEC } else { flags & !libc::FD_CLOEXEC };
+                libc::fcntl(fd, libc::F_SETFD, f);
+            }
+        }
+    }
+
+    /// Hands everything to `exe` and execs it. Returns only on failure.
+    pub fn exec_new_build(registry: &Registry, exe: &str) -> String {
+        use std::os::unix::process::CommandExt;
+        let dir = crate::settings::state_dir().join("upgrade");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            return e.to_string();
+        }
+        let reg = registry.lock().unwrap();
+        let sessions: Vec<Arc<DSession>> = reg.values().cloned().collect();
+        // Every session's lock stays held to the end: no output is forwarded
+        // (or lost) in between; it waits in the PTY for the new build.
+        let mut guards = Vec::new();
+        let mut states = Vec::new();
+        for s in &sessions {
+            let g = s.shared.lock().unwrap();
+            let (tx, rx) = mpsc::channel();
+            let _ = s.emu.lock().unwrap().send(Emu::Snapshot(tx));
+            let snap = rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default();
+            let snap_path = dir.join(format!("{}.vt", s.id));
+            if let Err(e) = std::fs::write(&snap_path, &snap) {
+                return e.to_string();
+            }
+            let Some(fd) = s.master.lock().unwrap().as_raw_fd() else { return "a PTY without an fd".into() };
+            set_cloexec(fd, false);
+            let client_fd = g.client.as_ref().map(|c| c.as_raw_fd());
+            if let Some(c) = client_fd {
+                set_cloexec(c, false);
+            }
+            let (cols, rows) = *s.size.lock().unwrap();
+            states.push(SessionState {
+                id: s.id.clone(),
+                fd,
+                pid: s.shell_pid,
+                created: s.created,
+                cols,
+                rows,
+                lines: s.lines,
+                snapshot: snap_path.display().to_string(),
+                client_fd,
+            });
+            guards.push(g);
+        }
+        let listener_fd = LISTENER_FD.load(Ordering::SeqCst);
+        set_cloexec(listener_fd, false);
+        let state_path = dir.join("state.json");
+        let state = State { listener_fd, sessions: states };
+        if let Err(e) = std::fs::write(&state_path, serde_json::to_vec(&state).unwrap_or_default()) {
+            return e.to_string();
+        }
+        eprintln!("tessera daemon: upgrading to {exe} with {} sessions", state.sessions.len());
+        let err = std::process::Command::new(exe).arg("daemon").arg("--resume").arg(&state_path).exec();
+        // Still here: the old build carries on.
+        set_cloexec(listener_fd, true);
+        for s in &state.sessions {
+            set_cloexec(s.fd, true);
+            if let Some(c) = s.client_fd {
+                set_cloexec(c, true);
+            }
+        }
+        drop(guards);
+        err.to_string()
+    }
+
+    /// The new build's side: everything the old one handed over.
+    pub fn resume(state_path: &str, registry: &Registry) -> std::io::Result<UnixListener> {
+        let state: State = serde_json::from_slice(&std::fs::read(state_path)?).map_err(ioe)?;
+        let _ = std::fs::remove_file(state_path);
+        set_cloexec(state.listener_fd, true);
+        let listener = unsafe { UnixListener::from_raw_fd(state.listener_fd) };
+        for st in state.sessions {
+            set_cloexec(st.fd, true);
+            let master = FdMaster { fd: st.fd };
+            let reader = master.try_clone_reader().map_err(ioe)?;
+            let writer = master.take_writer().map_err(ioe)?;
+            let (emu_tx, emu_rx) = mpsc::channel::<Emu>();
+            let (cols, rows, lines) = (st.cols.max(2), st.rows.max(1), st.lines);
+            std::thread::spawn(move || emulate(emu_rx, cols, rows, lines));
+            if let Ok(snap) = std::fs::read(&st.snapshot) {
+                let _ = emu_tx.send(Emu::Output(snap));
+            }
+            let _ = std::fs::remove_file(&st.snapshot);
+            let my_gen = GEN.fetch_add(1, Ordering::SeqCst);
+            let client = st.client_fd.map(|c| {
+                set_cloexec(c, true);
+                unsafe { UnixStream::from_raw_fd(c) }
+            });
+            let s = Arc::new(DSession {
+                id: st.id.clone(),
+                shell_pid: st.pid,
+                created: st.created,
+                master: Mutex::new(Box::new(master)),
+                writer: Mutex::new(writer),
+                child: Mutex::new(Box::new(PidChild { pid: st.pid.unwrap_or(0) })),
+                shared: Mutex::new(Shared { client: None, client_gen: my_gen }),
+                emu: Mutex::new(emu_tx),
+                size: Mutex::new((st.cols.max(1), st.rows.max(1))),
+                lines: st.lines,
+            });
+            registry.lock().unwrap().insert(s.id.clone(), s.clone());
+            // The window that was attached stays attached.
+            if let Some(c) = client {
+                if let Ok(input) = c.try_clone() {
+                    s.shared.lock().unwrap().client = Some(c);
+                    let s2 = s.clone();
+                    CONNECTIONS.fetch_add(1, Ordering::SeqCst);
+                    std::thread::spawn(move || {
+                        attached_loop(&s2, input, my_gen);
+                        CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
+                    });
+                }
+            }
+            let registry = registry.clone();
+            std::thread::spawn(move || pump_output(s, reader, registry));
+        }
+        eprintln!("tessera daemon: resumed after an upgrade");
+        Ok(listener)
+    }
+
+    /// A PTY master known only by its fd (after exec there's no
+    /// portable-pty object for it).
+    struct FdMaster {
+        fd: RawFd,
+    }
+
+    fn dup_file(fd: RawFd) -> anyhow::Result<std::fs::File> {
+        let d = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+        if d < 0 {
+            anyhow::bail!(std::io::Error::last_os_error());
+        }
+        Ok(unsafe { std::fs::File::from_raw_fd(d) })
+    }
+
+    impl MasterPty for FdMaster {
+        fn resize(&self, size: PtySize) -> anyhow::Result<()> {
+            let ws = libc::winsize { ws_row: size.rows, ws_col: size.cols, ws_xpixel: size.pixel_width, ws_ypixel: size.pixel_height };
+            if unsafe { libc::ioctl(self.fd, libc::TIOCSWINSZ, &ws) } != 0 {
+                anyhow::bail!(std::io::Error::last_os_error());
+            }
+            Ok(())
+        }
+        fn get_size(&self) -> anyhow::Result<PtySize> {
+            let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+            if unsafe { libc::ioctl(self.fd, libc::TIOCGWINSZ, &mut ws) } != 0 {
+                anyhow::bail!(std::io::Error::last_os_error());
+            }
+            Ok(PtySize { rows: ws.ws_row, cols: ws.ws_col, pixel_width: ws.ws_xpixel, pixel_height: ws.ws_ypixel })
+        }
+        fn try_clone_reader(&self) -> anyhow::Result<Box<dyn Read + Send>> {
+            Ok(Box::new(dup_file(self.fd)?))
+        }
+        fn take_writer(&self) -> anyhow::Result<Box<dyn Write + Send>> {
+            Ok(Box::new(dup_file(self.fd)?))
+        }
+        fn process_group_leader(&self) -> Option<libc::pid_t> {
+            let p = unsafe { libc::tcgetpgrp(self.fd) };
+            (p > 0).then_some(p)
+        }
+        fn as_raw_fd(&self) -> Option<RawFd> {
+            Some(self.fd)
+        }
+        fn tty_name(&self) -> Option<std::path::PathBuf> {
+            None
+        }
+    }
+
+    /// A shell this process started (still its child after exec).
+    #[derive(Debug, Clone)]
+    struct PidChild {
+        pid: u32,
+    }
+
+    impl portable_pty::ChildKiller for PidChild {
+        fn kill(&mut self) -> std::io::Result<()> {
+            if self.pid > 0 {
+                unsafe { libc::kill(self.pid as i32, libc::SIGHUP) };
+            }
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+
+    fn status(st: libc::c_int) -> portable_pty::ExitStatus {
+        if libc::WIFEXITED(st) {
+            portable_pty::ExitStatus::with_exit_code(libc::WEXITSTATUS(st) as u32)
+        } else {
+            portable_pty::ExitStatus::with_signal(&format!("signal {}", libc::WTERMSIG(st)))
+        }
+    }
+
+    impl portable_pty::Child for PidChild {
+        fn try_wait(&mut self) -> std::io::Result<Option<portable_pty::ExitStatus>> {
+            let mut st = 0;
+            let r = unsafe { libc::waitpid(self.pid as i32, &mut st, libc::WNOHANG) };
+            if r < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok((r > 0).then(|| status(st)))
+        }
+        fn wait(&mut self) -> std::io::Result<portable_pty::ExitStatus> {
+            let mut st = 0;
+            loop {
+                let r = unsafe { libc::waitpid(self.pid as i32, &mut st, 0) };
+                if r >= 0 {
+                    return Ok(status(st));
+                }
+                let e = std::io::Error::last_os_error();
+                if e.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(e);
+                }
+            }
+        }
+        fn process_id(&self) -> Option<u32> {
+            Some(self.pid)
+        }
+    }
 }

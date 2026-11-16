@@ -114,6 +114,8 @@ fn main() {
         kde::remember_window_position();
     }
     bridge::ffi::tessera_set_icon(&QString::from(concat!(env!("CARGO_MANIFEST_DIR"), "/icons/tessera.svg")));
+    // A daemon from an older build: swap the new one in (shells kept).
+    std::env::set_var("TESSERA_DAEMON_STATE", client::sync_daemon());
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         if let Some(qml) = option_env!("TESSERA_QT_QML") {

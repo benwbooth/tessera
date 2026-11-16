@@ -124,6 +124,90 @@ pub fn session_job(id: &str) -> std::io::Result<String> {
     Ok(serde_json::from_slice(&payload).unwrap_or_default())
 }
 
+/// Bring the running daemon up to this build. "none" (no daemon yet),
+/// "current", "upgraded" (swapped in place; every shell kept), "outdated"
+/// (a build from before in-place upgrades: it has to be restarted), or
+/// "newer" (the daemon is a newer build than this window: leave it).
+pub fn sync_daemon() -> &'static str {
+    let ask_version = || -> Option<Result<String, ()>> {
+        let mut s = UnixStream::connect(socket_path()).ok()?;
+        s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+        write_json(&mut s, T_VERSION, &()).ok()?;
+        match read_frame(&mut s) {
+            Ok((T_VERSION_REPLY, p)) => Some(Ok(serde_json::from_slice(&p).unwrap_or_default())),
+            Ok((T_ERROR, _)) => Some(Err(())),
+            _ => None,
+        }
+    };
+    let mine = exe_identity();
+    let theirs = match ask_version() {
+        None => return "none",
+        Some(Err(())) => return "outdated",
+        Some(Ok(id)) => id,
+    };
+    if theirs == mine || mine.is_empty() {
+        return "current";
+    }
+    // Only ever forward (two installed builds mustn't swap back and forth).
+    let mtime = |id: &str| id.split(':').nth(1).and_then(|m| m.parse::<u128>().ok()).unwrap_or(0);
+    if mtime(&theirs) > mtime(&mine) {
+        return "newer";
+    }
+    let Ok(exe) = std::env::current_exe() else { return "current" };
+    let sent = (|| -> std::io::Result<()> {
+        let mut s = UnixStream::connect(socket_path())?;
+        s.set_read_timeout(Some(Duration::from_secs(5)))?;
+        write_json(&mut s, T_UPGRADE, &serde_json::json!({ "exe": exe.display().to_string() }))?;
+        let _ = read_frame(&mut s)?;
+        Ok(())
+    })();
+    if sent.is_err() {
+        return "current";
+    }
+    // The new build answers on the same socket once it has taken over.
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(5) {
+        if let Some(Ok(id)) = ask_version() {
+            if id == mine {
+                return "upgraded";
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    "current"
+}
+
+/// End the daemon (and its shells): for a build too old to upgrade itself.
+pub fn stop_daemon() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let Ok(s) = UnixStream::connect(socket_path()) else { return false };
+        let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        let ok = unsafe { libc::getsockopt(s.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, (&mut cred as *mut libc::ucred).cast(), &mut len) } == 0;
+        drop(s);
+        if !ok || cred.pid <= 0 {
+            return false;
+        }
+        unsafe { libc::kill(cred.pid, libc::SIGTERM) };
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(3) {
+            if UnixStream::connect(socket_path()).is_err() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        unsafe { libc::kill(cred.pid, libc::SIGKILL) };
+        let _ = std::fs::remove_file(socket_path());
+        true
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 /// The desktop session's environment: systemd's user manager has it (what
 /// apps started from the desktop get). Falls back to a cleaned-up copy of our
 /// own. Tessera's own settings (TESSERA_SOCKET, XDG_STATE_HOME) are kept.

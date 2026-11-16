@@ -1527,6 +1527,37 @@ ApplicationWindow {
             }
         }
     }
+    // Shells in a daemon from before in-place upgrades: it can't take this
+    // build's changes (shell integration, the input editor, ...) without a
+    // restart. Asked once per start, after the window is up.
+    Timer {
+        id: daemonTimer
+        interval: 1500
+        onTriggered: sheet.ask({
+            title: "Restart the shells' background process?",
+            message: "Your shells run in Tessera's background process from an older version, which can't update itself. "
+                   + "Restarting it gives them this version's features (prompt marks, the input editor, clean zoom). "
+                   + "Every tab comes back in its folder with its screen; programs running in them (and in other Tessera windows) end.\n\n"
+                   + "From now on it updates itself in place, keeping your shells.",
+            okText: "Restart Shells",
+            destructive: true,
+            onAccept: function() {
+                // New shells (from a new daemon) in every tab's place, each
+                // under its saved screen; then the old tabs go.
+                win.saveSnapshots()
+                const layout = win.serializeWindow(true)
+                const old = win.tabs.slice(), cur = win.currentTab
+                if (!controller.stopDaemon()) {
+                    sheet.ask({ title: "Couldn't restart it", message: "The background process didn't stop. Logging out and back in restarts it.", infoOnly: true, okText: "OK" })
+                    return
+                }
+                win.restoreArrangement(layout, {}, true)
+                for (const t of old) win.removeTab(t)
+                win.focusTab(Math.min(cur, win.tabs.length - 1))
+                win.saveLayoutNow()
+            }
+        })
+    }
     Timer { id: composeTestTimer; interval: 4000; onTriggered: if (activePane) { activePane.compose.focusEditor(); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit() } }
     Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.open(menuButton); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
@@ -2024,6 +2055,7 @@ ApplicationWindow {
         if (controller.testEnv("ZOOM") !== "") zoomTestTimer.start()
         if (controller.testEnv("CONTEXT") !== "") contextTestTimer.start()
         if (controller.testEnv("COMPOSE") !== "") composeTestTimer.start()
+        if (controller.daemonState() === "outdated") daemonTimer.start()
         if (controller.screenshotPath() !== "") shotTimer.start()
     }
 

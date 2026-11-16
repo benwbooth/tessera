@@ -281,6 +281,13 @@ pub mod ffi {
         fn download_command_help(self: Pin<&mut Controller>);
         #[qinvokable]
         fn command_help_count(self: &Controller) -> i32;
+        /// How the running daemon compared with this build at startup:
+        /// "none", "current", "upgraded", "outdated", "newer".
+        #[qinvokable]
+        fn daemon_state(self: &Controller) -> QString;
+        /// End an outdated daemon (and its shells). False if it couldn't be.
+        #[qinvokable]
+        fn stop_daemon(self: &Controller) -> bool;
         /// Windows: open an elevated window (the UAC prompt first).
         #[qinvokable]
         fn new_admin_window(self: &Controller);
@@ -521,6 +528,14 @@ impl ffi::Controller {
                 c.as_mut().set_help_status(qs(&msg));
             });
         });
+    }
+
+    fn daemon_state(&self) -> ffi::QString {
+        qs(&std::env::var("TESSERA_DAEMON_STATE").unwrap_or_default())
+    }
+
+    fn stop_daemon(&self) -> bool {
+        crate::client::stop_daemon()
     }
 
     fn command_help_count(&self) -> i32 {

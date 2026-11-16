@@ -21,6 +21,10 @@ pub const T_JOB: u8 = 7;
 pub const T_KILL_ID: u8 = 8;
 /// What a session is doing: {job, cwd, shell} (T_INFO_REPLY).
 pub const T_INFO: u8 = 9;
+/// Which build the daemon is (T_VERSION_REPLY: exe_identity()).
+pub const T_VERSION: u8 = 10;
+/// Swap in another build without ending any shell: payload JSON {exe}.
+pub const T_UPGRADE: u8 = 11;
 
 pub const T_ATTACHED: u8 = 101;
 pub const T_OUTPUT: u8 = 102;
@@ -29,6 +33,8 @@ pub const T_SESSIONS: u8 = 104;
 pub const T_ERROR: u8 = 105;
 pub const T_JOB_REPLY: u8 = 106;
 pub const T_INFO_REPLY: u8 = 108;
+pub const T_VERSION_REPLY: u8 = 109;
+pub const T_UPGRADE_REPLY: u8 = 110;
 /// Another window attached the session: this client is no longer it.
 pub const T_TAKEN: u8 = 107;
 
@@ -130,6 +136,19 @@ impl FrameReader {
 pub fn admin_socket_path() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     base.join("Tessera").join("admin").join("daemon.sock")
+}
+
+/// This build's identity: the executable's size, modification time and
+/// inode (devloop and package managers replace it with a new file).
+pub fn exe_identity() -> String {
+    let Ok(exe) = std::env::current_exe() else { return String::new() };
+    let Ok(m) = std::fs::metadata(&exe) else { return String::new() };
+    let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+    #[cfg(unix)]
+    let ino = std::os::unix::fs::MetadataExt::ino(&m);
+    #[cfg(not(unix))]
+    let ino = 0u64;
+    format!("{}:{mtime}:{ino}", m.len())
 }
 
 pub fn socket_path() -> PathBuf {
