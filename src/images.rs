@@ -210,6 +210,31 @@ mod tests {
     }
 }
 
+/// What a file shown by a viewer command (cat README.md, bat data.json,
+/// head -50 x.csv) is, from its name: "" when it isn't one of those.
+pub fn kind_from_command(cmd: &str) -> &'static str {
+    // (The last command of a list: cd somewhere; cat it.md)
+    let last = cmd.rsplit(|c| c == ';' || c == '&' || c == '|').find(|p| !p.trim().is_empty()).unwrap_or(cmd);
+    let words = shell_words::split(last).unwrap_or_default();
+    let Some(first) = words.first() else { return "" };
+    let prog = first.rsplit('/').next().unwrap_or(first);
+    if !matches!(prog, "cat" | "bat" | "batcat" | "head" | "tail" | "less" | "more" | "glow" | "mdcat" | "jq" | "type" | "Get-Content") {
+        return "";
+    }
+    let Some(file) = words.iter().skip(1).rev().find(|w| !w.starts_with('-')) else { return "" };
+    let ext = file.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "md" | "markdown" | "mdx" => "markdown",
+        "json" | "jsonl" | "ndjson" | "geojson" => "json",
+        "csv" => "csv",
+        "tsv" => "tsv",
+        "html" | "htm" => "html",
+        "svg" => "svg",
+        "diff" | "patch" => "diff",
+        _ => "",
+    }
+}
+
 /// What a command's text output is, for a rich view: "json", "csv", "tsv",
 /// "html", "svg", "markdown", or "" (plain text). Clear-cut cases only.
 pub fn detect_text(text: &str) -> &'static str {
@@ -221,7 +246,11 @@ pub fn detect_text(text: &str) -> &'static str {
     if lower.starts_with("<svg") || (lower.starts_with("<?xml") && lower.contains("<svg")) {
         return "svg";
     }
-    if lower.starts_with("<!doctype html") || lower.starts_with("<html") || (lower.starts_with('<') && (lower.contains("<body") || lower.contains("<div") || lower.contains("<table") || lower.contains("<p>"))) {
+    // (Markdown that opens with some HTML, as many READMEs do, is still Markdown.)
+    let md_headings = t.lines().filter(|l| l.starts_with("# ") || l.starts_with("## ") || l.starts_with("### ")).count();
+    if lower.starts_with("<!doctype html") || lower.starts_with("<html")
+        || (lower.starts_with('<') && md_headings < 2 && (lower.contains("<body") || lower.contains("<div") || lower.contains("<table") || lower.contains("<p>")))
+    {
         return "html";
     }
     if (t.starts_with('{') && t.ends_with('}')) || (t.starts_with('[') && t.ends_with(']')) {
@@ -243,7 +272,11 @@ pub fn detect_text(text: &str) -> &'static str {
         }
     }
     let md_marks = lines.iter().filter(|l| l.starts_with("# ") || l.starts_with("## ") || l.starts_with("- ") || l.starts_with("* ") || l.starts_with("```") || l.starts_with("| ") || l.starts_with("> ")).count();
-    if lines.len() >= 3 && md_marks * 3 >= lines.len() && lines.iter().any(|l| l.starts_with('#')) {
+    // (A script's comments aren't headings.)
+    if !t.starts_with("#!")
+        && ((lines.len() >= 3 && md_marks * 3 >= lines.len() && lines.iter().any(|l| l.starts_with('#')))
+            || (md_headings >= 2 && (t.contains("](") || t.contains("```"))))
+    {
         return "markdown";
     }
     ""
@@ -299,6 +332,12 @@ mod detect_tests {
         assert_eq!(detect_text("<!DOCTYPE html><html><body>x</body></html>"), "html");
         assert_eq!(detect_text("<svg xmlns='http://www.w3.org/2000/svg'></svg>"), "svg");
         assert_eq!(detect_text("# Title\n\n- one\n- two\n"), "markdown");
+        assert_eq!(kind_from_command("cat README.md"), "markdown");
+        assert_eq!(kind_from_command("bat -p data.json"), "json");
+        assert_eq!(kind_from_command("git add README.md"), "");
+        assert_eq!(kind_from_command("cd ~/src/Kog; cat README.md"), "markdown");
+        assert_eq!(detect_text("<p align=center>x</p>\n\n# One\n\n[a](b)\n\n## Two\n\nmore text here\n"), "markdown");
+        assert_eq!(detect_text("#!/bin/sh\n# build it\nmake\n# then test\nmake test\nexit 0\n"), "");
         assert_eq!(detect_text("total 12\ndrwxr-xr-x 2 ben users 4096 src\n-rw-r--r-- 1 ben users 3 a, b\n"), "");
         assert_eq!(plain_text(b"\x1b[31mred\x1b[0m\r\nnext"), "red\nnext");
     }

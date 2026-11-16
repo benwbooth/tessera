@@ -142,9 +142,73 @@ fn for_qt(html: &str) -> String {
     out
 }
 
+/// Takes off the frame a pager like bat draws around a file (rules of ─┬┴,
+/// a "File:" header, line numbers and a │ before each line; its own wrapped
+/// lines joined back up), leaving the file. Other text comes back as it was.
+pub fn strip_frame(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let is_rule = |l: &str| {
+        let t = l.trim();
+        !t.is_empty() && t.chars().all(|c| matches!(c, '─' | '┬' | '┼' | '┴' | '━' | '┯' | '┷'))
+    };
+    // "  12 │ text", or "     │ more" (a wrapped line), or "     │ File: x".
+    let gutter = |l: &str| -> Option<(bool, String)> {
+        let (head, rest) = l.split_once('│')?;
+        let h = head.trim();
+        if !(h.is_empty() || h.chars().all(|c| c.is_ascii_digit())) {
+            return None;
+        }
+        let rest = rest.strip_prefix(' ').unwrap_or(rest);
+        Some((!h.is_empty(), rest.to_string()))
+    };
+    let rules = lines.iter().filter(|l| is_rule(l)).count();
+    let framed = lines.iter().filter(|l| !is_rule(l) && !l.trim().is_empty()).all(|l| gutter(l).is_some());
+    if rules < 2 || !framed {
+        return text.to_string();
+    }
+    let numbered = lines.iter().any(|l| gutter(l).is_some_and(|g| g.0));
+    let mut out: Vec<String> = Vec::new();
+    let mut header = true;
+    for l in &lines {
+        if is_rule(l) || l.trim().is_empty() {
+            continue;
+        }
+        let Some((num, body)) = gutter(l) else { continue };
+        if header && !num && (body.starts_with("File:") || body.starts_with("STDIN") || body.starts_with("Size:")) {
+            continue;
+        }
+        header = false;
+        // (Numbered: a line without a number continues the one before.)
+        if numbered && !num && !out.is_empty() {
+            out.last_mut().unwrap().push_str(&body);
+        } else {
+            out.push(body);
+        }
+    }
+    out.join("\n") + "\n"
+}
+
+/// Markdown as HTML (GitHub's flavor: tables, task lists, strikethrough).
+pub fn markdown_html(md: &str) -> String {
+    use pulldown_cmark::{html, Options, Parser};
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_FOOTNOTES;
+    let mut out = String::new();
+    html::push_html(&mut out, Parser::new_ext(md, opts));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bat_frame() {
+        let framed = "───────┬────────\n       │ File: README.md\n───────┼────────\n   1   │ # Title\n   2   │ some long li\n       │ ne wrapped\n   3   │ \n   4   │ - item\n───────┴────────\n";
+        assert_eq!(strip_frame(framed), "# Title\nsome long line wrapped\n\n- item\n");
+        assert_eq!(strip_frame("plain | text\n"), "plain | text\n");
+        let html = markdown_html(&strip_frame(framed));
+        assert!(html.contains("<h1>Title</h1>") && html.contains("<li>item</li>"), "{html}");
+    }
 
     #[test]
     fn cells_and_html() {
@@ -161,3 +225,4 @@ mod tests {
         assert_eq!(html.matches("</div>").count(), 1);
     }
 }
+

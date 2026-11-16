@@ -184,8 +184,9 @@ Rectangle {
                     // (Re-read while the command runs.)
                     property int tick: nb.tick
                     sourceComponent: cell.kind === "html" ? htmlView
+                                   : cell.kind === "markdown" ? markdownView
                                    : cell.kind === "image" ? imageView
-                                   : ["json", "csv", "tsv", "markdown", "svg"].indexOf(cell.kind) >= 0 ? richView
+                                   : ["json", "csv", "tsv", "svg"].indexOf(cell.kind) >= 0 ? richView
                                    : cell.kind === "diff" ? diffView
                                    : cell.kind === "text" ? plainView : termView
                 }
@@ -291,6 +292,52 @@ Rectangle {
                             fillMode: Image.PreserveAspectFit
                             horizontalAlignment: Image.AlignLeft
                             source: { const b = nb.view ? nb.view.cellOutput(cell.c.id, "image") : ""; return b !== "" ? "data:image/png;base64," + b : "" }
+                        }
+                    }
+                }
+                Component {
+                    id: markdownView
+                    // Markdown drawn as a page: headings, lists, tables, code and
+                    // pictures (relative ones from the command's folder), in the
+                    // theme's colors. Its HTML may show but never run scripts.
+                    WebEngineView {
+                        id: md
+                        implicitHeight: 360
+                        backgroundColor: Theme.bg
+                        settings.javascriptEnabled: false
+                        settings.pluginsEnabled: false
+                        settings.localContentCanAccessFileUrls: true
+                        settings.localContentCanAccessRemoteUrls: true
+                        settings.showScrollBars: true
+                        function css() {
+                            const c = (x) => String(x)
+                            return "body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:14px/1.6 'Noto Sans','Segoe UI',system-ui,sans-serif;margin:12px 18px;max-width:900px}"
+                                + "a{color:" + c(Theme.accent) + "}h1,h2{border-bottom:1px solid " + c(Theme.divider) + ";padding-bottom:.25em}"
+                                + "h1{font-size:1.8em}h2{font-size:1.4em}h1,h2,h3,h4{margin:1.1em 0 .5em;line-height:1.25}"
+                                + "code{font-family:" + nb.fontFamily + ",monospace;font-size:.88em;background:" + c(Theme.field) + ";padding:.15em .35em;border-radius:5px}"
+                                + "pre{background:" + c(Theme.field) + ";padding:10px 12px;border-radius:7px;overflow:auto}pre code{background:none;padding:0}"
+                                + "blockquote{margin:0;padding:0 1em;color:" + c(Theme.textDim) + ";border-left:3px solid " + c(Theme.divider) + "}"
+                                + "table{border-collapse:collapse}th,td{border:1px solid " + c(Theme.divider) + ";padding:5px 10px}th{background:" + c(Theme.field) + "}"
+                                + "img{max-width:100%}hr{border:0;border-top:1px solid " + c(Theme.divider) + "}"
+                                + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
+                        }
+                        function show() {
+                            const body = nb.view ? nb.view.cellOutput(cell.c.id, "markdown") : ""
+                            loadHtml("<!doctype html><html><head><meta charset='utf-8'><style>" + css() + "</style></head><body>" + body + "</body></html>",
+                                     "file://" + (cell.c.cwd || "/") + "/")
+                        }
+                        Component.onCompleted: show()
+                        Connections { target: loader; function onTickChanged() { if (!cell.c.done) md.show() } }
+                        onLoadingChanged: (r) => {
+                            if (r.status === WebEngineView.LoadSucceededStatus)
+                                runJavaScript("Math.ceil(document.documentElement.scrollHeight)", (h) => { if (h > 0) md.implicitHeight = Math.max(60, Math.min(520, h)) })
+                        }
+                        onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+                        onNavigationRequested: (req) => {
+                            // (Links open in the browser, not in the cell.)
+                            if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation) {
+                                req.reject(); Qt.openUrlExternally(req.url)
+                            }
                         }
                     }
                 }

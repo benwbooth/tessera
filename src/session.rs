@@ -759,8 +759,10 @@ impl Session {
                             let digits: String = after.iter().skip_while(|&&c| c == b';').take_while(|c| c.is_ascii_digit()).map(|&c| c as char).collect();
                             digits.parse().unwrap_or(0)
                         };
-                        let text = strip_zsh_marker(crate::images::plain_text(&raw));
-                        let kind = crate::images::detect_text(&text);
+                        let text = crate::cells::strip_frame(&strip_zsh_marker(crate::images::plain_text(&raw)));
+                        // (The file's name says best what cat showed; else the text itself.)
+                        let named = self.cells.list.back().filter(|c| !c.done).map(|c| crate::images::kind_from_command(&c.command)).unwrap_or("");
+                        let kind = if named.is_empty() { crate::images::detect_text(&text) } else { named };
 
                         if !kind.is_empty() {
                             self.events.push(json!({"type": "rich", "kind": kind, "size": text.len()}));
@@ -838,7 +840,8 @@ impl Session {
                 c.image.as_ref().map(|i| base64::engine::general_purpose::STANDARD.encode(i)).unwrap_or_default()
             }
             "html" => crate::cells::to_html(&c.raw, self.size.get().0),
-            _ => strip_zsh_marker(crate::images::plain_text(&c.raw)),
+            "markdown" => crate::cells::markdown_html(&crate::cells::strip_frame(&strip_zsh_marker(crate::images::plain_text(&c.raw)))),
+            _ => crate::cells::strip_frame(&strip_zsh_marker(crate::images::plain_text(&c.raw))),
         }
     }
 

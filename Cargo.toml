@@ -20,6 +20,7 @@ libghostty-vt = "0.2.2"
 libloading = "0.9.1"
 miniz_oxide = "0.9.1"
 portable-pty = "0.9"
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
 regex = "1.13.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
