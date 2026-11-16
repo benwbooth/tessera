@@ -54,6 +54,7 @@ fn main() {
         QmlFile::from("qml/BarButton.qml"),
         QmlFile::from("qml/SplitButton.qml"),
         QmlFile::from("qml/WindowControls.qml"),
+        QmlFile::from("qml/MomentumWheel.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");

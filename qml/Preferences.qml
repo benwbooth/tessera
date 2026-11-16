@@ -22,10 +22,10 @@ Window {
     signal saveArrangement(string name)
 
     title: "Tessera Preferences"
-    width: 1000
-    height: 700
-    minimumWidth: 760
-    minimumHeight: 500
+    width: 1200
+    height: 820
+    minimumWidth: 820
+    minimumHeight: 560
     color: Theme.panel
     flags: Qt.Dialog
 
@@ -570,6 +570,12 @@ Window {
                     Layout.fillHeight: true
                     contentWidth: availableWidth
                     clip: true
+                    Component.onCompleted: {
+                        const f = scroller.contentItem
+                        f.maximumFlickVelocity = 12000
+                        f.flickDeceleration = 1800
+                    }
+                    MomentumWheel { flick: scroller.contentItem }
 
                     ColumnLayout {
                         width: scroller.availableWidth
@@ -813,12 +819,15 @@ Window {
                                     GridView {
                                         id: grid
                                         Layout.fillWidth: true
-                                        Layout.preferredHeight: prefs.prof.theme_mode === "system" ? 300 : 440
+                                        Layout.preferredHeight: prefs.prof.theme_mode === "system" ? 340 : 540
                                         visible: gallery.all.length > 0
                                         clip: true
                                         cellWidth: 188
                                         cellHeight: 136
                                         boundsBehavior: Flickable.StopAtBounds
+                                        maximumFlickVelocity: 12000
+                                        flickDeceleration: 1800
+                                        MomentumWheel { flick: grid }
                                         model: gallery.all
                                         reuseItems: true
                                         delegate: ThemeCard {
