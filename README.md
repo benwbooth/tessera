@@ -45,8 +45,9 @@ Downloads for every platform are on the [releases page](https://github.com/benwb
 | **Windows** | the `-setup.exe` installer, or the portable `.zip` |
 
 The macOS app is signed ad hoc, not notarized (the Homebrew cask clears the
-quarantine flag for you). Windows support is new: shells are PowerShell by
-default; tmux control mode needs a tmux on the other end, as everywhere.
+quarantine flag for you). Windows support is new: new tabs run PowerShell;
+the + menu also has cmd.exe and each WSL distribution, and Shell › New
+Administrator Window opens an elevated window.
 
 ## Like iTerm2
 
