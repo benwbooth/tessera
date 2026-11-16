@@ -30,7 +30,7 @@ Item {
     property string badge: ""
     property real prefW: -1
     property real prefH: -1
-    signal contextMenu(var view)
+    signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW
     SplitView.preferredHeight: prefH
     SplitView.minimumWidth: 60
@@ -67,7 +67,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         focus: true
-        onContextMenuRequested: pane.contextMenu(term)
+        onContextMenuRequested: (x, y) => pane.contextMenu(term, x, y)
     }
 
     // Badge: large text behind the content, top right (iTerm2's badges).

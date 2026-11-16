@@ -125,6 +125,14 @@ TerminalItem::TerminalItem(QQuickItem* parent)
             m_smooth->stop();
         }
     });
+    m_openTimer = new QTimer(this);
+    m_openTimer->setSingleShot(true);
+    m_openTimer->setInterval(60);
+    connect(m_openTimer, &QTimer::timeout, this, [this] { if (width() > 0 && height() > 0) open(); });
+    m_resizeTimer = new QTimer(this);
+    m_resizeTimer->setSingleShot(true);
+    m_resizeTimer->setInterval(80);
+    connect(m_resizeTimer, &QTimer::timeout, this, [this] { resizeGrid(); });
     m_pasteTimer = new QTimer(this);
     m_pasteTimer->setInterval(125);
     connect(m_pasteTimer, &QTimer::timeout, this, [this] {
@@ -300,7 +308,7 @@ void TerminalItem::componentComplete()
     QQuickItem::componentComplete();
     m_complete = true;
     updateMetrics();
-    if (width() > 0 && height() > 0) open();
+    if (width() > 0 && height() > 0) m_openTimer->start();
 }
 
 void TerminalItem::itemChange(ItemChange change, const ItemChangeData& value)
@@ -474,9 +482,9 @@ void TerminalItem::geometryChange(const QRectF& g, const QRectF& old)
     QQuickItem::geometryChange(g, old);
     if (g.size() == old.size()) return;
     if (!m_session) {
-        if (g.width() > 0 && g.height() > 0) open();
+        if (g.width() > 0 && g.height() > 0) m_openTimer->start();
     } else {
-        resizeGrid();
+        m_resizeTimer->start();
     }
     m_rebuildNodes = true;
     update();
@@ -1267,6 +1275,12 @@ bool TerminalItem::applyKeyMapping(QKeyEvent* e)
         return true;   // "ignore" swallows the key
     }
     return false;
+}
+
+QString TerminalItem::linkAt(qreal x, qreal y) const
+{
+    if (!m_session) return QString();
+    return qs(m_session->link_at(float(x * m_dpr), float(y * m_dpr), uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad)));
 }
 
 bool TerminalItem::saveSnapshot(const QString& path)

@@ -6,6 +6,23 @@ fn channel(v: u32) -> f64 {
     if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
+/// Characters used to draw shapes rather than text: box drawing, blocks,
+/// Powerline separators and caps, Nerd Font icons (private use areas).
+/// Minimum contrast leaves them alone, as Ghostty and iTerm2 do: their
+/// color is meant to match a neighboring background (Starship's rounded
+/// segment ends), not to be read against it.
+pub fn is_drawing(text: &str) -> bool {
+    text.chars().next().is_some_and(|c| {
+        matches!(c as u32,
+            0x2500..=0x259F        // box drawing, block elements
+            | 0x25A0..=0x25FF      // geometric shapes
+            | 0x2800..=0x28FF      // braille (graphs)
+            | 0xE000..=0xF8FF      // private use: Powerline, Nerd Fonts
+            | 0xF0000..=0x10FFFF   // supplementary private use (Nerd Fonts)
+            | 0x1FB00..=0x1FBFF)   // symbols for legacy computing
+    })
+}
+
 /// WCAG relative luminance of 0xRRGGBB.
 pub fn luminance(c: u32) -> f64 {
     0.2126 * channel(c >> 16 & 0xff) + 0.7152 * channel(c >> 8 & 0xff) + 0.0722 * channel(c & 0xff)
@@ -83,6 +100,15 @@ mod tests {
         // On a dark background it lightens.
         let out = ensure(0x2a2d32, 0x1b1d20, t);
         assert!(luminance(out) > luminance(0x2a2d32));
+    }
+
+    #[test]
+    fn drawing_glyphs() {
+        assert!(is_drawing("\u{e0b6}"));
+        assert!(is_drawing("\u{e0b4}"));
+        assert!(is_drawing("\u{2588}"));
+        assert!(!is_drawing("a"));
+        assert!(!is_drawing("\u{65e5}"));
     }
 
     #[test]

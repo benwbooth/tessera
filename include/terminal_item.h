@@ -157,6 +157,8 @@ public:
     Q_INVOKABLE void scrollToRow(qreal row);
     Q_INVOKABLE bool jumpToPrompt(int dir);
     Q_INVOKABLE bool saveSnapshot(const QString& path);
+    // What Ctrl+click at this point (item coordinates) would open, or "".
+    Q_INVOKABLE QString linkAt(qreal x, qreal y) const;
     Q_INVOKABLE QString selectLastOutput();
 
 signals:
@@ -321,6 +323,11 @@ private:
     qint64 m_lastWheelMs = 0;
     QTimer* m_momentum = nullptr;
     QTimer* m_autoscroll = nullptr;   // selection dragged past an edge
+    // Opening and resizing wait for the layout to settle: every size the
+    // shell is told makes it redraw its prompt (zsh leaves the old first
+    // line of a two-line prompt behind each time).
+    QTimer* m_openTimer = nullptr;
+    QTimer* m_resizeTimer = nullptr;
     QTimer* m_smooth = nullptr;       // (unused)
     qreal m_smoothPending = 0;
     qreal m_decay = 0.95;             // momentum kept per 16 ms frame

@@ -37,6 +37,9 @@ struct DSession {
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     shared: Mutex<Shared>,
     emu: Mutex<mpsc::Sender<Emu>>,
+    /// The PTY's current size: resizing to the same size is skipped (every
+    /// resize makes the shell redraw its prompt).
+    size: Mutex<(u16, u16)>,
 }
 
 type Registry = Arc<Mutex<HashMap<String, Arc<DSession>>>>;
@@ -155,6 +158,7 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
         child: Mutex::new(child),
         shared: Mutex::new(Shared { client: None }),
         emu: Mutex::new(emu_tx),
+        size: Mutex::new((c.cols.max(1), c.rows.max(1))),
     });
     registry.lock().unwrap().insert(s.id.clone(), s.clone());
 
@@ -225,6 +229,13 @@ fn emulate(rx: mpsc::Receiver<Emu>, cols: u16, rows: u16, lines: u32) {
 }
 
 fn resize(s: &DSession, cols: u16, rows: u16) {
+    {
+        let mut size = s.size.lock().unwrap();
+        if *size == (cols.max(1), rows.max(1)) {
+            return;
+        }
+        *size = (cols.max(1), rows.max(1));
+    }
     let _ = s.emu.lock().unwrap().send(Emu::Resize(cols.max(2), rows.max(1)));
     let _ = s.master.lock().unwrap().resize(PtySize {
         rows: rows.max(1),

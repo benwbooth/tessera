@@ -99,7 +99,12 @@ ApplicationWindow {
             showTitle: win.settings.pane_titles
             badge: prof.badge
             broadcasting: win.broadcastMode !== "off" && win.broadcastTargets(tp).length > 1
-            onContextMenu: (v) => { win.contextView = v; contextMenu.open() }
+            onContextMenu: (v, x, y) => {
+                win.contextView = v
+                win.contextLink = v.linkAt(x, y)
+                win.contextSelection = v.hasSelection ? v.selectedText() : ""
+                contextMenu.open()
+            }
             Binding { target: tp.view; property: "command"; value: tp.commandOverride !== "" ? tp.commandOverride : (tp.prof.command_mode === "custom" ? tp.prof.command : "") }
             Binding { target: tp.view; property: "termName"; value: tp.prof.term }
             Binding { target: tp.view; property: "startupInput"; value: tp.prof.send_text }
@@ -1434,20 +1439,94 @@ ApplicationWindow {
             onTriggered: closeTabs(tabs.slice(tabMenu.at + 1)) }
     }
 
-    // Right click in a terminal (when the program isn't taking the mouse).
+    // Right click in a terminal (when the program isn't taking the mouse):
+    // iTerm2's context menu, depending on what's under the pointer.
+    property string contextLink: ""
+    property string contextSelection: ""
+    readonly property string contextSelShort: contextSelection.length > 30 ? contextSelection.slice(0, 28).trim() + "…" : contextSelection.trim()
+
+    function movePaneToNewTab(p, window) {
+        if (!p || p.view.tmuxPane !== "") return
+        const layout = { title: "", color: "", profile: p.profileName, root: serializeNode(p, true) }
+        const json = JSON.stringify(layout)
+        closePane(p, false)   // detaches; the new tab or window reattaches it
+        if (window) controller.newWindowWithTab(json)
+        else later(150, function() { newTab({ layout: layout, alive: sessionIds(layout.root, {}), profile: layout.profile }) })
+    }
+
     P.Menu {
         id: contextMenu
-        P.MenuItem { icon.name: "edit-copy"; text: "Copy\tCtrl+Shift+C"; enabled: contextView !== null && contextView.hasSelection; onTriggered: contextView.copy() }
+        // -- what's under the pointer
+        P.MenuItem { icon.name: "internet-services"; text: "Open “" + win.shortLabel(contextLink.replace(/^file:\/\//, "")) + "”"
+            visible: contextLink !== ""; onTriggered: Qt.openUrlExternally(contextLink) }
+        P.MenuItem { icon.name: "edit-copy"; text: "Copy Link Address"; visible: contextLink !== ""
+            onTriggered: { clipHelper.text = contextLink.replace(/^file:\/\//, ""); clipHelper.selectAll(); clipHelper.copy() } }
+        P.MenuSeparator { visible: contextLink !== "" }
+        // -- the selection
+        P.MenuItem { icon.name: "search"; text: "Search the Web for “" + contextSelShort + "”"; visible: contextSelection !== ""
+            onTriggered: Qt.openUrlExternally("https://duckduckgo.com/?q=" + encodeURIComponent(contextSelection.trim())) }
+        P.MenuItem { icon.name: "edit-find"; text: "Find “" + contextSelShort + "”"; visible: contextSelection !== ""
+            onTriggered: { const p = paneOf(contextView); if (p) p.findBar.open(contextSelection.split("\n")[0]) } }
+        P.MenuItem { icon.name: "go-jump"; text: "Send Selection"; visible: contextSelection !== ""
+            onTriggered: contextView.pasteText(contextSelection) }
+        P.MenuItem { icon.name: "insert-text"; text: "Save Selection as Snippet…"; visible: contextSelection !== ""
+            onTriggered: { const sel = contextSelection, short = contextSelShort
+                askText("Save as Snippet", "Title", short, function(t) {
+                    setSetting("snippets", (settings.snippets || []).concat([{ title: t || short, text: sel }]))
+                }) } }
+        P.MenuSeparator { visible: contextSelection !== "" }
+        // -- copy and paste
+        P.MenuItem { icon.name: "edit-copy"; text: "Copy\tCtrl+Shift+C"; enabled: contextSelection !== ""; onTriggered: contextView.copy() }
+        P.MenuItem { icon.name: "edit-copy"; text: "Copy with Styles"; enabled: contextSelection !== ""; onTriggered: contextView.copyWithStyles() }
+        P.MenuItem { icon.name: "edit-copy"; text: "Copy with Control Sequences"; enabled: contextSelection !== ""; onTriggered: contextView.copyWithControlSequences() }
         P.MenuItem { icon.name: "edit-paste"; text: "Paste\tCtrl+Shift+V"; onTriggered: pasteClipboard(contextView) }
+        P.Menu {
+            id: ctxPasteSpecial
+            title: "Paste Special"
+            icon.name: "edit-paste"
+            P.MenuItem { text: "Paste Selection\tShift+Insert"; onTriggered: contextView.pasteSelection() }
+            P.MenuItem { text: "Paste Slowly"; onTriggered: contextView.pasteSlowly() }
+            P.MenuSeparator { visible: pasteHistory.length > 0 }
+            Instantiator {
+                model: win.pasteHistory
+                delegate: P.MenuItem { text: win.shortLabel(modelData); onTriggered: pasteInto(contextView, modelData) }
+                onObjectAdded: (i, o) => ctxPasteSpecial.insertItem(3 + i, o)
+                onObjectRemoved: (i, o) => ctxPasteSpecial.removeItem(o)
+            }
+        }
         P.MenuItem { icon.name: "edit-select-all"; text: "Select All\tCtrl+Shift+A"; onTriggered: contextView.selectAll() }
-        P.MenuItem { icon.name: "edit-find"; text: "Find\u2026\tCtrl+Shift+F"; onTriggered: { const p = paneOf(contextView); if (p) p.findBar.open() } }
+        P.MenuItem { icon.name: "edit-select"; text: "Select Output of Last Command\tCtrl+Shift+L"; onTriggered: contextView.selectLastOutput() }
         P.MenuSeparator {}
+        // -- panes
         P.MenuItem { icon.name: "view-split-left-right"; text: "Split Right\tCtrl+Shift+D"; onTriggered: splitPane(paneOf(contextView), Qt.Horizontal) }
         P.MenuItem { icon.name: "view-split-top-bottom"; text: "Split Down\tCtrl+Shift+E"; onTriggered: splitPane(paneOf(contextView), Qt.Vertical) }
-        P.MenuItem { icon.name: "zoom-fit-best"; text: "Maximize Pane\tCtrl+Shift+Enter"; checkable: true; checked: maximizedPane !== null; onTriggered: toggleMaximize() }
+        P.MenuItem { icon.name: "zoom-fit-best"; text: "Maximize Pane\tCtrl+Shift+Enter"; checkable: true; checked: maximizedPane !== null
+            enabled: maximizedPane !== null || (contextView !== null && paneOf(contextView) !== null && paneOf(contextView).split); onTriggered: toggleMaximize() }
+        P.MenuItem { icon.name: "tab-new"; text: "Move Pane to New Tab"
+            enabled: contextView !== null && contextView.tmuxPane === "" && paneOf(contextView) !== null && paneOf(contextView).split
+            onTriggered: movePaneToNewTab(paneOf(contextView), false) }
+        P.MenuItem { icon.name: "window-new"; text: "Move Pane to New Window"
+            enabled: contextView !== null && contextView.tmuxPane === "" && (tabs.length > 1 || (paneOf(contextView) !== null && paneOf(contextView).split))
+            onTriggered: movePaneToNewTab(paneOf(contextView), true) }
         P.MenuSeparator {}
+        // -- the session
+        P.Menu {
+            title: "Broadcast Input"
+            icon.name: "network-transmit"
+            P.MenuItemGroup { id: ctxBroadcastGroup }
+            P.MenuItem { text: "Send Input to Current Session Only"; checkable: true; group: ctxBroadcastGroup; checked: broadcastMode === "off"; onTriggered: broadcastMode = "off" }
+            P.MenuItem { text: "Broadcast to All Panes in Current Tab"; checkable: true; group: ctxBroadcastGroup; checked: broadcastMode === "tab"; onTriggered: broadcastMode = "tab" }
+            P.MenuItem { text: "Broadcast to All Panes in All Tabs"; checkable: true; group: ctxBroadcastGroup; checked: broadcastMode === "all"; onTriggered: broadcastMode = "all" }
+        }
+        P.MenuItem { icon.name: "edit-find"; text: "Find…\tCtrl+Shift+F"; onTriggered: { const p = paneOf(contextView); if (p) p.findBar.open() } }
+        P.MenuItem { icon.name: "link"; text: "Find URLs"; onTriggered: { const p = paneOf(contextView); if (p) p.findBar.findUrls() } }
+        P.MenuItem { icon.name: "media-record"; text: contextView && contextView.logging ? "Stop Logging" : "Log to File…"
+            onTriggered: contextView.logging ? contextView.stopLogging() : logDialog.open() }
         P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Buffer\tCtrl+Shift+K"; onTriggered: contextView.clearScrollback() }
+        P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Scrollback Buffer"; onTriggered: contextView.showMessage("\u001b[3J") }
         P.MenuItem { icon.name: "edit-clear"; text: "Reset"; onTriggered: contextView.resetTerminal() }
+        P.MenuItem { icon.name: "view-refresh"; text: "Restart Session"; enabled: contextView !== null && contextView.tmuxPane === ""
+            onTriggered: { const v = contextView; confirmJobs([paneOf(v)], function() { v.restart() }) } }
         P.MenuSeparator {}
         P.MenuItem { icon.name: "document-edit"; text: "Edit Session…"; onTriggered: prefs.showProfile(paneOf(contextView).profileName) }
         P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }

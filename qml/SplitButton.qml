@@ -14,9 +14,9 @@ Item {
     signal menuClicked()
     readonly property Item menuAnchor: menuPane
 
-    readonly property real r: 7
-    implicitWidth: 50
-    implicitHeight: 24
+    readonly property real r: 5
+    implicitWidth: 38
+    implicitHeight: 20
 
     // Solid colors (mixed over the bar), so the two pieces of a pane's fill
     // never show where they overlap.
@@ -53,14 +53,15 @@ Item {
         id: g
         property string kind: "plus"
         property color ink: Theme.textDim
-        width: 14; height: 14
+        width: 12; height: 12
         renderStrategy: Canvas.Immediate
         onInkChanged: requestPaint()
         onPaint: {
             const c = getContext("2d")
             c.reset()
             c.strokeStyle = ink
-            c.lineWidth = 1.5
+            c.lineWidth = 1.4
+            c.scale(12 / 14, 12 / 14)
             c.lineCap = "round"
             c.lineJoin = "round"
             c.beginPath()
@@ -98,16 +99,16 @@ Item {
     // The hairline between the panes.
     Rectangle {
         x: menuPane.x - 0.5
-        y: 5
+        y: 4
         width: 1
-        height: sb.height - 10
+        height: sb.height - 8
         color: sb.frame
     }
 
     Item {
         id: menuPane
         x: sb.width - width; y: 0
-        width: 20
+        width: 15
         height: sb.height
         PaneFill {
             leftSide: false

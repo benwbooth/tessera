@@ -169,7 +169,8 @@ Item {
         anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
         width: 18; height: 18
-        readonly property bool showClose: tab.hovered || tab.closeAlways || (tab.current && !tab.activity && !tab.bell)
+        // Only while pointed at (or always, with Appearance > Tabs have close buttons).
+        readonly property bool showClose: tab.hovered || tab.closeAlways
 
         Rectangle {
             anchors.centerIn: parent

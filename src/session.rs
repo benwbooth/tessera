@@ -1490,7 +1490,7 @@ impl Session {
                             has_bg = true;
                         }
                         let target = crate::contrast::target(self.opts.minimum_contrast);
-                        if target > 1.0 && flags & FLAG_INVISIBLE == 0 {
+                        if target > 1.0 && flags & FLAG_INVISIBLE == 0 && !crate::contrast::is_drawing(&text) {
                             fg = *self
                                 .contrast_cache
                                 .entry((fg, bg))
