@@ -1558,9 +1558,9 @@ ApplicationWindow {
         P.MenuItem { icon.name: "go-jump"; text: "Send Selection"; visible: contextSelection !== ""
             onTriggered: contextView.pasteText(contextSelection) }
         P.MenuItem { icon.name: "insert-text"; text: "Save Selection as Snippet…"; visible: contextSelection !== ""
-            onTriggered: { const sel = contextSelection, short = contextSelShort
-                askText("Save as Snippet", "Title", short, function(t) {
-                    setSetting("snippets", (settings.snippets || []).concat([{ title: t || short, text: sel }]))
+            onTriggered: { const sel = contextSelection, brief = contextSelShort
+                askText("Save as Snippet", "Title", brief, function(t) {
+                    setSetting("snippets", (settings.snippets || []).concat([{ title: t || brief, text: sel }]))
                 }) } }
         P.MenuSeparator { visible: contextSelection !== "" }
         // -- copy and paste
