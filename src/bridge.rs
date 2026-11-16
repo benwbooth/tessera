@@ -262,6 +262,12 @@ pub mod ffi {
         /// Open another window (a new process that starts fresh, restoring nothing).
         #[qinvokable]
         fn new_window(self: &Controller);
+        /// Windows: open an elevated window (the UAC prompt first).
+        #[qinvokable]
+        fn new_admin_window(self: &Controller);
+        /// This window is elevated (opened with New Administrator Window).
+        #[qinvokable]
+        fn is_admin(self: &Controller) -> bool;
         /// False in a window opened with New Window (it mustn't take over the
         /// first window's sessions).
         #[qinvokable]
@@ -445,6 +451,26 @@ impl ffi::Controller {
 
     fn home_dir(&self) -> ffi::QString {
         qs(&std::env::var("HOME").unwrap_or_default())
+    }
+
+    fn is_admin(&self) -> bool {
+        std::env::var_os("TESSERA_ADMIN").is_some()
+    }
+
+    fn new_admin_window(&self) {
+        #[cfg(windows)]
+        if let Ok(exe) = std::env::current_exe() {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::UI::Shell::ShellExecuteW;
+            use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+            let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+            let verb = wide("runas".as_ref());
+            let file = wide(exe.as_os_str());
+            let args = wide("--admin".as_ref());
+            unsafe {
+                ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), args.as_ptr(), std::ptr::null(), SW_SHOWNORMAL);
+            }
+        }
     }
 
     fn new_window(&self) {

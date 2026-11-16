@@ -46,10 +46,45 @@ struct DSession {
 
 type Registry = Arc<Mutex<HashMap<String, Arc<DSession>>>>;
 
+/// The elevated daemon's folder: owned by Administrators and open only to
+/// them and SYSTEM, so a program running without elevation can't connect and
+/// drive the administrator shells. Fails (and the daemon doesn't start) when
+/// that can't be done, e.g. without elevation.
+pub fn lock_down_admin_dir(sock: &std::path::Path) -> std::io::Result<()> {
+    let dir = sock.parent().ok_or_else(|| std::io::Error::other("no folder"))?;
+    std::fs::create_dir_all(dir)?;
+    #[cfg(windows)]
+    {
+        let icacls = |args: &[&str]| -> std::io::Result<()> {
+            use std::os::windows::process::CommandExt;
+            let ok = std::process::Command::new("icacls")
+                .arg(dir)
+                .args(args)
+                .creation_flags(0x0800_0000)
+                .status()?
+                .success();
+            if ok { Ok(()) } else { Err(std::io::Error::other(format!("icacls {args:?} failed"))) }
+        };
+        // S-1-5-32-544: Administrators; S-1-5-18: SYSTEM.
+        icacls(&["/setowner", "*S-1-5-32-544"])?;
+        icacls(&["/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F"])?;
+        let _ = std::fs::remove_file(sock);
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = sock;
+        Err(std::io::Error::other("administrator windows are a Windows feature"))
+    }
+}
+
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
 pub fn run() -> std::io::Result<()> {
     let path = socket_path();
+    if std::env::var_os("TESSERA_ADMIN").is_some() {
+        lock_down_admin_dir(&path)?;
+    }
     if path.exists() {
         if UnixStream::connect(&path).is_ok() {
             eprintln!("tessera daemon: already running at {}", path.display());

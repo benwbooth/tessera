@@ -24,7 +24,8 @@ ApplicationWindow {
     palette.toolTipText: Theme.text
     flags: macOS ? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
                  : (Qt.Window | Qt.FramelessWindowHint)
-    title: customTitle !== "" ? customTitle : (activeView && activeView.title ? activeView.title : "Tessera")
+    title: (controller.isAdmin() ? "Administrator: " : "")
+           + (customTitle !== "" ? customTitle : (activeView && activeView.title ? activeView.title : "Tessera"))
 
     property var tabs: []
     property int currentTab: 0
@@ -1087,6 +1088,7 @@ ApplicationWindow {
             P.MenuItem { icon.name: "tab-new"; text: "New Tab\tCtrl+Shift+T"; onTriggered: newTab({}) }
             P.MenuItem { icon.name: "tab-new"; text: "New Tab with Current Profile"; onTriggered: newTab({ profile: activeProfile.name }) }
             P.MenuItem { icon.name: "window-new"; text: "New Window\tCtrl+Shift+N"; onTriggered: controller.newWindow() }
+            P.MenuItem { icon.name: "security-high"; text: "New Administrator Window"; visible: Qt.platform.os === "windows" && !controller.isAdmin(); onTriggered: controller.newAdminWindow() }
             P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Tab"; enabled: tabs.length > 0 && tabs[currentTab].tmuxWindow < 0
                 onTriggered: newTab({ layout: serializeTab(tabs[currentTab], false), profile: tabs[currentTab].profile }) }
             P.MenuSeparator {}

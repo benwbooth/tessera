@@ -46,6 +46,20 @@ fn main() {
                 i += 1;
             }
             "--new-window" => std::env::set_var("TESSERA_NO_RESTORE", "1"),
+            // An elevated window (Windows): its shells live in their own
+            // daemon, which only administrators can reach.
+            "--admin" => {
+                std::env::set_var("TESSERA_NO_RESTORE", "1");
+                std::env::set_var("TESSERA_ADMIN", "1");
+                let sock = crate::proto::admin_socket_path();
+                // Locked down before connecting too, so a daemon some other
+                // (unelevated) program put there is never used.
+                if let Err(e) = daemon::lock_down_admin_dir(&sock) {
+                    eprintln!("tessera: can't prepare the administrator window: {e}");
+                    std::process::exit(1);
+                }
+                std::env::set_var("TESSERA_SOCKET", sock);
+            }
             "--find" => {
                 if let Some(q) = args.get(i + 1) {
                     std::env::set_var("TESSERA_FIND", q);

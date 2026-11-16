@@ -62,7 +62,31 @@ fn shells() -> Vec<Shell> {
         }
         out.push(Shell { name, path: p });
     }
+    // Each WSL distribution, like Windows Terminal's profiles.
+    #[cfg(windows)]
+    for distro in wsl_distros() {
+        out.push(Shell { name: format!("WSL: {distro}"), path: format!("wsl.exe -d \"{distro}\" --cd ~") });
+    }
     out
+}
+
+/// Installed WSL distributions (`wsl -l -q`, which prints UTF-16).
+#[cfg(windows)]
+fn wsl_distros() -> Vec<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(out) = std::process::Command::new("wsl.exe").args(["-l", "-q"]).creation_flags(CREATE_NO_WINDOW).output() else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    let units: Vec<u16> = out.stdout.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    String::from_utf16_lossy(&units)
+        .lines()
+        .map(|l| l.trim_matches(|c: char| c.is_whitespace() || c == '\0').to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 /// Host aliases from ~/.ssh/config (and files it Includes), without patterns.

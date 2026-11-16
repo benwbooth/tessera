@@ -125,6 +125,13 @@ impl FrameReader {
     }
 }
 
+/// The administrator window's daemon socket, in a folder only
+/// administrators can open (see `daemon::lock_down_admin_dir`).
+pub fn admin_socket_path() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    base.join("Tessera").join("admin").join("daemon.sock")
+}
+
 pub fn socket_path() -> PathBuf {
     if let Some(p) = std::env::var_os("TESSERA_SOCKET") {
         return PathBuf::from(p);
