@@ -39,7 +39,8 @@ Rectangle {
     readonly property bool editing: edit.activeFocus
     readonly property real lineHeight: Math.ceil(fm.height)
     readonly property int lines: Math.max(1, edit.lineCount)
-    implicitHeight: Math.min(lines, 10) * lineHeight + 14 + (promptBar.visible ? promptBar.height : 0)
+    // (The editor's margins, and the prompt bar with the gap under it.)
+    implicitHeight: Math.min(lines, 10) * lineHeight + 14 + (promptBar.visible ? promptBar.height + 4 + 4 : 0)
 
     color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
     Rectangle { width: parent.width; height: 1; color: Theme.divider }
@@ -719,7 +720,7 @@ Rectangle {
             base: box.color
             label: box.lang + (box.langOverride !== "" ? "" : " \u00b7 auto")
             tip: "Input language (highlighting, checks, completion)"
-            onClicked: langMenu.popup(langChip, 0, langChip.height + 2)
+            onClicked: { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
         }
         Chip {
             id: modeChip
@@ -737,18 +738,48 @@ Rectangle {
             onClicked: keysMenu.popup(keysChip, 0, keysChip.height + 2)
         }
     }
-    Menu {
-        id: langMenu
-        MenuItem { text: "Automatic (" + (box.contentLang !== "" ? box.contentLang : box.autoLang) + ")"; checkable: true; checked: box.langOverride === ""; onTriggered: box.langOverride = "" }
-        MenuSeparator {}
-        Repeater {
-            model: box.languages
-            delegate: MenuItem {
-                required property var modelData
-                text: modelData[1]
-                checkable: true
-                checked: box.langOverride === modelData[0]
-                onTriggered: box.langOverride = modelData[0]
+    // The input language: a searchable list (hundreds with Helix's grammars).
+    Popup {
+        id: langPop
+        width: 260
+        height: Math.min(360, langList.contentHeight + langFilter.height + 24)
+        padding: 6
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        onOpened: { langFilter.text = ""; langFilter.forceActiveFocus() }
+        onClosed: edit.forceActiveFocus()
+        readonly property var options: [["", "Automatic (" + (box.contentLang !== "" ? box.contentLang : box.autoLang) + ")"]].concat(box.languages)
+        readonly property var shown: options.filter(o => langFilter.text === "" || (o[1] + " " + o[0]).toLowerCase().indexOf(langFilter.text.toLowerCase()) >= 0)
+        contentItem: Column {
+            spacing: 4
+            TextField {
+                id: langFilter
+                width: parent.width
+                placeholderText: "Search " + box.languages.length + " languages"
+                color: Theme.text
+                font.pixelSize: 12
+                background: Rectangle { radius: 6; color: Theme.bg; border.color: langFilter.activeFocus ? Theme.accent : Theme.divider }
+                Keys.onReturnPressed: if (langPop.shown.length > 0) { box.langOverride = langPop.shown[0][0]; langPop.close() }
+                Keys.onEscapePressed: langPop.close()
+            }
+            ListView {
+                id: langList
+                width: parent.width
+                height: Math.min(300, contentHeight)
+                clip: true
+                model: langPop.shown
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
+                MomentumWheel { flick: langList }
+                delegate: Rectangle {
+                    required property var modelData
+                    width: langList.width
+                    height: 24
+                    radius: 5
+                    color: lh.hovered ? Theme.tabHover : (box.langOverride === modelData[0] ? Theme.mix(Theme.bg, Theme.accent, 0.25) : "transparent")
+                    Text { x: 8; anchors.verticalCenter: parent.verticalCenter; text: modelData[1]; color: Theme.text; font.pixelSize: 12 }
+                    HoverHandler { id: lh }
+                    TapHandler { onTapped: { box.langOverride = modelData[0]; langPop.close() } }
+                }
             }
         }
     }
@@ -931,6 +962,15 @@ Rectangle {
             constructor: box.ansi(3, "#e5c07b"),
             punctuation: Theme.textDim,
             escape: box.ansi(6, "#56b6c2"),
+            attribute: box.ansi(3, "#e5c07b"),
+            tag: box.ansi(1, "#e06c75"),
+            namespace: box.ansi(3, "#e5c07b"),
+            module: box.ansi(3, "#e5c07b"),
+            label: box.ansi(5, "#c678dd"),
+            special: box.ansi(6, "#56b6c2"),
+            boolean: box.ansi(3, "#d19a66"),
+            character: box.ansi(2, "#98c379"),
+            markup: box.ansi(4, "#61afef"),
         })
     }
     onLangChanged: analyze(false)

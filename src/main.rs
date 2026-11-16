@@ -8,6 +8,7 @@ mod contrast;
 mod daemon;
 mod find;
 mod kde;
+mod grammars;
 mod history;
 mod images;
 mod keymap;

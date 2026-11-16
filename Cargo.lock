@@ -718,6 +718,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df233d9b287cded4bbebba3463c6df7a8bdb516c0341ed984e870ef5594c2e6f"
 
 [[package]]
+name = "libloading"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1832accd5a4ca2795ace4d05d15c4039be15b62d3b950eff99746a990e3cc10"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "link-cplusplus"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1242,6 +1252,7 @@ dependencies = [
  "libc",
  "libghostty-vt",
  "libghostty-vt-sys",
+ "libloading",
  "miniz_oxide 0.9.1",
  "portable-pty",
  "regex",
@@ -1259,6 +1270,7 @@ dependencies = [
  "tree-sitter-java",
  "tree-sitter-javascript",
  "tree-sitter-json",
+ "tree-sitter-language",
  "tree-sitter-lua",
  "tree-sitter-md",
  "tree-sitter-python",

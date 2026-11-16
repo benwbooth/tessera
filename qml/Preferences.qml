@@ -702,6 +702,17 @@ Window {
                                 }
                             }
                             Row2 {
+                                label: "Languages"
+                                hint: prefs.controller.helpStatus.indexOf("grammars") >= 0 || prefs.controller.helpStatus.indexOf("languages") >= 0 ? prefs.controller.helpStatus
+                                      : (18 + prefs.controller.grammarCount()) + " languages for highlighting and checks: 18 built in, the rest from Helix's tree-sitter grammars (~250)."
+                                PlainButton {
+                                    text: "Get More Languages"
+                                    enabled2: !prefs.controller.helpStatus.startsWith("Downloading")
+                                    onClicked: prefs.controller.downloadGrammars()
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Row2 {
                                 label: "Command help"
                                 hint: prefs.controller.helpStatus !== "" ? prefs.controller.helpStatus
                                       : "Completions show help from man and info pages, tldr-pages (examples, fetched once) and fish-shell's completions (subcommands and options for thousands of commands)."

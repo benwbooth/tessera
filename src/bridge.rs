@@ -316,6 +316,12 @@ pub mod ffi {
         /// What a text is clearly written in ("" when it's just a command).
         #[qinvokable]
         fn detect_language(self: &Controller, text: &QString) -> QString;
+        /// Download Helix's grammars (~250 languages) for the editor;
+        /// progress in help_status. (Used after the next start.)
+        #[qinvokable]
+        fn download_grammars(self: Pin<&mut Controller>);
+        #[qinvokable]
+        fn grammar_count(self: &Controller) -> i32;
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
         fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString) -> QString;
@@ -852,6 +858,25 @@ impl ffi::Controller {
 
     fn syntax_languages(&self) -> ffi::QString {
         qs(&crate::syntax::languages_json())
+    }
+
+    fn download_grammars(mut self: Pin<&mut Self>) {
+        self.as_mut().set_help_status(qs("Downloading Helix's grammars\u{2026}"));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let r = crate::grammars::download();
+            let _ = qt.queue(move |mut c| {
+                let msg = match r {
+                    Ok(n) => format!("{n} more languages \u{2014} available after Tessera restarts."),
+                    Err(e) => format!("Couldn't download the grammars: {e}"),
+                };
+                c.as_mut().set_help_status(qs(&msg));
+            });
+        });
+    }
+
+    fn grammar_count(&self) -> i32 {
+        crate::grammars::count() as i32
     }
 
     fn detect_language(&self, text: &ffi::QString) -> ffi::QString {

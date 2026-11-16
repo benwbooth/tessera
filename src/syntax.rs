@@ -59,7 +59,8 @@ fn make(name: &str) -> Option<Lang> {
         "html" => (tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.into()),
         "css" => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.into()),
         "markdown" => (tree_sitter_md::LANGUAGE.into(), tree_sitter_md::HIGHLIGHT_QUERY_BLOCK.into()),
-        _ => return None,
+        // Anything else: Helix's grammar for it, if there is one.
+        other => (crate::grammars::load(other)?, crate::grammars::highlights(other)),
     };
     // A query a grammar's version can't read leaves it unhighlighted (but
     // still checked).
@@ -71,7 +72,7 @@ fn lang(name: &str) -> Option<&'static Lang> {
     static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<&'static Lang>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     let mut c = cache.lock().unwrap();
-    let name = if LANGUAGES.iter().any(|(n, _)| *n == name) { name } else { "bash" };
+    let name = if LANGUAGES.iter().any(|(n, _)| *n == name) || crate::grammars::available().iter().any(|n| n == name) { name } else { "bash" };
     *c.entry(name.to_string()).or_insert_with(|| make(name).map(|l| &*Box::leak(Box::new(l))))
 }
 
@@ -141,7 +142,17 @@ pub fn detect_language(text: &str) -> &'static str {
 
 /// The languages for the editor's menu (JSON [[name, label]]).
 pub fn languages_json() -> String {
-    serde_json::to_string(&LANGUAGES.iter().map(|(n, l)| [n, l]).collect::<Vec<_>>()).unwrap_or_default()
+    let mut out: Vec<[String; 2]> = LANGUAGES.iter().map(|(n, l)| [n.to_string(), l.to_string()]).collect();
+    for n in crate::grammars::available() {
+        if !LANGUAGES.iter().any(|(b, _)| b == n) && !["tsx"].contains(&n.as_str()) {
+            let mut label: String = n.replace(['-', '_'], " ");
+            if let Some(f) = label.get_mut(0..1) {
+                f.make_ascii_uppercase();
+            }
+            out.push([n.clone(), label]);
+        }
+    }
+    serde_json::to_string(&out).unwrap_or_default()
 }
 
 /// {"spans": [[start, length, kind]], "errors": [[start, length, message]]}
