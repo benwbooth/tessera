@@ -15,13 +15,15 @@ Item {
     readonly property Item menuAnchor: menuPane
 
     readonly property real r: 7
-    implicitWidth: 52
+    implicitWidth: 50
     implicitHeight: 24
 
-    readonly property color frame: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, Theme.dark ? 0.13 : 0.16)
-    readonly property color base: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, Theme.dark ? 0.045 : 0.035)
-    readonly property color lit: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, Theme.dark ? 0.11 : 0.08)
-    readonly property color down: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, Theme.dark ? 0.18 : 0.14)
+    // Solid colors (mixed over the bar), so the two pieces of a pane's fill
+    // never show where they overlap.
+    readonly property color frame: Theme.mix(Theme.chrome, Theme.fg, Theme.dark ? 0.16 : 0.18)
+    readonly property color base: Theme.mix(Theme.chrome, Theme.fg, Theme.dark ? 0.04 : 0.03)
+    readonly property color lit: Theme.mix(Theme.chrome, Theme.fg, Theme.dark ? 0.10 : 0.07)
+    readonly property color down: Theme.mix(Theme.chrome, Theme.fg, Theme.dark ? 0.16 : 0.12)
 
     // The pill.
     Rectangle {
@@ -79,7 +81,7 @@ Item {
         height: sb.height
         PaneFill {
             leftSide: true
-            fill: mainTap.pressed ? sb.down : (mainHover.hovered ? sb.lit : "transparent")
+            fill: mainTap.pressed ? sb.down : (mainHover.hovered ? sb.lit : sb.base)
         }
         Glyph {
             anchors.centerIn: parent
@@ -109,7 +111,7 @@ Item {
         height: sb.height
         PaneFill {
             leftSide: false
-            fill: menuTap.pressed || sb.menuOpen ? sb.down : (menuHover.hovered ? sb.lit : "transparent")
+            fill: menuTap.pressed || sb.menuOpen ? sb.down : (menuHover.hovered ? sb.lit : sb.base)
         }
         Glyph {
             anchors.centerIn: parent

@@ -1,10 +1,9 @@
 import QtQuick
-import QtQuick.Shapes
 import Tessera
 
-// One tab. The current tab is cut from the terminal's own surface and runs
-// into it (rounded corners away from the terminal, flared corners where it
-// meets it); the others sit flat on the strip.
+// One tab: flat and full height. The current tab is the terminal's own color
+// (so it merges into it) with a crisp accent line along its outer edge; the
+// others sit quietly on the bar with hairline dividers between them.
 //
 // Dragging: along the bar the tab follows the pointer and the others slide
 // out of its way (the bar handles that from dragMoved); pulled out of the bar
@@ -15,7 +14,7 @@ Item {
     property string text: ""
     property int number: 0               // shown when > 0 (Alt+number selects it)
     property bool current: false
-    property bool nextIsCurrent: false   // hide the separator next to the current tab
+    property bool nextIsCurrent: false   // no divider next to the current tab
     property bool tmux: false
     property bool activity: false        // new output while in the background
     property bool bell: false
@@ -35,11 +34,11 @@ Item {
     signal dragReleased()
     signal dragFinished(int action)
 
-    readonly property real flare: 6
     readonly property bool hovered: hover.hovered
-    readonly property color fill: current ? surface : (hovered ? Theme.tabHover : Theme.chrome)
+    readonly property bool raised: current || lifted
+    readonly property color fill: raised ? surface : (hovered ? Theme.tabHover : Theme.chrome)
 
-    implicitHeight: 26
+    implicitHeight: 32
     implicitWidth: 170
     opacity: external ? 0.4 : 1
 
@@ -77,132 +76,77 @@ Item {
     }
 
     // ---- body -----------------------------------------------------------------
-    Item {
+    Rectangle {
         anchors.fill: parent
-        transform: Scale { origin.y: tab.height / 2; yScale: tab.flipped ? -1 : 1 }
-
-        readonly property bool raised: tab.current || tab.lifted
-
-        // A soft shadow around the raised tab.
-        Shape {
-            anchors.fill: parent
-            visible: parent.raised
-            preferredRendererType: Shape.CurveRenderer
-            opacity: Theme.dark ? 0.45 : 0.10
-            ShapePath {
-                strokeWidth: 3
-                strokeColor: "black"
-                fillColor: "transparent"
-                joinStyle: ShapePath.RoundJoin
-                startX: sp.r - 1; startY: sp.h
-                PathLine { x: sp.r - 1; y: sp.r }
-                PathQuad { x: 2 * sp.r; y: -0.5; controlX: sp.r - 1; controlY: -0.5 }
-                PathLine { x: sp.w - 2 * sp.r; y: -0.5 }
-                PathQuad { x: sp.w - sp.r + 1; y: sp.r; controlX: sp.w - sp.r + 1; controlY: -0.5 }
-                PathLine { x: sp.w - sp.r + 1; y: sp.h }
-            }
-        }
-
-        // The raised tab: the terminal's own surface, faintly lighter at the
-        // top so it reads as lifted, with a hairline edge; flared corners
-        // where it runs into the terminal.
-        Shape {
-            anchors.fill: parent
-            visible: parent.raised
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                id: sp
-                strokeWidth: 1
-                strokeColor: Qt.rgba(Theme.divider.r, Theme.divider.g, Theme.divider.b, Theme.dark ? 0.9 : 0.7)
-                fillGradient: LinearGradient {
-                    x1: 0; y1: 0; x2: 0; y2: sp.h
-                    GradientStop { position: 0; color: Theme.mix(tab.surface, Theme.fg, Theme.dark ? 0.055 : 0.03) }
-                    GradientStop { position: 0.55; color: tab.surface }
-                }
-                readonly property real w: tab.width
-                readonly property real h: tab.height + 1   // past the edge: no outline along the join
-                readonly property real r: tab.flare
-                startX: 0; startY: sp.h
-                PathQuad { x: sp.r; y: sp.h - sp.r; controlX: sp.r; controlY: sp.h }
-                PathLine { x: sp.r; y: sp.r }
-                PathQuad { x: 2 * sp.r; y: 0.5; controlX: sp.r; controlY: 0.5 }
-                PathLine { x: sp.w - 2 * sp.r; y: 0.5 }
-                PathQuad { x: sp.w - sp.r; y: sp.r; controlX: sp.w - sp.r; controlY: 0.5 }
-                PathLine { x: sp.w - sp.r; y: sp.h - sp.r }
-                PathQuad { x: sp.w; y: sp.h; controlX: sp.w - sp.r; controlY: sp.h }
-            }
-        }
-
-        // A thin accent line along the top of the raised tab (the tab's own
-        // color when it has one).
-        Rectangle {
-            visible: parent.raised
-            x: 2 * tab.flare
-            y: 0.5
-            width: tab.width - 4 * tab.flare
-            height: 2
-            radius: 1
-            color: tab.tabColor.a > 0 ? tab.tabColor : Theme.accent
-            opacity: tab.current ? 0.95 : 0.6
-        }
-
-        // Pointed at (not current): a quiet inset highlight.
-        Rectangle {
-            visible: !parent.raised
-            x: tab.flare + 1
-            y: 3
-            width: tab.width - 2 * tab.flare - 2
-            height: tab.height - 5
-            radius: 6
-            color: Theme.tabHover
-            opacity: tab.hovered ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 110 } }
-        }
-
-        // Tab color on a background tab: a short bar along the outer edge.
-        Rectangle {
-            visible: tab.tabColor.a > 0 && !parent.raised
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: Math.min(40, tab.width - 4 * tab.flare)
-            height: 2
-            radius: 1
-            y: 1
-            color: tab.tabColor
-            opacity: 0.8
-        }
+        color: tab.fill
+        Behavior on color { ColorAnimation { duration: 90 } }
     }
 
-    // (No separators between tabs: the hover fill and the current tab's
-    // shape are enough, and quieter.)
+    // The accent line along the outer edge of the current tab (its own
+    // color when it has one); a dimmer one on a colored background tab.
+    Rectangle {
+        visible: tab.raised || tab.tabColor.a > 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: tab.flipped ? tab.height - height : 0
+        height: 2
+        color: tab.tabColor.a > 0 ? tab.tabColor : Theme.accent
+        opacity: tab.raised ? 1 : 0.55
+    }
+
+    // Hairline dividers: on the right of every background tab (none touching
+    // the current one) and on both sides of the current one, which has no
+    // line along the terminal's side.
+    Rectangle {
+        anchors.right: parent.right
+        width: 1
+        height: parent.height
+        color: Theme.divider
+        visible: tab.raised || !tab.nextIsCurrent
+        opacity: tab.raised ? 1 : 0.7
+    }
+    Rectangle {
+        anchors.left: parent.left
+        width: 1
+        height: parent.height
+        color: Theme.divider
+        visible: tab.raised
+    }
+    Rectangle {
+        // The bar's edge line under background tabs.
+        visible: !tab.raised
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: tab.flipped ? 0 : tab.height - 1
+        height: 1
+        color: Theme.divider
+    }
 
     // ---- contents ---------------------------------------------------------
     Text {
         id: glyph
-        visible: tab.number > 0 || tab.tmux || tab.tabColor.a > 0
+        visible: tab.number > 0 || tab.tmux
         anchors.left: parent.left
-        anchors.leftMargin: tab.flare + 7
+        anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: tab.flipped ? -1 : 1
         width: 10
         horizontalAlignment: Text.AlignHCenter
-        text: tab.number > 0 ? tab.number : (tab.tmux ? "\u2237" : "\u25cf")
-        color: tab.tabColor.a > 0 ? tab.tabColor : (tab.tmux ? Theme.tmux : (tab.current ? Theme.accent : Theme.textDim))
-        font.pixelSize: tab.number > 0 ? 10 : 9
+        text: tab.number > 0 ? tab.number : "∷"
+        color: tab.tmux && tab.number === 0 ? Theme.tmux : Theme.textDim
+        font.pixelSize: tab.number > 0 ? 10 : 11
         font.weight: Font.Bold
     }
 
     Text {
         id: title
         anchors.left: glyph.visible ? glyph.right : parent.left
-        anchors.leftMargin: glyph.visible ? 5 : tab.flare + 10
+        anchors.leftMargin: glyph.visible ? 6 : 13
         anchors.right: tail.left
-        anchors.rightMargin: 2
+        anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter
         text: tab.text
-        color: tab.current ? Theme.text : (tab.hovered ? Theme.text : Theme.textDim)
+        color: tab.raised ? Theme.text : (tab.hovered ? Theme.text : Theme.textDim)
         font.pixelSize: 12
-        font.weight: tab.current ? Font.Medium : Font.Normal
-        anchors.verticalCenterOffset: tab.flipped ? -1 : 1
         clip: true
         // Fade the end of a long title instead of an ellipsis.
         Rectangle {
@@ -222,12 +166,10 @@ Item {
     Item {
         id: tail
         anchors.right: parent.right
-        anchors.rightMargin: tab.flare + 3
+        anchors.rightMargin: 8
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: tab.flipped ? -1 : 1
-        width: 16; height: 16
+        width: 18; height: 18
         readonly property bool showClose: tab.hovered || tab.closeAlways || (tab.current && !tab.activity && !tab.bell)
-        // (Fades rather than pops.)
 
         Rectangle {
             anchors.centerIn: parent
@@ -237,17 +179,21 @@ Item {
         }
         Rectangle {
             anchors.fill: parent
-            radius: 8
+            radius: 4
             visible: opacity > 0
             opacity: tail.showClose ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 110 } }
-            color: closeHover.hovered ? Theme.divider : "transparent"
-            Text {
+            color: closeHover.hovered ? Theme.mix(tab.fill, Theme.fg, 0.14) : "transparent"
+            Canvas {
                 anchors.centerIn: parent
-                anchors.verticalCenterOffset: -1
-                text: "×"
-                color: closeHover.hovered ? Theme.text : Theme.textDim
-                font.pixelSize: 13
+                width: 10; height: 10
+                property color ink: closeHover.hovered ? Theme.text : Theme.textDim
+                onInkChanged: requestPaint()
+                onPaint: {
+                    const c = getContext("2d"); c.reset()
+                    c.strokeStyle = ink; c.lineWidth = 1.3; c.lineCap = "round"
+                    c.beginPath(); c.moveTo(2, 2); c.lineTo(8, 8); c.moveTo(8, 2); c.lineTo(2, 8); c.stroke()
+                }
             }
             HoverHandler { id: closeHover }
             TapHandler { onTapped: tab.closeClicked() }

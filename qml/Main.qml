@@ -1315,7 +1315,7 @@ ApplicationWindow {
         P.Menu {
             id: shellsMenu
             title: "Shells"
-            icon.name: "terminal"
+            icon.name: "utilities-terminal"
             enabled: win.launchData.shells.length > 0
             Instantiator {
                 model: win.launchData.shells
@@ -1472,7 +1472,7 @@ ApplicationWindow {
 
     readonly property bool tabsAtBottom: settings.tab_position === "bottom"
     readonly property bool showTabs: settings.always_show_tabs || tabs.length > 1 || tabs.some(t => t.tmuxWindow >= 0)
-    readonly property real barHeight: 32
+    readonly property real barHeight: 34
 
     // The tab row (with the + button and the drop target for dragged tabs),
     // used in the top bar or, with tabs at the bottom, below the terminal.
@@ -1491,11 +1491,11 @@ ApplicationWindow {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 width: tabs.length > 0 ? (tabs.length - 1) * step + tabWidth : 0
-                readonly property real overlap: 5
-                readonly property real available: box.width - 44
+                readonly property real overlap: 0
+                readonly property real available: box.width - 70
                 readonly property real tabWidth: settings.stretch_tabs
-                    ? Math.max(72, (available + overlap * (tabs.length - 1)) / Math.max(1, tabs.length))
-                    : Math.max(72, Math.min(180, (available + overlap * (tabs.length - 1)) / Math.max(1, tabs.length)))
+                    ? Math.max(90, available / Math.max(1, tabs.length))
+                    : Math.max(90, Math.min(200, available / Math.max(1, tabs.length)))
                 readonly property real step: tabWidth - overlap
                 property int dragFrom: -1
                 property int dragTo: -1
@@ -1521,8 +1521,8 @@ ApplicationWindow {
                     delegate: TabButtonX {
                         id: tb
                         width: tabRow.tabWidth
-                        height: 26
-                        y: box.flipped ? 0 : tabRow.height - height
+                        height: tabRow.height
+                        y: 0
                         readonly property bool isDragged: index === tabRow.dragFrom
                         readonly property int slot: {
                             const f = tabRow.dragFrom, t = tabRow.dragTo
@@ -1579,8 +1579,7 @@ ApplicationWindow {
                 id: plus
                 anchors.left: tabRow.right
                 anchors.leftMargin: 8
-                // On the tabs' center line (they sit on the bar's edge).
-                y: box.flipped ? 2 : box.height - 26 + 1
+                anchors.verticalCenter: parent.verticalCenter
                 mainTip: "New Tab (Ctrl+Shift+T)"
                 menuTip: "Profiles, shells and SSH"
                 menuOpen: win.launchOpen
@@ -1669,7 +1668,7 @@ ApplicationWindow {
                 id: menuButton
                 anchors.left: parent.left
                 anchors.leftMargin: win.macOS ? 78 : 6
-                y: (showTabs && !tabsAtBottom) ? topBar.height - 26 - 2 + 1 : (topBar.height - 26) / 2
+                anchors.verticalCenter: parent.verticalCenter
                 icon: "menu"
                 tip: "Menu"
                 open: win.appMenuOpen
@@ -1682,8 +1681,8 @@ ApplicationWindow {
                 anchors.leftMargin: 2
                 anchors.right: controls.left
                 anchors.rightMargin: 12
+                anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                height: 28
                 sourceComponent: tabRowComp
             }
 
@@ -1721,7 +1720,7 @@ ApplicationWindow {
         Rectangle {
             Layout.row: 2
             Layout.fillWidth: true
-            Layout.preferredHeight: showTabs && tabsAtBottom ? 30 : 0
+            Layout.preferredHeight: showTabs && tabsAtBottom ? 34 : 0
             visible: showTabs && tabsAtBottom
             color: Theme.chrome
             Loader {

@@ -22,12 +22,12 @@ QtObject {
     readonly property bool dark: luma(bg) < 0.5
     // The tab strip: a step darker than the terminal, or a step lighter when
     // the terminal is already (nearly) black.
-    readonly property color chrome: luma(bg) < 0.06 ? mix(bg, fg, 0.09)
-                                  : dark ? mix(bg, "#000000", 0.32) : mix(bg, "#000000", 0.075)
-    readonly property color tabHover: mix(chrome, fg, dark ? 0.07 : 0.05)
+    readonly property color chrome: luma(bg) < 0.06 ? mix(bg, fg, 0.07)
+                                  : dark ? mix(bg, "#000000", 0.2) : mix(bg, "#000000", 0.05)
+    readonly property color tabHover: mix(chrome, fg, dark ? 0.06 : 0.045)
     readonly property color text: fg
     readonly property color textDim: mix(fg, chrome, 0.42)
-    readonly property color divider: mix(chrome, fg, dark ? 0.16 : 0.14)
+    readonly property color divider: mix(chrome, fg, dark ? 0.12 : 0.13)
     readonly property color accent: term.ansi ? term.ansi[4] : "#5aa0ff"
     readonly property color tmux: term.ansi ? term.ansi[2] : "#57c78a"
     // Preferences window surfaces.
