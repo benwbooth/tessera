@@ -292,6 +292,39 @@ pub mod ffi {
         fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32);
         #[qsignal]
         fn starship_ready(self: Pin<&mut Controller>, key: QString, json: QString);
+
+        /// An AI request (src/ai.rs) in the background. `task`: "inline",
+        /// "command", "check", "fix" or "chat" (which model, system prompt and
+        /// limits); `messages_json`: [{role, content}] after the system prompt;
+        /// `ctx_json`: {cwd, shell}. Streams ai_delta(key, text), ends with
+        /// ai_done(key, reply, error). A new request with the same key cancels
+        /// the last one.
+        #[qinvokable]
+        fn ai_run(self: Pin<&mut Controller>, key: &QString, task: &QString, messages_json: &QString, ctx_json: &QString);
+        #[qinvokable]
+        fn ai_cancel(self: &Controller, key: &QString);
+        /// Whether a task has a model set up (and its provider a key, if it needs one).
+        #[qinvokable]
+        fn ai_ready(self: &Controller, task: &QString) -> bool;
+        #[qsignal]
+        fn ai_delta(self: Pin<&mut Controller>, key: QString, text: QString);
+        #[qsignal]
+        fn ai_done(self: Pin<&mut Controller>, key: QString, reply: QString, error: QString);
+        /// Providers Tessera knows (JSON), for adding one.
+        #[qinvokable]
+        fn ai_presets(self: &Controller) -> QString;
+        #[qinvokable]
+        fn ai_set_key(self: &Controller, provider: &QString, key: &QString) -> QString;
+        #[qinvokable]
+        fn ai_has_key(self: &Controller, provider: &QString) -> bool;
+        /// A provider's models, in the background: ai_models_ready(provider, json list or "error: ...").
+        #[qinvokable]
+        fn ai_list_models(self: Pin<&mut Controller>, provider_json: &QString);
+        #[qsignal]
+        fn ai_models_ready(self: Pin<&mut Controller>, provider: QString, json: QString);
+        /// First run: set up Ollama if it's running here (background; settings change).
+        #[qinvokable]
+        fn ai_autodetect(self: Pin<&mut Controller>);
         /// Command history (Tessera's merged with the shells'), newest last, JSON array.
         #[qinvokable]
         fn history_all(self: &Controller, limit: i32) -> QString;
@@ -387,6 +420,7 @@ pub mod ffi {
 
 pub use crate::session::{session_open, Session};
 use cxx_qt::Threading;
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct ControllerRust {
@@ -577,6 +611,137 @@ impl ffi::Controller {
 
     fn prompt_info(&self, cwd: &ffi::QString, pid: i32) -> ffi::QString {
         qs(&crate::prompt::info(&local_path(cwd), pid.max(0) as u32))
+    }
+
+    fn ai_run(self: Pin<&mut Self>, key: &ffi::QString, task: &ffi::QString, messages_json: &ffi::QString, ctx_json: &ffi::QString) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (key, task) = (key.to_string(), task.to_string());
+        let mut msgs: Vec<serde_json::Value> = serde_json::from_str(&messages_json.to_string()).unwrap_or_default();
+        let ctx: serde_json::Value = serde_json::from_str(&ctx_json.to_string()).unwrap_or_default();
+        let s = crate::settings::load();
+        let model_ref = match task.as_str() {
+            "inline" => s.ai.inline_model.clone(),
+            "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
+            _ => s.ai.chat_model.clone(),
+        };
+        let qt = self.qt_thread();
+        let Some((provider, model)) = crate::ai::resolve(&s.ai.providers, &model_ref) else {
+            let _ = qt.queue(move |c| c.ai_done(qs(&key), qs(""), qs("No AI model set up (Preferences › AI).")));
+            return;
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Some(old) = ai_jobs().lock().unwrap().insert(key.clone(), cancel.clone()) {
+            old.store(true, Ordering::Relaxed);
+        }
+        msgs.insert(0, serde_json::json!({"role": "system", "content": crate::ai::system_prompt(&task, &ctx)}));
+        let opts = match task.as_str() {
+            "inline" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(8) },
+            "check" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(15) },
+            "command" | "fix" => crate::ai::Options { max_tokens: 300, temperature: 0.2, timeout: std::time::Duration::from_secs(60) },
+            _ => crate::ai::Options { max_tokens: 4096, temperature: 0.4, timeout: std::time::Duration::from_secs(600) },
+        };
+        std::thread::spawn(move || {
+            let stream = task == "chat";
+            let q2 = qt.clone();
+            let k2 = key.clone();
+            let result = crate::ai::chat(&provider, &model, &msgs, &opts, &cancel, |piece| {
+                if stream {
+                    let (k, p) = (k2.clone(), piece.to_string());
+                    let _ = q2.queue(move |c| c.ai_delta(qs(&k), qs(&p)));
+                }
+            });
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            {
+                let mut jobs = ai_jobs().lock().unwrap();
+                if jobs.get(&key).is_some_and(|c| Arc::ptr_eq(c, &cancel)) {
+                    jobs.remove(&key);
+                }
+            }
+            let (reply, err) = match result {
+                // (One command, for the tasks that want one.)
+                Ok(r) if matches!(task.as_str(), "inline" | "command" | "fix") => (crate::ai::command_from(&r), String::new()),
+                Ok(r) => (r, String::new()),
+                Err(e) => (String::new(), e),
+            };
+            let _ = qt.queue(move |c| c.ai_done(qs(&key), qs(&reply), qs(&err)));
+        });
+    }
+
+    fn ai_cancel(&self, key: &ffi::QString) {
+        if let Some(c) = ai_jobs().lock().unwrap().remove(&key.to_string()) {
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    fn ai_ready(&self, task: &ffi::QString) -> bool {
+        let s = crate::settings::load();
+        let r = match task.to_string().as_str() {
+            "inline" => s.ai.inline_model.clone(),
+            "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
+            _ => s.ai.chat_model.clone(),
+        };
+        crate::ai::resolve(&s.ai.providers, &r).is_some_and(|(p, _)| p.local || crate::ai::has_key(&p))
+    }
+
+    fn ai_presets(&self) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::ai::presets()).unwrap_or_default())
+    }
+
+    fn ai_set_key(&self, provider: &ffi::QString, key: &ffi::QString) -> ffi::QString {
+        match crate::ai::set_key(&provider.to_string(), key.to_string().trim()) {
+            Ok(()) => qs(""),
+            Err(e) => qs(&e),
+        }
+    }
+
+    fn ai_has_key(&self, provider: &ffi::QString) -> bool {
+        let id = provider.to_string();
+        let s = crate::settings::load();
+        let p = s.ai.providers.iter().find(|p| p.id == id).cloned().or_else(|| crate::ai::presets().into_iter().find(|p| p.id == id));
+        p.is_some_and(|p| crate::ai::has_key(&p))
+    }
+
+    fn ai_list_models(self: Pin<&mut Self>, provider_json: &ffi::QString) {
+        let p: crate::ai::Provider = serde_json::from_str(&provider_json.to_string()).unwrap_or_default();
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let json = match crate::ai::models(&p) {
+                Ok(m) => serde_json::to_string(&m).unwrap_or_default(),
+                Err(e) => format!("error: {e}"),
+            };
+            let id = p.id.clone();
+            let _ = qt.queue(move |c| c.ai_models_ready(qs(&id), qs(&json)));
+        });
+    }
+
+    fn ai_autodetect(self: Pin<&mut Self>) {
+        if crate::settings::load().ai.autodetected {
+            return;
+        }
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let found = crate::ai::autodetect();
+            let _ = qt.queue(move |mut c| {
+                let mut s = crate::settings::load();
+                s.ai.autodetected = true;
+                if let Some((p, small, big)) = found {
+                    if !s.ai.providers.iter().any(|x| x.id == p.id) {
+                        s.ai.providers.push(p);
+                    }
+                    if s.ai.inline_model.is_empty() {
+                        s.ai.inline_model = small;
+                    }
+                    if s.ai.chat_model.is_empty() {
+                        s.ai.chat_model = big;
+                    }
+                }
+                let _ = crate::settings::save(&s);
+                let r = c.as_ref().rust().revision + 1;
+                c.as_mut().set_revision(r);
+            });
+        });
     }
 
     fn has_starship(&self) -> bool {
@@ -802,6 +967,11 @@ fn local_path(s: &ffi::QString) -> String {
         None => s,
     };
     if p.is_empty() { std::env::var("HOME").unwrap_or_default() } else { p }
+}
+
+fn ai_jobs() -> &'static std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>> {
+    static JOBS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>> = std::sync::OnceLock::new();
+    JOBS.get_or_init(Default::default)
 }
 
 fn percent_decode(s: &str) -> String {

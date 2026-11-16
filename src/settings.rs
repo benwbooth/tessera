@@ -61,6 +61,8 @@ pub struct Settings {
     pub editor_prompt: bool,
     // -- "auto" (Starship when installed), "starship", or "builtin".
     pub prompt_engine: String,
+    // -- AI (src/ai.rs): providers and which model does what.
+    pub ai: AiSettings,
     pub prompt_segments: Vec<String>,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
@@ -103,6 +105,7 @@ impl Default for Settings {
             editor_keys: "emacs".into(),
             editor_prompt: true,
             prompt_engine: "auto".into(),
+            ai: AiSettings::default(),
             prompt_segments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"].map(String::from).to_vec(),
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
@@ -372,6 +375,39 @@ pub struct Theme {
     pub source: String,
     #[serde(default)]
     pub license: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct AiSettings {
+    pub providers: Vec<crate::ai::Provider>,
+    /// "provider/model" for each use; empty: off.
+    pub inline_model: String,
+    pub chat_model: String,
+    pub check_model: String,
+    /// Grey suggestions in the editor as you type (Tab or → takes them).
+    pub inline: bool,
+    /// The AI looks over the command before you run it.
+    pub check: bool,
+    /// Lines starting with "# " become a command (Enter asks, Enter again runs).
+    pub natural_language: bool,
+    /// The first-run look for a local model server happened.
+    pub autodetected: bool,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            providers: Vec::new(),
+            inline_model: String::new(),
+            chat_model: String::new(),
+            check_model: String::new(),
+            inline: true,
+            check: true,
+            natural_language: true,
+            autodetected: false,
+        }
+    }
 }
 
 pub fn config_dir() -> PathBuf {

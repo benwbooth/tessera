@@ -1,4 +1,5 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
+mod ai;
 mod bridge;
 mod client;
 mod complete;

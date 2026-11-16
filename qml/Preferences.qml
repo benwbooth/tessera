@@ -62,6 +62,31 @@ Window {
     }
     function setP(key, value) { prefs.changeProfile(prof.name, key, value) }
     function setG(key, value) { prefs.changeSetting(key, value) }
+    // ---- AI ---------------------------------------------------------------
+    readonly property var ai: settings.ai || ({ providers: [] })
+    function setAi(key, value) { const a = JSON.parse(JSON.stringify(ai)); a[key] = value; setG("ai", a) }
+    property var aiModels: ({})        // provider id -> [model] or "error: ..."
+    readonly property var aiPresets: { try { return JSON.parse(controller.aiPresets()) } catch (e) { return [] } }
+    function refreshModels() {
+        for (const p of (ai.providers || [])) controller.aiListModels(JSON.stringify(p))
+    }
+    readonly property var aiModelRefs: {
+        const out = []
+        for (const p of (ai.providers || [])) {
+            const m = aiModels[p.id]
+            if (Array.isArray(m)) for (const x of m) out.push(p.id + "/" + x)
+        }
+        return out
+    }
+    Connections {
+        target: prefs.controller
+        function onAiModelsReady(provider, json) {
+            const m = Object.assign({}, prefs.aiModels)
+            m[provider] = json.startsWith("error:") ? json : JSON.parse(json)
+            prefs.aiModels = m
+        }
+    }
+    onPageChanged: if (page === "ai") refreshModels()
 
     palette.window: Theme.panel
     palette.windowText: Theme.text
@@ -455,6 +480,7 @@ Window {
                             { id: "profiles", label: "Profiles", glyph: "❯_" },
                             { id: "arrangements", label: "Arrangements", glyph: "\u25a4" },
                             { id: "snippets", label: "Snippets", glyph: "\u2702" },
+                            { id: "ai", label: "AI", glyph: "\u2726" },
                             { id: "pointer", label: "Pointer", glyph: "↖" },
                             { id: "about", label: "About", glyph: "i" }
                         ]
@@ -1291,6 +1317,138 @@ Window {
                                 Field { id: arrName; placeholderText: "Name"; Layout.preferredWidth: 220 }
                                 PlainButton { text: "Save Current Window"; enabled2: arrName.text.trim() !== ""; onClicked: { prefs.saveArrangement(arrName.text.trim()); arrName.text = "" } }
                             }
+                        }
+
+                        // ================= AI =================
+                        ColumnLayout {
+                            visible: prefs.page === "ai"
+                            Layout.fillWidth: true
+                            Layout.margins: 24
+                            spacing: 12
+
+                            SectionTitle { text: "Providers" }
+                            Hint {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: "Local models (Ollama, llama.cpp, LM Studio, vLLM, LocalAI) need no key. Claude, OpenAI/Codex, Gemini, OpenRouter, Groq, Mistral, DeepSeek and xAI need an API key: paste it, or write env:NAME to read it from an environment variable. Keys are kept in secrets.json in the config folder, readable only by you."
+                            }
+                            Repeater {
+                                model: prefs.ai.providers || []
+                                delegate: Rectangle {
+                                    id: provRow
+                                    required property var modelData
+                                    required property int index
+                                    Layout.fillWidth: true
+                                    Layout.maximumWidth: 760
+                                    implicitHeight: provCol.implicitHeight + 20
+                                    radius: 8
+                                    color: Theme.field
+                                    border.color: Theme.divider
+                                    ColumnLayout {
+                                        id: provCol
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 6
+                                        RowLayout {
+                                            Text { text: provRow.modelData.name || provRow.modelData.id; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold }
+                                            Text {
+                                                readonly property var m: prefs.aiModels[provRow.modelData.id]
+                                                readonly property bool keyless: !provRow.modelData.local && !(prefs.controller.revision >= 0 && prefs.controller.aiHasKey(provRow.modelData.id))
+                                                text: keyless ? "needs an API key" : m === undefined ? "checking\u2026" : (typeof m === "string" ? m.replace(/^error: /, "\u26a0 ") : m.length + " models")
+                                                color: typeof m === "string" ? "#e06c75" : Theme.textDim
+                                                font.pixelSize: 11
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                            PlainButton { implicitHeight: 24; text: "Refresh"; onClicked: prefs.controller.aiListModels(JSON.stringify(provRow.modelData)) }
+                                            PlainButton {
+                                                implicitHeight: 24
+                                                text: "Remove"
+                                                onClicked: prefs.setAi("providers", prefs.ai.providers.filter((_, i) => i !== provRow.index))
+                                            }
+                                        }
+                                        RowLayout {
+                                            Text { text: "Address"; color: Theme.textDim; font.pixelSize: 12; Layout.preferredWidth: 60 }
+                                            Field {
+                                                saved: provRow.modelData.base_url
+                                                Layout.maximumWidth: 9999
+                                                onCommit: (t) => {
+                                                    const ps = JSON.parse(JSON.stringify(prefs.ai.providers))
+                                                    ps[provRow.index].base_url = t.trim()
+                                                    prefs.setAi("providers", ps)
+                                                }
+                                            }
+                                        }
+                                        RowLayout {
+                                            visible: !provRow.modelData.local
+                                            Text { text: "API key"; color: Theme.textDim; font.pixelSize: 12; Layout.preferredWidth: 60 }
+                                            TextField {
+                                                id: keyField
+                                                Layout.fillWidth: true
+                                                echoMode: TextInput.Password
+                                                color: Theme.text
+                                                placeholderText: prefs.controller.revision >= 0 && prefs.controller.aiHasKey(provRow.modelData.id) ? "\u2022\u2022\u2022\u2022 set (type to replace)" : "Paste the key, or env:VARIABLE"
+                                                placeholderTextColor: Theme.textDim
+                                                background: Rectangle { radius: 7; color: Theme.bg; border.color: keyField.activeFocus ? Theme.accent : Theme.divider }
+                                                onEditingFinished: if (text !== "") {
+                                                    prefs.controller.aiSetKey(provRow.modelData.id, text)
+                                                    text = ""
+                                                    prefs.controller.aiListModels(JSON.stringify(provRow.modelData))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                spacing: 10
+                                ChoiceBox {
+                                    id: addProv
+                                    implicitWidth: 240
+                                    values: [["", "Add a provider\u2026"]].concat(prefs.aiPresets.filter(p => !(prefs.ai.providers || []).some(x => x.id === p.id)).map(p => [p.id, p.name]))
+                                    value: ""
+                                    onChosen: (v) => {
+                                        if (v === "") return
+                                        const p = prefs.aiPresets.find(x => x.id === v)
+                                        prefs.setAi("providers", (prefs.ai.providers || []).concat([p]))
+                                        prefs.controller.aiListModels(JSON.stringify(p))
+                                        currentIndex = 0
+                                    }
+                                }
+                                PlainButton {
+                                    text: "Look for Ollama"
+                                    onClicked: { prefs.setAi("autodetected", false); prefs.controller.aiAutodetect() }
+                                }
+                            }
+
+                            SectionTitle { text: "Models" }
+                            component ModelRow: Row2 {
+                                id: mr
+                                property string key
+                                property string fallbackHint: ""
+                                ComboBox {
+                                    id: mc
+                                    editable: true
+                                    implicitWidth: 340
+                                    model: prefs.aiModelRefs
+                                    // (A new list resets the text: put the saved model back.)
+                                    function showSaved() { const v = prefs.ai[mr.key] || ""; currentIndex = prefs.aiModelRefs.indexOf(v); editText = v }
+                                    Component.onCompleted: showSaved()
+                                    onModelChanged: Qt.callLater(showSaved)
+                                    Connections { target: prefs; function onAiChanged() { if (!mc.activeFocus) mc.showSaved() } }
+                                    onAccepted: prefs.setAi(mr.key, editText.trim())
+                                    onActivated: (i) => prefs.setAi(mr.key, prefs.aiModelRefs[i])
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            ModelRow { key: "inline_model"; label: "Suggestions as you type"; hint: "Small and fast is best (e.g. ollama/qwen3.5:4b). Also checks commands unless the next one is set." }
+                            ModelRow { key: "chat_model"; label: "Assistant and commands"; hint: "The sidebar, # descriptions turned into commands, and fixing failed commands (e.g. ollama/qwen3.5:9b, anthropic/claude-sonnet-4-5, openai/gpt-5)." }
+                            ModelRow { key: "check_model"; label: "Checking commands"; hint: "Empty: the suggestions model." }
+
+                            SectionTitle { text: "In the editor" }
+                            ToggleRow { label: "Suggest as you type"; hint: "Grey text after the cursor: Tab or \u2192 takes it."; checked: prefs.ai.inline !== false; onToggled: (on) => prefs.setAi("inline", on) }
+                            ToggleRow { label: "Check commands as you type"; hint: "A short warning in the editor's corner when a command looks wrong or risky."; checked: prefs.ai.check !== false; onToggled: (on) => prefs.setAi("check", on) }
+                            ToggleRow { label: "Turn descriptions into commands"; hint: "Start a line with # and press Enter: the command replaces it, for you to check and run."; checked: prefs.ai.natural_language !== false; onToggled: (on) => prefs.setAi("natural_language", on) }
                         }
 
                         // ================= Pointer =================
