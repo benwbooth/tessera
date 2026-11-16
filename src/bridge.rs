@@ -303,6 +303,15 @@ pub mod ffi {
         fn ai_run(self: Pin<&mut Controller>, key: &QString, task: &QString, messages_json: &QString, ctx_json: &QString);
         #[qinvokable]
         fn ai_cancel(self: &Controller, key: &QString);
+        /// Ask the language server for the editor's language (src/lsp.rs), in
+        /// the background: `what` "diagnostics", "hover" or "complete" at a
+        /// UTF-16 cursor. The answer: lsp_ready(key, what, json).
+        #[qinvokable]
+        fn lsp_ask(self: Pin<&mut Controller>, key: &QString, lang: &QString, cwd: &QString, text: &QString, what: &QString, cursor: i32);
+        #[qinvokable]
+        fn lsp_available(self: &Controller, lang: &QString) -> QString;
+        #[qsignal]
+        fn lsp_ready(self: Pin<&mut Controller>, key: QString, what: QString, json: QString);
         /// Whether a task has a model set up (and its provider a key, if it needs one).
         #[qinvokable]
         fn ai_ready(self: &Controller, task: &QString) -> bool;
@@ -674,6 +683,27 @@ impl ffi::Controller {
             };
             let _ = qt.queue(move |c| c.ai_done(qs(&key), qs(&reply), qs(&err)));
         });
+    }
+
+    fn lsp_ask(self: Pin<&mut Self>, key: &ffi::QString, lang: &ffi::QString, cwd: &ffi::QString, text: &ffi::QString, what: &ffi::QString, cursor: i32) {
+        let (key, lang, root, text, what) = (key.to_string(), lang.to_string(), local_path(cwd), text.to_string(), what.to_string());
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let at = cursor.max(0) as usize;
+            let ask = match what.as_str() {
+                "hover" => crate::lsp::Ask::Hover(at),
+                "complete" => crate::lsp::Ask::Complete(at),
+                _ => crate::lsp::Ask::Diagnostics,
+            };
+            // (Each editor its own document: the key names it.)
+            let doc: String = key.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            let r = crate::lsp::ask(&lang, &root, &doc, &text, ask).unwrap_or_default();
+            let _ = qt.queue(move |c| c.lsp_ready(qs(&key), qs(&what), qs(&r)));
+        });
+    }
+
+    fn lsp_available(&self, lang: &ffi::QString) -> ffi::QString {
+        qs(&crate::lsp::server_for(&lang.to_string()).map(|c| c[0].clone()).unwrap_or_default())
     }
 
     fn ai_cancel(&self, key: &ffi::QString) {

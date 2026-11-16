@@ -18,6 +18,9 @@ class SyntaxHighlighter : public QSyntaxHighlighter {
     // kind ("keyword", "string", ...) -> color
     Q_PROPERTY(QVariantMap colors READ colors WRITE setColors NOTIFY colorsChanged)
     Q_PROPERTY(QColor errorColor READ errorColor WRITE setErrorColor NOTIFY colorsChanged)
+    // Language server diagnostics by severity (2 warning, 3-4 information/hint).
+    Q_PROPERTY(QColor warningColor MEMBER m_warningColor NOTIFY colorsChanged)
+    Q_PROPERTY(QColor infoColor MEMBER m_infoColor NOTIFY colorsChanged)
 
 public:
     explicit SyntaxHighlighter(QObject* parent = nullptr) : QSyntaxHighlighter(parent) {}
@@ -82,15 +85,17 @@ protected:
         }
         for (const QJsonValue& v : m_errors) {
             const QJsonArray e = v.toArray();
+            const int sev = e.size() > 3 ? e.at(3).toInt() : 1;
+            const QColor col = sev <= 1 ? m_errorColor : sev == 2 ? m_warningColor : m_infoColor;
             clip(e.at(0).toInt(), qMax(1, e.at(1).toInt()), [&](int a, int n) {
                 for (int i = a; i < a + n; ++i) {
                     QTextCharFormat f = format(i);
                     // (Qt Quick draws only straight underlines.)
                     f.setFontUnderline(true);
                     f.setUnderlineStyle(QTextCharFormat::SingleUnderline);
-                    f.setUnderlineColor(m_errorColor);
-                    QColor tint = m_errorColor;
-                    tint.setAlphaF(0.16);
+                    f.setUnderlineColor(col);
+                    QColor tint = col;
+                    tint.setAlphaF(sev <= 1 ? 0.16 : 0.08);
                     f.setBackground(tint);
                     setFormat(i, 1, f);
                 }
@@ -104,4 +109,6 @@ private:
     QJsonArray m_spans, m_errors;
     QVariantMap m_colors;
     QColor m_errorColor = QColor(0xe0, 0x5a, 0x5a);
+    QColor m_warningColor = QColor(0xe5, 0xc0, 0x7b);
+    QColor m_infoColor = QColor(0x61, 0xaf, 0xef);
 };

@@ -240,6 +240,8 @@ Rectangle {
     }
     function requestComplete() {
         if (!controller) return
+        if (!historyMode && box.lspServer !== "")
+            controller.lspAsk(aiKey + "-comp", box.lang, box.cwd, edit.text, "complete", edit.cursorPosition)
         const r = JSON.parse(historyMode ? controller.historySearch(historyQuery)
                                          : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}"))
         comp = r
@@ -547,6 +549,17 @@ Rectangle {
                 }
             }
             onCursorRectangleChanged: flick.ensureVisible(cursorRectangle)
+            // Pointing at a word (half a second) shows the language server's help for it.
+            HoverHandler {
+                id: wordHover
+                onPointChanged: { box.hoverDoc = ""; hoverTimer.restart() }
+                onHoveredChanged: if (!hovered) { hoverTimer.stop(); box.hoverDoc = "" }
+            }
+            Timer {
+                id: hoverTimer
+                interval: 550
+                onTriggered: if (wordHover.hovered) box.hoverAtPosition(edit.positionAt(wordHover.point.position.x, wordHover.point.position.y))
+            }
             // (Re-coloring also signals a change: react to real edits only.)
             property string seen: ""
             onTextChanged: {
@@ -572,6 +585,7 @@ Rectangle {
                         && ((e.key === Qt.Key_Tab && !(box.compOpen && box.comp.items.length > 0)) || e.key === Qt.Key_Right || e.key === Qt.Key_End))
                     done = box.acceptGhost()
                 if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
+                if (!done && e.key === Qt.Key_F1) { box.hoverAtPosition(cursorPosition); done = true }
                 if (!done) done = box.compKey(e)
                 if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
                         && !/^\s*$/.test(text.substring(box.lineStart(cursorPosition), cursorPosition))) {
@@ -641,13 +655,14 @@ Rectangle {
             text: box.problem !== "" ? "\u26a0 " + box.problem
                   : box.aiBusy !== "" ? "\u2726 " + (box.aiBusy === "fix" ? "fixing\u2026" : "writing the command\u2026")
                   : box.aiNote !== "" ? "\u2726 " + box.aiNote
+                  : box.lspNote !== "" ? "\u26a0 " + box.lspNote
                   : box.keys === "vi" ? (box.viNormal ? "NORMAL" : "INSERT") : box.lang
-            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : box.aiNote !== "" ? box.ansi(3, "#e5c07b") : Theme.textDim
+            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : (box.aiNote !== "" || box.lspNote !== "") ? box.ansi(3, "#e5c07b") : Theme.textDim
             width: Math.min(implicitWidth, box.width * 0.45)
             elide: Text.ElideRight
             HoverHandler { id: noteHover }
-            ToolTip.visible: noteHover.hovered && box.aiNote !== ""
-            ToolTip.text: box.aiNote
+            ToolTip.visible: noteHover.hovered && (box.aiNote !== "" || box.lspNote !== "" || box.problem !== "")
+            ToolTip.text: box.problem !== "" ? box.problem : box.aiNote !== "" ? box.aiNote : box.lspNote
             opacity: 0.75
             font.pixelSize: 10
             font.weight: Font.DemiBold
@@ -789,17 +804,58 @@ Rectangle {
 
     property string problem: ""        // the first syntax error, shown in the corner
     Timer { id: idle; interval: 650; onTriggered: box.analyze(true) }
+    // ---- language server --------------------------------------------------
+    readonly property string lspServer: controller ? controller.lspAvailable(box.lang) : ""
+    property var lspDiags: []          // [[start, length, message, severity]] for lspText
+    property string lspText: ""
+    property string lspNote: ""        // the first warning, for the corner
     function analyze(withErrors) {
         if (!controller) return
         const r = JSON.parse(controller.syntax(box.lang, edit.text))
         if (!withErrors) r.errors = []
         problem = r.errors.length > 0 ? r.errors[0][2] : ""
+        lspNote = ""
+        if (withErrors && box.lspText === edit.text && box.lspDiags.length > 0) {
+            r.errors = r.errors.concat(box.lspDiags)
+            const err = box.lspDiags.find(d => d[3] <= 1), warn = box.lspDiags.find(d => d[3] >= 2)
+            if (problem === "" && err) problem = err[2]
+            if (warn) lspNote = warn[2]
+        }
         hl.analysis = JSON.stringify(r)
+        if (withErrors && box.lspServer !== "" && box.lspText !== edit.text && edit.text.trim() !== "")
+            controller.lspAsk(aiKey + "-diag", box.lang, box.cwd, edit.text, "diagnostics", 0)
+    }
+    property string hoverDoc: ""
+    property rect hoverAt
+    function hoverAtPosition(pos) {
+        if (box.lspServer === "" || edit.text.trim() === "") return
+        hoverAt = edit.positionToRectangle(pos)
+        controller.lspAsk(aiKey + "-hover", box.lang, box.cwd, edit.text, "hover", pos)
+    }
+    Connections {
+        target: box.controller
+        function onLspReady(key, what, json) {
+            if (key === box.aiKey + "-diag") {
+                try { box.lspDiags = JSON.parse(json || "[]") } catch (e) { box.lspDiags = [] }
+                box.lspText = edit.text
+                box.analyze(true)
+            } else if (key === box.aiKey + "-hover") {
+                box.hoverDoc = (json || "").trim()
+            } else if (key === box.aiKey + "-comp" && box.compOpen && !box.historyMode) {
+                let extra = []
+                try { extra = JSON.parse(json || "[]") } catch (e) {}
+                const have = new Set(box.comp.items.map(i => i.label))
+                extra = extra.filter(i => i.label !== "" && !have.has(i.label))
+                if (extra.length > 0) box.comp = Object.assign({}, box.comp, { items: box.comp.items.concat(extra) })
+            }
+        }
     }
     SyntaxHighlighter {
         id: hl
         document: edit.textDocument
         errorColor: box.ansi(9, "#e05a5a")
+        warningColor: box.ansi(3, "#e5c07b")
+        infoColor: box.ansi(4, "#61afef")
         colors: ({
             keyword: box.ansi(5, "#c678dd"),
             string: box.ansi(2, "#98c379"),
@@ -995,6 +1051,40 @@ Rectangle {
             font.pixelSize: 12
             renderType: Text.NativeRendering
             Rectangle { anchors.bottom: parent.top; anchors.bottomMargin: 3; width: parent.width; height: 1; color: Theme.divider }
+        }
+    }
+
+    // The language server's help for a word (pointed at, or F1 at the cursor).
+    Rectangle {
+        id: hoverPopup
+        visible: box.hoverDoc !== "" && !compPopup.visible
+        z: 49
+        width: Math.min(box.width - 16, 620)
+        height: Math.min(hoverText.implicitHeight + 16, 260)
+        x: Math.max(8, Math.min(flick.x + box.hoverAt.x - 20, box.width - width - 8))
+        y: -height - 4
+        radius: 8
+        color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04)
+        border.color: Theme.divider
+        Flickable {
+            id: hoverFlick
+            anchors.fill: parent
+            anchors.margins: 8
+            contentHeight: hoverText.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar {}
+            MomentumWheel { flick: hoverFlick }
+            Text {
+                id: hoverText
+                width: hoverFlick.width - 8
+                text: box.hoverDoc
+                textFormat: Text.MarkdownText
+                wrapMode: Text.Wrap
+                color: Theme.text
+                font.pixelSize: 12
+                renderType: Text.NativeRendering
+            }
         }
     }
 }
