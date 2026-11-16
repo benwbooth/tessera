@@ -81,15 +81,44 @@ Item {
         anchors.fill: parent
         transform: Scale { origin.y: tab.height / 2; yScale: tab.flipped ? -1 : 1 }
 
+        readonly property bool raised: tab.current || tab.lifted
+
+        // A soft shadow around the raised tab.
         Shape {
             anchors.fill: parent
-            visible: tab.current || tab.hovered || tab.lifted
+            visible: parent.raised
+            preferredRendererType: Shape.CurveRenderer
+            opacity: Theme.dark ? 0.45 : 0.10
+            ShapePath {
+                strokeWidth: 3
+                strokeColor: "black"
+                fillColor: "transparent"
+                joinStyle: ShapePath.RoundJoin
+                startX: sp.r - 1; startY: sp.h
+                PathLine { x: sp.r - 1; y: sp.r }
+                PathQuad { x: 2 * sp.r; y: -0.5; controlX: sp.r - 1; controlY: -0.5 }
+                PathLine { x: sp.w - 2 * sp.r; y: -0.5 }
+                PathQuad { x: sp.w - sp.r + 1; y: sp.r; controlX: sp.w - sp.r + 1; controlY: -0.5 }
+                PathLine { x: sp.w - sp.r + 1; y: sp.h }
+            }
+        }
+
+        // The raised tab: the terminal's own surface, faintly lighter at the
+        // top so it reads as lifted, with a hairline edge; flared corners
+        // where it runs into the terminal.
+        Shape {
+            anchors.fill: parent
+            visible: parent.raised
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
                 id: sp
-                strokeWidth: tab.current || tab.lifted ? 1 : -1
-                strokeColor: Qt.rgba(Theme.divider.r, Theme.divider.g, Theme.divider.b, Theme.dark ? 0.9 : 0.6)
-                fillColor: tab.current || tab.lifted ? tab.surface : Theme.tabHover
+                strokeWidth: 1
+                strokeColor: Qt.rgba(Theme.divider.r, Theme.divider.g, Theme.divider.b, Theme.dark ? 0.9 : 0.7)
+                fillGradient: LinearGradient {
+                    x1: 0; y1: 0; x2: 0; y2: sp.h
+                    GradientStop { position: 0; color: Theme.mix(tab.surface, Theme.fg, Theme.dark ? 0.055 : 0.03) }
+                    GradientStop { position: 0.55; color: tab.surface }
+                }
                 readonly property real w: tab.width
                 readonly property real h: tab.height + 1   // past the edge: no outline along the join
                 readonly property real r: tab.flare
@@ -104,15 +133,42 @@ Item {
             }
         }
 
-        // Tab color: a short bar along the outer edge.
+        // A thin accent line along the top of the raised tab (the tab's own
+        // color when it has one).
         Rectangle {
-            visible: tab.tabColor.a > 0
+            visible: parent.raised
+            x: 2 * tab.flare
+            y: 0.5
+            width: tab.width - 4 * tab.flare
+            height: 2
+            radius: 1
+            color: tab.tabColor.a > 0 ? tab.tabColor : Theme.accent
+            opacity: tab.current ? 0.95 : 0.6
+        }
+
+        // Pointed at (not current): a quiet inset highlight.
+        Rectangle {
+            visible: !parent.raised
+            x: tab.flare + 1
+            y: 3
+            width: tab.width - 2 * tab.flare - 2
+            height: tab.height - 5
+            radius: 6
+            color: Theme.tabHover
+            opacity: tab.hovered ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 110 } }
+        }
+
+        // Tab color on a background tab: a short bar along the outer edge.
+        Rectangle {
+            visible: tab.tabColor.a > 0 && !parent.raised
             anchors.horizontalCenter: parent.horizontalCenter
-            width: Math.min(48, tab.width - 4 * tab.flare)
-            height: 3
-            radius: 1.5
+            width: Math.min(40, tab.width - 4 * tab.flare)
+            height: 2
+            radius: 1
             y: 1
             color: tab.tabColor
+            opacity: 0.8
         }
     }
 
@@ -145,7 +201,7 @@ Item {
         text: tab.text
         color: tab.current ? Theme.text : (tab.hovered ? Theme.text : Theme.textDim)
         font.pixelSize: 12
-        font.weight: Font.Normal
+        font.weight: tab.current ? Font.Medium : Font.Normal
         anchors.verticalCenterOffset: tab.flipped ? -1 : 1
         clip: true
         // Fade the end of a long title instead of an ellipsis.
@@ -171,6 +227,7 @@ Item {
         anchors.verticalCenterOffset: tab.flipped ? -1 : 1
         width: 16; height: 16
         readonly property bool showClose: tab.hovered || tab.closeAlways || (tab.current && !tab.activity && !tab.bell)
+        // (Fades rather than pops.)
 
         Rectangle {
             anchors.centerIn: parent
@@ -181,7 +238,9 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: 8
-            visible: tail.showClose
+            visible: opacity > 0
+            opacity: tail.showClose ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 110 } }
             color: closeHover.hovered ? Theme.divider : "transparent"
             Text {
                 anchors.centerIn: parent

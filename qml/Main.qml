@@ -20,6 +20,8 @@ ApplicationWindow {
     // own traffic lights inside it; elsewhere the window has no system frame
     // and the bar draws KDE (Breeze) or Windows buttons and moves the window.
     readonly property bool macOS: Qt.platform.os === "osx"
+    palette.toolTipBase: Theme.panel
+    palette.toolTipText: Theme.text
     flags: macOS ? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
                  : (Qt.Window | Qt.FramelessWindowHint)
     title: customTitle !== "" ? customTitle : (activeView && activeView.title ? activeView.title : "Tessera")
@@ -1033,6 +1035,8 @@ ApplicationWindow {
 
     P.Menu {
         id: appMenu
+        onAboutToShow: win.appMenuOpen = true
+        onAboutToHide: win.appMenuOpen = false
 
         P.Menu {
             title: "Shell"
@@ -1291,9 +1295,12 @@ ApplicationWindow {
 
     // The + button's menu: profiles, the shells installed, ssh hosts.
     property var launchData: ({ shells: [], ssh_hosts: [] })
+    property bool launchOpen: false
+    property bool appMenuOpen: false
     P.Menu {
         id: launchMenu
-        onAboutToShow: win.launchData = JSON.parse(controller.launchers())
+        onAboutToShow: { win.launchData = JSON.parse(controller.launchers()); win.launchOpen = true }
+        onAboutToHide: win.launchOpen = false
         Instantiator {
             model: win.profileList
             delegate: P.MenuItem {
@@ -1566,48 +1573,19 @@ ApplicationWindow {
                     }
                 }
             }
-            // New tab: + opens the default profile, ⌄ offers the others,
-            // installed shells and ssh hosts. One compact split button.
-            Rectangle {
+            // New tab: + opens the default profile; the chevron offers the
+            // other profiles, installed shells and ssh hosts.
+            SplitButton {
                 id: plus
                 anchors.left: tabRow.right
-                anchors.leftMargin: 6
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: box.flipped ? -1 : 1
-                width: 46; height: 22; radius: 6
-                color: "transparent"
-                border.width: 1
-                border.color: plusHover.hovered || launchHover.hovered ? Theme.divider : "transparent"
-                Rectangle {
-                    x: 1; y: 1; width: 26; height: parent.height - 2; radius: 5
-                    color: plusHover.hovered ? Theme.tabHover : "transparent"
-                    Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -1; text: "+"; color: plusHover.hovered ? Theme.text : Theme.textDim; font.pixelSize: 16 }
-                    HoverHandler { id: plusHover }
-                    TapHandler { onTapped: newTab({}) }
-                }
-                Rectangle {
-                    x: 27; y: 4; width: 1; height: parent.height - 8
-                    color: Theme.divider
-                    visible: plusHover.hovered || launchHover.hovered
-                }
-                Rectangle {
-                    id: launchButton
-                    x: 28; y: 1; width: parent.width - 29; height: parent.height - 2; radius: 5
-                    color: launchHover.hovered ? Theme.tabHover : "transparent"
-                    Canvas {
-                        anchors.centerIn: parent
-                        width: 8; height: 5
-                        property color ink: launchHover.hovered ? Theme.text : Theme.textDim
-                        onInkChanged: requestPaint()
-                        onPaint: {
-                            const c = getContext("2d"); c.reset()
-                            c.strokeStyle = ink; c.lineWidth = 1.4; c.lineCap = "round"; c.lineJoin = "round"
-                            c.beginPath(); c.moveTo(0.7, 0.7); c.lineTo(4, 4.2); c.lineTo(7.3, 0.7); c.stroke()
-                        }
-                    }
-                    HoverHandler { id: launchHover }
-                    TapHandler { onTapped: launchMenu.open(launchButton) }
-                }
+                anchors.leftMargin: 8
+                // On the tabs' center line (they sit on the bar's edge).
+                y: box.flipped ? 2 : box.height - 26 + 1
+                mainTip: "New Tab (Ctrl+Shift+T)"
+                menuTip: "Profiles, shells and SSH"
+                menuOpen: win.launchOpen
+                onMainClicked: newTab({})
+                onMenuClicked: launchMenu.open(plus.menuAnchor)
             }
 
             // Where a dragged tab would go.
@@ -1687,24 +1665,15 @@ ApplicationWindow {
             }
 
             // ☰ The app menu.
-            Rectangle {
+            BarButton {
                 id: menuButton
                 anchors.left: parent.left
                 anchors.leftMargin: win.macOS ? 78 : 6
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: (showTabs && !tabsAtBottom) ? 2 : 0
-                width: 26; height: 22; radius: 6
-                color: menuHover.hovered ? Theme.tabHover : "transparent"
-                Item {
-                    anchors.centerIn: parent
-                    width: 14; height: 10
-                    Repeater {
-                        model: 3
-                        Rectangle { y: index * 4; width: 14; height: 1.6; radius: 0.8; color: menuHover.hovered ? Theme.text : Theme.textDim }
-                    }
-                }
-                HoverHandler { id: menuHover }
-                TapHandler { onTapped: appMenu.open(menuButton) }
+                y: (showTabs && !tabsAtBottom) ? topBar.height - 26 - 2 + 1 : (topBar.height - 26) / 2
+                icon: "menu"
+                tip: "Menu"
+                open: win.appMenuOpen
+                onClicked: appMenu.open(menuButton)
             }
 
             Loader {

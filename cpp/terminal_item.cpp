@@ -753,6 +753,25 @@ void TerminalItem::keyPressEvent(QKeyEvent* e)
 {
     if (!m_session || m_exited) return QQuickItem::keyPressEvent(e);
     if (applyKeyMapping(e)) return;
+    // Shift+PgUp/PgDn scroll a page, Shift+Home/End jump to the top or
+    // bottom of the scrollback (full-screen programs get these keys).
+    if (e->modifiers() == Qt::ShiftModifier && m_session->scrolls_locally(0)) {
+        const int page = qMax(1, m_rows - 1);
+        bool handled = true;
+        switch (e->key()) {
+        case Qt::Key_PageUp: m_session->scroll_lines(-page); break;
+        case Qt::Key_PageDown: m_session->scroll_lines(page); break;
+        case Qt::Key_Home: m_session->scroll_to_row(0); break;
+        case Qt::Key_End: m_session->scroll_to_bottom(); break;
+        default: handled = false;
+        }
+        if (handled) {
+            m_momentum->stop();
+            polish();
+            e->accept();
+            return;
+        }
+    }
     const QByteArray text = e->text().toUtf8();
     if (m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), false, e->nativeVirtualKey())) {
         e->accept();
