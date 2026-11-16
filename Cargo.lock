@@ -1114,6 +1114,7 @@ name = "tessera"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "cxx",
  "cxx-qt",
  "cxx-qt-build",

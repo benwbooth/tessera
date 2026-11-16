@@ -290,7 +290,11 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
     let os = std::env::consts::OS;
     let shell = ctx["shell"].as_str().unwrap_or("bash");
     let cwd = ctx["cwd"].as_str().unwrap_or("");
-    let base = format!("You are built into Tessera, a terminal. The user's OS is {os}, shell {shell}, current folder {cwd}.");
+    let mut base = format!("You are built into Tessera, a terminal. The user's OS is {os}, shell {shell}, current folder {cwd}.");
+    if let Some(a) = ctx["aliases"].as_object().filter(|a| !a.is_empty()) {
+        let list: Vec<String> = a.iter().map(|(k, v)| format!("{k}='{}'", v.as_str().unwrap_or(""))).collect();
+        base.push_str(&format!(" Aliases in their shell: {} (an alias runs what it stands for: judge options by that program).", list.join(", ")));
+    }
     match task {
         "inline" => format!(
             "{base} Complete the command the user is typing. Reply with ONLY the complete command line (including what they typed), \

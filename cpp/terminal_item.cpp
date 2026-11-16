@@ -474,6 +474,9 @@ void TerminalItem::handleEvents()
             QGuiApplication::clipboard()->setText(e.value(u"text").toString());
         } else if (type == u"grid") {
             m_forceFull = true;
+        } else if (type == u"aliases") {
+            m_aliases = QString::fromUtf8(QJsonDocument(e.value(u"map").toObject()).toJson(QJsonDocument::Compact));
+            emit aliasesChanged();
         } else if (type == u"command") {
             m_lastStatus = e.value(u"status").toInt();
             m_lastDuration = qint64(e.value(u"ms").toDouble());

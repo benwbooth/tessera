@@ -241,7 +241,7 @@ Rectangle {
     function requestComplete() {
         if (!controller) return
         const r = JSON.parse(historyMode ? controller.historySearch(historyQuery)
-                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd))
+                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}"))
         comp = r
         if (compIndex >= r.items.length) compIndex = 0
         if (r.items.length === 0 && !r.pending) closeComp()
@@ -716,7 +716,12 @@ Rectangle {
     function aiContext() {
         let cwd = box.cwd.replace(/^file:\/\/[^/]*/, "")
         try { cwd = decodeURIComponent(cwd) } catch (e) {}
-        return JSON.stringify({ cwd: cwd, shell: box.shellName || "bash" })
+        // The aliases the command uses (ls -> lsd), so the AI knows what runs.
+        let al = {}
+        try { al = JSON.parse(box.view ? box.view.aliases : "{}") } catch (e) {}
+        const used = {}
+        for (const w of edit.text.split(/[\s;|&()]+/)) if (al[w] !== undefined) used[w] = al[w]
+        return JSON.stringify({ cwd: cwd, shell: box.shellName || "bash", aliases: used })
     }
     function recent(n) { return box.history.slice(-n).join("\n") }
     function askCommand(what) {
@@ -768,8 +773,11 @@ Rectangle {
                 const t = edit.text
                 box.ghost = !error && reply.startsWith(t) && reply.length > t.length ? reply.substring(t.length).split("\n")[0] : ""
                 box.lastGhostBase = t
+                // (Still being written, then: a check's complaint doesn't apply.)
+                if (box.ghost !== "") { box.aiNote = ""; box.checkedText = "" }
             } else if (key === box.aiKey + "-check") {
                 const r = reply.trim()
+                if (box.ghost !== "" || edit.text.trim() !== box.checkedText) return
                 box.aiNote = error || /^ok\.?$/i.test(r) || r === "" ? "" : r
             } else if (key === box.aiKey + "-cmd") {
                 box.aiBusy = ""
@@ -822,7 +830,7 @@ Rectangle {
         readonly property int rows: Math.max(hist ? 1 : 0, Math.min(hist ? 14 : 10, box.comp.items.length))
         readonly property var anchorRect: edit.positionToRectangle(box.comp.start)
         width: hist ? box.width - 16 : Math.min(box.width - 16, 640)
-        height: (hist ? searchRow.height + 6 : 0) + rows * rowH + 8 + (docText.visible ? docText.implicitHeight + 12 : 0)
+        height: (hist ? searchRow.height + 6 : 0) + rows * rowH + 8 + (docText.visible ? docText.height + 12 : 0)
         x: hist ? 8 : Math.max(8, Math.min(flick.x + anchorRect.x - 28, box.width - width - 8))
         y: -height - 4
         radius: 8
@@ -964,7 +972,14 @@ Rectangle {
         Text {
             id: docText
             readonly property var item: box.comp.items[box.compIndex]
-            visible: item !== undefined && ((item.doc || "") !== "" || item.detail.length > 60)
+            // The panel keeps one height for the whole list (moving through
+            // it mustn't make the dropdown grow and shrink): shown when any
+            // item has more to say than fits its row, sized for the longest kind.
+            readonly property bool anyDoc: box.comp.items.some(i => (i.doc || "") !== "")
+            readonly property bool anyLong: anyDoc || box.comp.items.some(i => (i.detail || "").length > 60)
+            visible: !compPopup.hist && anyLong
+            height: visible ? (anyDoc ? 14 : 5) * Math.ceil(docFm.height) : 0
+            FontMetrics { id: docFm; font.pixelSize: 12 }
             anchors.top: compList.bottom
             anchors.topMargin: 6
             anchors.left: parent.left
@@ -972,7 +987,8 @@ Rectangle {
             anchors.margins: 10
             text: item ? (item.doc || item.detail) : ""
             wrapMode: Text.Wrap
-            maximumLineCount: (item && item.doc) ? 16 : 5
+            maximumLineCount: anyDoc ? 14 : 5
+            verticalAlignment: Text.AlignTop
             elide: Text.ElideRight
             color: Theme.text
             opacity: 0.85

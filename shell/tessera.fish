@@ -16,3 +16,11 @@ function __tessera_preexec --on-event fish_preexec
     set -g __tessera_running 1
     printf '\e]133;C\a'
 end
+# The aliases (OSC 1337 TesseraAliases, base64), when they change: help and
+# completion for an alias come from what it runs (ls -> lsd).
+function __tessera_aliases --on-event fish_prompt
+    set -l a (alias | string collect)
+    test "$a" = "$__tessera_alias_seen"; and return
+    set -g __tessera_alias_seen $a
+    printf '\e]1337;TesseraAliases=%s\a' (printf '%s' "$a" | base64 | string join '')
+end

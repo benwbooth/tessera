@@ -274,7 +274,7 @@ pub mod ffi {
         fn language_for(self: &Controller, program: &QString) -> QString;
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
-        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString) -> QString;
+        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString) -> QString;
         /// Download fish's completion files (more commands and subcommands
         /// get help text); progress in help_status.
         #[qinvokable]
@@ -557,7 +557,8 @@ impl ffi::Controller {
         qs(&crate::syntax::analyze(&lang.to_string(), &text.to_string()))
     }
 
-    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString) -> ffi::QString {
+    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString) -> ffi::QString {
+        let aliases: serde_json::Value = serde_json::from_str(&aliases.to_string()).unwrap_or_default();
         let cwd = cwd.to_string();
         // An OSC 7 URL (file://host/path) or a plain path.
         let cwd = match cwd.strip_prefix("file://") {
@@ -565,7 +566,7 @@ impl ffi::Controller {
             None => cwd,
         };
         let cwd = if cwd.is_empty() { std::env::var("HOME").unwrap_or_default() } else { cwd };
-        qs(&crate::complete::complete(&text.to_string(), cursor.max(0) as usize, &cwd))
+        qs(&crate::complete::complete(&text.to_string(), cursor.max(0) as usize, &cwd, &aliases))
     }
 
     fn download_command_help(mut self: Pin<&mut Self>) {

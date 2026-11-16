@@ -40,6 +40,8 @@ class TerminalItem : public QQuickItem {
     Q_PROPERTY(bool fullScreen READ fullScreen NOTIFY promptChanged)
     // The last command's exit status and how long it ran (ms), from the marks.
     Q_PROPERTY(int lastStatus READ lastStatus NOTIFY commandFinished)
+    // The shell's aliases as JSON {name: value} (shell integration reports them).
+    Q_PROPERTY(QString aliases READ aliases NOTIFY aliasesChanged)
     Q_PROPERTY(qint64 lastDuration READ lastDuration NOTIFY commandFinished)
     Q_PROPERTY(int tmuxPaneId READ tmuxPaneId NOTIFY sessionIdChanged)
     Q_PROPERTY(QString tmuxGateway READ tmuxGateway NOTIFY tmuxGatewayChanged)
@@ -267,9 +269,12 @@ private:
     int m_cols = 0, m_rows = 0;
     bool m_atPrompt = false, m_fullScreen = false;
     int m_lastStatus = 0;
+    QString m_aliases = QStringLiteral("{}");
     qint64 m_lastDuration = 0;
 public:
     int lastStatus() const { return m_lastStatus; }
+    QString aliases() const { return m_aliases; }
+    Q_SIGNAL void aliasesChanged();
     qint64 lastDuration() const { return m_lastDuration; }
     Q_SIGNAL void commandFinished();
     bool atPrompt() const { return m_atPrompt; }

@@ -98,6 +98,8 @@ pub struct Session {
     mark_tail: Vec<u8>,
     /// When the running command started (mark C), for its duration.
     command_started: Option<std::time::Instant>,
+    /// A TesseraAliases report being read (it may span reads).
+    alias_buf: Option<Vec<u8>>,
     exited: bool,
     last_cursor_row: Option<u16>,
     last_full_size: (u16, u16),
@@ -304,6 +306,7 @@ pub fn session_open(
         mark: 0,
         mark_tail: Vec::new(),
         command_started: None,
+        alias_buf: None,
         exited: false,
         last_cursor_row: None,
         last_full_size: (0, 0),
@@ -555,9 +558,47 @@ impl Session {
         matches!(self.mark, b'A' | b'B' | b'D')
     }
 
+    /// The shell integration's alias report (OSC 1337;TesseraAliases=<base64>).
+    fn scan_aliases(&mut self, data: &[u8]) {
+        const PAT: &[u8] = b"\x1b]1337;TesseraAliases=";
+        let mut rest: &[u8] = data;
+        loop {
+            if let Some(buf) = self.alias_buf.as_mut() {
+                match rest.iter().position(|&b| b == 7 || b == 0x1b) {
+                    Some(end) => {
+                        buf.extend_from_slice(&rest[..end]);
+                        let b64 = self.alias_buf.take().unwrap();
+                        use base64::Engine;
+                        if let Ok(raw) = base64::engine::general_purpose::STANDARD.decode(b64.iter().filter(|c| !c.is_ascii_whitespace()).copied().collect::<Vec<u8>>()) {
+                            let map = crate::complete::parse_aliases(&String::from_utf8_lossy(&raw));
+                            self.events.push(json!({"type": "aliases", "map": map}));
+                        }
+                        rest = &rest[end..];
+                    }
+                    None => {
+                        if buf.len() < 1 << 20 {
+                            buf.extend_from_slice(rest);
+                        } else {
+                            self.alias_buf = None;
+                        }
+                        return;
+                    }
+                }
+            }
+            match rest.windows(PAT.len()).position(|w| w == PAT) {
+                Some(i) => {
+                    self.alias_buf = Some(Vec::new());
+                    rest = &rest[i + PAT.len()..];
+                }
+                None => return,
+            }
+        }
+    }
+
     fn process_output(&mut self, data: &[u8]) {
         if self.gateway.is_none() {
             self.scan_marks(data);
+            self.scan_aliases(data);
         }
         if let Some(gw) = self.gateway.clone() {
             let rest = gw.borrow_mut().feed(data);

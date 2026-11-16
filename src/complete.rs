@@ -739,12 +739,61 @@ fn rank(mut items: Vec<Item>, typed: &str, key: impl Fn(&Item) -> String) -> Vec
     scored.into_iter().map(|(_, i)| i).take(200).collect()
 }
 
+// ---- aliases ----------------------------------------------------------------------
+
+/// The shell's `alias` output (zsh: name=value; bash: alias name='value';
+/// fish: alias name 'value') as name -> value.
+pub fn parse_aliases(text: &str) -> std::collections::BTreeMap<String, String> {
+    let unquote = |v: &str| -> String {
+        let v = v.trim();
+        if v.len() >= 2 && v.starts_with('\'') && v.ends_with('\'') {
+            v[1..v.len() - 1].replace("'\\''", "'")
+        } else if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
+            v[1..v.len() - 1].to_string()
+        } else {
+            v.to_string()
+        }
+    };
+    let mut out = std::collections::BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let (name, value) = if let Some(rest) = line.strip_prefix("alias ") {
+            match rest.split_once('=') {
+                // bash: name='value'
+                Some((n, v)) if !n.contains(' ') => (n.trim_start_matches("-- ").to_string(), unquote(v)),
+                // fish: name value
+                _ => match rest.split_once(' ') {
+                    Some((n, v)) => (n.to_string(), unquote(v)),
+                    None => continue,
+                },
+            }
+        } else if let Some((n, v)) = line.split_once('=') {
+            (n.trim_matches('\'').to_string(), unquote(v))
+        } else {
+            continue;
+        };
+        if !name.is_empty() && !value.is_empty() {
+            out.insert(name, value);
+        }
+    }
+    out
+}
+
+/// What an alias runs: the first word of its value (after assignments and
+/// sudo-likes); None when it isn't one.
+fn alias_target(aliases: &serde_json::Value, cmd: &str) -> Option<String> {
+    let v = aliases.get(cmd)?.as_str()?;
+    let w = words(v);
+    let first = w.first()?.text.clone();
+    (first != cmd && !first.is_empty()).then_some(first)
+}
+
 // ---- the API ---------------------------------------------------------------------
 
 /// Completions at `cursor` (a UTF-16 offset) in `text`, for a shell in `cwd`.
 /// {"start": u16, "end": u16, "items": [...], "pending": bool}: replace
 /// start..end with an item's `insert`. `pending`: help is still being read.
-pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
+pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::Value) -> String {
     // UTF-16 cursor -> byte offset.
     let mut byte = text.len();
     let mut n = 0;
@@ -773,6 +822,10 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
                 .iter()
                 .map(|(n, d)| Item { label: n.to_string(), insert: n.to_string(), detail: d.to_string(), kind: "command", doc: String::new() })
                 .collect();
+            // The shell's aliases (what they run as the detail).
+            if let Some(map) = aliases.as_object() {
+                cands.extend(map.iter().map(|(n, v)| Item { label: n.clone(), insert: n.clone(), detail: format!("alias for {}", v.as_str().unwrap_or("")), kind: "command", doc: String::new() }));
+            }
             cands.extend(path_commands().iter().map(|n| Item { label: n.clone(), insert: n.clone(), detail: String::new(), kind: "command", doc: String::new() }));
             let mut seen = HashSet::new();
             cands.retain(|i| seen.insert(i.label.clone()));
@@ -783,9 +836,12 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
             for (n, i) in items.iter_mut().enumerate() {
                 // tldr-pages: what it is, and its common uses.
                 if n < 30 {
-                    if let Some((desc, examples)) = tldr_page(&i.label) {
+                    let real = if i.detail.starts_with("alias for ") { alias_target(aliases, &i.label).unwrap_or(i.label.clone()) } else { i.label.clone() };
+                    if let Some((desc, examples)) = tldr_page(&real) {
                         if i.detail.is_empty() {
                             i.detail = desc.clone();
+                        } else if i.detail.starts_with("alias for ") {
+                            i.detail = format!("{} \u{2014} {desc}", i.detail);
                         }
                         let mut doc = desc;
                         for (what, cmd) in examples.iter().take(6) {
@@ -800,7 +856,9 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
             }
         }
     } else {
-        let cmd = ws[0].text.rsplit('/').next().unwrap_or("").to_string();
+        let typed_cmd = ws[0].text.rsplit('/').next().unwrap_or("").to_string();
+        // An alias's help is its command's (ls -> lsd).
+        let cmd = alias_target(aliases, &typed_cmd).unwrap_or(typed_cmd);
         let args: Vec<&str> = ws[1..ws.len() - 1].iter().map(|w| w.text.as_str()).collect();
         let h = help(&cmd);
         pending |= h.is_none();
@@ -909,6 +967,20 @@ mod tests {
     }
 
     #[test]
+    fn aliases() {
+        let z = parse_aliases("ll='lsd -l'\nls=lsd\n");
+        assert_eq!(z["ls"], "lsd");
+        assert_eq!(z["ll"], "lsd -l");
+        let b = parse_aliases("alias ll='lsd -l'\nalias ls='lsd'\n");
+        assert_eq!(b["ll"], "lsd -l");
+        let f = parse_aliases("alias ls 'lsd'\nalias g git\n");
+        assert_eq!((f["ls"].as_str(), f["g"].as_str()), ("lsd", "git"));
+        let m = serde_json::json!({"ls": "lsd --group-dirs first", "ll": "sudo lsd -l"});
+        assert_eq!(alias_target(&m, "ls").as_deref(), Some("lsd"));
+        assert_eq!(alias_target(&m, "ll").as_deref(), Some("lsd"));
+    }
+
+    #[test]
     fn tldr_and_info() {
         let (d, ex) = parse_tldr("# tar\n\n> Archiving utility.\n> More information: <x>.\n\n- [c]reate an archive:\n\n`tar cf {{target.tar}} {{file}}`\n");
         assert_eq!(d, "Archiving utility.");
@@ -930,7 +1002,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tessera-complete-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub dir")).unwrap();
         std::fs::write(dir.join("file.txt"), "").unwrap();
-        let v: serde_json::Value = serde_json::from_str(&complete("cat su", 6, &dir.to_string_lossy())).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&complete("cat su", 6, &dir.to_string_lossy(), &serde_json::Value::Null)).unwrap();
         let first = &v["items"][0];
         assert_eq!(first["insert"], "sub\\ dir/");
         assert_eq!(v["start"], 4);
@@ -946,7 +1018,7 @@ mod live {
         for (line, wait) in [("ls --co", true), ("git sw", true), ("git commit --am", true), ("gre", false), ("cd ~/src/tes", false)] {
             let mut r = String::new();
             for _ in 0..40 {
-                r = super::complete(line, line.encode_utf16().count(), &std::env::current_dir().unwrap().to_string_lossy());
+                r = super::complete(line, line.encode_utf16().count(), &std::env::current_dir().unwrap().to_string_lossy(), &serde_json::Value::Null);
                 if !wait || !r.contains("\"pending\":true") { break }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }

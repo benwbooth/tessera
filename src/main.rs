@@ -12,6 +12,7 @@ mod keymap;
 mod net;
 mod procinfo;
 mod launchers;
+mod lsp;
 mod prompt;
 mod proto;
 mod settings;

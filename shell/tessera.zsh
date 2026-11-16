@@ -19,3 +19,12 @@ add-zsh-hook preexec __tessera_preexec
 # End of prompt / start of input, after whatever theme sets PS1.
 __tessera_mark_input() { [[ $PS1 != *$'\e]133;B'* ]] && PS1="$PS1%{"$'\e]133;B\a'"%}"; }
 add-zsh-hook precmd __tessera_mark_input
+# The aliases (OSC 1337 TesseraAliases, base64), when they change: help and
+# completion for an alias come from what it runs (ls -> lsd).
+__tessera_aliases() {
+    local a="$(alias)"
+    [[ $a == "${__tessera_alias_seen-}" ]] && return
+    __tessera_alias_seen=$a
+    printf '\e]1337;TesseraAliases=%s\a' "$(print -rn -- "$a" | base64 | tr -d '\n')"
+}
+add-zsh-hook precmd __tessera_aliases

@@ -19,3 +19,12 @@ __tessera_preexec() {
 PROMPT_COMMAND="__tessera_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 PS1="$PS1"'\[\e]133;B\a\]'
 trap '__tessera_preexec' DEBUG
+# The aliases (OSC 1337 TesseraAliases, base64), when they change: help and
+# completion for an alias come from what it runs (ls -> lsd).
+__tessera_aliases() {
+    local a; a="$(alias -p)"
+    [[ $a == "${__tessera_alias_seen-}" ]] && return
+    __tessera_alias_seen=$a
+    printf '\e]1337;TesseraAliases=%s\a' "$(printf '%s' "$a" | base64 | tr -d '\n')"
+}
+PROMPT_COMMAND="__tessera_aliases; $PROMPT_COMMAND"
