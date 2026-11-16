@@ -76,6 +76,8 @@ class TerminalItem : public QQuickItem {
     // Ctrl+click opens URLs and files.
     Q_PROPERTY(bool ctrlClickOpens MEMBER m_ctrlClickOpens NOTIFY optionsChanged)
     // Key mappings: [{key: "Ctrl+Alt+K", action: "send_text"|"send_hex"|"send_escape"|"ignore"|"action", value}]
+    // A saved screen shown above a new shell (its old session is gone).
+    Q_PROPERTY(QString preloadFile MEMBER m_preloadFile NOTIFY optionsChanged)
     Q_PROPERTY(QString keyMappingsJson READ keyMappingsJson WRITE setKeyMappingsJson NOTIFY optionsChanged)
     // Scrollback position, for the scrollbar (rows).
     Q_PROPERTY(qreal scrollTotal READ scrollTotal NOTIFY scrollChanged)
@@ -154,6 +156,7 @@ public:
     Q_INVOKABLE void endFind();
     Q_INVOKABLE void scrollToRow(qreal row);
     Q_INVOKABLE bool jumpToPrompt(int dir);
+    Q_INVOKABLE bool saveSnapshot(const QString& path);
     Q_INVOKABLE QString selectLastOutput();
 
 signals:
@@ -334,6 +337,7 @@ private:
     struct KeyMapping { QKeySequence seq; QString action; QString value; };
     QVector<KeyMapping> m_keyMappings;
     QString m_keyMappingsJson;
+    QString m_preloadFile;
     QVector<bool> m_rowMark;
     bool m_showMarks = true;
     QColor m_markColor = QColor(0x62, 0xa8, 0xf0);

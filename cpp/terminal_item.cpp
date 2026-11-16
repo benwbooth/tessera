@@ -376,6 +376,10 @@ void TerminalItem::open()
             const QByteArray o = m_optionsJson.toUtf8();
             m_session->set_options(rs(o));
         }
+        if (!m_preloadFile.isEmpty()) {
+            const QByteArray pf = m_preloadFile.toUtf8();
+            m_session->preload(rs(pf));
+        }
     } catch (const std::exception& e) {
         m_exited = true;
         emit openFailed(QString::fromUtf8(e.what()));
@@ -1244,6 +1248,13 @@ bool TerminalItem::applyKeyMapping(QKeyEvent* e)
         return true;   // "ignore" swallows the key
     }
     return false;
+}
+
+bool TerminalItem::saveSnapshot(const QString& path)
+{
+    if (!m_session || m_tmuxPane.size() > 0) return false;
+    const QByteArray p = path.toUtf8();
+    return m_session->save_snapshot(rs(p));
 }
 
 bool TerminalItem::jumpToPrompt(int dir)

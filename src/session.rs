@@ -193,7 +193,7 @@ pub fn session_open(
     } else {
         let mut stream = crate::client::connect().map_err(|e| format!("daemon: {e}"))?;
         if attach_id.is_empty() {
-            write_json(&mut stream, T_CREATE, &Create { cols, rows, cwd: cwd.to_string(), command: command.to_string(), term: term_name.to_string(), input: startup_input.to_string() })
+            write_json(&mut stream, T_CREATE, &Create { cols, rows, cwd: cwd.to_string(), command: command.to_string(), term: term_name.to_string(), input: startup_input.to_string(), scrollback })
         } else {
             write_json(&mut stream, T_ATTACH, &Attach { id: attach_id.to_string(), cols, rows })
         }
@@ -860,6 +860,34 @@ impl Session {
                 .with_triple_click_behavior(Behavior::Line);
             let _ = self.press.set_behaviors(&b);
         }
+    }
+
+    /// Save the screen and scrollback (VT sequences) for after a reboot.
+    pub fn save_snapshot(&self, path: &str) -> bool {
+        let data = crate::snapshot::snapshot(&self.term);
+        if let Some(d) = std::path::Path::new(path).parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        std::fs::write(path, data).is_ok()
+    }
+
+    /// Show a saved screen above a new shell's output (its session is gone).
+    pub fn preload(&mut self, path: &str) -> bool {
+        let Ok(data) = std::fs::read(path) else { return false };
+        self.term.vt_write(&data);
+        // Continue below the last line with anything on it.
+        let rows = self.term.rows().unwrap_or(1) as usize;
+        let top = self.total_rows().saturating_sub(rows);
+        let last = (0..rows).rev().find(|&r| !self.row_text(top + r).0.trim().is_empty());
+        let goto = match last {
+            Some(r) if r + 1 < rows => format!("\x1b[{};1H", r + 2),
+            Some(_) => "\r\n".to_string(),
+            None => "\x1b[1;1H".to_string(),
+        };
+        self.term.vt_write(format!("\x1b[0m{goto}\x1b[2m\u{2500}\u{2500} session restored \u{2500}\u{2500}\x1b[0m\r\n").as_bytes());
+        let _ = std::fs::remove_file(path);
+        self.force_full = true;
+        true
     }
 
     pub fn show_message(&mut self, text: &str) {

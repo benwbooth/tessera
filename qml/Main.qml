@@ -11,7 +11,10 @@ ApplicationWindow {
     id: win
     width: 1100
     height: 700
-    visible: true
+    // Shown from C++ once named, so the desktop can put it back where it was.
+    visible: false
+    objectName: "tessera-main"
+    property bool showAtStart: true
     color: useTransparency && activeProfile.transparency > 0 ? "transparent" : Theme.bg
     // A unified title bar: the tab strip *is* the title bar. macOS keeps its
     // own traffic lights inside it; elsewhere the window has no system frame
@@ -423,7 +426,7 @@ ApplicationWindow {
             profile: prof.name
         })
         if (opts.layout) {
-            buildSavedTree(t, opts.layout.root, opts.alive)
+            buildSavedTree(t, opts.layout.root, opts.alive, !!opts.recreate)
             if (opts.layout.title) t.customTitle = opts.layout.title
             if (opts.layout.color) t.tabColor = opts.layout.color
             if (t.root.count === 0) { t.destroy(); return null }
@@ -641,6 +644,7 @@ ApplicationWindow {
         closedStack = []
         if (settings.restore_sessions && tabs.length > 0) {
             saveLayoutNow()
+            saveSnapshots()
         } else {
             controller.saveLastLayout("")
             for (const p of allPanes()) if (p.view.tmuxPane === "") p.view.killSession()
@@ -664,19 +668,27 @@ ApplicationWindow {
     }
 
     function serializeWindow(withIds) {
-        return { width: win.width, height: win.height, current: currentTab,
+        return { width: win.width, height: win.height, x: win.x, y: win.y,
+                 maximized: win.visibility === Window.Maximized, current: currentTab,
                  tabs: tabs.filter(t => t.tmuxWindow < 0).map(t => serializeTab(t, withIds)) }
     }
 
     // `alive`: session ids that can be reattached (null: start new shells).
-    function buildSavedTree(t, node, alive) {
+    // `recreate`: a pane whose shell is gone comes back as a new shell in its
+    // folder, under its saved screen (startup after a reboot).
+    function buildSavedTree(t, node, alive, recreate) {
         function build(n, host) {
             if (n.t === "pane") {
                 const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "" }
                 if (alive) {
-                    if (!n.id || !alive[n.id]) return null
-                    props.attachId = n.id
-                    alive[n.id] = false
+                    if (n.id && alive[n.id]) {
+                        props.attachId = n.id
+                        alive[n.id] = false
+                    } else if (recreate) {
+                        if (n.id) props.preloadFile = snapshotPath(n.id)
+                    } else {
+                        return null
+                    }
                 }
                 const p = makePane(host, props)
                 p.prefW = n.w; p.prefH = n.h
@@ -705,9 +717,25 @@ ApplicationWindow {
         }
     }
 
-    function restoreArrangement(layout, alive) {
-        for (const tl of layout.tabs) newTab({ layout: tl, alive: alive, profile: tl.profile, background: true })
+    function restoreArrangement(layout, alive, recreate) {
+        for (const tl of layout.tabs) newTab({ layout: tl, alive: alive, profile: tl.profile, background: true, recreate: !!recreate })
     }
+
+    // Saved screens, for panes whose shell doesn't survive (a reboot).
+    readonly property string stateFolder: controller.stateFolder()
+    function snapshotPath(id) { return stateFolder + "/snapshots/" + id + ".vt" }
+    function saveSnapshots() {
+        if (!settings.restore_sessions) return
+        const keep = []
+        for (const p of allPanes()) {
+            if (p.view.tmuxPane !== "" || p.view.sessionId === "") continue
+            if (p.view.saveSnapshot(snapshotPath(p.view.sessionId))) keep.push(p.view.sessionId)
+        }
+        controller.pruneSnapshots(JSON.stringify(keep))
+    }
+    Timer { interval: 120000; repeat: true; running: startupDone; onTriggered: win.saveSnapshots() }
+    // The desktop's id for this window, so it can put it back (Wayland).
+    Timer { interval: 4000; running: startupDone; onTriggered: controller.saveWindowSession() }
 
     function saveLayoutNow() {
         if (settings.restore_sessions && tabs.length > 0)
@@ -1737,12 +1765,16 @@ ApplicationWindow {
         } else if (controller.restoreAllowed()) {
             const ids = JSON.parse(controller.restorableSessions())
             for (const id of ids) alive[id] = true
-            if (settings.restore_sessions && ids.length > 0) {
+            if (settings.restore_sessions) {
                 let layout = null
                 try { layout = JSON.parse(controller.lastLayout()) } catch (e) {}
                 if (layout && layout.tabs) {
-                    restoreArrangement(layout, alive)
+                    // Live shells reattach; gone ones come back with their saved screens.
+                    restoreArrangement(layout, alive, true)
                     if (layout.width > 200) { win.width = layout.width; win.height = layout.height }
+                    // X11 lets windows place themselves (Wayland: the desktop does, above).
+                    if (Qt.platform.pluginName === "xcb" && layout.x !== undefined) { win.x = layout.x; win.y = layout.y }
+                    if (layout.maximized) Qt.callLater(win.showMaximized)
                     if (tabs.length > 0) focusTab(Math.min(layout.current || 0, tabs.length - 1))
                 }
                 // Shells the saved layout didn't know about get tabs of their own.
@@ -1799,6 +1831,8 @@ ApplicationWindow {
         id: shotTimer
         interval: controller.screenshotDelay()
         onTriggered: {
+            win.saveLayoutNow()
+            win.saveSnapshots()
             const target = controller.prefsPage() !== "" ? prefs.contentRoot : rootLayout
             const ok = target.grabToImage(function(r) {
                 r.saveToFile(controller.screenshotPath())

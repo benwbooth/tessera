@@ -9,14 +9,14 @@ use libghostty_vt::{
 
 pub fn snapshot(term: &Terminal<'static, 'static>) -> Vec<u8> {
     // (No selection: the whole screen and scrollback. No tab stops: setting
-    // them moves the cursor after it has been put back.)
+    // them moves the cursor after it has been put back. No palette: the
+    // window's theme decides the colors.)
     let opts = FormatterOptions::new()
         .with_format(Format::Vt)
         .with_unwrap(false)
         .with_trim(true)
         .with_style(true)
         .with_hyperlink(true)
-        .with_palette(true)
         .with_modes(true)
         .with_cursor(true)
         .with_scrolling_region(true)

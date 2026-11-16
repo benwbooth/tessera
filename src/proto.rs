@@ -43,6 +43,9 @@ pub struct Create {
     /// Typed into the new shell right away (a profile's "Send text at start").
     #[serde(default)]
     pub input: String,
+    /// Scrollback lines the daemon's copy of the screen keeps.
+    #[serde(default)]
+    pub scrollback: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

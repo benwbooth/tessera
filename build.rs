@@ -21,7 +21,28 @@ fn main() {
         }
     }
 
-    CxxQtBuilder::new_qml_module(QmlModule::new("Tessera").qml_files([
+    // Qt's private window interface (Wayland session restore: the desktop
+    // puts the window back where it was).
+    let mut private_includes = Vec::new();
+    let query = |var: &str| {
+        std::process::Command::new(&qmake)
+            .args(["-query", var])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    if let (Some(headers), Some(version)) = (query("QT_INSTALL_HEADERS"), query("QT_VERSION")) {
+        for module in ["QtCore", "QtGui"] {
+            let dir = std::path::Path::new(&headers).join(module).join(&version);
+            if dir.exists() {
+                private_includes.push(dir.clone());
+                private_includes.push(dir.join(module));
+            }
+        }
+    }
+
+    let mut builder = CxxQtBuilder::new_qml_module(QmlModule::new("Tessera").qml_files([
         QmlFile::from("qml/Main.qml"),
         QmlFile::from("qml/Theme.qml").singleton(true),
         QmlFile::from("qml/TerminalPane.qml"),
@@ -33,7 +54,11 @@ fn main() {
         QmlFile::from("qml/WindowControls.qml"),
     ]))
     .crate_include_root(None)
-    .include_dir("include")
+    .include_dir("include");
+    for dir in private_includes {
+        builder = builder.include_dir(dir);
+    }
+    builder
     .qt_module("Quick")
     .qt_module("QuickControls2")
     .qt_module("QuickShapes")

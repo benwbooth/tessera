@@ -68,6 +68,8 @@ pub mod ffi {
 
         /// Show a line of text in the terminal itself (not sent to the program).
         fn show_message(self: &mut Session, text: &str);
+        fn save_snapshot(self: &Session, path: &str) -> bool;
+        fn preload(self: &mut Session, path: &str) -> bool;
 
         /// Profile/global options that apply live (JSON: mouse_reporting,
         /// alternate_scroll, allow_title, bracketed_paste, alt_mode,
@@ -178,7 +180,9 @@ pub mod ffi {
         include!("bootstrap.h");
         /// The application (QApplication, for the desktop's native menus),
         /// native text rendering, and QML registration of TerminalView.
-        fn tessera_create_app();
+        fn tessera_create_app(session: &QString);
+        fn tessera_show_windows();
+        fn tessera_session_id() -> QString;
         fn tessera_exec() -> i32;
         /// The app icon for window decorations that read it from the window.
         fn tessera_set_icon(path: &QString);
@@ -247,6 +251,15 @@ pub mod ffi {
         /// For the + menu: {shells: [{name, path}], ssh_hosts: [..]}.
         #[qinvokable]
         fn launchers(self: &Controller) -> QString;
+        /// Where restore state lives (layout, saved screens).
+        #[qinvokable]
+        fn state_folder(self: &Controller) -> QString;
+        /// Delete saved screens except these session ids (JSON array).
+        #[qinvokable]
+        fn prune_snapshots(self: &Controller, keep: &QString);
+        /// Remember the desktop's id for this window (Wayland session restore).
+        #[qinvokable]
+        fn save_window_session(self: &Controller);
         /// End a detached session by id (Undo Close ran out).
         #[qinvokable]
         fn kill_session(self: &Controller, id: &QString);
@@ -447,6 +460,36 @@ impl ffi::Controller {
 
     fn launchers(&self) -> ffi::QString {
         qs(&serde_json::to_string(&crate::launchers::launchers()).unwrap())
+    }
+
+    fn state_folder(&self) -> ffi::QString {
+        qs(&crate::settings::state_dir().display().to_string())
+    }
+
+    fn prune_snapshots(&self, keep: &ffi::QString) {
+        let keep: Vec<String> = serde_json::from_str(&keep.to_string()).unwrap_or_default();
+        let dir = crate::settings::state_dir().join("snapshots");
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let id = name.trim_end_matches(".vt");
+                if !keep.iter().any(|k| k == id) {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+    }
+
+    fn save_window_session(&self) {
+        if std::env::var_os("TESSERA_NO_RESTORE").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            return;
+        }
+        let id = ffi::tessera_session_id().to_string();
+        if !id.is_empty() && !id.contains('_') {
+            let dir = crate::settings::state_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("window-session"), id);
+        }
     }
 
     fn kill_session(&self, id: &ffi::QString) {

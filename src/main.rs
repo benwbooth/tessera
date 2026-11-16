@@ -71,7 +71,17 @@ fn main() {
     }
 
     std::env::set_var("QT_QUICK_CONTROLS_STYLE", std::env::var("TESSERA_STYLE").unwrap_or_else(|_| "Basic".into()));
-    bridge::ffi::tessera_create_app();
+    // Wayland: the desktop remembers where the window was (KDE Plasma 6.4+,
+    // GNOME 48+); the session id it gave last time lets it put it back.
+    // Only the first window does this (not New Window / torn-off tabs).
+    let main_window = std::env::var_os("TESSERA_NO_RESTORE").is_none() && std::env::var_os("TESSERA_SCREENSHOT").is_none();
+    let wayland = main_window && std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let session_file = settings::state_dir().join("window-session");
+    if wayland && std::env::var_os("QT_WAYLAND_ENABLE_XX_SESSION_MANAGER").is_none() {
+        std::env::set_var("QT_WAYLAND_ENABLE_XX_SESSION_MANAGER", "1");
+    }
+    let session = if wayland { std::fs::read_to_string(&session_file).unwrap_or_default().trim().to_string() } else { String::new() };
+    bridge::ffi::tessera_create_app(&QString::from(session.as_str()));
     bridge::ffi::tessera_set_icon(&QString::from(concat!(env!("CARGO_MANIFEST_DIR"), "/icons/tessera.svg")));
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
@@ -82,6 +92,15 @@ fn main() {
         }
         engine.load(&QUrl::from("qrc:/qt/qml/Tessera/qml/Main.qml"));
     }
+    bridge::ffi::tessera_show_windows();
     let code = bridge::ffi::tessera_exec();
+    if wayland {
+        // Qt reads "-session id_key", so an id with "_" in it can't be passed back.
+        let id = bridge::ffi::tessera_session_id().to_string();
+        if !id.is_empty() && !id.contains('_') {
+            let _ = std::fs::create_dir_all(settings::state_dir());
+            let _ = std::fs::write(&session_file, id);
+        }
+    }
     std::process::exit(code);
 }

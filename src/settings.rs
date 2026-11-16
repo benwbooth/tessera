@@ -432,14 +432,17 @@ pub fn save_arrangements(m: &serde_json::Map<String, serde_json::Value>) -> std:
     std::fs::write(arrangements_path(), serde_json::to_vec_pretty(m).unwrap())
 }
 
-/// The layout to bring back at the next start (state, not a preference).
-fn last_layout_path() -> PathBuf {
+pub fn state_dir() -> PathBuf {
     std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
         .unwrap_or_else(std::env::temp_dir)
         .join("tessera")
-        .join("last-layout.json")
+}
+
+/// The layout to bring back at the next start (state, not a preference).
+fn last_layout_path() -> PathBuf {
+    state_dir().join("last-layout.json")
 }
 
 pub fn last_layout() -> String {

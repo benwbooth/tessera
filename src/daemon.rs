@@ -9,19 +9,23 @@
 
 use crate::proto::*;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// How much recent output is kept per session for replay on attach.
-const REPLAY_BYTES: usize = 4 << 20;
-
 struct Shared {
-    ring: VecDeque<u8>,
     client: Option<UnixStream>,
+}
+
+/// Work for a session's emulator thread, which keeps its own copy of the
+/// screen (libghostty) so a window attaching later gets it exactly.
+enum Emu {
+    Output(Vec<u8>),
+    Resize(u16, u16),
+    Snapshot(mpsc::Sender<Vec<u8>>),
 }
 
 struct DSession {
@@ -32,6 +36,7 @@ struct DSession {
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     shared: Mutex<Shared>,
+    emu: Mutex<mpsc::Sender<Emu>>,
 }
 
 type Registry = Arc<Mutex<HashMap<String, Arc<DSession>>>>;
@@ -136,6 +141,11 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
     if !c.input.is_empty() {
         let _ = writer.write_all(c.input.as_bytes());
     }
+    let (emu_tx, emu_rx) = mpsc::channel::<Emu>();
+    {
+        let (cols, rows, lines) = (c.cols.max(2), c.rows.max(1), if c.scrollback > 0 { c.scrollback } else { 10_000 });
+        std::thread::spawn(move || emulate(emu_rx, cols, rows, lines));
+    }
     let s = Arc::new(DSession {
         id: new_id(),
         shell_pid,
@@ -143,7 +153,8 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
-        shared: Mutex::new(Shared { ring: VecDeque::new(), client: None }),
+        shared: Mutex::new(Shared { client: None }),
+        emu: Mutex::new(emu_tx),
     });
     registry.lock().unwrap().insert(s.id.clone(), s.clone());
 
@@ -164,11 +175,7 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
             Ok(n) => n,
         };
         let mut sh = s.shared.lock().unwrap();
-        sh.ring.extend(&buf[..n]);
-        let over = sh.ring.len().saturating_sub(REPLAY_BYTES);
-        if over > 0 {
-            sh.ring.drain(..over);
-        }
+        let _ = s.emu.lock().unwrap().send(Emu::Output(buf[..n].to_vec()));
         if let Some(c) = sh.client.as_mut() {
             if write_frame(c, T_OUTPUT, &buf[..n]).is_err() {
                 sh.client = None;
@@ -200,7 +207,25 @@ fn foreground_job(s: &DSession) -> String {
     std::fs::read_to_string(format!("/proc/{pgid}/comm")).map(|c| c.trim().to_string()).unwrap_or_default()
 }
 
+/// The emulator thread: libghostty types stay on the thread that made them.
+fn emulate(rx: mpsc::Receiver<Emu>, cols: u16, rows: u16, lines: u32) {
+    use libghostty_vt::{terminal::Options, Terminal};
+    let Ok(mut term) = Terminal::new(Options { cols, rows, max_scrollback: crate::session::scrollback_bytes(lines) }) else { return };
+    for msg in rx {
+        match msg {
+            Emu::Output(b) => term.vt_write(&b),
+            Emu::Resize(c, r) => {
+                let _ = term.resize(c.max(2), r.max(1), 8, 16);
+            }
+            Emu::Snapshot(reply) => {
+                let _ = reply.send(crate::snapshot::snapshot(&term));
+            }
+        }
+    }
+}
+
 fn resize(s: &DSession, cols: u16, rows: u16) {
+    let _ = s.emu.lock().unwrap().send(Emu::Resize(cols.max(2), rows.max(1)));
     let _ = s.master.lock().unwrap().resize(PtySize {
         rows: rows.max(1),
         cols: cols.max(1),
@@ -211,6 +236,7 @@ fn resize(s: &DSession, cols: u16, rows: u16) {
 
 fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result<()> {
     let (tag, payload) = read_frame(&mut stream)?;
+    let reattach = tag == T_ATTACH;
     let session = match tag {
         T_LIST => {
             let list: Vec<SessionInfo> = registry
@@ -264,12 +290,19 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
         }
         let mut out = stream.try_clone()?;
         write_json(&mut out, T_ATTACHED, &session.id)?;
-        let (a, b) = sh.ring.as_slices();
-        if !a.is_empty() || !b.is_empty() {
-            let mut replay = Vec::with_capacity(a.len() + b.len());
-            replay.extend_from_slice(a);
-            replay.extend_from_slice(b);
-            write_frame(&mut out, T_OUTPUT, &replay)?;
+        // The screen as it is now (already reflowed to this window's size),
+        // not a replay of old output. Output can't slip in between: the pump
+        // waits on this lock.
+        // (Only when reattaching: a new shell starts from a blank screen, and
+        // a snapshot would move the cursor over whatever the window shows.)
+        if reattach {
+            let (tx, rx) = mpsc::channel();
+            let _ = session.emu.lock().unwrap().send(Emu::Snapshot(tx));
+            if let Ok(snap) = rx.recv_timeout(Duration::from_secs(3)) {
+                if !snap.is_empty() {
+                    write_frame(&mut out, T_OUTPUT, &snap)?;
+                }
+            }
         }
         sh.client = Some(out);
     }
