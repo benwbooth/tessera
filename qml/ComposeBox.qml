@@ -33,7 +33,7 @@ Rectangle {
     signal openRich()                  // show the last output's rich view
     property string viewMode: "terminal"
     signal viewModePicked(string mode) // "terminal" or "notebook"
-    signal handBack()                  // Esc: type into the terminal instead
+    signal handBack()                  // Shift+Tab: type into the terminal instead
 
     readonly property alias text: edit.text
     readonly property bool editing: edit.activeFocus
@@ -624,6 +624,11 @@ Rectangle {
                 if (e.key === Qt.Key_Shift && !e.isAutoRepeat) { shiftSide = shiftSideOf(e); shiftAt = Date.now() }
                 else shiftSide = 0
                 let done = false
+                // Shift+Tab: over to the terminal (several lines selected: outdent them).
+                if (e.key === Qt.Key_Backtab && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))
+                        && selectedText.indexOf("\u2029") < 0 && selectedText.indexOf("\n") < 0) {
+                    box.closeComp(); box.ghost = ""; box.handBack(); e.accepted = true; return
+                }
                 const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
                 if (box.ghost !== "" && cursorPosition === length && plain
                         && (e.key === Qt.Key_Right || e.key === Qt.Key_End))
@@ -648,7 +653,6 @@ Rectangle {
                     else if (box.keys === "vscode") done = box.vscodeKey(e)
                     else done = box.emacsKey(e)
                 }
-                if (!done && e.key === Qt.Key_Escape) { box.handBack(); done = true }
                 if (!done && e.key === Qt.Key_Tab) { box.insert(box.indentUnit); done = true }
                 if (!done && e.text.length === 1 && !(box.keys === "vi" && box.viNormal)) Qt.callLater(box.maybeOutdent)
                 e.accepted = done
@@ -685,7 +689,7 @@ Rectangle {
         ToolTip.text: "Enter runs the command\n"
                       + "Tap right Shift (or Shift+Enter) for a new line\n"
                       + "Tap left Shift to take the grey suggestion (from history or the AI)\n"
-                      + "Tab completes; Ctrl+R searches history; Esc goes back to the terminal"
+                      + "Tab completes; Ctrl+R searches history\nShift+Tab switches between this editor and the terminal"
                       + (box.aiNL && box.chatReady ? "\n# then what you want, in words: the AI writes the command for you to check and run" : "")
         color: Theme.textDim
         opacity: 0.55

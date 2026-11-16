@@ -13,7 +13,7 @@ A multi-line editor under the terminal while the shell waits at its prompt
 - VS Code-style editing in every mode: auto-indent after `do`/`then`/`{`/`:`,
   outdent on `done`/`fi`/`}`, bracket and quote pairs, Tab/Shift+Tab indent.
 - History (Up/Down, Ctrl+P/N), Ctrl+C clears (or interrupts when empty),
-  Shift+PgUp/PgDn scroll the terminal, Esc hands the keys to the terminal.
+  Shift+PgUp/PgDn scroll the terminal, Shift+Tab switches the keys between the editor and the terminal.
 
 ## 2. Completion and language servers — done
 

@@ -1602,7 +1602,7 @@ ApplicationWindow {
             const k = keysTestTimer.keys.shift()
             if (k === "wait") { if (activePane) console.log("key test: wait ghost=" + JSON.stringify(activePane.compose.ghost) + " ready=" + activePane.compose.inlineReady); return }   // (a pause: let the AI answer)
             const named = { space: [Qt.Key_Space, 0, " ", 65], tab: [Qt.Key_Tab, 0, "\t", 23], bs: [Qt.Key_Backspace, 0, "\b", 22], enter: [Qt.Key_Return, 0, "\r", 36],
-                            lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62] }
+                            lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62], esc: [Qt.Key_Escape, 0, "\x1b", 9], stab: [Qt.Key_Backtab, Qt.ShiftModifier, "", 23] }
             const d = named[k] || [k.toUpperCase().charCodeAt(0), 0, k, 0]
             controller.testKey(d[0], d[1], d[2], d[3])
             if (activePane) console.log("key test: after " + k + " termFocus=" + activePane.view.activeFocus + " editorFocus=" + activePane.compose.editing + " focusItem=" + win.activeFocusItem + " editor=" + JSON.stringify(activePane.compose.text) + " ghost=" + JSON.stringify(activePane.compose.ghost) + " dropdown=" + activePane.compose.compOpen)

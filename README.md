@@ -77,6 +77,7 @@ iTerm2's Cmd shortcuts become Ctrl+Shift.
 | Close tab / pane | Ctrl+Shift+W / Ctrl+Alt+W |
 | Maximize pane | Ctrl+Shift+Enter |
 | Terminal / notebook view | Ctrl+Shift+J |
+| Editor ⇄ terminal (at a prompt) | Shift+Tab |
 | Copy / paste | Ctrl+Shift+C / Ctrl+Shift+V (selecting also copies; Shift+Insert or middle click pastes the selection) |
 | Select all / clear buffer | Ctrl+Shift+A / Ctrl+Shift+K |
 | Find / next / previous | Ctrl+Shift+F / F3 / Shift+F3 (Enter / Shift+Enter in the find bar) |

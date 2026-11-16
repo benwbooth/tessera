@@ -104,6 +104,14 @@ Item {
         // the keys again (switching tabs or panes).
         onActiveFocusChanged: if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
         PointHandler { onActiveChanged: if (active) pane.preferEditor = false }
+        // Shift+Tab at a prompt: back to the editor (elsewhere it goes to the program).
+        Keys.onPressed: (e) => {
+            if (e.key === Qt.Key_Backtab && pane.editorOn && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
+                pane.preferEditor = true
+                compose.focusEditor()
+                e.accepted = true
+            }
+        }
     }
 
     ComposeBox {
@@ -133,7 +141,8 @@ Item {
             else { term.pasteText(t); term.sendText("\r") }
             term.scrollToBottom()
         }
-        onHandBack: term.forceActiveFocus()
+        // (The terminal keeps the keys until the editor is clicked again.)
+        onHandBack: { pane.preferEditor = false; term.forceActiveFocus() }
         onKeysPicked: (k) => pane.editorKeysPicked(k)
         onOpenRich: pane.openRich()
         viewMode: pane.viewMode
