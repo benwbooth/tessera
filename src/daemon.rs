@@ -342,6 +342,7 @@ fn foreground_pgid(s: &DSession) -> Option<u32> {
 fn emulate(rx: mpsc::Receiver<Emu>, cols: u16, rows: u16, lines: u32) {
     use libghostty_vt::{terminal::Options, Terminal};
     let Ok(mut term) = Terminal::new(Options { cols, rows, max_scrollback: crate::session::scrollback_bytes(lines) }) else { return };
+    crate::images::enable(&mut term);
     for msg in rx {
         match msg {
             Emu::Output(b) => term.vt_write(&b),

@@ -15,7 +15,9 @@ base64 = "0.23.1"
 cxx = "1.0"
 cxx-qt = "0.10"
 cxx-qt-lib = { version = "0.10", features = ["qt_full"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 libghostty-vt = "0.2.2"
+miniz_oxide = "0.9.1"
 portable-pty = "0.9"
 regex = "1.13.1"
 serde = { version = "1", features = ["derive"] }

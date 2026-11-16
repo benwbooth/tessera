@@ -43,6 +43,33 @@ pub mod ffi {
         scroll_len: u64,
         /// Dirty rows where a shell prompt starts (mark indicators).
         mark_rows: Vec<u16>,
+        /// Pictures on screen (kitty graphics), in device pixels from the grid.
+        images: Vec<ImagePlace>,
+    }
+
+    #[namespace = "tessera"]
+    /// A picture's place: which image (and its generation, so a changed
+    /// image is fetched again), where, how big, which part of it, and its
+    /// layer (z < 0 under the text).
+    struct ImagePlace {
+        id: u32,
+        generation: u64,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+        src_x: u32,
+        src_y: u32,
+        src_w: u32,
+        src_h: u32,
+        z: i32,
+    }
+
+    #[namespace = "tessera"]
+    struct ImagePixels {
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
     }
 
     #[namespace = "tessera"]
@@ -96,6 +123,8 @@ pub mod ffi {
         fn wants_mouse(self: &Session, qt_mods: u32) -> bool;
         /// A full-screen program is running (the alternate screen is up).
         fn full_screen(self: &Session) -> bool;
+        /// An image's pixels (RGBA) for drawing it.
+        fn image_pixels(self: &Session, id: u32) -> ImagePixels;
         /// The shell is at its prompt (from shell integration's marks).
         fn at_prompt(self: &Session) -> bool;
 

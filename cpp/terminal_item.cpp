@@ -3,6 +3,8 @@
 #include "tessera/src/bridge.cxxqt.h"
 
 #include <QtCore/QJsonArray>
+#include <QtCore/QHash>
+#include <QtCore/QSet>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QDateTime>
@@ -48,10 +50,17 @@ public:
     QSGRectangleNode* overlay = nullptr;
     QVector<QSGImageNode*> rows;
     QVector<QSGRectangleNode*> marks;
+    // Pictures (kitty graphics): their nodes, and each image's texture with
+    // the generation it was made from.
+    QVector<QSGImageNode*> images;
+    QHash<quint32, QPair<quint64, QSGTexture*>> textures;
     ~TerminalNode() override
     {
         for (QSGImageNode* n : rows)
             if (!n->parent()) delete n;
+        for (QSGImageNode* n : images)
+            if (!n->parent()) delete n;
+        for (auto& t : textures) delete t.second;
     }
     void clearRows()
     {
@@ -533,6 +542,16 @@ void TerminalItem::pullFrame(bool full)
     if (!m_session) return;
     tessera::Frame& f = *m_frame;
     if (!m_session->frame(f, full)) return;
+    {
+        QVector<ImageSpot> spots;
+        spots.reserve(int(f.images.size()));
+        for (const tessera::ImagePlace& p : f.images)
+            spots.append(ImageSpot{ p.id, p.generation, p.x, p.y, int(p.width), int(p.height), int(p.src_x), int(p.src_y), int(p.src_w), int(p.src_h), p.z });
+        if (spots != m_images) {
+            m_images = spots;
+            update();
+        }
+    }
 
     const QColor bg = QColor::fromRgb(QRgb(f.default_bg));
     if (bg != m_bg) {
@@ -890,6 +909,50 @@ QSGNode* TerminalItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
         if (!n->parent()) continue;
         n->setRect(QRectF(pad, pad + i * m_ch / m_dpr, img.width() / m_dpr, img.height() / m_dpr));
         n->setSourceRect(QRectF(0, 0, img.width(), img.height()));
+    }
+
+    // Pictures: in the grid's coordinates (device pixels), clipped to it;
+    // under the text (z < 0) or over it.
+    {
+        QSet<quint32> used;
+        int n = 0;
+        const qreal gridH = qreal(m_rows) * m_ch;
+        for (const ImageSpot& im : std::as_const(m_images)) {
+            if (im.w <= 0 || im.h <= 0) continue;
+            auto cached = node->textures.value(im.id, { 0, nullptr });
+            if (!cached.second || cached.first != im.gen) {
+                const tessera::ImagePixels px = m_session ? m_session->image_pixels(im.id) : tessera::ImagePixels{};
+                if (px.width == 0 || px.height == 0 || px.rgba.size() < size_t(px.width) * px.height * 4) continue;
+                const QImage img = QImage(px.rgba.data(), int(px.width), int(px.height), QImage::Format_RGBA8888).copy();
+                delete cached.second;
+                cached = { im.gen, win->createTextureFromImage(img) };
+                node->textures.insert(im.id, cached);
+            }
+            used.insert(im.id);
+            // The visible part (an image partly scrolled off keeps its place).
+            const qreal top = qMax<qreal>(0, im.y), bottom = qMin<qreal>(gridH, im.y + im.h);
+            if (bottom <= top) continue;
+            const qreal sy = im.sh * (top - im.y) / im.h, sh = im.sh * (bottom - top) / im.h;
+            if (n >= node->images.size()) {
+                QSGImageNode* in = win->createImageNode();
+                in->setOwnsTexture(false);
+                in->setFiltering(QSGTexture::Linear);
+                node->images.append(in);
+            }
+            QSGImageNode* in = node->images[n++];
+            if (in->parent()) node->removeChildNode(in);
+            if (im.z < 0) node->insertChildNodeAfter(in, node->bg);
+            else node->appendChildNode(in);
+            in->setTexture(cached.second);
+            in->setRect(QRectF((m_pad + im.x) / m_dpr, (m_pad + top) / m_dpr, im.w / m_dpr, (bottom - top) / m_dpr));
+            in->setSourceRect(QRectF(im.sx, im.sy + sy, im.sw, sh));
+        }
+        for (int i = n; i < node->images.size(); ++i)
+            if (node->images[i]->parent()) node->removeChildNode(node->images[i]);
+        for (auto it = node->textures.begin(); it != node->textures.end();) {
+            if (!used.contains(it.key())) { delete it.value().second; it = node->textures.erase(it); }
+            else ++it;
+        }
     }
 
     // Shell-integration marks: a short tick in the left margin at each prompt.

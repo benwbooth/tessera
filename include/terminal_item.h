@@ -267,6 +267,17 @@ private:
     bool m_rawValid[4] = {};
 
     int m_cols = 0, m_rows = 0;
+    struct ImageSpot {
+        quint32 id;
+        quint64 gen;
+        int x, y, w, h, sx, sy, sw, sh, z;
+        bool operator==(const ImageSpot& o) const
+        {
+            return id == o.id && gen == o.gen && x == o.x && y == o.y && w == o.w && h == o.h
+                && sx == o.sx && sy == o.sy && sw == o.sw && sh == o.sh && z == o.z;
+        }
+    };
+    QVector<ImageSpot> m_images;
     bool m_atPrompt = false, m_fullScreen = false;
     int m_lastStatus = 0;
     QString m_aliases = QStringLiteral("{}");

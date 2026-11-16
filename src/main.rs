@@ -8,6 +8,7 @@ mod daemon;
 mod find;
 mod kde;
 mod history;
+mod images;
 mod keymap;
 mod net;
 mod procinfo;

@@ -100,6 +100,12 @@ pub struct Session {
     command_started: Option<std::time::Instant>,
     /// A TesseraAliases report being read (it may span reads).
     alias_buf: Option<Vec<u8>>,
+    /// An iTerm2 inline image (OSC 1337 File=) being read.
+    file_buf: Option<Vec<u8>>,
+    /// A command's output that began as an image file, until it ends.
+    raw_image: Option<Vec<u8>>,
+    /// The command just started: its first output bytes are checked.
+    output_starts: bool,
     exited: bool,
     last_cursor_row: Option<u16>,
     last_full_size: (u16, u16),
@@ -215,6 +221,7 @@ pub fn session_open(
         _ => (cols, rows),
     };
     let mut term = Terminal::new(Options { cols, rows, max_scrollback: scrollback_bytes(if scrollback > 0 { scrollback } else { SCROLLBACK as u32 }) }).map_err(|e| e.to_string())?;
+    crate::images::enable(&mut term);
     term.resize(cols, rows, cell_w.max(1), cell_h.max(1)).map_err(|e| e.to_string())?;
 
     let outbox: Rc<RefCell<Vec<u8>>> = Rc::default();
@@ -307,6 +314,9 @@ pub fn session_open(
         mark_tail: Vec::new(),
         command_started: None,
         alias_buf: None,
+        file_buf: None,
+        raw_image: None,
+        output_starts: false,
         exited: false,
         last_cursor_row: None,
         last_full_size: (0, 0),
@@ -595,11 +605,108 @@ impl Session {
         }
     }
 
+    /// Pictures in the output, made into kitty images the terminal shows:
+    /// iTerm2's inline images, and a command's output that is an image file.
+    fn transform_images(&mut self, data: &[u8]) -> Vec<u8> {
+        const FILE: &[u8] = b"\x1b]1337;File=";
+        const START: &[u8] = b"\x1b]133;C";
+        const END: &[u8] = b"\x1b]133;D";
+        let find = |hay: &[u8], pat: &[u8]| hay.windows(pat.len()).position(|w| w == pat);
+        let cols = self.size.get().0 as u32;
+        let mut out = Vec::with_capacity(data.len());
+        let mut rest: &[u8] = data;
+        loop {
+            // An image file a command is printing: collect it until it ends.
+            if let Some(buf) = self.raw_image.as_mut() {
+                // (The end mark may straddle two reads: search from just
+                // before where this read starts.)
+                let from = buf.len().saturating_sub(END.len());
+                buf.extend_from_slice(rest);
+                if let Some(i) = find(&buf[from..], END) {
+                    let i = from + i;
+                    let img = crate::images::un_onlcr(&buf[..i]);
+                    let tail = buf[i..].to_vec();
+                    self.raw_image = None;
+                    match crate::images::kitty_display(&img, cols.saturating_sub(2), self.size.get().2) {
+                        Some(k) => out.extend_from_slice(&k),
+                        None => out.extend_from_slice(b"[tessera: couldn't read this image]\r\n"),
+                    }
+                    out.extend_from_slice(&self.transform_images(&tail));
+                    return out;
+                }
+                if buf.len() > 64 << 20 {
+                    // Too big to be a picture to show: let it through.
+                    out.extend_from_slice(&self.raw_image.take().unwrap());
+                }
+                return out;
+            }
+            // An iTerm2 inline image being read.
+            if let Some(buf) = self.file_buf.as_mut() {
+                let end = rest.iter().position(|&b| b == 7).map(|i| (i, 1)).or_else(|| find(rest, b"\x1b\\").map(|i| (i, 2)));
+                match end {
+                    Some((i, n)) => {
+                        buf.extend_from_slice(&rest[..i]);
+                        let payload = self.file_buf.take().unwrap();
+                        if let Some(img) = crate::images::iterm2_file(&payload) {
+                            if let Some(k) = crate::images::kitty_display(&img, cols.saturating_sub(2), self.size.get().2) {
+                                out.extend_from_slice(&k);
+                            }
+                        }
+                        rest = &rest[i + n..];
+                    }
+                    None => {
+                        if buf.len() < 64 << 20 {
+                            buf.extend_from_slice(rest);
+                        } else {
+                            self.file_buf = None;
+                        }
+                        return out;
+                    }
+                }
+                continue;
+            }
+            // The first output after a command starts: an image file?
+            if self.output_starts && !rest.is_empty() {
+                self.output_starts = false;
+                if crate::images::output_is_image(rest) {
+                    self.raw_image = Some(Vec::new());
+                    continue;
+                }
+            }
+            let next_file = find(rest, FILE);
+            let next_start = find(rest, START);
+            match (next_file, next_start) {
+                (Some(f), s) if s.is_none_or(|s| f < s) => {
+                    out.extend_from_slice(&rest[..f]);
+                    self.file_buf = Some(Vec::new());
+                    rest = &rest[f + FILE.len()..];
+                }
+                (_, Some(s)) => {
+                    // Through the end of the mark (BEL or ST), then the output.
+                    let after = &rest[s..];
+                    let end = after.iter().position(|&b| b == 7).map(|i| i + 1).or_else(|| find(after, b"\x1b\\").map(|i| i + 2)).unwrap_or(after.len());
+                    out.extend_from_slice(&rest[..s + end]);
+                    rest = &rest[s + end..];
+                    self.output_starts = true;
+                }
+                _ => {
+                    out.extend_from_slice(rest);
+                    return out;
+                }
+            }
+        }
+    }
+
     fn process_output(&mut self, data: &[u8]) {
-        if self.gateway.is_none() {
+        let transformed;
+        let data = if self.gateway.is_none() {
             self.scan_marks(data);
             self.scan_aliases(data);
-        }
+            transformed = self.transform_images(data);
+            &transformed[..]
+        } else {
+            data
+        };
         if let Some(gw) = self.gateway.clone() {
             let rest = gw.borrow_mut().feed(data);
             self.events.append(&mut gw.borrow_mut().events);
@@ -1416,6 +1523,10 @@ impl Session {
         self.force_full = true;
     }
 
+    pub fn image_pixels(&self, id: u32) -> crate::bridge::ffi::ImagePixels {
+        crate::images::rgba(&self.term, id)
+    }
+
     pub fn full_screen(&self) -> bool {
         matches!(self.term.active_screen(), Ok(Screen::Alternate))
     }
@@ -1653,6 +1764,8 @@ impl Session {
             out.scroll_offset = sb.offset;
             out.scroll_len = sb.len;
         }
+        let (_, _, cw, ch) = self.size.get();
+        crate::images::placements(&self.term, cw, ch, &mut out.images);
         true
     }
 }
