@@ -1,0 +1,44 @@
+# Flatpak manifest. .github/workflows/release.yml replaces @KDE@ with the
+# newest KDE runtime branch on Flathub.
+id: io.github.benwbooth.Tessera
+runtime: org.kde.Platform
+runtime-version: '@KDE@'
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: tessera
+appstream-compose: false
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Shells run on the host (flatpak-spawn --host), like any terminal's.
+  - --talk-name=org.freedesktop.Flatpak
+  - --talk-name=org.freedesktop.Notifications
+  # Session logs, saved output, dropped files and links into your files
+  - --filesystem=home
+modules:
+  - name: tessera
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      # Cargo, Ghostty's source and Zig come from the network while building
+      # (this repo isn't on Flathub, so the build may use it).
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/tessera/cargo-home
+    build-commands:
+      - sh packaging/flatpak/build.sh
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - result
+          - .qt-env
+          - .flatpak-builder
+          - flatpak-build
+          - flatpak-repo

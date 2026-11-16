@@ -143,6 +143,10 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
     cmd.env("TERM_PROGRAM", "Tessera");
     cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
     crate::shell_integration::inject(&mut cmd);
+    // In a Flatpak the shell runs on the host, not in the sandbox.
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        cmd = host_command(&cmd);
+    }
     let child = pair.slave.spawn_command(cmd).map_err(ioe)?;
     let shell_pid = child.process_id();
     drop(pair.slave);
@@ -232,6 +236,34 @@ fn foreground_job(s: &DSession) -> String {
         return String::new();
     }
     crate::procinfo::name(pgid)
+}
+
+/// `cmd` run on the host through flatpak-spawn (its environment, folder
+/// and arguments carried over; the default program is the user's login shell
+/// there).
+fn host_command(cmd: &CommandBuilder) -> CommandBuilder {
+    let mut h = CommandBuilder::new("flatpak-spawn");
+    h.arg("--host");
+    h.arg("--watch-bus");
+    if let Some(dir) = cmd.get_cwd() {
+        h.arg(format!("--directory={}", dir.to_string_lossy()));
+        h.cwd(dir);
+    }
+    for (k, v) in cmd.iter_extra_env_as_str() {
+        // (The sandbox's data folders mean nothing on the host.)
+        if k == "XDG_DATA_DIRS" {
+            continue;
+        }
+        h.arg(format!("--env={k}={v}"));
+    }
+    if cmd.is_default_prog() {
+        h.args(["sh", "-c", "exec \"$(getent passwd \"$(id -un)\" | cut -d: -f7)\" -l"]);
+    } else {
+        for a in cmd.get_argv() {
+            h.arg(a);
+        }
+    }
+    h
 }
 
 /// The terminal's foreground process group (none on Windows).

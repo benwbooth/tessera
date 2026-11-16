@@ -70,7 +70,9 @@
             '';
             postInstall = ''
               install -Dm644 icons/tessera.svg $out/share/icons/hicolor/scalable/apps/tessera.svg
-              install -Dm644 packaging/tessera.desktop $out/share/applications/tessera.desktop
+              # (Outside a Flatpak the app id is plain "tessera".)
+              mkdir -p $out/share/applications
+              sed 's/^Icon=.*/Icon=tessera/' packaging/linux/io.github.benwbooth.Tessera.desktop > $out/share/applications/tessera.desktop
             '';
             meta = {
               description = "A terminal in the spirit of iTerm2 (Rust + Qt Quick + libghostty-vt)";

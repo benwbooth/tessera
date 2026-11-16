@@ -1,3 +1,4 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
 mod bridge;
 mod client;
 mod contrast;
@@ -17,6 +18,14 @@ mod tmux;
 use cxx_qt_lib::{QQmlApplicationEngine, QString, QUrl};
 
 fn main() {
+    // Windows has no HOME: settings and state live under the user profile
+    // (~/.config/tessera and so on), as on the other systems.
+    #[cfg(windows)]
+    if std::env::var_os("HOME").is_none() {
+        if let Some(p) = std::env::var_os("USERPROFILE") {
+            std::env::set_var("HOME", p);
+        }
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("daemon") {
         if let Err(e) = daemon::run() {

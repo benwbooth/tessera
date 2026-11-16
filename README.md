@@ -32,6 +32,22 @@ built-in `tmux -CC`, and shells that survive closing the window.
 
 ![The color scheme gallery in Preferences](docs/screenshots/themes.png)
 
+## Install
+
+Downloads for every platform are on the [releases page](https://github.com/benwbooth/tessera/releases/latest).
+
+| | |
+|---|---|
+| **Linux: Flatpak** | `flatpak install --user https://benwbooth.github.io/tessera/flatpak/tessera.flatpakref` (or the `.flatpak` bundle from the release) |
+| **Linux: AppImage** | download `Tessera-*-x86_64.AppImage`, `chmod +x` it, run it |
+| **Nix** | `nix run github:benwbooth/tessera`, or add the flake's `packages.default` to your system |
+| **macOS** | `brew install --cask benwbooth/tap/tessera`, or open the `.dmg` (Apple Silicon or Intel) |
+| **Windows** | the `-setup.exe` installer, or the portable `.zip` |
+
+The macOS app is signed ad hoc, not notarized (the Homebrew cask clears the
+quarantine flag for you). Windows support is new: shells are PowerShell by
+default; tmux control mode needs a tmux on the other end, as everywhere.
+
 ## Like iTerm2
 
 The ☰ menu (top left) is iTerm2's menu bar — Shell, Edit, View, Session,
@@ -76,6 +92,9 @@ target/debug/tessera
 ```
 
 The dev shell provides Qt 6 and Zig 0.15 (libghostty-vt's build compiles Ghostty).
+Without Nix: Rust, Qt 6 (set `QMAKE` to its qmake) and Zig 0.15 on `PATH`, then
+`cargo build --release`. Releases are built by `.github/workflows/release.yml`
+(push a `v*` tag, or run it by hand to try the builds).
 
 Testing: `--screenshot out.png` saves the window and quits, `--run CMD` types a command into the first terminal, `--then CMD` types another a few seconds later into whichever terminal has focus, `--prefs PAGE` opens Preferences (the screenshot is then of Preferences). Set `TESSERA_SOCKET`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to keep a test run apart from your own sessions and settings.
 

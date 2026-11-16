@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.benwbooth.Tessera</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Tessera</name>
+  <summary>A terminal in the spirit of iTerm2</summary>
+  <developer id="io.github.benwbooth">
+    <name>Ben Booth</name>
+  </developer>
+  <description>
+    <p>
+      Tessera pairs Ghostty's terminal engine with a native Qt Quick interface:
+      tabs, splits, profiles, hundreds of color schemes, find in scrollback,
+      built-in tmux control mode, and shells that survive closing the window.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.benwbooth.Tessera.desktop</launchable>
+  <url type="homepage">https://github.com/benwbooth/tessera</url>
+  <url type="bugtracker">https://github.com/benwbooth/tessera/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/benwbooth/tessera/main/docs/screenshots/hero.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>tessera</binary>
+  </provides>
+</component>
