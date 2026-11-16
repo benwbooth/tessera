@@ -5,7 +5,7 @@ import Tessera.Native
 
 // The input editor: a small multi-line editor docked under the terminal while
 // the shell (or a REPL) waits for input. Enter runs the command (it goes to
-// the shell as if typed, and scrolls up with its output); Shift+Enter starts
+// the shell as if typed, and scrolls up with its output); a right Shift tap (or Shift+Enter) starts
 // a new line. Highlighting and syntax errors come from tree-sitter; the keys
 // follow Emacs (readline), vi, or VS Code.
 Rectangle {
@@ -545,6 +545,8 @@ Rectangle {
                 id: cur
                 readonly property string under: {
                     const c = edit.text[edit.cursorPosition]
+                    // (At the end, the suggestion's first letter is under it.)
+                    if (c === undefined && box.ghost !== "" && edit.activeFocus) return box.ghost[0]
                     return c === undefined || c === "\n" || c === "\u2029" ? "" : c
                 }
                 width: Math.max(2, fm.advanceWidth(under !== "" ? under : " "))
@@ -588,7 +590,13 @@ Rectangle {
                 if (box.ghost !== "" && text.length > box.lastGhostBase.length && full.startsWith(text) && full.length > text.length) {
                     box.ghost = full.substring(text.length)
                     box.lastGhostBase = text
-                } else { box.ghost = ""; ghostTimer.restart() }
+                } else {
+                    // What was run before comes up at once (like fish); the AI
+                    // is asked when history has nothing.
+                    box.ghost = box.historyGhost(text)
+                    box.lastGhostBase = text
+                    if (box.ghost === "") ghostTimer.restart()
+                }
                 if (text.trim() !== box.checkedText) box.aiNote = ""
                 checkTimer.restart()
             }
@@ -652,12 +660,11 @@ Rectangle {
         parent: flick.contentItem
         readonly property rect at: edit.positionToRectangle(edit.length)
         visible: box.ghost !== "" && edit.activeFocus && edit.cursorPosition === edit.length
-        x: at.x + 1
+        x: at.x
         y: at.y
         text: box.ghost
         font: edit.font
-        color: Theme.textDim
-        opacity: 0.7
+        color: Theme.mix(Theme.text, Theme.bg, 0.45)
         renderType: Text.NativeRendering
     }
 
@@ -669,8 +676,8 @@ Rectangle {
         visible: edit.text === "" && !(box.keys === "vi" && box.viNormal)
         width: flick.width
         elide: Text.ElideRight
-        text: box.aiNL && box.chatReady ? "Type a command, or # and what you want — Enter runs it, Shift+Enter adds a line"
-                                         : "Type a command — Enter runs it, Shift+Enter adds a line"
+        text: box.aiNL && box.chatReady ? "Type a command, or # and what you want — Enter runs it, tap right Shift for a new line, left Shift takes the grey suggestion"
+                                         : "Type a command — Enter runs it, tap right Shift for a new line, left Shift takes the grey suggestion"
         color: Theme.textDim
         opacity: 0.55
         font: edit.font
@@ -738,8 +745,12 @@ Rectangle {
             id: keysChip
             base: box.color
             label: ({ emacs: "Emacs", vi: "vi", vscode: "VS Code" })[box.keys] || box.keys
-            tip: "Editor keys"
-            onClicked: keysMenu.popup(keysChip, 0, keysChip.height + 2)
+            tip: "Editor keys: click for the next (Emacs, vi, VS Code)"
+            onClicked: {
+                const order = ["emacs", "vi", "vscode"]
+                box.keysPicked(order[(order.indexOf(box.keys) + 1) % order.length])
+                edit.forceActiveFocus()
+            }
         }
     }
     // The input language: a searchable list (hundreds with Helix's grammars).
@@ -792,18 +803,6 @@ Rectangle {
         MenuItem { text: "Terminal"; checkable: true; checked: box.viewMode !== "notebook"; onTriggered: box.viewModePicked("terminal") }
         MenuItem { text: "Notebook"; checkable: true; checked: box.viewMode === "notebook"; onTriggered: box.viewModePicked("notebook") }
     }
-    Menu {
-        id: keysMenu
-        Repeater {
-            model: [["emacs", "Emacs (readline)"], ["vi", "vi"], ["vscode", "VS Code"]]
-            delegate: MenuItem {
-                text: modelData[1]
-                checkable: true
-                checked: box.keys === modelData[0]
-                onTriggered: { box.keysPicked(modelData[0]); edit.forceActiveFocus() }
-            }
-        }
-    }
 
     // ---- syntax -----------------------------------------------------------
     // Colors from the theme's own palette; errors show once typing pauses
@@ -831,6 +830,15 @@ Rectangle {
         const used = {}
         for (const w of edit.text.split(/[\s;|&()]+/)) if (al[w] !== undefined) used[w] = al[w]
         return JSON.stringify({ cwd: cwd, shell: box.shellName || "bash", aliases: used })
+    }
+    // The newest command run before that starts with what's typed: the rest of it.
+    function historyGhost(t) {
+        if (t.trim().length < 2 || t.indexOf("\n") >= 0 || edit.cursorPosition !== t.length) return ""
+        for (let i = box.history.length - 1; i >= 0; i--) {
+            const h = box.history[i]
+            if (h.length > t.length && h.startsWith(t) && h.indexOf("\n") < 0) return h.substring(t.length)
+        }
+        return ""
     }
     function recent(n) { return box.history.slice(-n).join("\n") }
     function askCommand(what) {

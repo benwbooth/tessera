@@ -1594,7 +1594,7 @@ ApplicationWindow {
         onTriggered: {
             if (keysTestTimer.keys.length === 0) { stop(); return }
             const k = keysTestTimer.keys.shift()
-            if (k === "wait") return   // (a pause: let the AI answer)
+            if (k === "wait") { if (activePane) console.log("key test: wait ghost=" + JSON.stringify(activePane.compose.ghost) + " ready=" + activePane.compose.inlineReady); return }   // (a pause: let the AI answer)
             const named = { space: [Qt.Key_Space, 0, " ", 65], tab: [Qt.Key_Tab, 0, "\t", 23], bs: [Qt.Key_Backspace, 0, "\b", 22], enter: [Qt.Key_Return, 0, "\r", 36],
                             lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62] }
             const d = named[k] || [k.toUpperCase().charCodeAt(0), 0, k, 0]

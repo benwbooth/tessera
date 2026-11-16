@@ -78,13 +78,22 @@ inline QString tessera_session_id() { return qApp ? qApp->sessionId() : QString(
 // main window, as the desktop would send it.
 // phase: 0 none (a wheel), 1 begin, 2 update, 3 end (a touchpad, with
 // pixel movement `px`).
+// (A scroll with phases comes from a touchpad.)
+inline const QPointingDevice* testTouchpad()
+{
+    static QPointingDevice pad("test touchpad", 9901, QInputDevice::DeviceType::TouchPad, QPointingDevice::PointerType::Finger,
+                               QInputDevice::Capability::Position | QInputDevice::Capability::Scroll | QInputDevice::Capability::PixelScroll, 2, 0);
+    return &pad;
+}
+
 inline void tessera_test_wheel(double x, double y, int dy, int px, int phase)
 {
     for (QWindow* w : QGuiApplication::topLevelWindows()) {
         if (!w->property("showAtStart").toBool() || !w->isVisible()) continue;
         const QPointF p(x, y);
         const Qt::ScrollPhase ph = phase == 1 ? Qt::ScrollBegin : phase == 2 ? Qt::ScrollUpdate : phase == 3 ? Qt::ScrollEnd : Qt::NoScrollPhase;
-        QWheelEvent e(p, w->mapToGlobal(p), QPoint(0, px), QPoint(0, dy), Qt::NoButton, Qt::NoModifier, ph, false, Qt::MouseEventNotSynthesized, QPointingDevice::primaryPointingDevice());
+        QWheelEvent e(p, w->mapToGlobal(p), QPoint(0, px), QPoint(0, dy), Qt::NoButton, Qt::NoModifier, ph, false, Qt::MouseEventNotSynthesized,
+                      phase != 0 ? testTouchpad() : QPointingDevice::primaryPointingDevice());
         QGuiApplication::sendEvent(w, &e);
         return;
     }

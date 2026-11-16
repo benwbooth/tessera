@@ -6,7 +6,7 @@ A multi-line editor under the terminal while the shell waits at its prompt
 (shell integration's OSC 133 marks) or a REPL (python, node) runs.
 
 - Enter runs the command (typed into the shell, so it scrolls up with its
-  output); Shift+Enter adds a line (multi-line commands go in as a paste).
+  output); a right Shift tap (or Shift+Enter) adds a line (multi-line commands go in as a paste).
 - tree-sitter highlighting in the theme's colors (bash, Python, JavaScript)
   and syntax errors, marked once typing pauses.
 - Keys: Emacs (readline), vi (normal/insert, operators, motions), VS Code.

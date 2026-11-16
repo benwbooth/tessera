@@ -651,7 +651,7 @@ Window {
                             SectionTitle { text: "Input editor" }
                             ToggleRow {
                                 label: "Edit commands in an editor under the terminal"
-                                hint: "At a shell prompt (with shell integration) and in Python or Node: Enter runs, Shift+Enter adds a line, with highlighting and syntax checking."
+                                hint: "At a shell prompt (with shell integration) and in Python or Node: Enter runs, a tap of right Shift adds a line, a tap of left Shift takes the grey suggestion, with highlighting and syntax checking."
                                 checked: prefs.settings.input_editor !== false
                                 onToggled: (on) => prefs.setG("input_editor", on)
                             }
