@@ -15,7 +15,7 @@ A multi-line editor under the terminal while the shell waits at its prompt
 - History (Up/Down, Ctrl+P/N), Ctrl+C clears (or interrupts when empty),
   Shift+PgUp/PgDn scroll the terminal, Esc hands the keys to the terminal.
 
-## 2. Completion and language servers — done (language servers to come)
+## 2. Completion and language servers — done
 
 - A dropdown for commands, options and arguments with their descriptions:
   fish's completion files (thousands of commands), parsed `--help` and man
@@ -40,17 +40,18 @@ A multi-line editor under the terminal while the shell waits at its prompt
 - A chat sidebar that sees the folder and recent output, suggests commands,
   and runs them in the terminal with your approval.
 
-## 4. Rich output
+## 4. Rich output — done
 
 - Inline images: iTerm2 (imgcat) and kitty graphics protocols.
-- Each command's output (between OSC 133 C and D) is sniffed — Magika (a
-  small local content-type model) plus magic bytes — and images, SVG, HTML,
-  JSON, CSV, Markdown and audio get a rich view in place, with a toggle back
-  to text.
+- A command whose output is an image file (cat photo.png) shows the picture.
+- Each command's output (between OSC 133 C and D) is recognised — JSON,
+  CSV/TSV, HTML, Markdown, SVG — and gets a View chip: a folding JSON tree, a
+  sortable table, formatted HTML/Markdown, the drawn SVG; Esc back to text.
+- Still to do: audio, and an AI/Magika guess for output the rules can't place.
 
-## 5. Built-in prompt
+## 5. Built-in prompt — done
 
-- A prompt drawn by Tessera above the editor, like Starship but built in:
-  segments (folder, git, language versions, exit status, duration, time,
-  host, k8s, ...) each configurable — what shows, colors, icons, order,
-  separators — in Preferences, with a live preview.
+- A prompt drawn by Tessera above the editor: Starship's own (your
+  starship.toml, every module) when it's installed, else built-in segments
+  (folder, git, venv, nix-shell, exit status, duration, Kubernetes, AWS,
+  gcloud, host, time) chosen and ordered in Preferences › General.

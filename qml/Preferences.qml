@@ -642,6 +642,65 @@ Window {
                                 }
                                 Item { Layout.fillWidth: true }
                             }
+                            ToggleRow {
+                                label: "Prompt above the editor"
+                                hint: "Folder, git, status and more, drawn by Tessera above the editor."
+                                checked: prefs.settings.editor_prompt !== false
+                                onToggled: (on) => prefs.setG("editor_prompt", on)
+                            }
+                            Row2 {
+                                label: "Prompt from"
+                                hint: prefs.controller.hasStarship() ? "Starship uses your starship.toml (every module, your colors)." : "Starship isn't installed: the built-in segments below."
+                                Segmented {
+                                    options: [{ label: "Auto", value: "auto" }, { label: "Starship", value: "starship" }, { label: "Built-in", value: "builtin" }]
+                                    value: prefs.settings.prompt_engine || "auto"
+                                    onPicked: (v) => prefs.setG("prompt_engine", v)
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            // The built-in prompt's segments, in order; "right side" moves the rest right.
+                            Row2 {
+                                label: "Built-in segments"
+                                hint: "In order, left to right. Everything after \u201cright side\u201d is on the right."
+                                Flow {
+                                    Layout.fillWidth: true
+                                    Layout.maximumWidth: 560
+                                    spacing: 6
+                                    readonly property var names: ({ dir: "Folder", git: "Git", venv: "Python venv", nix: "Nix shell", status: "Exit status", duration: "Duration", kube: "Kubernetes", aws: "AWS", gcloud: "gcloud", host: "user@host (SSH)", user: "User", time: "Time", "|": "\u2192 right side" })
+                                    readonly property var segs: prefs.settings.prompt_segments || []
+                                    Repeater {
+                                        model: parent.segs
+                                        delegate: Rectangle {
+                                            required property string modelData
+                                            required property int index
+                                            readonly property var segs: parent.segs
+                                            height: 26
+                                            width: segRow.implicitWidth + 12
+                                            radius: 13
+                                            color: modelData === "|" ? "transparent" : Theme.field
+                                            border.color: Theme.divider
+                                            Row {
+                                                id: segRow
+                                                anchors.centerIn: parent
+                                                spacing: 4
+                                                Text { text: "\u2039"; color: Theme.textDim; font.pixelSize: 14; visible: index > 0
+                                                       TapHandler { onTapped: { const a = segs.slice(); a.splice(index - 1, 0, a.splice(index, 1)[0]); prefs.setG("prompt_segments", a) } } }
+                                                Text { text: parent.parent.parent.names[modelData] || modelData; color: Theme.text; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
+                                                Text { text: "\u203a"; color: Theme.textDim; font.pixelSize: 14; visible: index < segs.length - 1
+                                                       TapHandler { onTapped: { const a = segs.slice(); a.splice(index + 1, 0, a.splice(index, 1)[0]); prefs.setG("prompt_segments", a) } } }
+                                                Text { text: "\u00d7"; color: Theme.textDim; font.pixelSize: 13; visible: modelData !== "|"
+                                                       TapHandler { onTapped: { const a = segs.slice(); a.splice(index, 1); prefs.setG("prompt_segments", a) } } }
+                                            }
+                                        }
+                                    }
+                                    ChoiceBox {
+                                        implicitWidth: 150
+                                        values: [["", "Add\u2026"]].concat(Object.keys(parent.names).filter(k => parent.segs.indexOf(k) < 0).map(k => [k, parent.names[k]]))
+                                        value: ""
+                                        onChosen: (v) => { if (v !== "") { prefs.setG("prompt_segments", parent.segs.concat([v])); currentIndex = 0 } }
+                                    }
+                                }
+                            }
                             Row2 {
                                 label: "Command help"
                                 hint: prefs.controller.helpStatus !== "" ? prefs.controller.helpStatus
