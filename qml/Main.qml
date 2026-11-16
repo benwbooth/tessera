@@ -1574,6 +1574,34 @@ ApplicationWindow {
             }
         })
     }
+    // Test hook: TESSERA_TEST_KEYS="term|editor:key,key,..." (tab, bs, enter,
+    // lshift, rshift, or text), one key every 150 ms after the window settles.
+    Timer {
+        id: keysTestTimer
+        interval: 4500
+        property var keys: []
+        onTriggered: {
+            const spec = controller.testEnv("KEYS")
+            const [target, list] = spec.split(":")
+            if (activePane) { if (target === "term") { activePane.preferEditor = false; activePane.view.forceActiveFocus() } else activePane.compose.focusEditor() }
+            keys = list.split(",")
+            keyStep.start()
+        }
+    }
+    Timer {
+        id: keyStep
+        interval: 150; repeat: true
+        onTriggered: {
+            if (keysTestTimer.keys.length === 0) { stop(); return }
+            const k = keysTestTimer.keys.shift()
+            if (k === "wait") return   // (a pause: let the AI answer)
+            const named = { space: [Qt.Key_Space, 0, " ", 65], tab: [Qt.Key_Tab, 0, "\t", 23], bs: [Qt.Key_Backspace, 0, "\b", 22], enter: [Qt.Key_Return, 0, "\r", 36],
+                            lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62] }
+            const d = named[k] || [k.toUpperCase().charCodeAt(0), 0, k, 0]
+            controller.testKey(d[0], d[1], d[2], d[3])
+            if (activePane) console.log("key test: after " + k + " editor=" + JSON.stringify(activePane.compose.text) + " ghost=" + JSON.stringify(activePane.compose.ghost) + " dropdown=" + activePane.compose.compOpen)
+        }
+    }
     Timer { id: notebookTestTimer; interval: 9000; onTriggered: if (activePane) activePane.viewMode = "notebook" }
     Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
@@ -2124,6 +2152,7 @@ ApplicationWindow {
         if (controller.testEnv("ASSISTANT") !== "") assistantTestTimer.start()
         if (controller.testEnv("RICH") !== "") richTestTimer.start()
         if (controller.testEnv("NOTEBOOK") !== "") notebookTestTimer.start()
+        if (controller.testEnv("KEYS") !== "") keysTestTimer.start()
         if (controller.daemonState() === "outdated") daemonTimer.start()
         controller.aiAutodetect()
         if (controller.screenshotPath() !== "") shotTimer.start()

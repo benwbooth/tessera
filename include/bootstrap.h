@@ -7,6 +7,7 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QIcon>
 #include <QtGui/QWheelEvent>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPointingDevice>
 #include <QtQml/qqml.h>
 #include <QtQuick/QQuickWindow>
@@ -85,6 +86,21 @@ inline void tessera_test_wheel(double x, double y, int dy, int px, int phase)
         const Qt::ScrollPhase ph = phase == 1 ? Qt::ScrollBegin : phase == 2 ? Qt::ScrollUpdate : phase == 3 ? Qt::ScrollEnd : Qt::NoScrollPhase;
         QWheelEvent e(p, w->mapToGlobal(p), QPoint(0, px), QPoint(0, dy), Qt::NoButton, Qt::NoModifier, ph, false, Qt::MouseEventNotSynthesized, QPointingDevice::primaryPointingDevice());
         QGuiApplication::sendEvent(w, &e);
+        return;
+    }
+}
+
+// For tests: a key press and release, to whatever has the keys in the main
+// window (scan: the native scan code, for telling left and right Shift apart).
+inline void tessera_test_key(int key, int mods, const QString& text, int scan)
+{
+    for (QWindow* w : QGuiApplication::topLevelWindows()) {
+        if (!w->property("showAtStart").toBool() || !w->isVisible()) continue;
+        const auto m = Qt::KeyboardModifiers(mods);
+        QKeyEvent press(QEvent::KeyPress, key, m, quint32(scan), 0, 0, text);
+        QGuiApplication::sendEvent(w, &press);
+        QKeyEvent release(QEvent::KeyRelease, key, m, quint32(scan), 0, 0, text);
+        QGuiApplication::sendEvent(w, &release);
         return;
     }
 }

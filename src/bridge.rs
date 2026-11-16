@@ -226,6 +226,7 @@ pub mod ffi {
         fn tessera_webengine_initialize();
         fn tessera_show_windows();
         fn tessera_test_wheel(x: f64, y: f64, dy: i32, px: i32, phase: i32);
+        fn tessera_test_key(key: i32, mods: i32, text: &QString, scan: i32);
         fn tessera_session_id() -> QString;
         fn tessera_exec() -> i32;
         /// The app icon for window decorations that read it from the window.
@@ -383,6 +384,9 @@ pub mod ffi {
         /// For tests: a wheel notch at a point in the window.
         #[qinvokable]
         fn test_wheel(self: &Controller, x: f64, y: f64, dy: i32, px: i32, phase: i32);
+        /// For tests: a key press and release (Qt key code, modifiers, text, native scan code).
+        #[qinvokable]
+        fn test_key(self: &Controller, key: i32, mods: i32, text: &QString, scan: i32);
         /// Ask the language server for the editor's language (src/lsp.rs), in
         /// the background: `what` "diagnostics", "hover" or "complete" at a
         /// UTF-16 cursor. The answer: lsp_ready(key, what, json).
@@ -785,6 +789,10 @@ impl ffi::Controller {
 
     fn lsp_available(&self, lang: &ffi::QString) -> ffi::QString {
         qs(&crate::lsp::server_for(&lang.to_string()).map(|c| c[0].clone()).unwrap_or_default())
+    }
+
+    fn test_key(&self, key: i32, mods: i32, text: &ffi::QString, scan: i32) {
+        ffi::tessera_test_key(key, mods, text, scan);
     }
 
     fn test_wheel(&self, x: f64, y: f64, dy: i32, px: i32, phase: i32) {
