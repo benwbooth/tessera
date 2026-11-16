@@ -2089,7 +2089,14 @@ ApplicationWindow {
                 if (layout && layout.tabs) {
                     // Live shells reattach; gone ones come back with their saved screens.
                     restoreArrangement(layout, alive, true)
-                    if (layout.width > 200) { win.width = layout.width; win.height = layout.height }
+                    // (Kept within the screen's usable area: a window taller than
+                    // the space above a panel hides its bottom, the editor, under it.)
+                    if (layout.width > 200) {
+                        const availW = Screen.desktopAvailableWidth > 0 ? Screen.desktopAvailableWidth : Screen.width
+                        const availH = Screen.desktopAvailableHeight > 0 && Screen.desktopAvailableHeight < Screen.height ? Screen.desktopAvailableHeight : Screen.height - 56
+                        win.width = Math.min(layout.width, availW)
+                        win.height = Math.min(layout.height, availH)
+                    }
                     // X11 lets windows place themselves (Wayland: the desktop does, above).
                     if (Qt.platform.pluginName === "xcb" && layout.x !== undefined) { win.x = layout.x; win.y = layout.y }
                     if (layout.maximized) Qt.callLater(win.showMaximized)

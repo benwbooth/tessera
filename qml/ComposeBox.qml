@@ -40,7 +40,10 @@ Rectangle {
     readonly property real lineHeight: Math.ceil(fm.height)
     readonly property int lines: Math.max(1, edit.lineCount)
     // (The editor's margins, and the prompt bar with the gap under it.)
-    implicitHeight: Math.min(lines, 10) * lineHeight + 14 + (promptBar.visible ? promptBar.height + 4 + 4 : 0)
+    // (The text's real laid-out height, which some fonts make taller than
+    // their metrics say, up to ten lines; then it scrolls.)
+    implicitHeight: Math.ceil(Math.min(Math.max(edit.contentHeight, lineHeight), 10 * lineHeight)) + 16
+                    + (promptBar.visible ? promptBar.height + 4 + 4 : 0)
 
     color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
     Rectangle { width: parent.width; height: 1; color: Theme.divider }
