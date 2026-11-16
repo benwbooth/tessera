@@ -31,6 +31,8 @@ Item {
     property real prefW: -1
     property real prefH: -1
     property string job: ""            // the program running in it (empty at a prompt)
+    property string procCwd: ""        // its folder, read from the process
+    property string shellName: ""      // the shell at the prompt
     property int zoomPercent: 100      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW

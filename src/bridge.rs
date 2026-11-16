@@ -247,6 +247,11 @@ pub mod ffi {
         /// the shell itself ("" when the shell is idle).
         #[qinvokable]
         fn session_job(self: &Controller, id: &QString) -> QString;
+        /// {job, cwd, shell} of a session, as JSON.
+        #[qinvokable]
+        fn session_info(self: &Controller, id: &QString) -> QString;
+        #[qinvokable]
+        fn home_dir(self: &Controller) -> QString;
         /// Open a window holding this tab (JSON layout with session ids): a
         /// tab torn off by dragging it out of the tab bar.
         #[qinvokable]
@@ -431,6 +436,15 @@ impl ffi::Controller {
 
     fn session_job(&self, id: &ffi::QString) -> ffi::QString {
         qs(&crate::client::session_job(&id.to_string()).unwrap_or_default())
+    }
+
+    fn session_info(&self, id: &ffi::QString) -> ffi::QString {
+        let info = crate::client::proc_info(&id.to_string()).unwrap_or_default();
+        qs(&serde_json::to_string(&info).unwrap_or_default())
+    }
+
+    fn home_dir(&self) -> ffi::QString {
+        qs(&std::env::var("HOME").unwrap_or_default())
     }
 
     fn new_window(&self) {

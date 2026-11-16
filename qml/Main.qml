@@ -160,7 +160,8 @@ ApplicationWindow {
                 : lastPane && lastPane.job !== "" ? lastPane.job
                 : (win.settings.tab_titles_per_tab && lastView && lastView.title ? lastView.title
                    : launchTitle !== "" ? launchTitle
-                   : (lastView && lastView.pwd ? lastView.pwd.split("/").filter(x => x).pop() || "/" : prof.name))
+                   : win.folderName(lastView && lastView.pwd ? lastView.pwd : (lastPane ? lastPane.procCwd : ""))
+                     || (lastPane && lastPane.shellName) || prof.name)
             PaneSplit {
                 id: rootSplit
                 anchors.fill: parent
@@ -259,6 +260,15 @@ ApplicationWindow {
         menuSpot.x = pt.x
         menuSpot.y = pt.y - 1
         menu.open(menuSpot)
+    }
+
+    // A folder's name for a title: "~" for home.
+    function folderName(path) {
+        path = (path || "").replace(/^file:\/\/[^/]*/, "")
+        if (path === "") return ""
+        const home = controller.homeDir ? controller.homeDir() : ""
+        if (home !== "" && path.replace(/\/$/, "") === home) return "~"
+        return path.split("/").filter(x => x).pop() || "/"
     }
 
     function paneOf(view) {
@@ -1498,8 +1508,13 @@ ApplicationWindow {
                 const v = t.lastView
                 const p = v ? paneOf(v) : null
                 if (!p) continue
-                const job = v.tmuxPane === "" && !v.exited && v.sessionId !== "" ? controller.sessionJob(v.sessionId) : ""
-                if (p.job !== job) p.job = job
+                let info = { job: "", cwd: "", shell: "" }
+                if (v.tmuxPane === "" && !v.exited && v.sessionId !== "") {
+                    try { info = JSON.parse(controller.sessionInfo(v.sessionId)) } catch (e) {}
+                }
+                if (p.job !== info.job) p.job = info.job
+                if (p.procCwd !== info.cwd) p.procCwd = info.cwd
+                if (p.shellName !== info.shell) p.shellName = info.shell
             }
         }
     }

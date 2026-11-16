@@ -204,6 +204,22 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
 }
 
 /// The foreground process group's program, when it isn't the shell.
+/// The running program (empty at a prompt), the folder it's in (the
+/// program's, else the shell's) and the shell's name.
+fn proc_info(s: &DSession) -> crate::client::ProcInfo {
+    let comm = |pid: u32| std::fs::read_to_string(format!("/proc/{pid}/comm")).map(|c| c.trim().to_string()).unwrap_or_default();
+    let cwd = |pid: u32| std::fs::read_link(format!("/proc/{pid}/cwd")).map(|p| p.display().to_string()).unwrap_or_default();
+    let pgid = s.master.lock().unwrap().process_group_leader().map(|p| p as u32);
+    let job = foreground_job(s);
+    let mut dir = pgid.map(cwd).unwrap_or_default();
+    if dir.is_empty() {
+        dir = s.shell_pid.map(cwd).unwrap_or_default();
+    }
+    // The shell is whatever runs at the prompt (a login bash may exec zsh).
+    let shell = if job.is_empty() { pgid.or(s.shell_pid).map(comm).unwrap_or_default() } else { s.shell_pid.map(comm).unwrap_or_default() };
+    crate::client::ProcInfo { job, cwd: dir, shell }
+}
+
 fn foreground_job(s: &DSession) -> String {
     let Some(pgid) = s.master.lock().unwrap().process_group_leader() else { return String::new() };
     if Some(pgid as u32) == s.shell_pid {
@@ -269,6 +285,12 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
                 let _ = s.child.lock().unwrap().kill();
             }
             return Ok(());
+        }
+        T_INFO => {
+            let id: String = serde_json::from_slice(&payload)?;
+            let found = registry.lock().unwrap().get(&id).cloned();
+            let info = found.map(|s| proc_info(&s)).unwrap_or_default();
+            return write_json(&mut stream, T_INFO_REPLY, &info);
         }
         T_JOB => {
             let id: String = serde_json::from_slice(&payload)?;

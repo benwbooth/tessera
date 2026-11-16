@@ -19,6 +19,8 @@ pub const T_LIST: u8 = 6;
 pub const T_JOB: u8 = 7;
 /// End a session by id (Undo Close's grace period ran out).
 pub const T_KILL_ID: u8 = 8;
+/// What a session is doing: {job, cwd, shell} (T_INFO_REPLY).
+pub const T_INFO: u8 = 9;
 
 pub const T_ATTACHED: u8 = 101;
 pub const T_OUTPUT: u8 = 102;
@@ -26,6 +28,7 @@ pub const T_EXITED: u8 = 103;
 pub const T_SESSIONS: u8 = 104;
 pub const T_ERROR: u8 = 105;
 pub const T_JOB_REPLY: u8 = 106;
+pub const T_INFO_REPLY: u8 = 108;
 /// Another window attached the session: this client is no longer it.
 pub const T_TAKEN: u8 = 107;
 

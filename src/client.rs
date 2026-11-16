@@ -79,6 +79,30 @@ pub fn kill_session(id: &str) {
 }
 
 /// The foreground program of a session when it isn't the shell ("" if idle).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+pub struct ProcInfo {
+    pub job: String,
+    pub cwd: String,
+    pub shell: String,
+}
+
+/// What a session is doing; from a daemon older than T_INFO, just the job.
+pub fn proc_info(id: &str) -> std::io::Result<ProcInfo> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static OLD_DAEMON: AtomicBool = AtomicBool::new(false);
+    if !OLD_DAEMON.load(Ordering::Relaxed) {
+        let mut s = UnixStream::connect(socket_path())?;
+        s.set_read_timeout(Some(Duration::from_millis(500)))?;
+        write_json(&mut s, T_INFO, &id)?;
+        match read_frame(&mut s) {
+            Ok((T_INFO_REPLY, payload)) => return Ok(serde_json::from_slice(&payload).unwrap_or_default()),
+            Ok((T_ERROR, _)) => OLD_DAEMON.store(true, Ordering::Relaxed),
+            _ => {}
+        }
+    }
+    Ok(ProcInfo { job: session_job(id)?, ..Default::default() })
+}
+
 pub fn session_job(id: &str) -> std::io::Result<String> {
     let mut s = UnixStream::connect(socket_path())?;
     s.set_read_timeout(Some(Duration::from_millis(500)))?;
