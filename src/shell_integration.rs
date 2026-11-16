@@ -25,7 +25,11 @@ pub fn install(shell: &str) -> String {
             let _ = std::fs::create_dir_all(d);
         }
         let _ = std::fs::remove_file(&rc_path);
-        return match std::os::unix::fs::symlink(&script_path, &rc_path) {
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&script_path, &rc_path);
+        #[cfg(not(unix))]
+        let linked = std::fs::copy(&script_path, &rc_path).map(|_| ());
+        return match linked {
             Ok(()) => format!("Installed for fish ({}). New fish sessions have it.", rc_path.display()),
             Err(e) => format!("Couldn't link {}: {e}", rc_path.display()),
         };

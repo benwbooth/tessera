@@ -98,7 +98,7 @@ pub mod ffi {
         fn full_screen(self: &Session) -> bool;
 
         /// The fd to watch for readability (daemon socket or tmux wake pipe).
-        fn fd(self: &Session) -> i32;
+        fn fd(self: &Session) -> i64;
         fn id(self: &Session) -> String;
         /// Read whatever is available. Returns SIG_* bits.
         fn on_readable(self: &mut Session) -> u32;

@@ -139,6 +139,8 @@ pub fn socket_path() -> PathBuf {
     }
     #[cfg(not(unix))]
     {
-        std::env::temp_dir().join("tessera-daemon.sock")
+        let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("Tessera");
+        let _ = std::fs::create_dir_all(&base);
+        base.join("daemon.sock")
     }
 }

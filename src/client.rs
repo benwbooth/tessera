@@ -1,7 +1,7 @@
 //! Connecting to the PTY daemon, starting it when it isn't running.
 
 use crate::proto::*;
-use std::os::unix::net::UnixStream;
+use crate::net::UnixStream;
 use std::time::{Duration, Instant};
 
 pub fn connect() -> std::io::Result<UnixStream> {
@@ -21,7 +21,6 @@ pub fn connect() -> std::io::Result<UnixStream> {
 }
 
 fn spawn_daemon() -> std::io::Result<()> {
-    use std::os::unix::process::CommandExt;
     let exe = std::env::current_exe()?;
     let log = log_path();
     let stderr = std::fs::OpenOptions::new()
@@ -40,11 +39,22 @@ fn spawn_daemon() -> std::io::Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(stderr);
     // Its own session, so it survives the GUI and its terminal.
+    #[cfg(unix)]
     unsafe {
+        use std::os::unix::process::CommandExt;
         cmd.pre_exec(|| {
             libc::setsid();
             Ok(())
         });
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window, and not ended with the GUI's process group.
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     }
     cmd.spawn()?;
     Ok(())
@@ -118,6 +128,11 @@ pub fn session_job(id: &str) -> std::io::Result<String> {
 /// apps started from the desktop get). Falls back to a cleaned-up copy of our
 /// own. Tessera's own settings (TESSERA_SOCKET, XDG_STATE_HOME) are kept.
 fn session_env() -> Vec<(String, String)> {
+    // (Linux desktops only: elsewhere the app's own environment is the
+    // session's.)
+    if !cfg!(target_os = "linux") {
+        return std::env::vars().collect();
+    }
     let mut env: Vec<(String, String)> = std::process::Command::new("systemctl")
         .args(["--user", "show-environment"])
         .output()
@@ -182,6 +197,15 @@ fn parse_systemd_env(text: &str) -> Vec<(String, String)> {
 }
 
 pub fn login_shell() -> Option<String> {
+    #[cfg(windows)]
+    {
+        // PowerShell 7 when installed, else Windows PowerShell.
+        let pwsh = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).map(|d| d.join("pwsh.exe")).any(|f| f.exists()))
+            .unwrap_or(false);
+        return Some(if pwsh { "pwsh.exe".into() } else { "powershell.exe".into() });
+    }
+    #[cfg(unix)]
     unsafe {
         let pw = libc::getpwuid(libc::getuid());
         if pw.is_null() || (*pw).pw_shell.is_null() {

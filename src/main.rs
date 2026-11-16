@@ -4,6 +4,8 @@ mod contrast;
 mod daemon;
 mod find;
 mod keymap;
+mod net;
+mod procinfo;
 mod launchers;
 mod proto;
 mod settings;

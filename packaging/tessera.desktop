@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Tessera
+GenericName=Terminal
+Comment=A terminal in the spirit of iTerm2
+Exec=tessera
+Icon=tessera
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;console;command;prompt;tmux;
+StartupWMClass=tessera
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=tessera --new-window

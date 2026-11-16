@@ -11,13 +11,15 @@ use crate::proto::*;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use crate::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct Shared {
     client: Option<UnixStream>,
+    /// Which connection `client` is (so a detaching one only clears itself).
+    client_gen: u64,
 }
 
 /// Work for a session's emulator thread, which keeps its own copy of the
@@ -122,8 +124,12 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
         let shell = crate::client::login_shell()
             .or_else(|| std::env::var("SHELL").ok())
             .unwrap_or_else(|| "/bin/sh".into());
-        let mut b = CommandBuilder::new(shell);
-        b.args(["-l", "-c", c.command.as_str()]);
+        let mut b = CommandBuilder::new(&shell);
+        if cfg!(windows) {
+            b.args(["/C", c.command.as_str()]);
+        } else {
+            b.args(["-l", "-c", c.command.as_str()]);
+        }
         b
     };
     let cwd = if !c.cwd.is_empty() && std::path::Path::new(&c.cwd).is_dir() {
@@ -157,7 +163,7 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
-        shared: Mutex::new(Shared { client: None }),
+        shared: Mutex::new(Shared { client: None, client_gen: 0 }),
         emu: Mutex::new(emu_tx),
         size: Mutex::new((c.cols.max(1), c.rows.max(1))),
     });
@@ -207,9 +213,9 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
 /// The running program (empty at a prompt), the folder it's in (the
 /// program's, else the shell's) and the shell's name.
 fn proc_info(s: &DSession) -> crate::client::ProcInfo {
-    let comm = |pid: u32| std::fs::read_to_string(format!("/proc/{pid}/comm")).map(|c| c.trim().to_string()).unwrap_or_default();
-    let cwd = |pid: u32| std::fs::read_link(format!("/proc/{pid}/cwd")).map(|p| p.display().to_string()).unwrap_or_default();
-    let pgid = s.master.lock().unwrap().process_group_leader().map(|p| p as u32);
+    let comm = crate::procinfo::name;
+    let cwd = crate::procinfo::cwd;
+    let pgid = foreground_pgid(s);
     let job = foreground_job(s);
     let mut dir = pgid.map(cwd).unwrap_or_default();
     if dir.is_empty() {
@@ -221,11 +227,24 @@ fn proc_info(s: &DSession) -> crate::client::ProcInfo {
 }
 
 fn foreground_job(s: &DSession) -> String {
-    let Some(pgid) = s.master.lock().unwrap().process_group_leader() else { return String::new() };
-    if Some(pgid as u32) == s.shell_pid {
+    let Some(pgid) = foreground_pgid(s) else { return String::new() };
+    if Some(pgid) == s.shell_pid {
         return String::new();
     }
-    std::fs::read_to_string(format!("/proc/{pgid}/comm")).map(|c| c.trim().to_string()).unwrap_or_default()
+    crate::procinfo::name(pgid)
+}
+
+/// The terminal's foreground process group (none on Windows).
+fn foreground_pgid(s: &DSession) -> Option<u32> {
+    #[cfg(unix)]
+    {
+        s.master.lock().unwrap().process_group_leader().map(|p| p as u32)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = s;
+        None
+    }
 }
 
 /// The emulator thread: libghostty types stay on the thread that made them.
@@ -314,6 +333,8 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
         _ => return write_json(&mut stream, T_ERROR, &"expected create, attach or list"),
     };
 
+    static GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let my_gen = GEN.fetch_add(1, Ordering::SeqCst);
     // Attach: hand over the replay and become the live client, atomically
     // with respect to the output pump so nothing is lost or duplicated.
     {
@@ -339,6 +360,7 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
             }
         }
         sh.client = Some(out);
+        sh.client_gen = my_gen;
     }
 
     loop {
@@ -364,24 +386,12 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
     }
     // Detach only if we're still the attached client.
     let mut sh = session.shared.lock().unwrap();
-    if let Some(c) = &sh.client {
-        if same_socket(c, &stream) {
-            sh.client = None;
-        }
+    if sh.client.is_some() && sh.client_gen == my_gen {
+        sh.client = None;
     }
     Ok(())
 }
 
-fn same_socket(a: &UnixStream, b: &UnixStream) -> bool {
-    use std::os::fd::AsRawFd;
-    // try_clone gives a new fd for the same socket; compare inodes.
-    let ino = |s: &UnixStream| unsafe {
-        let mut st: libc::stat = std::mem::zeroed();
-        libc::fstat(s.as_raw_fd(), &mut st);
-        st.st_ino
-    };
-    ino(a) == ino(b)
-}
 
 fn ioe(e: impl std::fmt::Display) -> std::io::Error {
     std::io::Error::other(e.to_string())

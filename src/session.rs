@@ -27,8 +27,7 @@ use libghostty_vt::{
 use serde_json::{json, Value};
 use std::cell::{Cell, RefCell};
 use std::io::{ErrorKind, Read, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixStream;
+use crate::net::UnixStream;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -351,9 +350,9 @@ fn rgb(c: RgbColor) -> u32 {
 }
 
 impl Session {
-    pub fn fd(&self) -> i32 {
+    pub fn fd(&self) -> i64 {
         match &self.backend {
-            Backend::Daemon { stream, .. } => stream.as_raw_fd(),
+            Backend::Daemon { stream, .. } => crate::net::raw(stream),
             Backend::Tmux { shared, .. } => shared.borrow().wake_fd(),
         }
     }

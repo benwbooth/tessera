@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::net::UnixStream;
+use crate::net::UnixStream;
+use std::io::Read;
 use std::rc::Rc;
 
 pub const DCS_START: &[u8] = b"\x1bP1000p";
@@ -28,14 +28,16 @@ pub struct PaneShared {
     pub grid: (u16, u16),
     pub grid_changed: bool,
     pub closed: bool,
-    wake_r: OwnedFd,
-    wake_w: OwnedFd,
+    wake_r: UnixStream,
+    wake_w: UnixStream,
 }
 
 impl PaneShared {
     fn new() -> Self {
-        let mut fds = [0i32; 2];
-        unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) };
+        // A socket pair (portable, and Qt can watch a socket everywhere).
+        let (wake_r, wake_w) = UnixStream::pair().expect("socket pair");
+        let _ = wake_r.set_nonblocking(true);
+        let _ = wake_w.set_nonblocking(true);
         Self {
             pending: Vec::new(),
             held: Vec::new(),
@@ -43,19 +45,19 @@ impl PaneShared {
             grid: (80, 24),
             grid_changed: false,
             closed: false,
-            wake_r: unsafe { OwnedFd::from_raw_fd(fds[0]) },
-            wake_w: unsafe { OwnedFd::from_raw_fd(fds[1]) },
+            wake_r,
+            wake_w,
         }
     }
     fn wake(&self) {
-        unsafe { libc::write(self.wake_w.as_raw_fd(), b"x".as_ptr().cast(), 1) };
+        let _ = (&self.wake_w).write(b"x");
     }
-    pub fn wake_fd(&self) -> i32 {
-        self.wake_r.as_raw_fd()
+    pub fn wake_fd(&self) -> i64 {
+        crate::net::raw(&self.wake_r)
     }
     pub fn drain_wake(&self) {
         let mut buf = [0u8; 256];
-        while unsafe { libc::read(self.wake_r.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) } > 0 {}
+        while matches!((&self.wake_r).read(&mut buf), Ok(n) if n > 0) {}
     }
     fn output(&mut self, data: &[u8]) {
         if self.capturing {

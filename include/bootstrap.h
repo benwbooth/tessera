@@ -45,7 +45,9 @@ inline void tessera_create_app(const QString& session)
     QApplication::setApplicationDisplayName(QStringLiteral("Tessera"));
     QApplication::setOrganizationName(QStringLiteral("tessera"));
     // The Wayland app id / X11 class, matching tessera.desktop.
-    QGuiApplication::setDesktopFileName(QStringLiteral("tessera"));
+    // (In a Flatpak the desktop file is named for the app id.)
+    const QByteArray flatpakId = qgetenv("FLATPAK_ID");
+    QGuiApplication::setDesktopFileName(flatpakId.isEmpty() ? QStringLiteral("tessera") : QString::fromUtf8(flatpakId));
     if (QIcon::themeName().isEmpty()) QIcon::setThemeName(QStringLiteral("breeze"));
     QIcon::setFallbackThemeName(QStringLiteral("breeze"));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("tessera"),

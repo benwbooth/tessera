@@ -28,10 +28,15 @@ fn shells() -> Vec<Shell> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(str::to_string)
         .collect();
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    for name in ["bash", "zsh", "fish", "nu", "xonsh", "elvish", "pwsh", "dash", "ksh", "tcsh"] {
-        for dir in path_var.split(':') {
-            let p = Path::new(dir).join(name);
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let names: &[&str] = if cfg!(windows) {
+        &["pwsh.exe", "powershell.exe", "cmd.exe", "wsl.exe", "bash.exe", "nu.exe"]
+    } else {
+        &["bash", "zsh", "fish", "nu", "xonsh", "elvish", "pwsh", "dash", "ksh", "tcsh"]
+    };
+    for name in names {
+        for dir in std::env::split_paths(&path_var) {
+            let p = dir.join(name);
             if p.is_file() {
                 paths.push(p.display().to_string());
                 break;
