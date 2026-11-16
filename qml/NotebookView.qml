@@ -152,11 +152,13 @@ Rectangle {
                 Chip { base: cell.color; label: "Copy"; tip: "Copy the output"
                        onClicked: { clip.text = nb.view.cellOutput(cell.c.id, "text"); clip.selectAll(); clip.copy() } }
                 Chip { base: cell.color; label: "\u21bb"; tip: "Put the command back in the editor"; onClicked: nb.rerun(cell.c.command) }
-                Menu {
+                // (Test hook: TESSERA_TEST_OPEN_KIND_MENU opens the first cell's menu.)
+                Timer { interval: 1500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("OPEN_KIND_MENU") !== ""; onTriggered: kindMenu.popup(kindChip, 0, kindChip.height + 2) }
+                SlimMenu {
                     id: kindMenu
                     Repeater {
                         model: nb.viewNames
-                        delegate: MenuItem {
+                        delegate: SlimMenuItem {
                             required property var modelData
                             text: modelData[1]
                             checkable: true

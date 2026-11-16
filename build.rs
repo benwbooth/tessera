@@ -62,6 +62,8 @@ fn main() {
         QmlFile::from("qml/NotebookView.qml"),
         QmlFile::from("qml/Chip.qml"),
         QmlFile::from("qml/SlimCombo.qml"),
+        QmlFile::from("qml/SlimMenu.qml"),
+        QmlFile::from("qml/SlimMenuItem.qml"),
         QmlFile::from("qml/StarshipLine.qml"),
     ]))
     .crate_include_root(None)
