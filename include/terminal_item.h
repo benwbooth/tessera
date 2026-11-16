@@ -9,6 +9,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QSocketNotifier>
 #include <QtCore/QTimer>
+#include <QtGui/QKeySequence>
 #include <QtCore/QVariantMap>
 #include <QtCore/QVector>
 #include <QtGui/QColor>
@@ -69,6 +70,13 @@ class TerminalItem : public QQuickItem {
     // Other views that receive this one's typing (Broadcast Input).
     Q_PROPERTY(QVariantList broadcastTo MEMBER m_broadcastTo NOTIFY optionsChanged)
     Q_PROPERTY(bool logging READ logging NOTIFY loggingChanged)
+    // Shell integration mark indicators in the left margin.
+    Q_PROPERTY(bool showMarks MEMBER m_showMarks NOTIFY optionsChanged)
+    Q_PROPERTY(QColor markColor MEMBER m_markColor NOTIFY optionsChanged)
+    // Ctrl+click opens URLs and files.
+    Q_PROPERTY(bool ctrlClickOpens MEMBER m_ctrlClickOpens NOTIFY optionsChanged)
+    // Key mappings: [{key: "Ctrl+Alt+K", action: "send_text"|"send_hex"|"send_escape"|"ignore"|"action", value}]
+    Q_PROPERTY(QString keyMappingsJson READ keyMappingsJson WRITE setKeyMappingsJson NOTIFY optionsChanged)
     // Scrollback position, for the scrollbar (rows).
     Q_PROPERTY(qreal scrollTotal READ scrollTotal NOTIFY scrollChanged)
     Q_PROPERTY(qreal scrollOffset READ scrollOffset NOTIFY scrollChanged)
@@ -145,6 +153,8 @@ public:
     Q_INVOKABLE int findIndex() const;
     Q_INVOKABLE void endFind();
     Q_INVOKABLE void scrollToRow(qreal row);
+    Q_INVOKABLE bool jumpToPrompt(int dir);
+    Q_INVOKABLE QString selectLastOutput();
 
 signals:
     void attachIdChanged();
@@ -174,6 +184,10 @@ signals:
     // The session was attached by another window (a tab dragged there).
     void takenOver();
     void scrollChanged();
+    // A key mapping asked for an app action (new_tab, split_right, ...).
+    void keyAction(const QString& name);
+    // Text went to the clipboard (copy or copy-on-select), for Paste History.
+    void copied(const QString& text);
 
 protected:
     void componentComplete() override;
@@ -304,9 +318,26 @@ private:
     qint64 m_lastWheelMs = 0;
     QTimer* m_momentum = nullptr;
     QTimer* m_autoscroll = nullptr;   // selection dragged past an edge
-    QTimer* m_smooth = nullptr;       // eases mouse-wheel scrolling
-    qreal m_smoothPending = 0;        // logical px still to scroll
+    QTimer* m_smooth = nullptr;       // (unused)
+    qreal m_smoothPending = 0;
+    qreal m_decay = 0.95;             // momentum kept per 16 ms frame
+    qreal m_fingerVelocity = 0;       // touchpad: speed while the fingers move
+    qreal m_carry = 0;                // momentum still going when a new flick began
+    int m_streak = 0;                 // wheel notches in quick succession
+    qint64 m_lastNotchMs = 0;
+    qint64 m_autoscrollStart = 0;
     QPointF m_lastPointer;
+
+    QString keyMappingsJson() const { return m_keyMappingsJson; }
+    void setKeyMappingsJson(const QString& v);
+    bool applyKeyMapping(QKeyEvent* e);
+    struct KeyMapping { QKeySequence seq; QString action; QString value; };
+    QVector<KeyMapping> m_keyMappings;
+    QString m_keyMappingsJson;
+    QVector<bool> m_rowMark;
+    bool m_showMarks = true;
+    QColor m_markColor = QColor(0x62, 0xa8, 0xf0);
+    bool m_ctrlClickOpens = true;
 
     QString m_themeJson;
     int m_cursorShape = 0;

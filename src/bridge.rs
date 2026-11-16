@@ -41,6 +41,8 @@ pub mod ffi {
         scroll_total: u64,
         scroll_offset: u64,
         scroll_len: u64,
+        /// Dirty rows where a shell prompt starts (mark indicators).
+        mark_rows: Vec<u16>,
     }
 
     #[namespace = "tessera"]
@@ -112,6 +114,12 @@ pub mod ffi {
         fn send_text(self: &mut Session, text: &str);
         fn scroll_lines(self: &mut Session, delta: i32);
         fn scroll_to_bottom(self: &mut Session);
+        /// Ctrl+click target: a hyperlink, URL or existing file (file://), or "".
+        fn link_at(self: &Session, x: f32, y: f32, cell_w: u32, cell_h: u32, pad: u32) -> String;
+        /// Shell integration: scroll to the previous (-1) / next (+1) prompt.
+        fn jump_to_prompt(self: &mut Session, dir: i32) -> bool;
+        /// Shell integration: select the last command's output; returns it.
+        fn select_last_output(self: &mut Session) -> String;
         /// Put this row (0 = top of the scrollback) at the top of the view.
         fn scroll_to_row(self: &mut Session, row: u64);
         /// Whether wheel/touchpad scrolling moves through the scrollback here
@@ -239,6 +247,17 @@ pub mod ffi {
         /// For the + menu: {shells: [{name, path}], ssh_hosts: [..]}.
         #[qinvokable]
         fn launchers(self: &Controller) -> QString;
+        /// End a detached session by id (Undo Close ran out).
+        #[qinvokable]
+        fn kill_session(self: &Controller, id: &QString);
+        /// A desktop notification.
+        #[qinvokable]
+        fn notify(self: &Controller, title: &QString, body: &QString);
+        /// Install shell integration for "bash", "zsh" or "fish": writes the
+        /// script and adds a line to the shell's startup file. Returns what
+        /// happened (or what to add by hand when the file can't be changed).
+        #[qinvokable]
+        fn install_shell_integration(self: &Controller, shell: &QString) -> QString;
         /// Every theme (built in, then imported) as a JSON array.
         #[qinvokable]
         fn themes(self: &Controller) -> QString;
@@ -428,6 +447,21 @@ impl ffi::Controller {
 
     fn launchers(&self) -> ffi::QString {
         qs(&serde_json::to_string(&crate::launchers::launchers()).unwrap())
+    }
+
+    fn kill_session(&self, id: &ffi::QString) {
+        crate::client::kill_session(&id.to_string());
+    }
+
+    fn notify(&self, title: &ffi::QString, body: &ffi::QString) {
+        let icon = concat!(env!("CARGO_MANIFEST_DIR"), "/icons/tessera.svg");
+        let _ = std::process::Command::new("notify-send")
+            .args(["-a", "Tessera", "-i", icon, &title.to_string(), &body.to_string()])
+            .spawn();
+    }
+
+    fn install_shell_integration(&self, shell: &ffi::QString) -> ffi::QString {
+        qs(&crate::shell_integration::install(&shell.to_string()))
     }
 
     fn themes(&self) -> ffi::QString {

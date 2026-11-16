@@ -17,6 +17,8 @@ pub const T_RESIZE: u8 = 4;
 pub const T_KILL: u8 = 5;
 pub const T_LIST: u8 = 6;
 pub const T_JOB: u8 = 7;
+/// End a session by id (Undo Close's grace period ran out).
+pub const T_KILL_ID: u8 = 8;
 
 pub const T_ATTACHED: u8 = 101;
 pub const T_OUTPUT: u8 = 102;

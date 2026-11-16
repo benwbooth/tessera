@@ -225,6 +225,13 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
                 .collect();
             return write_json(&mut stream, T_SESSIONS, &list);
         }
+        T_KILL_ID => {
+            let id: String = serde_json::from_slice(&payload)?;
+            if let Some(s) = registry.lock().unwrap().get(&id).cloned() {
+                let _ = s.child.lock().unwrap().kill();
+            }
+            return Ok(());
+        }
         T_JOB => {
             let id: String = serde_json::from_slice(&payload)?;
             let found = registry.lock().unwrap().get(&id).cloned();

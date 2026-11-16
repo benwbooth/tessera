@@ -71,6 +71,13 @@ pub fn list_sessions() -> std::io::Result<Vec<SessionInfo>> {
     Ok(serde_json::from_slice(&payload)?)
 }
 
+/// End a (detached) session.
+pub fn kill_session(id: &str) {
+    if let Ok(mut s) = UnixStream::connect(socket_path()) {
+        let _ = write_json(&mut s, T_KILL_ID, &id);
+    }
+}
+
 /// The foreground program of a session when it isn't the shell ("" if idle).
 pub fn session_job(id: &str) -> std::io::Result<String> {
     let mut s = UnixStream::connect(socket_path())?;

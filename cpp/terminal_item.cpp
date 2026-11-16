@@ -9,6 +9,7 @@
 #include <QtCore/QMimeData>
 #include <QtCore/QUrl>
 #include <QtGui/QClipboard>
+#include <QtGui/QDesktopServices>
 #include <QtWidgets/QApplication>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QFontMetricsF>
@@ -43,6 +44,7 @@ public:
     QSGRectangleNode* bg = nullptr;
     QSGRectangleNode* overlay = nullptr;
     QVector<QSGImageNode*> rows;
+    QVector<QSGRectangleNode*> marks;
     ~TerminalNode() override
     {
         for (QSGImageNode* n : rows)
@@ -83,8 +85,8 @@ TerminalItem::TerminalItem(QQuickItem* parent)
     m_momentum = new QTimer(this);
     m_momentum->setInterval(16);
     connect(m_momentum, &QTimer::timeout, this, [this] {
-        m_velocity *= 0.95;
-        if (std::abs(m_velocity) < 0.02) {
+        m_velocity *= m_decay;
+        if (std::abs(m_velocity) < 0.015) {
             m_momentum->stop();
             m_velocity = 0;
             return;
@@ -100,7 +102,9 @@ TerminalItem::TerminalItem(QQuickItem* parent)
         const qreal rowH = m_ch / m_dpr;
         const qreal top = m_pad / m_dpr, bottom = height() - m_pad / m_dpr;
         const qreal dist = p.y() < top ? top - p.y() : qMax<qreal>(0, p.y() - bottom);
-        const uint32_t rows = uint32_t(qBound<qreal>(1, 1 + std::pow(dist / rowH, 1.4), 30));
+        // ...and faster the longer it's held there.
+        const qreal held = (QDateTime::currentMSecsSinceEpoch() - m_autoscrollStart) / 700.0;
+        const uint32_t rows = uint32_t(qBound<qreal>(1, (1 + std::pow(dist / rowH, 1.4)) * (1 + held), 80));
         if (!m_session->autoscroll_tick(float(p.x() * m_dpr), float(p.y() * m_dpr), uint32_t(width() * m_dpr),
                                         uint32_t(height() * m_dpr), uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad), rows))
             m_autoscroll->stop();
@@ -520,6 +524,11 @@ void TerminalItem::pullFrame(bool full)
         byRow[r.row].append(RunData{r.col, r.width, qs(r.text), QRgb(r.fg), QRgb(r.bg), r.flags});
     }
     if (m_rowRuns.size() != m_rows) m_rowRuns.resize(m_rows);
+    if (m_rowMark.size() != m_rows) m_rowMark.fill(false, m_rows);
+    for (uint16_t row : f.dirty_rows)
+        if (row < m_rows) m_rowMark[row] = false;
+    for (uint16_t row : f.mark_rows)
+        if (row < m_rows) m_rowMark[row] = true;
     for (uint16_t row : f.dirty_rows) {
         if (row < m_rows) {
             m_rowRuns[row] = byRow.value(row);
@@ -553,7 +562,8 @@ void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
     p.setRenderHint(QPainter::TextAntialiasing);
 
     const qreal lineW = qMax<qreal>(1, qRound(m_dpr));
-    auto drawText = [&](int x, const QString& text, QRgb color, quint32 flags, int cells) {
+    // `room`: cells the glyph may use (its own, plus a blank neighbor).
+    auto drawText = [&](int x, const QString& text, QRgb color, quint32 flags, int cells, int roomCells = 0) {
         p.setPen(QColor::fromRgb(color));
         const QRawFont& raw = rawFont(flags);
         QVector<quint32> glyphs = raw.isValid() ? raw.glyphIndexesForString(text) : QVector<quint32>();
@@ -568,31 +578,57 @@ void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
             gr.setPositions(pos);
             p.drawGlyphRun(QPointF(0, 0), gr);
         } else {
-            // Symbols the terminal font lacks: let Qt pick a fallback font,
-            // centered in its cell(s) (CJK fallbacks are often narrower).
-            const QFont f = fontFor(flags);
+            // Symbols the terminal font lacks: let Qt pick a fallback font
+            // (emoji, CJK, symbols), shrunk to fit its cell(s) when it's
+            // bigger (color emoji usually are) and centered in them.
+            QFont f = fontFor(flags);
+            QFontMetricsF fm(f);
+            qreal adv = fm.horizontalAdvance(text);
+            const qreal room = qMax(cells, roomCells) * m_cw;
+            const qreal scale = qMin<qreal>(1.0, qMin(adv > 0 ? room / adv : 1.0, m_ch / qMax<qreal>(1, fm.height())));
+            qreal baseline = m_ascent;
+            if (scale < 0.98) {
+                f.setPixelSize(qMax(4, int(f.pixelSize() * scale)));
+                fm = QFontMetricsF(f);
+                adv = fm.horizontalAdvance(text);
+                baseline = (m_ch - fm.height()) / 2 + fm.ascent();
+            }
             p.setFont(f);
-            const qreal adv = QFontMetricsF(f).horizontalAdvance(text);
-            const qreal off = adv < cells * m_cw ? (cells * m_cw - adv) / 2 : 0;
-            p.drawText(QPointF(x + off, m_ascent), text);
+            // Centered in its own cell(s); spilling into the blank neighbor
+            // only as far as it needs.
+            const qreal own = cells * m_cw;
+            const qreal off = adv <= own ? (own - adv) / 2 : 0;
+            p.drawText(QPointF(x + off, baseline), text);
         }
     };
 
+    // Backgrounds first, then text: a glyph wider than its cell (an emoji,
+    // an italic overhang) must not be painted over by the next cell's color.
     for (const RunData& r : runs) {
+        if (!(r.flags & FLAG_HAS_BG)) continue;
+        QColor bgc = QColor::fromRgb(r.bg);
+        if (!m_keepOpaque) bgc.setAlphaF(1 - m_transparency);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.fillRect(r.col * m_cw, 0, r.width * m_cw, m_ch, bgc);
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    }
+    for (int ri = 0; ri < runs.size(); ++ri) {
+        const RunData& r = runs[ri];
         const int x = r.col * m_cw;
         const int w = r.width * m_cw;
-        if (r.flags & FLAG_HAS_BG) {
-            QColor bgc = QColor::fromRgb(r.bg);
-            if (!m_keepOpaque) bgc.setAlphaF(1 - m_transparency);
-            p.setCompositionMode(QPainter::CompositionMode_Source);
-            p.fillRect(x, 0, w, m_ch, bgc);
-            p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-        }
         if (r.flags & FLAG_INVISIBLE) continue;
+        // A one-cell symbol followed by a blank cell may spread into it (as
+        // Ghostty does), so emoji-style icons aren't shrunk to half size.
+        int roomCells = r.width;
+        if (r.width == 1 && r.text.size() <= 2) {
+            const RunData* next = ri + 1 < runs.size() ? &runs[ri + 1] : nullptr;
+            const bool blankNext = !next || next->col > r.col + 1 || next->text.startsWith(u' ');
+            if (blankNext && r.col + 1 < m_cols) roomCells = 2;
+        }
         QRgb fg = r.fg;
         if (r.flags & FLAG_FAINT) fg = blend(fg, (r.flags & FLAG_HAS_BG) ? r.bg : m_bg.rgb(), 1 - m_faintOpacity);
         const bool blank = r.text.trimmed().isEmpty();
-        if (!blank) drawText(x, r.text, fg, r.flags, r.width);
+        if (!blank) drawText(x, r.text, fg, r.flags, r.width, roomCells);
         if (r.flags & FLAG_UNDERLINE)
             p.fillRect(QRectF(x, qMin<qreal>(m_ch - lineW, m_ascent + lineW * 1.5), w, lineW), QColor::fromRgb(fg));
         if (r.flags & FLAG_STRIKE) p.fillRect(QRectF(x, m_ascent * 0.65, w, lineW), QColor::fromRgb(fg));
@@ -662,6 +698,25 @@ QSGNode* TerminalItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
         n->setSourceRect(QRectF(0, 0, img.width(), img.height()));
     }
 
+    // Shell-integration marks: a short tick in the left margin at each prompt.
+    int nMarks = 0;
+    if (m_showMarks && m_pad >= 2) {
+        for (int i = 0; i < m_rows && i < m_rowMark.size(); ++i) {
+            if (!m_rowMark[i]) continue;
+            if (nMarks >= node->marks.size()) {
+                QSGRectangleNode* r = win->createRectangleNode();
+                node->appendChildNode(r);
+                node->marks.append(r);
+            }
+            QSGRectangleNode* r = node->marks[nMarks++];
+            const qreal w = qMax<qreal>(2, qRound(m_pad * 0.45)) / m_dpr;
+            const qreal h = m_ch * 0.62 / m_dpr;
+            r->setRect(QRectF(qMax<qreal>(0.5, (m_pad / m_dpr - w) / 2), pad + i * m_ch / m_dpr + (m_ch / m_dpr - h) / 2, w, h));
+            r->setColor(m_markColor);
+        }
+    }
+    for (int i = nMarks; i < node->marks.size(); ++i) node->marks[i]->setRect(QRectF());
+
     // Visual bell flash and Find Cursor highlight, on top.
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (!node->overlay) {
@@ -693,6 +748,7 @@ QSGNode* TerminalItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
 void TerminalItem::keyPressEvent(QKeyEvent* e)
 {
     if (!m_session || m_exited) return QQuickItem::keyPressEvent(e);
+    if (applyKeyMapping(e)) return;
     const QByteArray text = e->text().toUtf8();
     if (m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), false, e->nativeVirtualKey())) {
         e->accept();
@@ -793,6 +849,15 @@ void TerminalItem::mousePressEvent(QMouseEvent* e)
 {
     forceActiveFocus(Qt::MouseFocusReason);
     const bool appWantsMouse = m_session && m_session->wants_mouse(uint32_t(e->modifiers()));
+    if (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier) && m_ctrlClickOpens && m_session) {
+        const QString link = qs(m_session->link_at(float(e->position().x() * m_dpr), float(e->position().y() * m_dpr),
+                                                   uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad)));
+        if (!link.isEmpty()) {
+            QDesktopServices::openUrl(QUrl(link));
+            e->accept();
+            return;
+        }
+    }
     if (e->button() == Qt::RightButton && !appWantsMouse) {
         if (m_rightClickPastes) paste();
         else emit contextMenuRequested(e->position().x(), e->position().y());
@@ -816,7 +881,10 @@ void TerminalItem::mouseMoveEvent(QMouseEvent* e)
     // Dragging a selection past the top or bottom keeps scrolling.
     if (m_selecting) {
         const bool outside = e->position().y() < m_pad / m_dpr || e->position().y() > height() - m_pad / m_dpr;
-        if (outside && !m_autoscroll->isActive()) m_autoscroll->start();
+        if (outside && !m_autoscroll->isActive()) {
+            m_autoscrollStart = QDateTime::currentMSecsSinceEpoch();
+            m_autoscroll->start();
+        }
     }
     e->accept();
 }
@@ -834,6 +902,13 @@ void TerminalItem::mouseReleaseEvent(QMouseEvent* e)
 
 void TerminalItem::hoverMoveEvent(QHoverEvent* e)
 {
+    // Ctrl over a link or file: the pointing hand.
+    if (m_session && m_ctrlClickOpens) {
+        const bool onLink = (e->modifiers() & Qt::ControlModifier)
+            && !m_session->link_at(float(e->position().x() * m_dpr), float(e->position().y() * m_dpr),
+                                   uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad)).empty();
+        setCursor(onLink ? Qt::PointingHandCursor : Qt::IBeamCursor);
+    }
     // Motion reports for programs that track the pointer (no buttons held).
     if (m_session) mouse(2, 0, e->position(), e->modifiers());
     QQuickItem::hoverMoveEvent(e);
@@ -863,32 +938,59 @@ void TerminalItem::scrollToRow(qreal row)
 
 void TerminalItem::wheelEvent(QWheelEvent* e)
 {
-    // Scrollback, smoothly: touchpads scroll by pixels and glide on after a
-    // flick; a mouse wheel moves three rows a notch. Programs that take the
-    // mouse (or full-screen ones) get wheel events/arrow keys as before.
+    // Scrollback with momentum that builds up. Touchpads (which report
+    // scroll phases) follow the fingers and glide on after a flick, and each
+    // flick made while still gliding adds to the speed. A mouse wheel gives
+    // each notch a push; notches in quick succession push harder and harder.
+    // Programs that take the mouse (or full-screen ones) get wheel events or
+    // arrow keys as before.
     if (m_session && m_session->scrolls_locally(uint32_t(e->modifiers()))) {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        const bool touchpad = !e->pixelDelta().isNull();
-        if (e->phase() == Qt::ScrollBegin || (!touchpad && e->phase() == Qt::NoScrollPhase)) m_momentum->stop();
-        if (touchpad) {
-            const qreal dy = e->pixelDelta().y();
-            if (e->phase() == Qt::ScrollEnd) {
-                if (std::abs(m_velocity) > 0.15 && now - m_lastWheelMs < 80) m_momentum->start();
-                else m_velocity = 0;
-            } else if (e->phase() == Qt::ScrollMomentum) {
-                scrollPixels(dy);   // the platform's own momentum (macOS)
-            } else {
+        const qreal rowH = m_ch / m_dpr;
+        const bool fingers = e->phase() != Qt::NoScrollPhase;
+        const qreal dy = !e->pixelDelta().isNull() ? e->pixelDelta().y() : e->angleDelta().y() / 120.0 * 3 * rowH;
+        if (fingers) {
+            switch (e->phase()) {
+            case Qt::ScrollBegin:
+                m_carry = m_momentum->isActive() ? m_velocity : 0;
                 m_momentum->stop();
+                m_fingerVelocity = 0;
+                m_lastWheelMs = now;
+                break;
+            case Qt::ScrollUpdate: {
                 const qreal dt = qMax<qint64>(1, now - m_lastWheelMs);
                 const qreal v = dy / dt;
-                m_velocity = dt > 100 ? v : 0.6 * v + 0.4 * m_velocity;
+                m_fingerVelocity = dt > 100 ? v : 0.6 * v + 0.4 * m_fingerVelocity;
                 m_lastWheelMs = now;
                 scrollPixels(dy);
+                break;
             }
-        } else {
-            // Three rows a notch (fractions for high-resolution wheels), eased.
-            m_smoothPending += e->angleDelta().y() / 120.0 * 3 * (m_ch / m_dpr);
-            if (!m_smooth->isActive()) m_smooth->start();
+            case Qt::ScrollEnd: {
+                qreal v = (now - m_lastWheelMs < 120) ? m_fingerVelocity : 0;
+                if (v != 0 && m_carry != 0 && (v > 0) == (m_carry > 0)) v += m_carry * 0.9;   // keeps building
+                m_carry = 0;
+                if (std::abs(v) > 0.05) {
+                    m_velocity = qBound<qreal>(-40, v, 40);
+                    m_decay = 0.955;
+                    m_momentum->start();
+                }
+                break;
+            }
+            case Qt::ScrollMomentum:
+                scrollPixels(dy);   // the platform's own momentum (macOS)
+                break;
+            default:
+                break;
+            }
+        } else if (dy != 0) {
+            const bool sameWay = m_momentum->isActive() && (m_velocity > 0) == (dy > 0);
+            m_streak = (sameWay && now - m_lastNotchMs < 300) ? qMin(m_streak + 1, 14) : 0;
+            m_lastNotchMs = now;
+            // About three rows for a lone notch; faster with every quick one.
+            const qreal push = dy / 200.0 * (1 + 0.35 * m_streak);
+            m_velocity = sameWay ? qBound<qreal>(-60, m_velocity + push, 60) : push;
+            m_decay = 0.92;
+            if (!m_momentum->isActive()) m_momentum->start();
         }
         e->accept();
         return;
@@ -910,7 +1012,10 @@ void TerminalItem::publishSelection()
     if (has) {
         // Copy on select (iTerm2's default, a preference); the X/Wayland
         // primary selection always.
-        if (m_copyOnSelect) QGuiApplication::clipboard()->setText(text, QClipboard::Clipboard);
+        if (m_copyOnSelect) {
+            QGuiApplication::clipboard()->setText(text, QClipboard::Clipboard);
+            emit copied(text);
+        }
         if (QGuiApplication::clipboard()->supportsSelection())
             QGuiApplication::clipboard()->setText(text, QClipboard::Selection);
     }
@@ -952,7 +1057,10 @@ void TerminalItem::copy()
 {
     if (!m_session) return;
     const QString text = qs(m_session->selected_text());
-    if (!text.isEmpty()) QGuiApplication::clipboard()->setText(text);
+    if (!text.isEmpty()) {
+        QGuiApplication::clipboard()->setText(text);
+        emit copied(text);
+    }
 }
 
 void TerminalItem::paste() { pasteText(QGuiApplication::clipboard()->text()); }
@@ -1082,6 +1190,77 @@ void TerminalItem::endFind()
     if (!m_session) return;
     m_session->find_clear();
     polish();
+}
+
+void TerminalItem::setKeyMappingsJson(const QString& v)
+{
+    if (v == m_keyMappingsJson) return;
+    m_keyMappingsJson = v;
+    m_keyMappings.clear();
+    const QJsonArray arr = QJsonDocument::fromJson(v.toUtf8()).array();
+    for (const QJsonValue& x : arr) {
+        const QJsonObject o = x.toObject();
+        const QKeySequence seq(o.value(u"key").toString());
+        if (seq.isEmpty()) continue;
+        m_keyMappings.append({seq, o.value(u"action").toString(), o.value(u"value").toString()});
+    }
+    emit optionsChanged();
+}
+
+static QByteArray unescapeText(const QString& s)
+{
+    QString out;
+    for (int i = 0; i < s.size(); ++i) {
+        if (s[i] == u'\\' && i + 1 < s.size()) {
+            const QChar c = s[++i];
+            if (c == u'n') out += u'\n';
+            else if (c == u'r') out += u'\r';
+            else if (c == u't') out += u'\t';
+            else if (c == u'e') out += QChar(0x1b);
+            else out += c;
+        } else {
+            out += s[i];
+        }
+    }
+    return out.toUtf8();
+}
+
+bool TerminalItem::applyKeyMapping(QKeyEvent* e)
+{
+    if (m_keyMappings.isEmpty()) return false;
+    const QKeySequence pressed(QKeyCombination(e->modifiers() & ~Qt::KeypadModifier, Qt::Key(e->key())));
+    for (const KeyMapping& m : std::as_const(m_keyMappings)) {
+        if (m.seq.matches(pressed) != QKeySequence::ExactMatch) continue;
+        QByteArray bytes;
+        if (m.action == u"send_text") bytes = unescapeText(m.value);
+        else if (m.action == u"send_escape") bytes = QByteArray("\x1b") + unescapeText(m.value);
+        else if (m.action == u"send_hex") {
+            for (const QString& h : m.value.split(u' ', Qt::SkipEmptyParts)) bytes.append(char(h.toUInt(nullptr, 16)));
+        } else if (m.action == u"action") {
+            emit keyAction(m.value);
+        }
+        if (!bytes.isEmpty()) m_session->send_text(rs(bytes));
+        e->accept();
+        return true;   // "ignore" swallows the key
+    }
+    return false;
+}
+
+bool TerminalItem::jumpToPrompt(int dir)
+{
+    if (!m_session) return false;
+    const bool ok = m_session->jump_to_prompt(dir);
+    polish();
+    return ok;
+}
+
+QString TerminalItem::selectLastOutput()
+{
+    if (!m_session) return QString();
+    const QString t = qs(m_session->select_last_output());
+    publishSelection();
+    polish();
+    return t;
 }
 
 void TerminalItem::findCursor()

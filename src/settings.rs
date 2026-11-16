@@ -50,6 +50,12 @@ pub struct Settings {
     pub focus_follows_mouse: bool,
     // -- Edit > Paste Special
     pub warn_multiline_paste: bool,
+    // -- Shell > Undo Close: seconds a closed session stays revivable (0: off).
+    pub undo_close_seconds: u32,
+    // -- Pointer: Ctrl+click opens URLs and files.
+    pub ctrl_click_opens: bool,
+    // -- Snippets (Edit > Snippets): text sent as if typed.
+    pub snippets: Vec<Snippet>,
     // -- Profiles
     pub default_profile: String,
     pub profiles: Vec<Profile>,
@@ -82,10 +88,48 @@ impl Default for Settings {
             right_click: "menu".into(),
             focus_follows_mouse: false,
             warn_multiline_paste: false,
+            undo_close_seconds: 5,
+            ctrl_click_opens: true,
+            snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),
             profiles: vec![Profile::default()],
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct Snippet {
+    pub title: String,
+    /// \\n, \\t and \\e are a newline, tab and escape.
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct Trigger {
+    pub regex: String,
+    /// "highlight", "notify", "bell" or "send".
+    pub action: String,
+    /// A color for highlight, a title for notify, text for send.
+    pub param: String,
+    pub enabled: bool,
+}
+
+impl Default for Trigger {
+    fn default() -> Self {
+        Self { regex: String::new(), action: "highlight".into(), param: "#d9b43b".into(), enabled: true }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct KeyMapping {
+    /// A key sequence such as "Ctrl+Alt+K".
+    pub key: String,
+    /// "send_text", "send_hex", "send_escape", "ignore" or "action".
+    pub action: String,
+    pub value: String,
 }
 
 /// One profile (iTerm2's Profiles panel, tab by tab).
@@ -140,6 +184,9 @@ pub struct Profile {
     pub visual_bell: bool,
     pub bell_icon: bool,
     pub notify_bell: bool,
+    pub notify_exit: bool,
+    /// Shell integration mark indicators at each prompt.
+    pub show_marks: bool,
     pub mouse_reporting: bool,
     pub alternate_scroll: bool,
     pub allow_title: bool,
@@ -151,9 +198,15 @@ pub struct Profile {
     pub confirm_close: String,
     /// Shell jobs that don't count as running jobs for "jobs".
     pub ignored_jobs: String,
+    /// Log every session's output to a file in `log_folder`.
+    pub auto_log: bool,
+    pub log_folder: String,
     // -- Keys
     /// Alt sends Esc+key ("esc") or the key itself ("normal").
     pub alt_mode: String,
+    pub key_mappings: Vec<KeyMapping>,
+    // -- Advanced
+    pub triggers: Vec<Trigger>,
 }
 
 impl Default for Profile {
@@ -195,6 +248,8 @@ impl Default for Profile {
             visual_bell: true,
             bell_icon: true,
             notify_bell: false,
+            notify_exit: false,
+            show_marks: true,
             mouse_reporting: true,
             alternate_scroll: true,
             allow_title: true,
@@ -202,7 +257,11 @@ impl Default for Profile {
             on_exit: "close".into(),
             confirm_close: "jobs".into(),
             ignored_jobs: "rlogin, ssh, slogin, telnet, sh, bash, zsh, fish, nu, tmux, screen".into(),
+            auto_log: false,
+            log_folder: "~/tessera-logs".into(),
             alt_mode: "esc".into(),
+            key_mappings: Vec::new(),
+            triggers: Vec::new(),
         }
     }
 }

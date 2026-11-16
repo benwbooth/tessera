@@ -15,6 +15,7 @@ Popup {
     property alias value: field.text
     property string placeholder: ""
     property var onAccept: null
+    property bool infoOnly: false
 
     function ask(opts) {
         title = opts.title || ""
@@ -25,6 +26,7 @@ Popup {
         placeholder = opts.placeholder || ""
         field.text = opts.value || ""
         onAccept = opts.onAccept || null
+        infoOnly = !!opts.infoOnly
         open()
     }
     function accept() {
@@ -93,6 +95,7 @@ Popup {
             Layout.rightMargin: 20
             Layout.bottomMargin: sheet.input ? 10 : 18
             text: sheet.message
+            textFormat: Text.PlainText
             color: Theme.textDim
             font.pixelSize: 13
             wrapMode: Text.WordWrap
@@ -137,7 +140,7 @@ Popup {
                 TapHandler { onTapped: sb.hit() }
                 Keys.onSpacePressed: sb.hit()
             }
-            SheetButton { text: "Cancel"; onHit: sheet.close() }
+            SheetButton { visible: !sheet.infoOnly; text: "Cancel"; onHit: sheet.close() }
             SheetButton { id: okButton; text: sheet.okText; primary: true; danger: sheet.destructive; onHit: sheet.accept() }
         }
     }

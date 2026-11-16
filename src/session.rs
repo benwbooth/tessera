@@ -12,7 +12,7 @@ use libghostty_vt::{
     fmt::{Format, Formatter, FormatterOptions},
     key, mouse,
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator},
-    screen::{CellWide, Screen},
+    screen::{CellWide, RowSemanticPrompt, Screen},
     selection::{
         gesture::{Autoscroll, AutoscrollTickEvent, DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
         Selection,
@@ -50,6 +50,16 @@ const MATCH_CURRENT_BG: u32 = 0xff9632;
 const MATCH_FG: u32 = 0x1a1a1a;
 
 const SCROLLBACK: usize = 10_000;
+
+/// libghostty limits scrollback in bytes, not lines: a row takes about
+/// 9.3 bytes per column (measured). Budget for 300 columns so at least
+/// `lines` rows are kept at any usual width (more when narrower).
+pub fn scrollback_bytes(lines: u32) -> usize {
+    if lines >= 10_000_000 {
+        return usize::MAX;
+    }
+    (lines as usize).saturating_mul(2_900) + (1 << 20)
+}
 
 enum Backend {
     Daemon { stream: UnixStream, reader: FrameReader, id: String },
@@ -100,6 +110,11 @@ pub struct Session {
     taken: bool,
     /// Minimum-contrast results per (fg, bg) pair.
     contrast_cache: std::collections::HashMap<(u32, u32), u32>,
+    triggers: Vec<(regex::Regex, TriggerSpec)>,
+    /// Screen row up to which output has been checked by triggers.
+    trigger_row: usize,
+    /// Trigger highlights: (row, start, end, color), sorted by row.
+    highlights: Vec<(usize, u16, u16, u32)>,
 }
 
 struct FindState {
@@ -123,6 +138,18 @@ struct Options2 {
     copy_trailing_newline: bool,
     /// iTerm2's Minimum Contrast, 0 (off) to 1.
     minimum_contrast: f64,
+    triggers: Vec<TriggerSpec>,
+}
+
+/// A trigger: when output matches `regex`, do `action` (highlight, notify,
+/// send, bell) with `param` (a color for highlight, text for send/notify).
+#[derive(serde::Deserialize, Clone, Default)]
+#[serde(default)]
+struct TriggerSpec {
+    regex: String,
+    action: String,
+    param: String,
+    enabled: bool,
 }
 
 impl Default for Options2 {
@@ -138,6 +165,7 @@ impl Default for Options2 {
             clipboard_access: true,
             copy_trailing_newline: false,
             minimum_contrast: 0.0,
+            triggers: Vec::new(),
         }
     }
 }
@@ -178,7 +206,7 @@ pub fn session_open(
         Backend::Tmux { shared, .. } => shared.borrow().grid,
         _ => (cols, rows),
     };
-    let mut term = Terminal::new(Options { cols, rows, max_scrollback: if scrollback > 0 { scrollback as usize } else { SCROLLBACK } }).map_err(|e| e.to_string())?;
+    let mut term = Terminal::new(Options { cols, rows, max_scrollback: scrollback_bytes(if scrollback > 0 { scrollback } else { SCROLLBACK as u32 }) }).map_err(|e| e.to_string())?;
     term.resize(cols, rows, cell_w.max(1), cell_h.max(1)).map_err(|e| e.to_string())?;
 
     let outbox: Rc<RefCell<Vec<u8>>> = Rc::default();
@@ -283,6 +311,9 @@ pub fn session_open(
         find: None,
         taken: false,
         contrast_cache: std::collections::HashMap::new(),
+        triggers: Vec::new(),
+        trigger_row: 0,
+        highlights: Vec::new(),
     });
     // A tmux pane may already have its captured contents waiting.
     if matches!(s.backend, Backend::Tmux { .. }) {
@@ -390,6 +421,7 @@ impl Session {
                                 let _ = f.write_all(&payload);
                             }
                             self.process_output(&payload);
+                            self.run_triggers();
                             sig |= SIG_DIRTY;
                         }
                         T_EXITED => self.exited = true,
@@ -428,6 +460,7 @@ impl Session {
                         let _ = f.write_all(&data);
                     }
                     self.term.vt_write(&data);
+                    self.run_triggers();
                     sig |= SIG_DIRTY;
                 }
                 if closed {
@@ -810,6 +843,12 @@ impl Session {
                 self.contrast_cache.clear();
                 self.force_full = true;
             }
+            self.triggers = o
+                .triggers
+                .iter()
+                .filter(|t| t.enabled && !t.regex.is_empty())
+                .filter_map(|t| regex::Regex::new(&t.regex).ok().map(|r| (r, t.clone())))
+                .collect();
             self.opts = o;
             let chars: Vec<char> = self.opts.word_chars.chars().collect();
             let _ = self.press.set_word_boundary_codepoints(&boundary_chars(&chars));
@@ -829,6 +868,7 @@ impl Session {
     }
 
     pub fn reset(&mut self) {
+        self.highlights.clear();
         self.term.reset();
         self.force_full = true;
         if self.gateway.is_none() {
@@ -841,7 +881,14 @@ impl Session {
             self.log = None;
             return true;
         }
-        match std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let path = match path.strip_prefix("~/") {
+            Some(rest) => format!("{}/{rest}", std::env::var("HOME").unwrap_or_default()),
+            None => path.to_string(),
+        };
+        if let Some(dir) = std::path::Path::new(&path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
             Ok(f) => {
                 self.log = Some(f);
                 true
@@ -990,6 +1037,225 @@ impl Session {
         }
     }
 
+    /// Text of one screen row (0 = top of the scrollback), and each
+    /// character's cell column.
+    fn row_text(&self, row: usize) -> (String, Vec<u16>) {
+        let cols = self.term.cols().unwrap_or(0);
+        let mut text = String::new();
+        let mut at = Vec::new();
+        let mut buf = ['\0'; 16];
+        for x in 0..cols {
+            let Ok(r) = self.term.grid_ref(Point::Screen(PointCoordinate { x, y: row as u32 })) else { break };
+            if let Ok(c) = r.cell() {
+                if matches!(c.wide(), Ok(CellWide::SpacerTail | CellWide::SpacerHead)) {
+                    continue;
+                }
+            }
+            let n = r.graphemes(&mut buf).unwrap_or(0);
+            if n == 0 {
+                text.push(' ');
+                at.push(x);
+            } else {
+                for c in &buf[..n] {
+                    text.push(*c);
+                    at.push(x);
+                }
+            }
+        }
+        (text, at)
+    }
+
+    fn total_rows(&self) -> usize {
+        self.term.total_rows().unwrap_or(0)
+    }
+
+    /// What Ctrl+click at this spot opens: an OSC 8 hyperlink, a URL in the
+    /// text, or an existing file named there (file:// URL). Empty if nothing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn link_at(&self, x: f32, y: f32, cell_w: u32, cell_h: u32, pad: u32) -> String {
+        let (cols, rows) = (self.term.cols().unwrap_or(1), self.term.rows().unwrap_or(1));
+        let cx = ((x - pad as f32).max(0.0) / cell_w.max(1) as f32).min(cols as f32 - 1.0) as u16;
+        let cy = ((y - pad as f32).max(0.0) / cell_h.max(1) as f32).min(rows as f32 - 1.0) as u32;
+        if let Ok(r) = self.term.grid_ref(Point::Viewport(PointCoordinate { x: cx, y: cy })) {
+            let mut buf = vec![0u8; 2048];
+            if let Ok(n) = r.hyperlink_uri(&mut buf) {
+                if n > 0 {
+                    return String::from_utf8_lossy(&buf[..n]).into_owned();
+                }
+            }
+        }
+        let row = self.view_top() + cy as usize;
+        let (text, at) = self.row_text(row);
+        let Some(i) = at.iter().position(|&c| c >= cx) else { return String::new() };
+        let byte = text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(0);
+        let url = regex::Regex::new(r#"(?:https?|ftp|file)://[^\s"'<>()\[\]]+|www\.[^\s"'<>()\[\]]+"#).unwrap();
+        for m in url.find_iter(&text) {
+            if m.start() <= byte && byte < m.end() {
+                let u = m.as_str().trim_end_matches(['.', ',', ';', ':', '!', '?']);
+                return if u.starts_with("www.") { format!("https://{u}") } else { u.to_string() };
+            }
+        }
+        // A path: the word under the pointer, if it names an existing file.
+        let is_path = |c: char| c.is_alphanumeric() || "/._-~+@%=:".contains(c);
+        let chars: Vec<char> = text.chars().collect();
+        if i >= chars.len() || !is_path(chars[i]) {
+            return String::new();
+        }
+        let (mut a, mut b) = (i, i);
+        while a > 0 && is_path(chars[a - 1]) {
+            a -= 1;
+        }
+        while b + 1 < chars.len() && is_path(chars[b + 1]) {
+            b += 1;
+        }
+        let word: String = chars[a..=b].iter().collect();
+        let word = word.trim_end_matches(['.', ',', ';', ':']);
+        // file:line:col (compilers, grep -n): open the file.
+        let plain = word.split(':').next().unwrap_or(word);
+        let home = std::env::var("HOME").unwrap_or_default();
+        let path = if let Some(rest) = plain.strip_prefix("~/") {
+            std::path::PathBuf::from(&home).join(rest)
+        } else if plain.starts_with('/') {
+            std::path::PathBuf::from(plain)
+        } else {
+            let base = self.pwd();
+            if base.is_empty() { return String::new() }
+            std::path::PathBuf::from(base).join(plain)
+        };
+        if !plain.is_empty() && path.exists() {
+            return format!("file://{}", path.display());
+        }
+        String::new()
+    }
+
+    /// Screen rows where a shell prompt starts (shell integration, OSC 133).
+    fn prompt_rows(&self) -> Vec<usize> {
+        let total = self.total_rows();
+        (0..total)
+            .filter(|&y| {
+                self.term
+                    .grid_ref(Point::Screen(PointCoordinate { x: 0, y: y as u32 }))
+                    .ok()
+                    .and_then(|r| r.row().ok())
+                    .and_then(|r| r.semantic_prompt().ok())
+                    == Some(RowSemanticPrompt::Prompt)
+            })
+            .collect()
+    }
+
+    /// Scroll to the previous (dir < 0) or next shell prompt. False if none.
+    pub fn jump_to_prompt(&mut self, dir: i32) -> bool {
+        let top = self.view_top();
+        let rows = self.prompt_rows();
+        let target = if dir < 0 { rows.iter().rev().find(|&&r| r < top).copied() } else { rows.iter().find(|&&r| r > top).copied() };
+        match target {
+            Some(r) => {
+                self.term.scroll_viewport(ScrollViewport::Row(r));
+                self.force_full = true;
+                true
+            }
+            None => {
+                if dir > 0 {
+                    self.term.scroll_viewport(ScrollViewport::Bottom);
+                }
+                false
+            }
+        }
+    }
+
+    /// Select the output of the last finished command (between the last two
+    /// prompts, without the command line). Returns the text.
+    pub fn select_last_output(&mut self) -> String {
+        let prompts = self.prompt_rows();
+        if prompts.len() < 2 {
+            return String::new();
+        }
+        let (p1, p2) = (prompts[prompts.len() - 2], prompts[prompts.len() - 1]);
+        // The command line itself: rows from p1 that hold input or prompt.
+        let mut start = p1 + 1;
+        while start < p2 {
+            let out = self
+                .term
+                .grid_ref(Point::Screen(PointCoordinate { x: 0, y: start as u32 }))
+                .ok()
+                .and_then(|r| r.row().ok())
+                .and_then(|r| r.semantic_prompt().ok());
+            if out != Some(RowSemanticPrompt::Continuation) {
+                break;
+            }
+            start += 1;
+        }
+        let mut end = p2.saturating_sub(1);
+        while end > start && self.row_text(end).0.trim().is_empty() {
+            end -= 1;
+        }
+        if start > end || start >= p2 {
+            return String::new();
+        }
+        let cols = self.term.cols().unwrap_or(1);
+        let (Ok(a), Ok(b)) = (
+            self.term.grid_ref(Point::Screen(PointCoordinate { x: 0, y: start as u32 })),
+            self.term.grid_ref(Point::Screen(PointCoordinate { x: cols - 1, y: end as u32 })),
+        ) else {
+            return String::new();
+        };
+        let sel = Selection::new(a, b, false);
+        let _ = self.term.set_selection(Some(&sel));
+        self.selected = format_selection(&self.term, &sel);
+        self.selected_html = format_selection_as(&self.term, &sel, Format::Html, true);
+        self.selected_vt = format_selection_as(&self.term, &sel, Format::Vt, true);
+        self.force_full = true;
+        self.selected.clone()
+    }
+
+    /// Check finished lines of new output against the profile's triggers.
+    fn run_triggers(&mut self) {
+        if self.triggers.is_empty() {
+            return;
+        }
+        let total = self.total_rows();
+        let rows = self.term.rows().unwrap_or(1) as usize;
+        let cursor = (total.saturating_sub(rows)) + self.term.cursor_y().unwrap_or(0) as usize;
+        if self.trigger_row > total {
+            self.trigger_row = 0;
+        }
+        let from = self.trigger_row.max(cursor.saturating_sub(500));
+        let mut sends = Vec::new();
+        for row in from..cursor {
+            let (text, at) = self.row_text(row);
+            for (re, t) in &self.triggers {
+                for m in re.find_iter(&text) {
+                    match t.action.as_str() {
+                        "highlight" => {
+                            let i0 = text[..m.start()].chars().count();
+                            let i1 = text[..m.end()].chars().count();
+                            let start = at.get(i0).copied().unwrap_or(0);
+                            let end = at.get(i1.saturating_sub(1)).copied().map(|c| c + 1).unwrap_or(start + 1);
+                            let color = crate::settings::hex_rgb(&t.param).map(rgb).unwrap_or(0xd9b43b);
+                            self.highlights.push((row, start, end, color));
+                        }
+                        "notify" => self.events.push(json!({"type": "notify", "title": if t.param.is_empty() { "Trigger" } else { t.param.as_str() }, "body": m.as_str()})),
+                        "bell" => self.bell.set(true),
+                        "send" => sends.push(t.param.replace("\\n", "\n").replace("\\r", "\r")),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.trigger_row = cursor;
+        if self.highlights.len() > 4000 {
+            let cut = self.highlights.len() - 4000;
+            self.highlights.drain(..cut);
+        }
+        self.highlights.sort_by_key(|h| h.0);
+        for s in sends {
+            self.write_input(s.as_bytes());
+        }
+        if !self.highlights.is_empty() {
+            self.force_full = true;
+        }
+    }
+
     pub fn set_theme(&mut self, theme_json: &str) {
         let Ok(th) = serde_json::from_str::<crate::settings::Theme>(theme_json) else { return };
         use crate::settings::hex_rgb;
@@ -1061,7 +1327,8 @@ impl Session {
     pub fn frame(&mut self, out: &mut Frame, force_full: bool) -> bool {
         out.dirty_rows.clear();
         out.runs.clear();
-        let view_top = if self.find.is_some() { self.view_top() } else { 0 };
+        let view_top = if self.find.is_some() || !self.highlights.is_empty() { self.view_top() } else { 0 };
+        out.mark_rows.clear();
         let Ok(snap) = self.rs.update(&self.term) else { return false };
         let dirty = snap.dirty().unwrap_or(Dirty::Full);
         let cols = snap.cols().unwrap_or(0);
@@ -1109,6 +1376,16 @@ impl Session {
                 || Some(y) == old_cursor_row;
             if want {
                 out.dirty_rows.push(y);
+                if row.raw_row().ok().and_then(|r| r.semantic_prompt().ok()) == Some(RowSemanticPrompt::Prompt) {
+                    out.mark_rows.push(y);
+                }
+                let abs_row = view_top + y as usize;
+                let row_highlights: Vec<(u16, u16, u32)> = if self.highlights.is_empty() {
+                    Vec::new()
+                } else {
+                    let first = self.highlights.partition_point(|h| h.0 < abs_row);
+                    self.highlights[first..].iter().take_while(|h| h.0 == abs_row).map(|h| (h.1, h.2, h.3)).collect()
+                };
                 // Find matches on this row: (start, end, is_current).
                 let row_matches: Vec<(u16, u16, bool)> = match self.find.as_ref() {
                     Some(f) => {
@@ -1191,6 +1468,11 @@ impl Session {
                                 .entry((fg, bg))
                                 .or_insert_with(|| crate::contrast::ensure(fg, bg, target));
                         }
+                        if let Some(&(_, _, color)) = row_highlights.iter().find(|(a, b, _)| *a <= x && x < *b) {
+                            bg = color;
+                            fg = if crate::contrast::luminance(color) > 0.4 { 0x1a1a1a } else { 0xffffff };
+                            has_bg = true;
+                        }
                         if let Some(&(_, _, cur)) = row_matches.iter().find(|(a, b, _)| *a <= x && x < *b) {
                             bg = if cur { MATCH_CURRENT_BG } else { MATCH_BG };
                             fg = MATCH_FG;
@@ -1271,6 +1553,22 @@ impl Drop for Session {
         // going away ends its tmux tabs.
         if let Some(gw) = self.gateway.take() {
             tmux::unregister(&gw.borrow().key);
+        }
+    }
+}
+
+#[cfg(test)]
+mod scrollback_tests {
+    use libghostty_vt::{terminal::Options, Terminal};
+
+    #[test]
+    fn keeps_at_least_the_configured_lines() {
+        for (cols, lines) in [(80u16, 1000u32), (200, 5000), (300, 2000)] {
+            let mut t = Terminal::new(Options { cols, rows: 24, max_scrollback: super::scrollback_bytes(lines) }).unwrap();
+            for i in 0..(lines as usize * 3) {
+                t.vt_write(format!("line {i}\r\n").as_bytes());
+            }
+            assert!(t.scrollback_rows().unwrap() >= lines as usize, "{cols} cols: {} < {lines}", t.scrollback_rows().unwrap());
         }
     }
 }

@@ -7,6 +7,8 @@ mod keymap;
 mod launchers;
 mod proto;
 mod settings;
+mod shell_integration;
+mod snapshot;
 mod session;
 mod tmux;
 

@@ -255,6 +255,85 @@ Window {
         TapHandler { onTapped: if (pb.enabled2) pb.clicked() }
     }
 
+    // Lists in profiles/settings: replace the whole array.
+    function editItem(list, i, field, value) {
+        const copy = JSON.parse(JSON.stringify(list || []))
+        copy[i][field] = value
+        return copy
+    }
+    function removeItem(list, i) {
+        const copy = JSON.parse(JSON.stringify(list || []))
+        copy.splice(i, 1)
+        return copy
+    }
+
+    // Records a key combination: click it, then press the keys.
+    component KeyField: Rectangle {
+        id: kf
+        property string value: ""
+        property bool recording: false
+        signal recorded(string seq)
+        implicitWidth: 150
+        implicitHeight: 30
+        radius: 7
+        color: Theme.field
+        border.color: recording || activeFocus ? Theme.accent : Theme.divider
+        Text {
+            anchors.centerIn: parent
+            text: kf.recording ? "Press keys…" : (kf.value || "Click to record")
+            color: kf.value && !kf.recording ? Theme.text : Theme.textDim
+            font.pixelSize: 12
+        }
+        TapHandler { onTapped: { kf.recording = true; kf.forceActiveFocus() } }
+        function keyName(e) {
+            const special = {}
+            special[Qt.Key_Up] = "Up"; special[Qt.Key_Down] = "Down"; special[Qt.Key_Left] = "Left"; special[Qt.Key_Right] = "Right"
+            special[Qt.Key_Home] = "Home"; special[Qt.Key_End] = "End"; special[Qt.Key_PageUp] = "PgUp"; special[Qt.Key_PageDown] = "PgDown"
+            special[Qt.Key_Tab] = "Tab"; special[Qt.Key_Backtab] = "Tab"; special[Qt.Key_Return] = "Return"; special[Qt.Key_Enter] = "Enter"
+            special[Qt.Key_Escape] = "Esc"; special[Qt.Key_Backspace] = "Backspace"; special[Qt.Key_Delete] = "Del"
+            special[Qt.Key_Insert] = "Ins"; special[Qt.Key_Space] = "Space"
+            if (special[e.key]) return special[e.key]
+            if (e.key >= Qt.Key_F1 && e.key <= Qt.Key_F24) return "F" + (e.key - Qt.Key_F1 + 1)
+            if (e.key >= 0x20 && e.key < 0x7f) return String.fromCharCode(e.key).toUpperCase()
+            return ""
+        }
+        Keys.onPressed: (e) => {
+            if (!kf.recording) return
+            e.accepted = true
+            if ([Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta].indexOf(e.key) >= 0) return
+            const k = keyName(e)
+            if (k === "") return
+            let mods = ""
+            if (e.modifiers & Qt.ControlModifier) mods += "Ctrl+"
+            if (e.modifiers & Qt.AltModifier) mods += "Alt+"
+            if (e.modifiers & Qt.ShiftModifier) mods += "Shift+"
+            if (e.modifiers & Qt.MetaModifier) mods += "Meta+"
+            kf.recording = false
+            kf.recorded(mods + k)
+        }
+        onActiveFocusChanged: if (!activeFocus) recording = false
+    }
+
+    component SmallButton: Rectangle {
+        id: smb
+        property string glyph: "×"
+        signal hit()
+        implicitWidth: 26; implicitHeight: 26; radius: 6
+        color: smh.hovered ? Theme.tabHover : "transparent"
+        Text { anchors.centerIn: parent; text: smb.glyph; color: Theme.textDim; font.pixelSize: 14 }
+        HoverHandler { id: smh }
+        TapHandler { onTapped: smb.hit() }
+    }
+
+    component ChoiceBox: ComboBox {
+        property var values: []
+        property string value: ""
+        signal chosen(string v)
+        implicitWidth: 170
+        model: values.map(v => v[1])
+        currentIndex: Math.max(0, values.findIndex(v => v[0] === value))
+        onActivated: (i) => chosen(values[i][0])
+    }
     // A theme as a little terminal: prompt, a command, the ANSI colors.
     component ThemeCard: Item {
         id: card
@@ -363,7 +442,8 @@ Window {
                             { id: "general", label: "General", glyph: "⚙" },
                             { id: "appearance", label: "Appearance", glyph: "◐" },
                             { id: "profiles", label: "Profiles", glyph: "❯_" },
-                            { id: "arrangements", label: "Arrangements", glyph: "▤" },
+                            { id: "arrangements", label: "Arrangements", glyph: "\u25a4" },
+                            { id: "snippets", label: "Snippets", glyph: "\u2702" },
                             { id: "pointer", label: "Pointer", glyph: "↖" },
                             { id: "about", label: "About", glyph: "i" }
                         ]
@@ -466,7 +546,7 @@ Window {
                             { label: "General", value: "general" }, { label: "Colors", value: "colors" },
                             { label: "Text", value: "text" }, { label: "Window", value: "window" },
                             { label: "Terminal", value: "terminal" }, { label: "Session", value: "session" },
-                            { label: "Keys", value: "keys" }
+                            { label: "Keys", value: "keys" }, { label: "Advanced", value: "advanced" }
                         ]
                         value: prefs.profileTab
                         onPicked: (v) => prefs.profileTab = v
@@ -502,6 +582,17 @@ Window {
                             SectionTitle { text: "Closing" }
                             ToggleRow { label: "Confirm closing multiple sessions"; checked: prefs.settings.confirm_close_multiple; onToggled: (on) => prefs.setG("confirm_close_multiple", on) }
                             ToggleRow { label: "Confirm closing the window"; checked: prefs.settings.confirm_quit; onToggled: (on) => prefs.setG("confirm_quit", on) }
+                            Row2 {
+                                label: "Undo Close"
+                                hint: "A closed tab or pane can be brought back (Ctrl+Shift+Z) for this long; its shell keeps running meanwhile."
+                                Stepper {
+                                    value: prefs.settings.undo_close_seconds
+                                    step: 5; from: 0; to: 600
+                                    display: prefs.settings.undo_close_seconds > 0 ? prefs.settings.undo_close_seconds + " s" : "Off"
+                                    onMoved: (v) => prefs.setG("undo_close_seconds", Math.round(v))
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
 
                             SectionTitle { text: "Selection" }
                             ToggleRow { label: "Copy to clipboard on selection"; hint: "The middle-click selection always gets it."; checked: prefs.settings.copy_on_select; onToggled: (on) => prefs.setG("copy_on_select", on) }
@@ -882,6 +973,13 @@ Window {
                             ToggleRow { label: "Silence bell"; checked: prefs.prof.silence_bell; onToggled: (on) => prefs.setP("silence_bell", on) }
                             ToggleRow { label: "Flash visual bell"; checked: prefs.prof.visual_bell; onToggled: (on) => prefs.setP("visual_bell", on) }
                             ToggleRow { label: "Show bell icon in tabs"; checked: prefs.prof.bell_icon; onToggled: (on) => prefs.setP("bell_icon", on) }
+
+                            SectionTitle { text: "Notifications" }
+                            ToggleRow { label: "Notify on bell"; hint: "A desktop notification when a background tab, or this window while you're elsewhere, rings the bell."; checked: prefs.prof.notify_bell; onToggled: (on) => prefs.setP("notify_bell", on) }
+                            ToggleRow { label: "Notify when a session ends"; hint: "When it isn't the tab you're looking at."; checked: prefs.prof.notify_exit; onToggled: (on) => prefs.setP("notify_exit", on) }
+
+                            SectionTitle { text: "Shell Integration" }
+                            ToggleRow { label: "Show mark indicators"; hint: "A tick in the left margin at each prompt. Needs shell integration (\u2630 \u203a Install Shell Integration)."; checked: prefs.prof.show_marks; onToggled: (on) => prefs.setP("show_marks", on) }
                         }
 
                         // ================= Profiles: Session =================
@@ -919,7 +1017,15 @@ Window {
                                 }
                                 Item { Layout.fillWidth: true }
                             }
-                            Hint { text: "Logging: Session › Log › Log to File. With “Restore sessions” on (General), sessions outlive the window." }
+                            SectionTitle { text: "Logging" }
+                            ToggleRow { label: "Automatically log session output"; hint: "Every new session of this profile writes its output (raw, with escape sequences) to a file."; checked: prefs.prof.auto_log; onToggled: (on) => prefs.setP("auto_log", on) }
+                            Row2 {
+                                visible: prefs.prof.auto_log
+                                label: "Folder"
+                                Field { saved: prefs.prof.log_folder || ""; onCommit: (t) => prefs.setP("log_folder", t) }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Hint { text: "Logging one session by hand: Session \u203a Log \u203a Log to File. With \u201cRestore sessions\u201d on (General), sessions outlive the window." }
                         }
 
                         // ================= Profiles: Keys =================
@@ -940,8 +1046,114 @@ Window {
                                 Item { Layout.fillWidth: true }
                             }
                             Hint { text: "Programs can turn on the Kitty keyboard protocol or application keypad mode themselves; both are supported." }
+
+                            SectionTitle { text: "Key Mappings" }
+                            Hint { text: "A key here does something else instead of reaching the program. In text, \\n is a newline, \\t a tab and \\e escape." }
+                            Repeater {
+                                model: prefs.prof.key_mappings || []
+                                delegate: RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    KeyField { value: modelData.key; onRecorded: (k) => prefs.setP("key_mappings", prefs.editItem(prefs.prof.key_mappings, index, "key", k)) }
+                                    ChoiceBox {
+                                        values: [["send_text", "Send text"], ["send_escape", "Send Esc +"], ["send_hex", "Send hex codes"], ["action", "Run action"], ["ignore", "Ignore"]]
+                                        value: modelData.action
+                                        onChosen: (v) => prefs.setP("key_mappings", prefs.editItem(prefs.prof.key_mappings, index, "action", v))
+                                    }
+                                    ChoiceBox {
+                                        visible: modelData.action === "action"
+                                        values: [["new_tab", "New tab"], ["new_window", "New window"], ["close", "Close pane"], ["split_right", "Split right"], ["split_down", "Split down"],
+                                                 ["next_tab", "Next tab"], ["previous_tab", "Previous tab"], ["next_pane", "Next pane"], ["previous_pane", "Previous pane"],
+                                                 ["maximize_pane", "Maximize pane"], ["find", "Find"], ["copy", "Copy"], ["paste", "Paste"], ["clear_buffer", "Clear buffer"],
+                                                 ["previous_prompt", "Previous prompt"], ["next_prompt", "Next prompt"], ["select_last_output", "Select last output"],
+                                                 ["undo_close", "Undo close"], ["fullscreen", "Full screen"], ["preferences", "Preferences"]]
+                                        value: modelData.value
+                                        onChosen: (v) => prefs.setP("key_mappings", prefs.editItem(prefs.prof.key_mappings, index, "value", v))
+                                    }
+                                    Field {
+                                        visible: modelData.action !== "action" && modelData.action !== "ignore"
+                                        saved: modelData.value
+                                        placeholderText: modelData.action === "send_hex" ? "0x1b 0x5b 0x41" : "text"
+                                        onCommit: (t) => prefs.setP("key_mappings", prefs.editItem(prefs.prof.key_mappings, index, "value", t))
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    SmallButton { onHit: prefs.setP("key_mappings", prefs.removeItem(prefs.prof.key_mappings, index)) }
+                                }
+                            }
+                            PlainButton { text: "Add Key Mapping"; onClicked: prefs.setP("key_mappings", (prefs.prof.key_mappings || []).concat([{ key: "", action: "send_text", value: "" }])) }
                         }
 
+                        // ================= Profiles: Advanced =================
+                        ColumnLayout {
+                            visible: prefs.page === "profiles" && prefs.profileTab === "advanced"
+                            Layout.fillWidth: true
+                            Layout.margins: 24
+                            spacing: 12
+
+                            SectionTitle { text: "Triggers" }
+                            Hint { text: "When a line of output matches a regular expression: highlight the match, post a notification, ring the bell, or send text back (\\n is Enter)." }
+                            Repeater {
+                                model: prefs.prof.triggers || []
+                                delegate: RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Toggle { checked: modelData.enabled; onToggled: (on) => prefs.setP("triggers", prefs.editItem(prefs.prof.triggers, index, "enabled", on)) }
+                                    Field {
+                                        saved: modelData.regex
+                                        placeholderText: "regular expression"
+                                        font.family: "monospace"
+                                        onCommit: (t) => prefs.setP("triggers", prefs.editItem(prefs.prof.triggers, index, "regex", t))
+                                    }
+                                    ChoiceBox {
+                                        values: [["highlight", "Highlight"], ["notify", "Notify"], ["bell", "Ring bell"], ["send", "Send text"]]
+                                        value: modelData.action
+                                        onChosen: (v) => prefs.setP("triggers", prefs.editItem(prefs.prof.triggers, index, "action", v))
+                                    }
+                                    Field {
+                                        visible: modelData.action !== "bell"
+                                        Layout.maximumWidth: 160
+                                        saved: modelData.param
+                                        placeholderText: modelData.action === "highlight" ? "#d9b43b" : (modelData.action === "notify" ? "title" : "text")
+                                        onCommit: (t) => prefs.setP("triggers", prefs.editItem(prefs.prof.triggers, index, "param", t))
+                                    }
+                                    SmallButton { onHit: prefs.setP("triggers", prefs.removeItem(prefs.prof.triggers, index)) }
+                                }
+                            }
+                            PlainButton { text: "Add Trigger"; onClicked: prefs.setP("triggers", (prefs.prof.triggers || []).concat([{ regex: "", action: "highlight", param: "#d9b43b", enabled: true }])) }
+                        }
+
+                        // ================= Snippets =================
+                        ColumnLayout {
+                            visible: prefs.page === "snippets"
+                            Layout.fillWidth: true
+                            Layout.margins: 24
+                            spacing: 12
+
+                            SectionTitle { text: "Snippets" }
+                            Hint { text: "Text sent to the terminal as if typed (Edit › Snippets). \\n is Enter, \\t Tab, \\e Escape." }
+                            Repeater {
+                                model: prefs.settings.snippets || []
+                                delegate: RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Field {
+                                        Layout.maximumWidth: 180
+                                        saved: modelData.title
+                                        placeholderText: "Title"
+                                        onCommit: (t) => prefs.setG("snippets", prefs.editItem(prefs.settings.snippets, index, "title", t))
+                                    }
+                                    Field {
+                                        Layout.maximumWidth: 1000
+                                        saved: modelData.text
+                                        placeholderText: "Text"
+                                        font.family: "monospace"
+                                        onCommit: (t) => prefs.setG("snippets", prefs.editItem(prefs.settings.snippets, index, "text", t))
+                                    }
+                                    SmallButton { onHit: prefs.setG("snippets", prefs.removeItem(prefs.settings.snippets, index)) }
+                                }
+                            }
+                            PlainButton { text: "Add Snippet"; onClicked: prefs.setG("snippets", (prefs.settings.snippets || []).concat([{ title: "New Snippet", text: "" }])) }
+                        }
                         // ================= Arrangements =================
                         ColumnLayout {
                             visible: prefs.page === "arrangements"
@@ -988,6 +1200,7 @@ Window {
 
                             SectionTitle { text: "General" }
                             ToggleRow { label: "Middle click pastes the selection"; checked: prefs.settings.middle_click_pastes; onToggled: (on) => prefs.setG("middle_click_pastes", on) }
+                            ToggleRow { label: "Ctrl+click opens URLs and files"; hint: "Links (including OSC 8 hyperlinks), and paths of files that exist, such as file:line from compiler errors."; checked: prefs.settings.ctrl_click_opens; onToggled: (on) => prefs.setG("ctrl_click_opens", on) }
                             Row2 {
                                 label: "Right click"
                                 Segmented {

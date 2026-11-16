@@ -150,3 +150,4 @@ mod tests {
         assert_eq!(search(&Rows { first: 0, first_col: 0, lines: lines.clone() }, &re).len(), 2);
     }
 }
+

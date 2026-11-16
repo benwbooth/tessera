@@ -72,7 +72,7 @@ ApplicationWindow {
             allow_title: p.allow_title, bracketed_paste: p.bracketed_paste, alt_mode: p.alt_mode,
             word_chars: settings.word_chars, triple_click_wrapped: settings.triple_click_wrapped,
             clipboard_access: settings.clipboard_access, copy_trailing_newline: settings.copy_trailing_newline,
-            minimum_contrast: p.minimum_contrast
+            minimum_contrast: p.minimum_contrast, triggers: p.triggers || []
         })
     }
 
@@ -113,6 +113,10 @@ ApplicationWindow {
             Binding { target: tp.view; property: "rightClickPastes"; value: win.settings.right_click === "paste" }
             Binding { target: tp.view; property: "focusFollowsMouse"; value: win.settings.focus_follows_mouse }
             Binding { target: tp.view; property: "broadcastTo"; value: win.broadcastTargets(tp) }
+            Binding { target: tp.view; property: "showMarks"; value: tp.prof.show_marks }
+            Binding { target: tp.view; property: "markColor"; value: Theme.accent }
+            Binding { target: tp.view; property: "ctrlClickOpens"; value: win.settings.ctrl_click_opens }
+            Binding { target: tp.view; property: "keyMappingsJson"; value: JSON.stringify(tp.prof.key_mappings || []) }
         }
     }
     Component { id: splitComp; PaneSplit {} }
@@ -181,7 +185,10 @@ ApplicationWindow {
         })
         p.view.exitedChanged.connect(function() {
             if (!p.view.exited || p.view.tmuxPane !== "" || p.taken) return
-            const action = profileFor(p.profileName).on_exit
+            const exitProf = profileFor(p.profileName)
+            if (exitProf.notify_exit && (!win.active || tabOf(p) !== tabs[currentTab]))
+                controller.notify("Session ended", (tabOf(p) ? tabOf(p).tabTitle : exitProf.name))
+            const action = exitProf.on_exit
             if (action === "restart") Qt.callLater(function() { p.view.restart() })
             else if (action === "keep") p.view.showMessage("\n\u001b[2m[Process completed]\u001b[0m\n")
             else Qt.callLater(closePane, p, false)
@@ -192,7 +199,20 @@ ApplicationWindow {
         })
         p.view.bell.connect(function() {
             const t = tabOf(p)
-            if (t && profileFor(p.profileName).bell_icon && (t !== tabs[currentTab] || !win.active)) t.bell = true
+            const prof = profileFor(p.profileName)
+            const away = t !== tabs[currentTab] || !win.active
+            if (t && prof.bell_icon && away) t.bell = true
+            if (prof.notify_bell && away) controller.notify("Bell in \u201c" + (t ? t.tabTitle : "Tessera") + "\u201d", p.view.title || "")
+        })
+        p.view.copied.connect(function(text) { addPasteHistory(text) })
+        p.view.keyAction.connect(function(name) { runAction(name) })
+        p.view.sessionIdChanged.connect(function() {
+            const prof = profileFor(p.profileName)
+            if (prof.auto_log && p.view.sessionId !== "" && !p.view.logging && p.view.tmuxPane === "") {
+                const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19)
+                const folder = (prof.log_folder || "~/tessera-logs").replace(/\/$/, "")
+                p.view.startLogging(folder + "/" + prof.name.replace(/[^A-Za-z0-9_-]/g, "_") + "-" + stamp + ".log")
+            }
         })
         p.view.tmuxEvent.connect(function(ev) { onTmuxEvent(p.view, ev) })
         p.view.openFailed.connect(function(msg) { console.warn("tessera: " + msg) })
@@ -265,7 +285,9 @@ ApplicationWindow {
         if (maximizedPane) toggleMaximize()
         if (kill) {
             if (p.view.tmuxPaneId >= 0) { p.view.tmuxCommand("kill-pane -t %" + p.view.tmuxPaneId); return }
-            p.view.killSession()
+            if (!p.view.exited && settings.undo_close_seconds > 0 && p.view.sessionId !== "")
+                retire({ title: "", color: "", profile: p.profileName, root: serializeNode(p, true) })
+            else p.view.killSession()
         }
         const h = p.host
         const idx = indexIn(h, p)
@@ -458,7 +480,8 @@ ApplicationWindow {
         }
         const panes = panesIn(t.root, [])
         const doIt = function() {
-            for (const p of panes) p.view.killSession()
+            if (settings.undo_close_seconds > 0) retire(serializeTab(t, true))
+            else for (const p of panes) p.view.killSession()
             removeTab(t)
         }
         if (panes.length > 1 && settings.confirm_close_multiple)
@@ -546,7 +569,76 @@ ApplicationWindow {
         finishClose()
     }
 
+    // ---- Undo Close: closed sessions stay alive a few seconds -------------
+
+    property var closedStack: []   // [{layout, ids, timer}]
+    function retire(layout) {
+        const ids = Object.keys(sessionIds(layout.root, {}))
+        const entry = { layout: layout, ids: ids, timer: null }
+        entry.timer = later(settings.undo_close_seconds * 1000, function() {
+            const i = closedStack.indexOf(entry)
+            if (i >= 0) { closedStack.splice(i, 1); closedStack = closedStack.slice() }
+            for (const id of ids) controller.killSession(id)
+        })
+        closedStack.push(entry)
+        closedStack = closedStack.slice()
+    }
+    function undoClose() {
+        const entry = closedStack.pop()
+        if (!entry) return
+        closedStack = closedStack.slice()
+        if (entry.timer) entry.timer.stop()
+        newTab({ layout: entry.layout, alive: sessionIds(entry.layout.root, {}), profile: entry.layout.profile })
+    }
+
+    // ---- Paste History and Snippets ---------------------------------------
+
+    property var pasteHistory: []
+    function addPasteHistory(text) {
+        if (!text || text.trim() === "") return
+        const h = pasteHistory.filter(x => x !== text)
+        h.unshift(text)
+        pasteHistory = h.slice(0, 20)
+    }
+    function unescapeText(s) {
+        return s.replace(/\\(n|r|t|e|\\)/g, (m, c) => ({ n: "\n", r: "\r", t: "\t", e: "\u001b", "\\": "\\" })[c])
+    }
+    function shortLabel(s) {
+        const first = s.split("\n").filter(l => l.trim() !== "")[0] || s
+        return (first.length > 60 ? first.slice(0, 57) + "\u2026" : first) + (s.indexOf("\n") >= 0 ? "  \u21b5" : "")
+    }
+
+    // Named actions, for key mappings ("action": name).
+    function runAction(name) {
+        const v = activeView
+        switch (name) {
+        case "new_tab": newTab({}); break
+        case "new_window": controller.newWindow(); break
+        case "close": closeActivePane(); break
+        case "split_right": splitPane(activePane, Qt.Horizontal); break
+        case "split_down": splitPane(activePane, Qt.Vertical); break
+        case "next_tab": focusTab((currentTab + 1) % tabs.length); break
+        case "previous_tab": focusTab((currentTab + tabs.length - 1) % tabs.length); break
+        case "next_pane": cyclePane(1); break
+        case "previous_pane": cyclePane(-1); break
+        case "maximize_pane": toggleMaximize(); break
+        case "find": openFind(false); break
+        case "copy": if (v) v.copy(); break
+        case "paste": pasteClipboard(v); break
+        case "clear_buffer": if (v) v.clearScrollback(); break
+        case "previous_prompt": if (v) v.jumpToPrompt(-1); break
+        case "next_prompt": if (v) v.jumpToPrompt(1); break
+        case "select_last_output": if (v) v.selectLastOutput(); break
+        case "undo_close": undoClose(); break
+        case "fullscreen": toggleFullScreen(); break
+        case "preferences": prefs.showPage(""); break
+        }
+    }
+
     function finishClose() {
+        // Closed sessions waiting for Undo end now.
+        for (const e of closedStack) { if (e.timer) e.timer.stop(); for (const id of e.ids) controller.killSession(id) }
+        closedStack = []
         if (settings.restore_sessions && tabs.length > 0) {
             saveLayoutNow()
         } else {
@@ -651,6 +743,7 @@ ApplicationWindow {
 
     function pasteInto(view, text) {
         if (!view || text === "") return
+        addPasteHistory(text)
         const lines = text.replace(/\n$/, "").split("\n").length
         if (settings.warn_multiline_paste && lines > 1)
             confirm("Paste", "Paste " + lines + " lines?", function() { view.pasteText(text) })
@@ -669,6 +762,7 @@ ApplicationWindow {
         t.interval = ms
         t.triggered.connect(function() { fn(); t.destroy() })
         t.start()
+        return t
     }
 
     function tabPayload(t) {
@@ -791,6 +885,9 @@ ApplicationWindow {
             delete tmuxGateways[ev.gateway]
             tmuxGateways = Object.assign({}, tmuxGateways)
             break
+        case "notify":
+            controller.notify(ev.title, ev.body)
+            break
         case "tmuxError":
             console.warn("tmux: " + ev.message)
             break
@@ -883,6 +980,10 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+,"; onActivated: prefs.showPage("") }
     Shortcut { sequence: "Ctrl+Shift+Q"; autoRepeat: false; onActivated: win.close() }
     Shortcut { sequence: "Ctrl+Shift+F"; onActivated: openFind(false) }
+    Shortcut { sequence: "Ctrl+Shift+Up"; onActivated: if (activeView) activeView.jumpToPrompt(-1) }
+    Shortcut { sequence: "Ctrl+Shift+Down"; onActivated: if (activeView) activeView.jumpToPrompt(1) }
+    Shortcut { sequence: "Ctrl+Shift+L"; onActivated: if (activeView) activeView.selectLastOutput() }
+    Shortcut { sequence: "Ctrl+Shift+Z"; autoRepeat: false; onActivated: undoClose() }
     Shortcut { sequence: "F3"; onActivated: findStep(-1) }
     Shortcut { sequence: "Shift+F3"; onActivated: findStep(1) }
     Repeater {
@@ -924,6 +1025,7 @@ ApplicationWindow {
             P.MenuItem { icon.name: "document-save-as"; text: "Save Selected Text…"; enabled: activeView !== null && activeView.hasSelection
                 onTriggered: saveContentsTo(activeView.selectedText(), "Save Selected Text") }
             P.MenuSeparator {}
+            P.MenuItem { icon.name: "edit-undo"; text: "Undo Close\tCtrl+Shift+Z"; enabled: closedStack.length > 0; onTriggered: undoClose() }
             P.MenuItem { icon.name: "view-close"; text: "Close\tCtrl+Shift+W"; onTriggered: closeActivePane() }
             P.MenuItem { icon.name: "tab-close"; text: "Close All Panes in Tab"; enabled: tabs.length > 0; onTriggered: closeTab(tabs[currentTab]) }
             P.MenuItem { icon.name: "window-close"; text: "Close Window\tCtrl+Shift+Q"; onTriggered: win.close() }
@@ -961,8 +1063,43 @@ ApplicationWindow {
                 P.MenuItem { text: "Warn Before Multi-Line Paste"; checkable: true; checked: settings.warn_multiline_paste
                     onTriggered: setSetting("warn_multiline_paste", !settings.warn_multiline_paste) }
             }
+            P.Menu {
+                id: pasteHistoryMenu
+                title: "Paste History"
+                icon.name: "view-history"
+                enabled: pasteHistory.length > 0
+                Instantiator {
+                    model: win.pasteHistory
+                    delegate: P.MenuItem { text: win.shortLabel(modelData); onTriggered: pasteInto(activeView, modelData) }
+                    onObjectAdded: (i, o) => pasteHistoryMenu.insertItem(i, o)
+                    onObjectRemoved: (i, o) => pasteHistoryMenu.removeItem(o)
+                }
+            }
+            P.Menu {
+                id: snippetsMenu
+                title: "Snippets"
+                icon.name: "insert-text"
+                Instantiator {
+                    model: win.settings.snippets
+                    delegate: P.MenuItem { text: modelData.title; onTriggered: if (activeView) activeView.sendText(win.unescapeText(modelData.text)) }
+                    onObjectAdded: (i, o) => snippetsMenu.insertItem(i, o)
+                    onObjectRemoved: (i, o) => snippetsMenu.removeItem(o)
+                }
+                P.MenuSeparator {}
+                P.MenuItem { icon.name: "configure"; text: "Edit Snippets\u2026"; onTriggered: prefs.showPage("snippets") }
+            }
             P.MenuSeparator {}
             P.MenuItem { icon.name: "edit-select-all"; text: "Select All\tCtrl+Shift+A"; onTriggered: if (activeView) activeView.selectAll() }
+            P.Menu {
+                title: "Marks"
+                icon.name: "bookmarks"
+                P.MenuItem { icon.name: "go-up"; text: "Previous Prompt\tCtrl+Shift+Up"; onTriggered: if (activeView) activeView.jumpToPrompt(-1) }
+                P.MenuItem { icon.name: "go-down"; text: "Next Prompt\tCtrl+Shift+Down"; onTriggered: if (activeView) activeView.jumpToPrompt(1) }
+                P.MenuSeparator {}
+                P.MenuItem { icon.name: "edit-select"; text: "Select Output of Last Command\tCtrl+Shift+L"; onTriggered: if (activeView) activeView.selectLastOutput() }
+                P.MenuSeparator {}
+                P.MenuItem { enabled: false; text: "These need shell integration (\u2630 \u203a Install Shell Integration)" }
+            }
             P.MenuSeparator {}
             P.Menu {
                 title: "Find"
@@ -1106,6 +1243,20 @@ ApplicationWindow {
         }
 
         P.MenuSeparator {}
+        P.Menu {
+            id: shellIntegrationMenu
+            title: "Install Shell Integration"
+            icon.name: "run-install"
+            Instantiator {
+                model: ["bash", "zsh", "fish"]
+                delegate: P.MenuItem {
+                    text: modelData
+                    onTriggered: sheet.ask({ title: "Shell Integration", message: controller.installShellIntegration(modelData), infoOnly: true, okText: "OK" })
+                }
+                onObjectAdded: (i, o) => shellIntegrationMenu.insertItem(i, o)
+                onObjectRemoved: (i, o) => shellIntegrationMenu.removeItem(o)
+            }
+        }
         P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
         P.MenuItem { icon.name: "application-exit"; text: "Quit Tessera\tCtrl+Shift+Q"; onTriggered: win.close() }
     }
@@ -1182,7 +1333,8 @@ ApplicationWindow {
         const doIt = function() {
             for (const t of list) {
                 if (t.tmuxWindow >= 0) { closeTab(t); continue }
-                for (const p of panesIn(t.root, [])) p.view.killSession()
+                if (settings.undo_close_seconds > 0) retire(serializeTab(t, true))
+                else for (const p of panesIn(t.root, [])) p.view.killSession()
                 removeTab(t)
             }
         }
