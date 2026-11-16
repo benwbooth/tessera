@@ -52,6 +52,8 @@ pub struct Settings {
     pub warn_multiline_paste: bool,
     // -- Shell > Undo Close: seconds a closed session stays revivable (0: off).
     pub undo_close_seconds: u32,
+    // -- Ctrl+W closes the tab (off: it goes to the shell, which deletes a word).
+    pub ctrl_w_closes_tab: bool,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
     // -- Snippets (Edit > Snippets): text sent as if typed.
@@ -89,6 +91,7 @@ impl Default for Settings {
             focus_follows_mouse: false,
             warn_multiline_paste: false,
             undo_close_seconds: 5,
+            ctrl_w_closes_tab: true,
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),
@@ -352,6 +355,11 @@ pub struct Theme {
     pub builtin: bool,
     #[serde(default)]
     pub dark: bool,
+    /// Where it comes from ("Tessera", "iTerm2-Color-Schemes", "Imported").
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub license: String,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -512,7 +520,23 @@ fn t(name: &str, bg: &str, fg: &str, cursor: &str, sel: &str, ansi: [&str; 16]) 
         ansi: ansi.iter().map(|s| s.to_string()).collect(),
         builtin: true,
         dark: is_dark(bg),
+        source: "Tessera".into(),
+        license: String::new(),
     }
+}
+
+/// The permissively licensed iTerm2-Color-Schemes (themes/README.md).
+fn bundled_pack() -> &'static [Theme] {
+    static PACK: std::sync::OnceLock<Vec<Theme>> = std::sync::OnceLock::new();
+    PACK.get_or_init(|| {
+        let mut v: Vec<Theme> = serde_json::from_str(include_str!("../themes/iterm2-color-schemes.json")).unwrap_or_default();
+        for t in &mut v {
+            t.builtin = true;
+            t.dark = is_dark(&t.background);
+            t.source = "iTerm2-Color-Schemes".into();
+        }
+        v
+    })
 }
 
 pub fn builtin_themes() -> Vec<Theme> {
@@ -520,6 +544,10 @@ pub fn builtin_themes() -> Vec<Theme> {
         t("Tessera Dark", "#1b1d20", "#d7dade", "#e8eaed", "#36404d", [
             "#2a2d32", "#ef6b73", "#8fcf7a", "#e8c46b", "#62a8f0", "#c792ea", "#5cc8c8", "#c9ccd1",
             "#5c636e", "#ff8a92", "#a9e392", "#f5d68a", "#86bdf7", "#d8acf2", "#7fdede", "#f2f4f7",
+        ]),
+        t("Tessera OLED", "#000000", "#d3d6db", "#eef0f3", "#253248", [
+            "#000000", "#ff5f6d", "#7ee081", "#ffd166", "#5eb0ff", "#d38cff", "#4fd6d6", "#c9ccd1",
+            "#555b64", "#ff7b86", "#9ff0a1", "#ffe08a", "#85c3ff", "#e3adff", "#7ce8e8", "#ffffff",
         ]),
         t("Tessera Light", "#fbfbfa", "#2b2f36", "#2b2f36", "#cfe0f7", [
             "#2b2f36", "#c8323c", "#3d8a2c", "#a67c00", "#2862c9", "#9a3fb5", "#1e8a8f", "#c4c7cc",
@@ -580,9 +608,19 @@ pub fn user_themes() -> Vec<Theme> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(themes_dir()) {
         for e in rd.flatten() {
-            if let Ok(b) = std::fs::read(e.path()) {
-                if let Ok(mut th) = serde_json::from_slice::<Theme>(&b) {
-                    th.builtin = false;
+            let Ok(b) = std::fs::read(e.path()) else { continue };
+            if let Ok(mut th) = serde_json::from_slice::<Theme>(&b) {
+                // One imported theme.
+                th.builtin = false;
+                th.dark = is_dark(&th.background);
+                if th.source.is_empty() {
+                    th.source = "Imported".into();
+                }
+                out.push(th);
+            } else if let Ok(pack) = serde_json::from_slice::<Vec<Theme>>(&b) {
+                // A downloaded pack: kept as a whole (not deletable one by one).
+                for mut th in pack {
+                    th.builtin = true;
                     th.dark = is_dark(&th.background);
                     out.push(th);
                 }
@@ -595,8 +633,90 @@ pub fn user_themes() -> Vec<Theme> {
 
 pub fn all_themes() -> Vec<Theme> {
     let mut v = builtin_themes();
-    v.extend(user_themes());
+    let mut seen: std::collections::HashSet<String> = v.iter().map(|t| t.name.to_lowercase()).collect();
+    for t in bundled_pack().iter().cloned().chain(user_themes()) {
+        if seen.insert(t.name.to_lowercase()) {
+            v.push(t);
+        }
+    }
     v
+}
+
+/// Download the complete iTerm2-Color-Schemes collection (git) and save it
+/// as one pack file in the themes folder. Returns how many it holds.
+pub fn download_pack() -> Result<usize, String> {
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("tessera")
+        .join("iTerm2-Color-Schemes");
+    let ok = if cache.join(".git").exists() {
+        std::process::Command::new("git").arg("-C").arg(&cache).args(["pull", "-q", "--depth", "1"]).status()
+    } else {
+        let _ = std::fs::create_dir_all(cache.parent().unwrap());
+        std::process::Command::new("git")
+            .args(["clone", "-q", "--depth", "1", "https://github.com/mbadolato/iTerm2-Color-Schemes.git"])
+            .arg(&cache)
+            .status()
+    };
+    match ok {
+        Ok(s) if s.success() => {}
+        Ok(_) => return Err("git couldn't download the collection".into()),
+        Err(e) => return Err(format!("couldn't run git: {e}")),
+    }
+    let mut pack = Vec::new();
+    let rd = std::fs::read_dir(cache.join("ghostty")).map_err(|e| e.to_string())?;
+    let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+    files.sort();
+    for f in files {
+        let Ok(text) = std::fs::read_to_string(&f) else { continue };
+        if let Some(t) = parse_ghostty_theme(&f.file_name().unwrap_or_default().to_string_lossy(), &text) {
+            pack.push(t);
+        }
+    }
+    std::fs::create_dir_all(themes_dir()).map_err(|e| e.to_string())?;
+    std::fs::write(themes_dir().join("iterm2-color-schemes-all.json"), serde_json::to_vec(&pack).unwrap()).map_err(|e| e.to_string())?;
+    Ok(pack.len())
+}
+
+/// A theme in Ghostty's format (key = value, palette = N=#rrggbb).
+pub fn parse_ghostty_theme(name: &str, text: &str) -> Option<Theme> {
+    let mut kv = std::collections::HashMap::new();
+    let mut pal: [Option<String>; 16] = Default::default();
+    for line in text.lines() {
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let (k, v) = (k.trim(), v.trim());
+        if k == "palette" {
+            if let Some((i, c)) = v.split_once('=') {
+                if let Ok(i) = i.trim().parse::<usize>() {
+                    if i < 16 {
+                        pal[i] = Some(c.trim().to_string());
+                    }
+                }
+            }
+        } else {
+            kv.insert(k.to_string(), v.to_string());
+        }
+    }
+    let hex = |c: &str| if c.starts_with('#') { c.to_string() } else { format!("#{c}") };
+    let ansi: Vec<String> = pal.iter().map(|c| c.as_deref().map(hex)).collect::<Option<_>>()?;
+    let bg = hex(kv.get("background")?);
+    let fg = hex(kv.get("foreground")?);
+    Some(Theme {
+        name: name.to_string(),
+        cursor: kv.get("cursor-color").map(|c| hex(c)).unwrap_or_else(|| fg.clone()),
+        cursor_text: kv.get("cursor-text").map(|c| hex(c)).unwrap_or_else(|| bg.clone()),
+        selection_background: kv.get("selection-background").map(|c| hex(c)).unwrap_or_else(|| ansi[8].clone()),
+        selection_foreground: kv.get("selection-foreground").map(|c| hex(c)).unwrap_or_default(),
+        dark: is_dark(&bg),
+        background: bg,
+        foreground: fg,
+        ansi,
+        builtin: true,
+        source: "iTerm2-Color-Schemes".into(),
+        license: String::new(),
+    })
 }
 
 pub fn find_theme(name: &str) -> Theme {
@@ -630,6 +750,8 @@ pub fn import_itermcolors(path: &str) -> Result<Theme, String> {
         foreground: fg,
         ansi,
         builtin: false,
+        source: "Imported".into(),
+        license: String::new(),
     };
     std::fs::create_dir_all(themes_dir()).map_err(|e| e.to_string())?;
     let file: String = th.name.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
@@ -680,6 +802,31 @@ fn parse_plist_colors(xml: &str) -> Option<Vec<(String, String)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_pack_loads() {
+        let all = all_themes();
+        assert!(all.len() > 250, "{}", all.len());
+        assert!(all.iter().any(|t| t.name == "Tessera OLED"));
+        // No duplicate names.
+        let mut names: Vec<String> = all.iter().map(|t| t.name.to_lowercase()).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), all.len());
+    }
+
+    #[test]
+    fn ghostty_format() {
+        let mut s = String::new();
+        for i in 0..16 {
+            s.push_str(&format!("palette = {i}=#0{:x}0000\n", i));
+        }
+        s.push_str("background = #000000\nforeground = fafafa\n");
+        let t = parse_ghostty_theme("X", &s).unwrap();
+        assert_eq!(t.foreground, "#fafafa");
+        assert_eq!(t.ansi.len(), 16);
+        assert!(t.dark);
+    }
 
     #[test]
     fn plist() {

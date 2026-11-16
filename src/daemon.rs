@@ -136,6 +136,7 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "Tessera");
     cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    crate::shell_integration::inject(&mut cmd);
     let child = pair.slave.spawn_command(cmd).map_err(ioe)?;
     let shell_pid = child.process_id();
     drop(pair.slave);

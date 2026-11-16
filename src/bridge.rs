@@ -94,6 +94,8 @@ pub mod ffi {
         /// Whether mouse events go to the program (it asked for them and
         /// Shift isn't held), so the view knows a right click isn't a menu.
         fn wants_mouse(self: &Session, qt_mods: u32) -> bool;
+        /// A full-screen program is running (the alternate screen is up).
+        fn full_screen(self: &Session) -> bool;
 
         /// The fd to watch for readability (daemon socket or tmux wake pipe).
         fn fd(self: &Session) -> i32;
@@ -176,6 +178,8 @@ pub mod ffi {
         type QString = cxx_qt_lib::QString;
     }
 
+    impl cxx_qt::Threading for Controller {}
+
     unsafe extern "C++" {
         include!("bootstrap.h");
         /// The application (QApplication, for the desktop's native menus),
@@ -196,7 +200,16 @@ pub mod ffi {
         #[qml_element]
         /// Goes up whenever the settings or the theme list change.
         #[qproperty(i32, revision)]
+        /// Progress of "Get All iTerm2-Color-Schemes" ("" when idle).
+        #[qproperty(QString, pack_status)]
         type Controller = super::ControllerRust;
+
+        /// Download the complete iTerm2-Color-Schemes collection (background).
+        #[qinvokable]
+        fn download_theme_pack(self: Pin<&mut Controller>);
+        /// For tests: the value of TESSERA_TEST_<name> (empty if unset).
+        #[qinvokable]
+        fn test_env(self: &Controller, name: &QString) -> QString;
 
         /// Preferences as JSON (settings::Settings).
         #[qinvokable]
@@ -317,10 +330,12 @@ pub mod ffi {
 }
 
 pub use crate::session::{session_open, Session};
+use cxx_qt::Threading;
 
 #[derive(Default)]
 pub struct ControllerRust {
     revision: i32,
+    pack_status: ffi::QString,
 }
 
 use std::pin::Pin;
@@ -492,6 +507,23 @@ impl ffi::Controller {
         }
     }
 
+    fn download_theme_pack(mut self: Pin<&mut Self>) {
+        self.as_mut().set_pack_status(qs("Downloading iTerm2-Color-Schemes\u{2026}"));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = crate::settings::download_pack();
+            let _ = qt.queue(move |mut c| {
+                let msg = match result {
+                    Ok(n) => format!("Added the full collection: {n} themes."),
+                    Err(e) => format!("Couldn't download: {e}"),
+                };
+                c.as_mut().set_pack_status(qs(&msg));
+                let r = c.as_ref().rust().revision + 1;
+                c.as_mut().set_revision(r);
+            });
+        });
+    }
+
     fn kill_session(&self, id: &ffi::QString) {
         crate::client::kill_session(&id.to_string());
     }
@@ -583,6 +615,10 @@ impl ffi::Controller {
 
     fn screenshot_delay(&self) -> i32 {
         std::env::var("TESSERA_SHOT_DELAY").ok().and_then(|v| v.parse().ok()).unwrap_or(3500)
+    }
+
+    fn test_env(&self, name: &ffi::QString) -> ffi::QString {
+        ffi::QString::from(&std::env::var(format!("TESSERA_TEST_{name}")).unwrap_or_default())
     }
 
     fn startup_command(&self) -> ffi::QString {

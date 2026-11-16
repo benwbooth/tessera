@@ -256,6 +256,8 @@ private:
     bool m_rawValid[4] = {};
 
     int m_cols = 0, m_rows = 0;
+    Qt::KeyboardModifiers m_hoverMods;
+    void updatePointer(QPointF pos);
     QColor m_bg = QColor(0x1d, 0x1f, 0x21);
     QColor m_fg = QColor(0xc5, 0xc8, 0xc6);
 

@@ -30,6 +30,18 @@ Window {
     flags: Qt.Dialog
 
     readonly property var themes: { controller.revision; return JSON.parse(controller.themes()) }
+    // The theme galleries' search and filter; long lists show a page at a time.
+    property string themeQuery: ""
+    property string themeKind: "all"     // "all", "dark", "light"
+    property int themeLimit: 48
+    onThemeQueryChanged: themeLimit = 48
+    onThemeKindChanged: themeLimit = 48
+    function themeMatches(t) {
+        if (themeKind === "dark" && !t.dark) return false
+        if (themeKind === "light" && t.dark) return false
+        const q = themeQuery.trim().toLowerCase()
+        return q === "" || t.name.toLowerCase().indexOf(q) >= 0
+    }
     readonly property var fonts: JSON.parse(controller.monospaceFamilies())
     readonly property var arrangements: { controller.revision; return JSON.parse(controller.arrangements()) }
     readonly property var prof: {
@@ -582,6 +594,12 @@ Window {
                             SectionTitle { text: "Closing" }
                             ToggleRow { label: "Confirm closing multiple sessions"; checked: prefs.settings.confirm_close_multiple; onToggled: (on) => prefs.setG("confirm_close_multiple", on) }
                             ToggleRow { label: "Confirm closing the window"; checked: prefs.settings.confirm_quit; onToggled: (on) => prefs.setG("confirm_quit", on) }
+                            ToggleRow {
+                                label: "Ctrl+W closes the tab"
+                                hint: "Off: Ctrl+W goes to the shell (delete the word before the cursor). Ctrl+Shift+W closes a pane either way."
+                                checked: prefs.settings.ctrl_w_closes_tab !== false
+                                onToggled: (on) => prefs.setG("ctrl_w_closes_tab", on)
+                            }
                             Row2 {
                                 label: "Undo Close"
                                 hint: "A closed tab or pane can be brought back (Ctrl+Shift+Z) for this long; its shell keeps running meanwhile."
@@ -746,6 +764,26 @@ Window {
                                 checked: prefs.prof.theme_mode === "system"
                                 onToggled: (on) => prefs.setP("theme_mode", on ? "system" : "fixed")
                             }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                TextField {
+                                    id: themeSearch
+                                    Layout.preferredWidth: 240
+                                    placeholderText: "Search " + prefs.themes.length + " themes"
+                                    placeholderTextColor: Theme.textDim
+                                    selectByMouse: true
+                                    color: Theme.text
+                                    onTextChanged: prefs.themeQuery = text
+                                    background: Rectangle { radius: 7; color: Theme.field; border.color: themeSearch.activeFocus ? Theme.accent : Theme.divider }
+                                }
+                                Segmented {
+                                    options: [{ label: "All", value: "all" }, { label: "Dark", value: "dark" }, { label: "Light", value: "light" }]
+                                    value: prefs.themeKind
+                                    onPicked: (v) => prefs.themeKind = v
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
                             Repeater {
                                 // One gallery, or one each for dark and light mode.
                                 model: prefs.prof.theme_mode === "system"
@@ -765,13 +803,26 @@ Window {
                                         font.weight: Font.DemiBold
                                         Layout.topMargin: 8
                                     }
+                                    // Themes of the matching kind first; every theme is
+                                    // allowed. The chosen one always shows.
+                                    readonly property var all: {
+                                        const l = (gallery.slot.dark === null ? prefs.themes
+                                                   : prefs.themes.filter(t => t.dark === gallery.slot.dark).concat(prefs.themes.filter(t => t.dark !== gallery.slot.dark)))
+                                                  .filter(t => prefs.themeMatches(t))
+                                        const cur = prefs.prof[gallery.slot.key]
+                                        const i = l.findIndex(t => t.name === cur)
+                                        if (i >= prefs.themeLimit) l.unshift(l.splice(i, 1)[0])
+                                        return l
+                                    }
+                                    Hint {
+                                        visible: gallery.all.length === 0
+                                        text: "No themes match."
+                                    }
                                     Flow {
                                         Layout.fillWidth: true
                                         spacing: 12
                                         Repeater {
-                                            // Themes of the matching kind first; every theme is allowed.
-                                            model: gallery.slot.dark === null ? prefs.themes
-                                                   : prefs.themes.filter(t => t.dark === gallery.slot.dark).concat(prefs.themes.filter(t => t.dark !== gallery.slot.dark))
+                                            model: gallery.all.slice(0, prefs.themeLimit)
                                             delegate: ThemeCard {
                                                 theme: modelData
                                                 selected: prefs.prof[gallery.slot.key] === modelData.name
@@ -780,12 +831,22 @@ Window {
                                             }
                                         }
                                     }
+                                    PlainButton {
+                                        visible: gallery.all.length > prefs.themeLimit
+                                        text: "Show " + Math.min(96, gallery.all.length - prefs.themeLimit) + " more  (" + (gallery.all.length - prefs.themeLimit) + " left)"
+                                        onClicked: prefs.themeLimit += 96
+                                    }
                                 }
                             }
                             RowLayout {
                                 spacing: 10
                                 PlainButton { text: "Import .itermcolors…"; onClicked: importDialog.open() }
-                                Hint { id: importStatus; text: "" }
+                                PlainButton {
+                                    text: "Get All iTerm2-Color-Schemes"
+                                    enabled2: !prefs.controller.packStatus.startsWith("Downloading")
+                                    onClicked: prefs.controller.downloadThemePack()
+                                }
+                                Hint { id: importStatus; text: prefs.controller.packStatus }
                             }
                             SectionTitle { text: "Text" }
                             SliderRow {

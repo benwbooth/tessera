@@ -50,3 +50,60 @@ pub fn install(shell: &str) -> String {
         format!("~/{rc} can't be changed here (managed by Nix?). Add this to your {shell} configuration:\n\n{line}")
     }
 }
+
+/// Loads the integration into new shells automatically, as Ghostty and
+/// iTerm2 do, so prompts are marked without editing any startup file:
+/// zsh through a ZDOTDIR whose .zshenv puts the user's ZDOTDIR back, runs
+/// their .zshenv and then the script; fish through a vendor_conf.d folder on
+/// XDG_DATA_DIRS. (The marks let the terminal clear a prompt that the shell
+/// redraws on resize, instead of leaving its old lines behind.)
+pub fn inject(cmd: &mut portable_pty::CommandBuilder) {
+    if std::env::var_os("TESSERA_NO_SHELL_INTEGRATION").is_some() {
+        return;
+    }
+    let Some(base) = write_auto_scripts() else { return };
+    let zdot = base.join("zsh");
+    if let Some(old) = std::env::var_os("ZDOTDIR") {
+        cmd.env("TESSERA_ZDOTDIR", old);
+    }
+    cmd.env("ZDOTDIR", &zdot);
+    let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    cmd.env("XDG_DATA_DIRS", format!("{}:{data}", base.display()));
+    cmd.env("TESSERA_FISH_DATA_DIR", base.display().to_string());
+}
+
+const ZSHENV: &str = r#"# Tessera: put ZDOTDIR back, run the user's .zshenv, then load the
+# shell integration (for interactive shells only).
+if [[ -n "${TESSERA_ZDOTDIR+X}" ]]; then
+    ZDOTDIR=$TESSERA_ZDOTDIR
+    unset TESSERA_ZDOTDIR
+else
+    unset ZDOTDIR
+fi
+{
+    [[ -r "${ZDOTDIR-$HOME}/.zshenv" ]] && source "${ZDOTDIR-$HOME}/.zshenv"
+} always {
+    [[ -o interactive ]] && source "${${(%):-%x}:A:h}/tessera.zsh"
+}
+"#;
+
+fn write_auto_scripts() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?
+        .join("tessera/shell-integration");
+    let files = [
+        ("zsh/.zshenv", ZSHENV),
+        ("zsh/tessera.zsh", ZSH),
+        ("fish/vendor_conf.d/tessera.fish", FISH),
+        ("bash/tessera.bash", BASH),
+    ];
+    for (rel, text) in files {
+        let p = base.join(rel);
+        if std::fs::read_to_string(&p).ok().as_deref() != Some(text) {
+            std::fs::create_dir_all(p.parent()?).ok()?;
+            std::fs::write(&p, text).ok()?;
+        }
+    }
+    Some(base)
+}

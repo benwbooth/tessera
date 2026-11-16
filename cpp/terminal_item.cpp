@@ -357,7 +357,9 @@ void TerminalItem::updateMetrics()
     emit metricsChanged();
     m_forceFull = true;
     m_rebuildNodes = true;
-    resizeGrid();
+    // Debounced like a window resize: holding Ctrl+= resizes the shell once,
+    // at the end, rather than at every step.
+    if (m_session) m_resizeTimer->start(); else resizeGrid();
     polish();
 }
 
@@ -508,6 +510,8 @@ void TerminalItem::pullFrame(bool full)
         emit backgroundChanged();
     }
     m_fg = QColor::fromRgb(QRgb(f.default_fg));
+    // A program starting or ending changes the pointer without it moving.
+    if (isUnderMouse() && !(m_hoverMods & Qt::ControlModifier)) updatePointer(QPointF(-1, -1));
     if (f.cols != m_cols || f.rows != m_rows) {
         m_cols = f.cols;
         m_rows = f.rows;
@@ -931,15 +935,27 @@ void TerminalItem::mouseReleaseEvent(QMouseEvent* e)
     e->accept();
 }
 
+// The pointer: the pointing hand over a link with Ctrl held; an arrow while
+// a full-screen or mouse-using program runs (Shift selects, so it gets the
+// I-beam back); the I-beam over a shell.
+void TerminalItem::updatePointer(QPointF pos)
+{
+    if (!m_session) return;
+    Qt::CursorShape shape = Qt::IBeamCursor;
+    const bool shift = m_hoverMods & Qt::ShiftModifier;
+    if (!shift && (m_session->full_screen() || m_session->wants_mouse(uint32_t(m_hoverMods))))
+        shape = Qt::ArrowCursor;
+    if (m_ctrlClickOpens && (m_hoverMods & Qt::ControlModifier) && pos.x() >= 0
+        && !m_session->link_at(float(pos.x() * m_dpr), float(pos.y() * m_dpr),
+                               uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad)).empty())
+        shape = Qt::PointingHandCursor;
+    if (cursor().shape() != shape) setCursor(shape);
+}
+
 void TerminalItem::hoverMoveEvent(QHoverEvent* e)
 {
-    // Ctrl over a link or file: the pointing hand.
-    if (m_session && m_ctrlClickOpens) {
-        const bool onLink = (e->modifiers() & Qt::ControlModifier)
-            && !m_session->link_at(float(e->position().x() * m_dpr), float(e->position().y() * m_dpr),
-                                   uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad)).empty();
-        setCursor(onLink ? Qt::PointingHandCursor : Qt::IBeamCursor);
-    }
+    m_hoverMods = e->modifiers();
+    updatePointer(e->position());
     // Motion reports for programs that track the pointer (no buttons held).
     if (m_session) mouse(2, 0, e->position(), e->modifiers());
     QQuickItem::hoverMoveEvent(e);

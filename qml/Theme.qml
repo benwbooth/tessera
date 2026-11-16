@@ -22,7 +22,9 @@ QtObject {
     readonly property bool dark: luma(bg) < 0.5
     // The tab strip: a step darker than the terminal, or a step lighter when
     // the terminal is already (nearly) black.
-    readonly property color chrome: luma(bg) < 0.06 ? mix(bg, fg, 0.07)
+    // Pure black (OLED themes) stays black, so the bar is black too.
+    readonly property color chrome: luma(bg) < 0.002 ? bg
+                                  : luma(bg) < 0.06 ? mix(bg, fg, 0.07)
                                   : dark ? mix(bg, "#000000", 0.2) : mix(bg, "#000000", 0.05)
     readonly property color tabHover: mix(chrome, fg, dark ? 0.06 : 0.045)
     readonly property color text: fg

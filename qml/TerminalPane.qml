@@ -30,6 +30,7 @@ Item {
     property string badge: ""
     property real prefW: -1
     property real prefH: -1
+    property int zoomPercent: 100      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW
     SplitView.preferredHeight: prefH
@@ -84,6 +85,46 @@ Item {
         font.pixelSize: Math.max(18, Math.min(64, term.height / 6))
         font.weight: Font.Bold
     }
+
+    // The grid size (and zoom), briefly, whenever it changes: while zooming
+    // or resizing the window, as iTerm2 shows it.
+    Rectangle {
+        id: sizeTip
+        z: 6
+        anchors.centerIn: term
+        width: sizeText.implicitWidth + 24
+        height: sizeText.implicitHeight + 12
+        radius: 8
+        color: Theme.mix(Theme.bg, Theme.fg, 0.10)
+        border.width: 1
+        border.color: Theme.mix(Theme.bg, Theme.fg, 0.2)
+        opacity: 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 140 } }
+        property bool armed: false     // not for the first size, when it opens
+        Text {
+            id: sizeText
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: 0.001
+            text: term.columns + " × " + term.rows + (pane.zoomPercent !== 100 ? "   " + pane.zoomPercent + "%" : "")
+            color: Theme.text
+            font.pixelSize: 14
+            font.weight: Font.DemiBold
+            font.features: { "tnum": 1 }
+        }
+        Timer { id: sizeHide; interval: 1100; onTriggered: sizeTip.opacity = 0 }
+        Timer { interval: 1500; running: true; onTriggered: sizeTip.armed = true }
+        function flash() {
+            if (!armed || !pane.visible || term.columns <= 0) return
+            opacity = 0.96
+            sizeHide.restart()
+        }
+        Connections {
+            target: term
+            function onGridChanged() { sizeTip.flash() }
+        }
+    }
+    onZoomPercentChanged: sizeTip.flash()
 
     // Overlay scrollbar: shows while scrolling or near the right edge.
     Item {

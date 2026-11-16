@@ -30,6 +30,8 @@ ApplicationWindow {
     property int currentTab: 0
     property var activeView: null
     property real fontSize: 0          // a zoom (Ctrl+=/-) over the profile's size; 0 = none
+    property real zoomBase: 11         // the profile's size when zooming started
+    readonly property int zoomPercent: fontSize > 0 ? Math.round(100 * fontSize / zoomBase) : 100
     property var tmuxGateways: ({})    // gateway key -> gateway TerminalView
     property var contextView: null
     property string customTitle: ""    // Window > Edit Window Title
@@ -94,6 +96,7 @@ ApplicationWindow {
             cursorShape: ({ block: 0, bar: 1, underline: 2 })[prof.cursor_style] || 0
             scrollback: prof.unlimited_scrollback ? 10000000 : prof.scrollback
             copyOnSelect: win.settings.copy_on_select
+            zoomPercent: win.zoomPercent
             dimInactive: win.settings.dim_inactive
             dimAmount: win.settings.dim_amount
             showTitle: win.settings.pane_titles
@@ -520,8 +523,10 @@ ApplicationWindow {
     }
 
     function zoomBy(d) {
-        const base = fontSize > 0 ? fontSize : (activeView ? activeView.fontPointSize : 11)
+        if (fontSize <= 0) zoomBase = activeView ? activeView.fontPointSize : 11
+        const base = fontSize > 0 ? fontSize : zoomBase
         fontSize = Math.max(6, Math.min(48, base + d))
+        if (Math.abs(fontSize - zoomBase) < 0.01) fontSize = 0
     }
 
     // ---- closing, with iTerm2's confirmations ------------------------------
@@ -987,6 +992,12 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+T"; onActivated: newTab({}) }
     Shortcut { sequence: "Ctrl+Shift+N"; autoRepeat: false; onActivated: controller.newWindow() }
     Shortcut { sequence: "Ctrl+Shift+W"; autoRepeat: false; onActivated: closeActivePane() }
+    Shortcut {
+        sequence: "Ctrl+W"
+        autoRepeat: false
+        enabled: win.settings.ctrl_w_closes_tab !== false
+        onActivated: if (currentTab >= 0 && currentTab < tabs.length) closeTab(tabs[currentTab])
+    }
     Shortcut { sequence: "Ctrl+Shift+D"; autoRepeat: false; onActivated: splitPane(activePane, Qt.Horizontal) }
     Shortcut { sequence: "Ctrl+Shift+E"; autoRepeat: false; onActivated: splitPane(activePane, Qt.Vertical) }
     Shortcut { sequence: "Ctrl+Shift+C"; onActivated: if (activeView) activeView.copy() }
@@ -1432,7 +1443,7 @@ ApplicationWindow {
         P.MenuItem { icon.name: "window-new"; text: "Move Tab to New Window"; enabled: tabMenu.t !== null && tabMenu.t.tmuxWindow < 0 && tabs.length > 1
             onTriggered: moveToNewWindow(tabMenu.t) }
         P.MenuSeparator {}
-        P.MenuItem { icon.name: "tab-close"; text: "Close Tab"; onTriggered: closeTab(tabMenu.t) }
+        P.MenuItem { icon.name: "tab-close"; text: "Close Tab" + (win.settings.ctrl_w_closes_tab !== false ? "\tCtrl+W" : ""); onTriggered: closeTab(tabMenu.t) }
         P.MenuItem { icon.name: "tab-close-other"; text: "Close Other Tabs"; enabled: tabs.length > 1
             onTriggered: closeTabs(tabs.filter(x => x !== tabMenu.t)) }
         P.MenuItem { icon.name: "tab-close"; text: "Close Tabs to the Right"; enabled: tabMenu.at >= 0 && tabMenu.at < tabs.length - 1
@@ -1452,6 +1463,33 @@ ApplicationWindow {
         closePane(p, false)   // detaches; the new tab or window reattaches it
         if (window) controller.newWindowWithTab(json)
         else later(150, function() { newTab({ layout: layout, alive: sessionIds(layout.root, {}), profile: layout.profile }) })
+    }
+
+    // Right-click on the zoom chip: preset sizes.
+    property bool zoomMenuOpen: false
+    function zoomTo(pct) {
+        if (fontSize <= 0) zoomBase = activeView ? activeView.fontPointSize : 11
+        fontSize = pct === 100 ? 0 : Math.max(6, Math.min(48, Math.round(zoomBase * pct / 10) / 10))
+    }
+    Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
+    P.Menu {
+        id: zoomMenu
+        onAboutToShow: win.zoomMenuOpen = true
+        onAboutToHide: win.zoomMenuOpen = false
+        Instantiator {
+            model: [75, 90, 100, 110, 125, 150, 175, 200]
+            delegate: P.MenuItem {
+                text: modelData + "%"
+                checkable: true
+                checked: win.zoomPercent === modelData
+                onTriggered: win.zoomTo(modelData)
+            }
+            onObjectAdded: (i, o) => zoomMenu.insertItem(i, o)
+            onObjectRemoved: (i, o) => zoomMenu.removeItem(o)
+        }
+        P.MenuSeparator {}
+        P.MenuItem { icon.name: "zoom-in"; text: "Bigger\tCtrl+="; onTriggered: zoomBy(1) }
+        P.MenuItem { icon.name: "zoom-out"; text: "Smaller\tCtrl+-"; onTriggered: zoomBy(-1) }
     }
 
     P.Menu {
@@ -1528,6 +1566,13 @@ ApplicationWindow {
         P.MenuItem { icon.name: "view-refresh"; text: "Restart Session"; enabled: contextView !== null && contextView.tmuxPane === ""
             onTriggered: { const v = contextView; confirmJobs([paneOf(v)], function() { v.restart() }) } }
         P.MenuSeparator {}
+        P.Menu {
+            icon.name: "zoom-original"
+            title: "Text Size (" + win.zoomPercent + "%)"
+            P.MenuItem { icon.name: "zoom-in"; text: "Bigger\tCtrl+="; onTriggered: zoomBy(1) }
+            P.MenuItem { icon.name: "zoom-out"; text: "Smaller\tCtrl+-"; onTriggered: zoomBy(-1) }
+            P.MenuItem { icon.name: "zoom-original"; text: "100%\tCtrl+0"; enabled: win.fontSize > 0; onTriggered: win.fontSize = 0 }
+        }
         P.MenuItem { icon.name: "document-edit"; text: "Edit Session…"; onTriggered: prefs.showProfile(paneOf(contextView).profileName) }
         P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
         P.MenuSeparator {}
@@ -1758,11 +1803,42 @@ ApplicationWindow {
                 active: showTabs && !tabsAtBottom
                 anchors.left: menuButton.right
                 anchors.leftMargin: 2
-                anchors.right: controls.left
-                anchors.rightMargin: 12
+                anchors.right: zoomChip.visible ? zoomChip.left : controls.left
+                anchors.rightMargin: zoomChip.visible ? 6 : 12
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 sourceComponent: tabRowComp
+            }
+
+            // The zoom, while it isn't 100%: click to go back (Ctrl+0).
+            Rectangle {
+                id: zoomChip
+                visible: win.fontSize > 0
+                anchors.right: controls.left
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                width: zoomText.implicitWidth + 14
+                height: 20
+                radius: 5
+                color: zoomHover.hovered ? Theme.mix(Theme.chrome, Theme.fg, 0.12) : Theme.mix(Theme.chrome, Theme.fg, 0.05)
+                border.width: 1
+                border.color: Theme.mix(Theme.chrome, Theme.fg, 0.14)
+                Text {
+                    id: zoomText
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: 0.001
+                    text: win.zoomPercent + "%"
+                    color: zoomHover.hovered ? Theme.text : Theme.textDim
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    font.features: { "tnum": 1 }
+                }
+                HoverHandler { id: zoomHover }
+                TapHandler { onTapped: win.fontSize = 0 }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: zoomMenu.open(zoomChip) }
+                ToolTip.visible: zoomHover.hovered && !win.zoomMenuOpen
+                ToolTip.text: "Text size " + win.zoomPercent + "% — click for 100% (Ctrl+0)"
+                ToolTip.delay: 500
             }
 
             // Without a tab row up here: the window title.
@@ -1886,6 +1962,7 @@ ApplicationWindow {
         if (controller.thenCommand() !== "") thenTimer.start()
         if (controller.prefsPage() !== "") prefs.showPage(controller.prefsPage())
         if (controller.findQuery() !== "") findTimer.start()
+        if (controller.testEnv("ZOOM") !== "") zoomTestTimer.start()
         if (controller.screenshotPath() !== "") shotTimer.start()
     }
 

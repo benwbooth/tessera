@@ -1317,6 +1317,10 @@ impl Session {
         self.force_full = true;
     }
 
+    pub fn full_screen(&self) -> bool {
+        matches!(self.term.active_screen(), Ok(Screen::Alternate))
+    }
+
     pub fn wants_mouse(&self, qt_mods: u32) -> bool {
         self.opts.mouse_reporting
             && self.term.is_mouse_tracking().unwrap_or(false)

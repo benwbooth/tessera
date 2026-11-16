@@ -9,7 +9,9 @@ __tessera_precmd() {
     [[ -n $__tessera_running ]] && printf '\e]133;D;%s\a' $st
     __tessera_running=
     printf '\e]7;file://%s%s\a' "${HOST:-localhost}" "$PWD"
-    printf '\e]133;A\a'
+    # redraw=1: zsh redraws its prompt when the window is resized, so the
+    # terminal clears the old one first (no leftover prompt lines).
+    printf '\e]133;A;redraw=1\a'
 }
 __tessera_preexec() { __tessera_running=1; printf '\e]133;C\a'; }
 add-zsh-hook precmd __tessera_precmd

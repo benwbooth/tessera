@@ -10,7 +10,7 @@ function __tessera_prompt --on-event fish_prompt
         set -e __tessera_running
     end
     printf '\e]7;file://%s%s\a' (hostname) "$PWD"
-    printf '\e]133;A\a'
+    printf '\e]133;A;redraw=1\a'
 end
 function __tessera_preexec --on-event fish_preexec
     set -g __tessera_running 1

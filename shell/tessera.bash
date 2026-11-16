@@ -10,7 +10,7 @@ __tessera_prompt() {
     if [[ -n "${__tessera_running-}" ]]; then printf '\e]133;D;%s\a' "$status"; fi
     __tessera_running=
     __tessera_cwd
-    printf '\e]133;A\a'
+    printf '\e]133;A;redraw=last\a'
 }
 __tessera_preexec() {
     [[ -n "${COMP_LINE-}" || "$BASH_COMMAND" == __tessera_* ]] && return
