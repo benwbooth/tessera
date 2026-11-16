@@ -386,7 +386,7 @@ Window {
         TapHandler { onTapped: smb.hit() }
     }
 
-    component ChoiceBox: ComboBox {
+    component ChoiceBox: SlimCombo {
         property var values: []
         property string value: ""
         signal chosen(string v)
@@ -1052,7 +1052,7 @@ Window {
                             Row2 {
                                 label: "Family"
                                 hint: "Fixed-width fonts installed on this computer."
-                                ComboBox {
+                                SlimCombo {
                                     Layout.preferredWidth: 280
                                     model: ["System monospace"].concat(prefs.fonts)
                                     currentIndex: prefs.prof.font_family ? Math.max(0, prefs.fonts.indexOf(prefs.prof.font_family) + 1) : 0
@@ -1176,7 +1176,7 @@ Window {
                             Row2 {
                                 label: "Report terminal type"
                                 hint: "TERM for new sessions."
-                                ComboBox {
+                                SlimCombo {
                                     Layout.preferredWidth: 220
                                     editable: true
                                     model: ["xterm-256color", "xterm", "xterm-ghostty", "screen-256color", "tmux-256color", "linux", "vt100"]
@@ -1628,6 +1628,8 @@ Window {
                                 ChoiceBox {
                                     id: addProv
                                     implicitWidth: 240
+                                    // (Test hook: TESSERA_TEST_OPEN_COMBO opens this list.)
+                                    Timer { interval: 600; running: prefs.controller && prefs.controller.testEnv("OPEN_COMBO") !== ""; onTriggered: addProv.popup.open() }
                                     values: [["", "Add a provider\u2026"]].concat(prefs.aiPresets.filter(p => !(prefs.ai.providers || []).some(x => x.id === p.id)).map(p => [p.id, p.name]))
                                     value: ""
                                     onChosen: (v) => {
@@ -1649,7 +1651,7 @@ Window {
                                 id: mr
                                 property string key
                                 property string fallbackHint: ""
-                                ComboBox {
+                                SlimCombo {
                                     id: mc
                                     editable: true
                                     implicitWidth: 340
@@ -1669,7 +1671,7 @@ Window {
                             ModelRow { key: "check_model"; label: "Checking commands"; hint: "Empty: the suggestions model." }
 
                             SectionTitle { text: "In the editor" }
-                            ToggleRow { label: "Suggest as you type"; hint: "Grey text after the cursor: Tab or \u2192 takes it."; checked: prefs.ai.inline !== false; onToggled: (on) => prefs.setAi("inline", on) }
+                            ToggleRow { label: "Suggest as you type"; hint: "Grey text after the cursor, from history or the AI: tap left Shift (or \u2192) to take it."; checked: prefs.ai.inline !== false; onToggled: (on) => prefs.setAi("inline", on) }
                             ToggleRow { label: "Check commands as you type"; hint: "A short warning in the editor's corner when a command looks wrong or risky."; checked: prefs.ai.check !== false; onToggled: (on) => prefs.setAi("check", on) }
                             ToggleRow { label: "Turn descriptions into commands"; hint: "Start a line with # and press Enter: the command replaces it, for you to check and run."; checked: prefs.ai.natural_language !== false; onToggled: (on) => prefs.setAi("natural_language", on) }
                         }

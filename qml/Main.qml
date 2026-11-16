@@ -2201,7 +2201,8 @@ ApplicationWindow {
         onTriggered: {
             win.saveLayoutNow()
             win.saveSnapshots()
-            const target = controller.prefsPage() !== "" ? prefs.contentRoot : rootLayout
+            // (The window's whole content for Preferences, so open popups show too.)
+            const target = controller.prefsPage() !== "" ? prefs.contentItem : rootLayout
             const ok = target.grabToImage(function(r) {
                 r.saveToFile(controller.screenshotPath())
                 Qt.quit()
