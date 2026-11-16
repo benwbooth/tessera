@@ -302,7 +302,8 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
         ),
         "check" => format!(
             "{base} Check the command the user is about to run. If it has a real problem (a mistake, a flag the program doesn't have, \
-             something destructive or risky they may not intend), reply with one short sentence naming it. Otherwise reply with exactly OK."
+             something destructive or risky they may not intend), reply with one short sentence naming it. Otherwise reply with exactly OK. \
+             Commands that are fine but unusual, and anything you're not sure about, are OK."
         ),
         "fix" => format!(
             "{base} The user's last command failed. From the command, its exit status and output, reply with ONLY a corrected command, \

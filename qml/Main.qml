@@ -103,6 +103,7 @@ ApplicationWindow {
             inputEditor: win.settings.input_editor !== false
             editorKeys: win.settings.editor_keys || "emacs"
             editorPrompt: win.settings.editor_prompt !== false
+            aiSettings: win.settings.ai || ({})
             promptEngine: win.settings.prompt_engine || "auto"
             promptSegments: win.settings.prompt_segments || ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
             commandHistory: win.commandHistory
@@ -2062,6 +2063,7 @@ ApplicationWindow {
         if (controller.testEnv("CONTEXT") !== "") contextTestTimer.start()
         if (controller.testEnv("COMPOSE") !== "") composeTestTimer.start()
         if (controller.daemonState() === "outdated") daemonTimer.start()
+        controller.aiAutodetect()
         if (controller.screenshotPath() !== "") shotTimer.start()
     }
 

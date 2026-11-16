@@ -55,6 +55,9 @@ Rectangle {
 
     function submit() {
         const t = edit.text
+        // "# what I want": the AI writes the command, for you to check first.
+        if (aiNL && /^#\s*\S/.test(t) && t.indexOf("\n") < 0 && chatReady) { askCommand(t.replace(/^#\s*/, "")); return }
+        ghost = ""
         if (t.trim() !== "") {
             const h = box.history
             const old = h.indexOf(t)
@@ -552,10 +555,24 @@ Rectangle {
                 idle.restart()
                 box.analyze(false)
                 compAuto.restart()
+                // A suggestion stays while what's typed still leads into it.
+                const full = box.lastGhostBase + box.ghost
+                if (box.ghost !== "" && text.length > box.lastGhostBase.length && full.startsWith(text) && full.length > text.length) {
+                    box.ghost = full.substring(text.length)
+                    box.lastGhostBase = text
+                } else { box.ghost = ""; ghostTimer.restart() }
+                if (text.trim() !== box.checkedText) box.aiNote = ""
+                checkTimer.restart()
             }
             Keys.priority: Keys.BeforeItem
             Keys.onPressed: (e) => {
-                let done = box.compKey(e)
+                let done = false
+                const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
+                if (box.ghost !== "" && cursorPosition === length && plain
+                        && ((e.key === Qt.Key_Tab && !(box.compOpen && box.comp.items.length > 0)) || e.key === Qt.Key_Right || e.key === Qt.Key_End))
+                    done = box.acceptGhost()
+                if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
+                if (!done) done = box.compKey(e)
                 if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
                         && !/^\s*$/.test(text.substring(box.lineStart(cursorPosition), cursorPosition))) {
                     box.openComp(); done = true
@@ -578,6 +595,20 @@ Rectangle {
                 e.accepted = done
             }
         }
+    }
+
+    // The AI's suggestion: the rest of the command, greyed, after the cursor.
+    Text {
+        parent: flick.contentItem
+        readonly property rect at: edit.positionToRectangle(edit.length)
+        visible: box.ghost !== "" && edit.activeFocus && edit.cursorPosition === edit.length
+        x: at.x + 1
+        y: at.y
+        text: box.ghost
+        font: edit.font
+        color: Theme.textDim
+        opacity: 0.7
+        renderType: Text.NativeRendering
     }
 
     Text {
@@ -605,12 +636,25 @@ Rectangle {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: box.problem !== "" ? "\u26a0 " + box.problem
+                  : box.aiBusy !== "" ? "\u2726 " + (box.aiBusy === "fix" ? "fixing\u2026" : "writing the command\u2026")
+                  : box.aiNote !== "" ? "\u2726 " + box.aiNote
                   : box.keys === "vi" ? (box.viNormal ? "NORMAL" : "INSERT") : box.lang
-            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : Theme.textDim
+            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : box.aiNote !== "" ? box.ansi(3, "#e5c07b") : Theme.textDim
+            width: Math.min(implicitWidth, box.width * 0.45)
+            elide: Text.ElideRight
+            HoverHandler { id: noteHover }
+            ToolTip.visible: noteHover.hovered && box.aiNote !== ""
+            ToolTip.text: box.aiNote
             opacity: 0.75
             font.pixelSize: 10
             font.weight: Font.DemiBold
             font.letterSpacing: 0.5
+        }
+        Chip {
+            visible: box.view !== null && box.view.lastStatus !== 0 && edit.text === "" && box.chatReady && box.aiBusy === ""
+            label: "\u2726 Fix"
+            tip: "Ask the AI to correct the command that just failed"
+            onClicked: box.askFix()
         }
         Chip { label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {
@@ -652,6 +696,86 @@ Rectangle {
     // ---- syntax -----------------------------------------------------------
     // Colors from the theme's own palette; errors show once typing pauses
     // (half-typed text is always "wrong").
+    // ---- AI ------------------------------------------------------------------
+    property bool aiInline: true
+    property bool aiCheck: true
+    property bool aiNL: true
+    property string shellName: "bash"
+    readonly property string aiKey: "ed-" + Math.random().toString(36).slice(2)
+    readonly property bool inlineReady: controller !== null && controller.revision >= 0 && controller.aiReady("inline")
+    readonly property bool chatReady: controller !== null && controller.revision >= 0 && controller.aiReady("chat")
+    readonly property bool checkReady: controller !== null && controller.revision >= 0 && controller.aiReady("check")
+    property string ghost: ""          // the suggestion's rest, after the cursor
+    property string lastGhostBase: ""  // the text the suggestion was made for
+    property string aiBusy: ""         // "command" or "fix" while the AI works on one
+    property string aiNote: ""         // the check's warning
+    property string checkedText: ""
+    function aiContext() {
+        let cwd = box.cwd.replace(/^file:\/\/[^/]*/, "")
+        try { cwd = decodeURIComponent(cwd) } catch (e) {}
+        return JSON.stringify({ cwd: cwd, shell: box.shellName || "bash" })
+    }
+    function recent(n) { return box.history.slice(-n).join("\n") }
+    function askCommand(what) {
+        aiBusy = "command"
+        controller.aiRun(aiKey + "-cmd", "command", JSON.stringify([{ role: "user", content: "Recent commands:\n" + recent(10) + "\n\nWhat I want: " + what }]), aiContext())
+    }
+    function askFix() {
+        if (!box.view) return
+        const lines = box.view.contentsText().split("\n")
+        const tail = lines.slice(-60).join("\n")
+        const last = box.history.length ? box.history[box.history.length - 1] : ""
+        aiBusy = "fix"
+        controller.aiRun(aiKey + "-cmd", "fix", JSON.stringify([{ role: "user", content: "Command: " + last + "\nExit status: " + box.view.lastStatus + "\nThe terminal's last lines:\n" + tail }]), aiContext())
+    }
+    function acceptGhost() {
+        if (ghost === "") return false
+        edit.insert(edit.length, ghost)
+        edit.cursorPosition = edit.length
+        ghost = ""
+        return true
+    }
+    Timer {
+        id: ghostTimer
+        interval: 220
+        onTriggered: {
+            const t = edit.text
+            if (!box.aiInline || !box.inlineReady || t.trim().length < 2 || t.startsWith("#") || box.historyMode
+                    || edit.cursorPosition !== t.length || t.indexOf("\n") >= 0) return
+            box.controller.aiRun(box.aiKey + "-inline", "inline", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(8) + "\n\nComplete this command line: " + t }]), box.aiContext())
+        }
+    }
+    Timer {
+        id: checkTimer
+        interval: 1800
+        onTriggered: {
+            const t = edit.text.trim()
+            // (Not while it's still being written: a suggestion says so, and so
+            // does a syntax error.)
+            if (!box.aiCheck || !box.checkReady || t.length < 4 || t.startsWith("#") || t === box.checkedText
+                    || box.ghost !== "" || box.problem !== "") return
+            box.checkedText = t
+            box.controller.aiRun(box.aiKey + "-check", "check", JSON.stringify([{ role: "user", content: t }]), box.aiContext())
+        }
+    }
+    Connections {
+        target: box.controller
+        function onAiDone(key, reply, error) {
+            if (key === box.aiKey + "-inline") {
+                const t = edit.text
+                box.ghost = !error && reply.startsWith(t) && reply.length > t.length ? reply.substring(t.length).split("\n")[0] : ""
+                box.lastGhostBase = t
+            } else if (key === box.aiKey + "-check") {
+                const r = reply.trim()
+                box.aiNote = error || /^ok\.?$/i.test(r) || r === "" ? "" : r
+            } else if (key === box.aiKey + "-cmd") {
+                box.aiBusy = ""
+                if (error) box.aiNote = error
+                else if (reply.trim() !== "") { box.setText(reply.trim()); box.aiNote = "" }
+            }
+        }
+    }
+
     property string problem: ""        // the first syntax error, shown in the corner
     Timer { id: idle; interval: 650; onTriggered: box.analyze(true) }
     function analyze(withErrors) {

@@ -42,6 +42,7 @@ Item {
     property bool inputEditor: false
     property string editorKeys: "emacs"
     property bool editorPrompt: true
+    property var aiSettings: ({})
     property string promptEngine: "auto"
     property int shellPid: 0            // from the daemon (for the prompt's environment)
     property var promptSegments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
@@ -120,6 +121,10 @@ Item {
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         cwd: term.pwd !== "" ? term.pwd : pane.procCwd
         showPrompt: pane.editorPrompt
+        aiInline: pane.aiSettings.inline !== false
+        aiCheck: pane.aiSettings.check !== false
+        aiNL: pane.aiSettings.natural_language !== false
+        shellName: pane.shellName !== "" ? pane.shellName : "bash"
         shellPid: pane.shellPid
         promptEngine: pane.promptEngine
         promptSegments: pane.promptSegments
