@@ -1065,6 +1065,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+]"; onActivated: cyclePane(1) }
     Shortcut { sequence: "Ctrl+Shift+["; onActivated: cyclePane(-1) }
     Shortcut { sequence: "Ctrl+Shift+Return"; autoRepeat: false; onActivated: toggleMaximize() }
+    // Terminal <-> notebook for the active pane.
+    Shortcut { sequence: "Ctrl+Shift+J"; autoRepeat: false; onActivated: if (activePane) activePane.viewMode = activePane.viewMode === "notebook" ? "terminal" : "notebook" }
     Shortcut { sequence: "F11"; autoRepeat: false; onActivated: toggleFullScreen() }
     Shortcut { sequence: "Ctrl+Shift+/"; onActivated: if (activeView) activeView.findCursor() }
     Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; onActivated: zoomBy(1) }

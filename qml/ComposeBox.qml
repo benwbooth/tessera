@@ -629,6 +629,7 @@ Rectangle {
                         && (e.key === Qt.Key_Right || e.key === Qt.Key_End))
                     done = box.acceptGhost()
                 if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
+                if (!done && e.key === Qt.Key_Escape && box.aiBusy !== "") { box.controller.aiCancel(box.aiKey + "-cmd"); box.aiBusy = ""; done = true }
                 if (!done && e.key === Qt.Key_F1) { box.hoverAtPosition(cursorPosition); done = true }
                 if (!done) done = box.compKey(e)
                 if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
@@ -676,12 +677,43 @@ Rectangle {
         visible: edit.text === "" && !(box.keys === "vi" && box.viNormal)
         width: flick.width
         elide: Text.ElideRight
-        text: box.aiNL && box.chatReady ? "Type a command, or # and what you want — Enter runs it, tap right Shift for a new line, left Shift takes the grey suggestion"
-                                         : "Type a command — Enter runs it, tap right Shift for a new line, left Shift takes the grey suggestion"
+        text: box.aiNL && box.chatReady ? "Type a command, or # and a request for the AI — hover for keys"
+                                         : "Type a command — hover for keys"
+        HoverHandler { id: hintHover }
+        ToolTip.visible: hintHover.hovered
+        ToolTip.delay: 300
+        ToolTip.text: "Enter runs the command\n"
+                      + "Tap right Shift (or Shift+Enter) for a new line\n"
+                      + "Tap left Shift to take the grey suggestion (from history or the AI)\n"
+                      + "Tab completes; Ctrl+R searches history; Esc goes back to the terminal"
+                      + (box.aiNL && box.chatReady ? "\n# then what you want, in words: the AI writes the command for you to check and run" : "")
         color: Theme.textDim
         opacity: 0.55
         font: edit.font
         renderType: Text.NativeRendering
+    }
+
+    // Working: a short bar sweeping along the editor's top edge.
+    Item {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: 2
+        clip: true
+        visible: spinner.on
+        Rectangle {
+            id: sweep
+            width: parent.width * 0.3
+            height: parent.height
+            radius: 1
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 0.5; color: Theme.accent }
+                GradientStop { position: 1; color: "transparent" }
+            }
+            NumberAnimation on x { from: -sweep.width; to: sweep.parent.width; duration: 1100; loops: Animation.Infinite; running: spinner.on; easing.type: Easing.InOutQuad }
+        }
     }
 
     // The corner: a problem, or the language / vi mode; the history button
@@ -693,15 +725,34 @@ Rectangle {
         anchors.top: flick.top
         anchors.topMargin: -2
         spacing: 6
+        // Working: a turning arc.
+        Canvas {
+            id: spinner
+            readonly property bool on: box.aiBusy !== "" || box.fetchingLang !== ""
+            visible: on
+            anchors.verticalCenter: parent.verticalCenter
+            width: 12; height: 12
+            onPaint: {
+                const g = getContext("2d")
+                g.reset()
+                g.lineWidth = 1.8
+                g.lineCap = "round"
+                g.strokeStyle = Theme.accent
+                g.beginPath()
+                g.arc(6, 6, 4.6, 0, Math.PI * 1.4)
+                g.stroke()
+            }
+            RotationAnimator on rotation { from: 0; to: 360; duration: 800; loops: Animation.Infinite; running: spinner.on }
+        }
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: box.problem !== "" ? "\u26a0 " + box.problem
                   : box.fetchingLang !== "" ? "getting " + box.fetchingLang + "\u2026"
-                  : box.aiBusy !== "" ? "\u2726 " + (box.aiBusy === "fix" ? "fixing\u2026" : "writing the command\u2026")
+                  : box.aiBusy !== "" ? (box.aiBusy === "fix" ? "fixing the command\u2026" : "writing the command\u2026") + "  esc cancels"
                   : box.aiNote !== "" ? "\u2726 " + box.aiNote
                   : box.lspNote !== "" ? "\u26a0 " + box.lspNote
-                  : box.keys === "vi" ? (box.viNormal ? "NORMAL" : "INSERT") : ""
-            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : (box.aiNote !== "" || box.lspNote !== "") ? box.ansi(3, "#e5c07b") : Theme.textDim
+                  : ""
+            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : spinner.on ? Theme.accent : (box.aiNote !== "" || box.lspNote !== "") ? box.ansi(3, "#e5c07b") : Theme.textDim
             width: Math.min(implicitWidth, box.width * 0.45)
             elide: Text.ElideRight
             HoverHandler { id: noteHover }
@@ -737,14 +788,15 @@ Rectangle {
             id: modeChip
             base: box.color
             label: box.viewMode === "notebook" ? "\u25a4 Notebook" : "\u25ad Terminal"
-            tip: "Show this pane as a terminal or as a notebook (each command a cell)"
-            onClicked: modeMenu.popup(modeChip, 0, modeChip.height + 2)
+            tip: "Click (or Ctrl+Shift+J) to switch between terminal and notebook (each command a cell)"
+            onClicked: box.viewModePicked(box.viewMode === "notebook" ? "terminal" : "notebook")
         }
         Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {
             id: keysChip
             base: box.color
-            label: ({ emacs: "Emacs", vi: "vi", vscode: "VS Code" })[box.keys] || box.keys
+            label: box.keys === "vi" ? "vi \u00b7 " + (box.viNormal ? "normal" : "insert")
+                 : (({ emacs: "Emacs", vscode: "VS Code" })[box.keys] || box.keys)
             tip: "Editor keys: click for the next (Emacs, vi, VS Code)"
             onClicked: {
                 const order = ["emacs", "vi", "vscode"]
@@ -797,11 +849,6 @@ Rectangle {
                 }
             }
         }
-    }
-    Menu {
-        id: modeMenu
-        MenuItem { text: "Terminal"; checkable: true; checked: box.viewMode !== "notebook"; onTriggered: box.viewModePicked("terminal") }
-        MenuItem { text: "Notebook"; checkable: true; checked: box.viewMode === "notebook"; onTriggered: box.viewModePicked("notebook") }
     }
 
     // ---- syntax -----------------------------------------------------------
@@ -898,6 +945,7 @@ Rectangle {
                 if (box.ghost !== "" || edit.text.trim() !== box.checkedText) return
                 box.aiNote = error || /^ok\.?$/i.test(r) || r === "" ? "" : r
             } else if (key === box.aiKey + "-cmd") {
+                if (box.aiBusy === "") return   // (cancelled)
                 box.aiBusy = ""
                 if (error) box.aiNote = error
                 else if (reply.trim() !== "") { box.setText(reply.trim()); box.aiNote = "" }
