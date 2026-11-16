@@ -62,3 +62,7 @@ The dev shell provides Qt 6 and Zig 0.15 (libghostty-vt's build compiles Ghostty
 Testing: `--screenshot out.png` saves the window and quits, `--run CMD` types a command into the first terminal, `--then CMD` types another a few seconds later into whichever terminal has focus, `--prefs PAGE` opens Preferences (the screenshot is then of Preferences). Set `TESSERA_SOCKET`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to keep a test run apart from your own sessions and settings.
 
 Development: `devloop start tessera` (from home-services) rebuilds and restarts the window on every change; shells survive, since they live in the daemon.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The bundled color schemes keep their own license (see [themes/](themes/)).
