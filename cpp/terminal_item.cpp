@@ -21,6 +21,9 @@
 #include <QtQuick/QSGRectangleNode>
 
 #include <cmath>
+#include <algorithm>
+#include <functional>
+#include <QtGui/QPainterPath>
 
 namespace {
 constexpr quint32 FLAG_BOLD = 1, FLAG_ITALIC = 2, FLAG_UNDERLINE = 4, FLAG_STRIKE = 8, FLAG_FAINT = 16,
@@ -560,6 +563,138 @@ void TerminalItem::pullFrame(bool full)
     update();
 }
 
+// Box drawing (U+2500-257F) and block elements (U+2580-259F) are drawn as
+// shapes filling the whole cell, so lines join across rows and columns
+// whatever the line height (a font's glyphs stop short of a taller cell).
+// Each entry: the up, right, down and left arms, 2 bits each
+// (0 none, 1 light, 2 heavy, 3 double). Dashes and diagonals: 0 (the font).
+static const quint8 kBoxLines[128] = {
+    0x44, 0x88, 0x11, 0x22, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x14, 0x18, 0x24, 0x28,
+    0x50, 0x90, 0x60, 0xa0, 0x05, 0x09, 0x06, 0x0a,
+    0x41, 0x81, 0x42, 0x82, 0x15, 0x19, 0x16, 0x25,
+    0x26, 0x1a, 0x29, 0x2a, 0x51, 0x91, 0x52, 0x61,
+    0x62, 0x92, 0xa1, 0xa2, 0x54, 0x94, 0x58, 0x98,
+    0x64, 0xa4, 0x68, 0xa8, 0x45, 0x85, 0x49, 0x89,
+    0x46, 0x86, 0x4a, 0x8a, 0x55, 0x95, 0x59, 0x99,
+    0x56, 0x65, 0x66, 0x96, 0x5a, 0xa5, 0x69, 0x9a,
+    0xa9, 0xa6, 0x6a, 0xaa, 0x00, 0x00, 0x00, 0x00,
+    0xcc, 0x33, 0x1c, 0x34, 0x3c, 0xd0, 0x70, 0xf0,
+    0x0d, 0x07, 0x0f, 0xc1, 0x43, 0xc3, 0x1d, 0x37,
+    0x3f, 0xd1, 0x73, 0xf3, 0xdc, 0x74, 0xfc, 0xcd,
+    0x47, 0xcf, 0xdd, 0x77, 0xff, 0x14, 0x50, 0x41,
+    0x05, 0x00, 0x00, 0x00, 0x40, 0x01, 0x04, 0x10,
+    0x80, 0x02, 0x08, 0x20, 0x48, 0x21, 0x84, 0x12,
+};
+
+static bool isBoxChar(QChar c)
+{
+    const ushort u = c.unicode();
+    if (u >= 0x2580 && u <= 0x259f) return true;
+    return u >= 0x2500 && u <= 0x257f && kBoxLines[u - 0x2500] != 0;
+}
+
+static void drawBoxChar(QPainter& p, int x, int cw, int ch, ushort u, const QColor& color, int light)
+{
+    if (u >= 0x2580) {
+        // Block elements.
+        auto fill = [&](qreal x0, qreal y0, qreal x1, qreal y1, qreal a = 1) {
+            QColor c = color;
+            c.setAlphaF(c.alphaF() * a);
+            p.fillRect(QRect(x + qRound(x0 * cw), qRound(y0 * ch), qRound(x1 * cw) - qRound(x0 * cw), qRound(y1 * ch) - qRound(y0 * ch)), c);
+        };
+        if (u == 0x2580) fill(0, 0, 1, 0.5);
+        else if (u <= 0x2588) fill(0, 1 - (u - 0x2580) / 8.0, 1, 1);          // lower eighths .. full
+        else if (u <= 0x258f) fill(0, 0, (0x2590 - u) / 8.0, 1);              // left eighths
+        else if (u == 0x2590) fill(0.5, 0, 1, 1);
+        else if (u <= 0x2593) fill(0, 0, 1, 1, (u - 0x2590) * 0.25);          // shades
+        else if (u == 0x2594) fill(0, 0, 1, 0.125);
+        else if (u == 0x2595) fill(0.875, 0, 1, 1);
+        else {
+            // Quadrants: bits for upper-left, upper-right, lower-left, lower-right.
+            static const quint8 q[10] = { 4, 8, 1, 1 | 4 | 8, 1 | 8, 1 | 2 | 4, 1 | 2 | 8, 2, 2 | 4, 2 | 4 | 8 };
+            const quint8 m = q[u - 0x2596];
+            if (m & 1) fill(0, 0, 0.5, 0.5);
+            if (m & 2) fill(0.5, 0, 1, 0.5);
+            if (m & 4) fill(0, 0.5, 0.5, 1);
+            if (m & 8) fill(0.5, 0.5, 1, 1);
+        }
+        return;
+    }
+    const quint8 code = kBoxLines[u - 0x2500];
+    const int up = code & 3, rt = (code >> 2) & 3, dn = (code >> 4) & 3, lf = (code >> 6) & 3;
+    const int heavy = qMax(light + 1, 2 * light);
+    const int g = light + qMax(1, light / 2) ;             // half the gap of a double line
+    const int cx = x + cw / 2, cy = ch / 2;                 // the cell's center lines
+    auto widthOf = [&](int w) { return w == 2 ? heavy : light; };
+
+    if (u >= 0x256d && u <= 0x2570) {
+        // Rounded corners.
+        QPainterPath path;
+        const qreal r = qMin(cw, ch) / 2.0, mx = cx + (light % 2) * 0.5, my = cy + (light % 2) * 0.5;
+        const qreal ex = rt ? x + cw : x, ey = dn ? ch : 0;
+        const qreal sx = rt ? 1 : -1, sy = dn ? 1 : -1;
+        path.moveTo(ex, my);
+        path.lineTo(mx + sx * r, my);
+        path.quadTo(mx, my, mx, my + sy * r);
+        path.lineTo(mx, ey);
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(color, light, Qt::SolidLine, Qt::FlatCap));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(path);
+        p.restore();
+        return;
+    }
+
+    const bool vDouble = up == 3 || dn == 3, hDouble = lf == 3 || rt == 3;
+    // A vertical arm (dir -1 up, +1 down) of weight w.
+    auto vArm = [&](int w, int dir) {
+        if (!w) return;
+        const int end = dir < 0 ? 0 : ch;
+        if (w == 3) {
+            for (int side = -1; side <= 1; side += 2) {
+                // The line on a side that has a horizontal arm stops at it
+                // (inside the junction); the other runs past the center.
+                const bool inner = side < 0 ? lf != 0 : rt != 0;
+                const int from = cy + dir * (inner ? g : -g) + (dir < 0 ? light : 0) * (inner ? 1 : 0);
+                const int lx = cx + side * g - light / 2;
+                const int a = qMin(from, end), b = qMax(from, end);
+                p.fillRect(QRect(lx, a, light, b - a), color);
+            }
+            return;
+        }
+        const int t = widthOf(w);
+        const int reach = hDouble ? g + light / 2 + 1 : (qMax(widthOf(lf), widthOf(rt)) + 1) / 2;
+        const int from = cy - dir * reach;
+        const int a = qMin(from, end), b = qMax(from, end);
+        p.fillRect(QRect(cx - t / 2, a, t, b - a), color);
+    };
+    auto hArm = [&](int w, int dir) {
+        if (!w) return;
+        const int end = dir < 0 ? x : x + cw;
+        if (w == 3) {
+            for (int side = -1; side <= 1; side += 2) {
+                const bool inner = side < 0 ? up != 0 : dn != 0;
+                const int from = cx + dir * (inner ? g : -g) + (dir < 0 ? light : 0) * (inner ? 1 : 0);
+                const int ly = cy + side * g - light / 2;
+                const int a = qMin(from, end), b = qMax(from, end);
+                p.fillRect(QRect(a, ly, b - a, light), color);
+            }
+            return;
+        }
+        const int t = widthOf(w);
+        const int reach = vDouble ? g + light / 2 + 1 : (qMax(widthOf(up), widthOf(dn)) + 1) / 2;
+        const int from = cx - dir * reach;
+        const int a = qMin(from, end), b = qMax(from, end);
+        p.fillRect(QRect(a, cy - t / 2, b - a, t), color);
+    };
+    vArm(up, -1);
+    vArm(dn, 1);
+    hArm(lf, -1);
+    hArm(rt, 1);
+}
+
 void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
 {
     const QSize size(qMax(1, m_cols * m_cw), m_ch);
@@ -579,7 +714,19 @@ void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
 
     const qreal lineW = qMax<qreal>(1, qRound(m_dpr));
     // `room`: cells the glyph may use (its own, plus a blank neighbor).
-    auto drawText = [&](int x, const QString& text, QRgb color, quint32 flags, int cells, int roomCells = 0) {
+    std::function<void(int, const QString&, QRgb, quint32, int, int)> drawText;
+    drawText = [&](int x, const QString& text, QRgb color, quint32 flags, int cells, int roomCells) {
+        // Box drawing and blocks: shapes, one cell per character.
+        if (text.size() == cells && std::any_of(text.begin(), text.end(), isBoxChar)) {
+            int start = 0;
+            for (int i = 0; i <= text.size(); ++i) {
+                if (i < text.size() && !isBoxChar(text[i])) continue;
+                if (i > start) drawText(x + start * m_cw, text.mid(start, i - start), color, flags, i - start, 0);
+                if (i < text.size()) drawBoxChar(p, x + i * m_cw, m_cw, m_ch, text[i].unicode(), QColor::fromRgb(color), int(lineW));
+                start = i + 1;
+            }
+            return;
+        }
         p.setPen(QColor::fromRgb(color));
         const QRawFont& raw = rawFont(flags);
         QVector<quint32> glyphs = raw.isValid() ? raw.glyphIndexesForString(text) : QVector<quint32>();
@@ -665,7 +812,7 @@ void TerminalItem::paintRow(int row, const QVector<RunData>& runs)
             p.fillRect(QRectF(cell.x(), m_ch - 2 * lineW, cell.width(), 2 * lineW), cc);
         } else {
             p.fillRect(cell, cc);
-            if (!m_cursorText.trimmed().isEmpty()) drawText(int(cell.x()), m_cursorText, m_bg.rgb(), 0, m_cursorWide ? 2 : 1);
+            if (!m_cursorText.trimmed().isEmpty()) drawText(int(cell.x()), m_cursorText, m_bg.rgb(), 0, m_cursorWide ? 2 : 1, 0);
         }
     }
 }

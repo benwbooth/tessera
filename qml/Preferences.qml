@@ -33,9 +33,6 @@ Window {
     // The theme galleries' search and filter; long lists show a page at a time.
     property string themeQuery: ""
     property string themeKind: "all"     // "all", "dark", "light"
-    property int themeLimit: 48
-    onThemeQueryChanged: themeLimit = 48
-    onThemeKindChanged: themeLimit = 48
     function themeMatches(t) {
         if (themeKind === "dark" && !t.dark) return false
         if (themeKind === "light" && t.dark) return false
@@ -50,6 +47,8 @@ Window {
     }
 
     function showPage(p) {
+        // "profiles/colors": a page and one of its tabs.
+        if (p.indexOf("/") > 0) { profileTab = p.split("/")[1]; p = p.split("/")[0] }
         if (p !== "") page = p
         if (editingProfile === "" || !settings.profiles.some(x => x.name === editingProfile)) editingProfile = activeProfileName
         show()
@@ -809,32 +808,43 @@ Window {
                                         const l = (gallery.slot.dark === null ? prefs.themes
                                                    : prefs.themes.filter(t => t.dark === gallery.slot.dark).concat(prefs.themes.filter(t => t.dark !== gallery.slot.dark)))
                                                   .filter(t => prefs.themeMatches(t))
-                                        const cur = prefs.prof[gallery.slot.key]
-                                        const i = l.findIndex(t => t.name === cur)
-                                        if (i >= prefs.themeLimit) l.unshift(l.splice(i, 1)[0])
                                         return l
                                     }
                                     Hint {
                                         visible: gallery.all.length === 0
                                         text: "No themes match."
                                     }
-                                    Flow {
+                                    // Every theme in one scrolling grid (only the visible
+                                    // cards exist at a time).
+                                    GridView {
+                                        id: grid
                                         Layout.fillWidth: true
-                                        spacing: 12
-                                        Repeater {
-                                            model: gallery.all.slice(0, prefs.themeLimit)
-                                            delegate: ThemeCard {
-                                                theme: modelData
-                                                selected: prefs.prof[gallery.slot.key] === modelData.name
-                                                onClicked: prefs.setP(gallery.slot.key, modelData.name)
-                                                onRemoveClicked: prefs.controller.deleteTheme(modelData.name)
-                                            }
+                                        Layout.preferredHeight: prefs.prof.theme_mode === "system" ? 300 : 440
+                                        visible: gallery.all.length > 0
+                                        clip: true
+                                        cellWidth: 188
+                                        cellHeight: 136
+                                        boundsBehavior: Flickable.StopAtBounds
+                                        model: gallery.all
+                                        reuseItems: true
+                                        delegate: ThemeCard {
+                                            theme: modelData
+                                            selected: prefs.prof[gallery.slot.key] === modelData.name
+                                            onClicked: prefs.setP(gallery.slot.key, modelData.name)
+                                            onRemoveClicked: prefs.controller.deleteTheme(modelData.name)
                                         }
+                                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded; minimumSize: 0.06 }
+                                        // Opening the page shows the chosen theme.
+                                        function showCurrent() {
+                                            const i = gallery.all.findIndex(t => t.name === prefs.prof[gallery.slot.key])
+                                            if (i >= 0) positionViewAtIndex(i, GridView.Contain)
+                                        }
+                                        Component.onCompleted: Qt.callLater(showCurrent)
+                                        onVisibleChanged: if (visible) Qt.callLater(showCurrent)
                                     }
-                                    PlainButton {
-                                        visible: gallery.all.length > prefs.themeLimit
-                                        text: "Show " + Math.min(96, gallery.all.length - prefs.themeLimit) + " more  (" + (gallery.all.length - prefs.themeLimit) + " left)"
-                                        onClicked: prefs.themeLimit += 96
+                                    Hint {
+                                        text: gallery.all.length + (gallery.all.length === 1 ? " theme" : " themes")
+                                              + (prefs.themeQuery !== "" || prefs.themeKind !== "all" ? " match" : "")
                                     }
                                 }
                             }
