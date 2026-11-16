@@ -86,7 +86,29 @@ Window {
             prefs.aiModels = m
         }
     }
-    onPageChanged: if (page === "ai") refreshModels()
+    onPageChanged: { if (page === "ai") refreshModels(); if (page === "prompt") loadPrompt() }
+    // ---- the prompt builder -------------------------------------------------
+    property string promptToml: ""
+    property var promptPreviews: ({})     // key -> {lines, right}
+    readonly property var promptPresets: { try { return JSON.parse(controller.promptPresets()) } catch (e) { return [] } }
+    readonly property var promptTheme: themes.find(t => t.name === prof.theme) || ({})
+    function loadPrompt() {
+        promptToml = controller.promptTesseraConfig()
+        previewPrompt("current", promptToml)
+        for (const p of promptPresets) previewPrompt("preset-" + p, controller.promptPreset(p))
+    }
+    function previewPrompt(key, toml) { controller.requestPromptPreview("pp-" + key, toml, "", 96) }
+    function setPromptToml(t) { promptToml = t; promptPreview.restart() }
+    Timer { id: promptPreview; interval: 300; onTriggered: prefs.previewPrompt("current", prefs.promptToml) }
+    Connections {
+        target: prefs.controller
+        function onStarshipReady(key, json) {
+            if (!key.startsWith("pp-")) return
+            const m = Object.assign({}, prefs.promptPreviews)
+            try { m[key.slice(3)] = JSON.parse(json) } catch (e) {}
+            prefs.promptPreviews = m
+        }
+    }
 
     palette.window: Theme.panel
     palette.windowText: Theme.text
@@ -480,6 +502,7 @@ Window {
                             { id: "profiles", label: "Profiles", glyph: "❯_" },
                             { id: "arrangements", label: "Arrangements", glyph: "\u25a4" },
                             { id: "snippets", label: "Snippets", glyph: "\u2702" },
+                            { id: "prompt", label: "Prompt", glyph: "\u276f" },
                             { id: "ai", label: "AI", glyph: "\u2726" },
                             { id: "pointer", label: "Pointer", glyph: "↖" },
                             { id: "about", label: "About", glyph: "i" }
@@ -1386,6 +1409,133 @@ Window {
                                 spacing: 8
                                 Field { id: arrName; placeholderText: "Name"; Layout.preferredWidth: 220 }
                                 PlainButton { text: "Save Current Window"; enabled2: arrName.text.trim() !== ""; onClicked: { prefs.saveArrangement(arrName.text.trim()); arrName.text = "" } }
+                            }
+                        }
+
+                        // ================= Prompt =================
+                        ColumnLayout {
+                            visible: prefs.page === "prompt"
+                            Layout.fillWidth: true
+                            Layout.margins: 24
+                            spacing: 12
+
+                            Row2 {
+                                label: "Prompt from"
+                                hint: (prefs.settings.prompt_config || "own") === "tessera" ? "The prompt built on this page (Tessera keeps its own starship.toml; yours is left alone)."
+                                                                                     : "Your own starship.toml. Build one here and choose Use This Prompt to switch."
+                                Segmented {
+                                    options: [{ label: "Your starship.toml", value: "own" }, { label: "Built here", value: "tessera" }]
+                                    value: prefs.settings.prompt_config || "own"
+                                    onPicked: (v) => prefs.setG("prompt_config", v)
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            component PromptCard: Rectangle {
+                                id: pcard
+                                property string key
+                                property string title
+                                property bool chosen: false
+                                signal picked()
+                                Layout.fillWidth: true
+                                implicitHeight: pcol.implicitHeight + 16
+                                radius: 8
+                                color: prefs.promptTheme.background || Theme.bg
+                                border.width: chosen ? 2 : 1
+                                border.color: chosen ? Theme.accent : (cardHover.hovered ? Theme.textDim : Theme.divider)
+                                Column {
+                                    id: pcol
+                                    x: 10; y: 8
+                                    width: parent.width - 20
+                                    spacing: 4
+                                    Text { text: pcard.title; color: prefs.promptTheme.foreground || Theme.text; opacity: 0.7; font.pixelSize: 11 }
+                                    StarshipLine {
+                                        width: parent.width
+                                        clip: true
+                                        lines: (prefs.promptPreviews[pcard.key] || {}).lines || []
+                                        themeData: prefs.promptTheme
+                                        fontFamily: prefs.prof.font_family || "monospace"
+                                        fontSize: 11
+                                    }
+                                }
+                                HoverHandler { id: cardHover }
+                                TapHandler { onTapped: pcard.picked() }
+                            }
+                            SectionTitle { text: "Your prompt" }
+                            PromptCard { key: "current"; title: "Preview (your home folder; the last command failed after 3.4 s)"; chosen: true }
+                            RowLayout {
+                                spacing: 10
+                                PlainButton {
+                                    text: "Use This Prompt"
+                                    onClicked: {
+                                        const err = prefs.controller.savePromptConfig(prefs.promptToml)
+                                        if (err === "") prefs.setG("prompt_config", "tessera")
+                                    }
+                                }
+                                PlainButton { text: "Start From My starship.toml"; onClicked: prefs.setPromptToml(prefs.controller.promptUserConfig()) }
+                                Hint { text: (prefs.settings.prompt_config || "own") === "tessera" ? "In use." : "" }
+                            }
+
+                            SectionTitle { text: "Modules" }
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                readonly property var states: { try { return JSON.parse(prefs.controller.promptModules(prefs.promptToml)) } catch (e) { return {} } }
+                                Repeater {
+                                    model: Object.keys(parent.states)
+                                    delegate: Rectangle {
+                                        required property string modelData
+                                        readonly property var st: parent.states[modelData]
+                                        height: 26
+                                        width: modText.implicitWidth + 30
+                                        radius: 13
+                                        color: st.on ? Theme.mix(Theme.panel, Theme.accent, 0.3) : Theme.field
+                                        border.color: st.on ? Theme.accent : Theme.divider
+                                        Text {
+                                            id: modText
+                                            anchors.centerIn: parent
+                                            text: (parent.st.on ? "\u2713 " : "") + parent.st.label
+                                            color: Theme.text
+                                            font.pixelSize: 12
+                                        }
+                                        TapHandler { onTapped: prefs.setPromptToml(prefs.controller.promptSetModule(prefs.promptToml, modelData, !parent.st.on)) }
+                                    }
+                                }
+                            }
+
+                            SectionTitle { text: "Presets" }
+                            Hint { text: "Starship's own designs (they use a Nerd Font). Click one to start from it." }
+                            Repeater {
+                                model: prefs.promptPresets
+                                delegate: PromptCard {
+                                    required property string modelData
+                                    key: "preset-" + modelData
+                                    title: modelData
+                                    onPicked: prefs.setPromptToml(prefs.controller.promptPreset(modelData))
+                                }
+                            }
+
+                            SectionTitle { text: "Settings (starship.toml)" }
+                            Hint { text: "Every Starship option: modules, formats, colors, symbols (starship.rs/config). The preview follows as you type." }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 320
+                                radius: 8
+                                color: Theme.field
+                                border.color: tomlEdit.activeFocus ? Theme.accent : Theme.divider
+                                ScrollView {
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    TextArea {
+                                        id: tomlEdit
+                                        text: prefs.promptToml
+                                        font.family: prefs.prof.font_family || "monospace"
+                                        font.pointSize: 10
+                                        color: Theme.text
+                                        selectByMouse: true
+                                        background: null
+                                        onTextChanged: if (activeFocus && text !== prefs.promptToml) prefs.setPromptToml(text)
+                                    }
+                                }
                             }
                         }
 

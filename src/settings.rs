@@ -61,6 +61,9 @@ pub struct Settings {
     pub editor_prompt: bool,
     // -- "auto" (Starship when installed), "starship", or "builtin".
     pub prompt_engine: String,
+    // -- Starship's config: "own" (the user's starship.toml) or "tessera"
+    // (the one built in Preferences › Prompt).
+    pub prompt_config: String,
     // -- AI (src/ai.rs): providers and which model does what.
     pub ai: AiSettings,
     pub prompt_segments: Vec<String>,
@@ -105,6 +108,7 @@ impl Default for Settings {
             editor_keys: "emacs".into(),
             editor_prompt: true,
             prompt_engine: "auto".into(),
+            prompt_config: "own".into(),
             ai: AiSettings::default(),
             prompt_segments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"].map(String::from).to_vec(),
             ctrl_click_opens: true,

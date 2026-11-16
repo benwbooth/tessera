@@ -129,6 +129,13 @@ fn shell_env(pid: u32) -> Option<Vec<(String, String)>> {
 /// "p<N>" for palette entry N, or ""). The final line (the prompt character
 /// alone) is left out: the editor stands in for it.
 pub fn starship(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: u32) -> String {
+    // Tessera's own prompt (built in Preferences), when that's the choice.
+    let config = (crate::settings::load().prompt_config == "tessera").then(tessera_config_path);
+    starship_with(cwd, status, duration_ms, width, pid, config.as_deref())
+}
+
+/// Starship with a given config file (None: the user's own).
+pub fn starship_with(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: u32, config: Option<&std::path::Path>) -> String {
     let run = |right: bool| -> String {
         let mut cmd = std::process::Command::new("starship");
         cmd.arg("prompt");
@@ -140,6 +147,9 @@ pub fn starship(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: u32) 
             cmd.env_clear().envs(env);
         }
         cmd.env("TERM", "xterm-256color").env_remove("STARSHIP_SHELL").env("PWD", cwd);
+        if let Some(c) = config {
+            cmd.env("STARSHIP_CONFIG", c);
+        }
         if std::path::Path::new(cwd).is_dir() {
             cmd.current_dir(cwd);
         }
@@ -324,5 +334,109 @@ mod starship_tests {
         assert_eq!(r[1]["t"], " ~ ");
         assert_eq!(r[2]["t"], " x");
         assert_eq!(r[3]["fg"], "p1");
+    }
+}
+
+
+// ---- the prompt builder ---------------------------------------------------------
+
+/// Tessera's own Starship config (the user's starship.toml is left alone:
+/// it may be managed elsewhere).
+pub fn tessera_config_path() -> std::path::PathBuf {
+    crate::settings::config_dir().join("starship.toml")
+}
+
+pub fn tessera_config() -> String {
+    std::fs::read_to_string(tessera_config_path()).unwrap_or_else(|_| preset("pastel-powerline"))
+}
+
+pub fn save_tessera_config(toml: &str) -> Result<(), String> {
+    let p = tessera_config_path();
+    let _ = std::fs::create_dir_all(p.parent().unwrap());
+    std::fs::write(p, toml).map_err(|e| e.to_string())
+}
+
+/// The user's own starship.toml (for starting from it).
+pub fn user_config() -> String {
+    let p = std::env::var_os("STARSHIP_CONFIG").map(std::path::PathBuf::from).unwrap_or_else(|| {
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/starship.toml")
+    });
+    std::fs::read_to_string(p).unwrap_or_default()
+}
+
+pub fn presets() -> Vec<String> {
+    std::process::Command::new("starship")
+        .args(["preset", "--list"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+pub fn preset(name: &str) -> String {
+    std::process::Command::new("starship")
+        .args(["preset", name])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// A preview of a config: written to a scratch file, run for `cwd`.
+pub fn preview(toml: &str, cwd: &str, width: u32, key: &str) -> String {
+    let dir = std::env::temp_dir().join("tessera-prompt-preview");
+    let _ = std::fs::create_dir_all(&dir);
+    let safe: String = key.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+    let file = dir.join(format!("{safe}.toml"));
+    if std::fs::write(&file, toml).is_err() {
+        return String::new();
+    }
+    let r = starship_with(cwd, 1, 3400, width, 0, Some(&file));
+    let _ = std::fs::remove_file(&file);
+    r
+}
+
+/// The modules the builder offers switches for, with a label.
+pub const MODULES: &[(&str, &str)] = &[
+    ("os", "OS icon"), ("username", "User"), ("hostname", "Host"), ("directory", "Folder"), ("git_branch", "Git branch"),
+    ("git_status", "Git status"), ("git_state", "Git state (rebase, merge)"), ("nix_shell", "Nix shell"), ("python", "Python"),
+    ("nodejs", "Node.js"), ("rust", "Rust"), ("golang", "Go"), ("java", "Java"), ("docker_context", "Docker context"),
+    ("kubernetes", "Kubernetes"), ("aws", "AWS"), ("gcloud", "Google Cloud"), ("azure", "Azure"), ("terraform", "Terraform"),
+    ("cmd_duration", "Command duration"), ("status", "Exit status"), ("jobs", "Background jobs"), ("memory_usage", "Memory"),
+    ("battery", "Battery"), ("time", "Time"), ("character", "Prompt character"),
+];
+
+/// Which modules are on in a config: {module: bool} (on unless disabled;
+/// time, memory_usage and status are off unless enabled, as in Starship).
+pub fn module_states(toml: &str) -> String {
+    let doc = toml.parse::<toml_edit::DocumentMut>().unwrap_or_default();
+    let mut out = serde_json::Map::new();
+    for (m, label) in MODULES {
+        let off_by_default = matches!(*m, "time" | "memory_usage" | "status" | "kubernetes" | "os" | "battery" | "azure");
+        let disabled = doc.get(m).and_then(|t| t.get("disabled")).and_then(|d| d.as_bool()).unwrap_or(off_by_default);
+        out.insert(m.to_string(), json!({"label": label, "on": !disabled}));
+    }
+    serde_json::Value::Object(out).to_string()
+}
+
+/// The config with a module switched on or off (comments and layout kept).
+pub fn set_module(toml: &str, module: &str, on: bool) -> String {
+    let mut doc = toml.parse::<toml_edit::DocumentMut>().unwrap_or_default();
+    if doc.get(module).and_then(|t| t.as_table()).is_none() {
+        doc[module] = toml_edit::table();
+    }
+    doc[module]["disabled"] = toml_edit::value(!on);
+    doc.to_string()
+}
+
+#[cfg(test)]
+mod builder_tests {
+    #[test]
+    fn modules() {
+        let t = "# mine\n[git_branch]\nsymbol = \"x\"\n";
+        let t2 = super::set_module(t, "git_branch", false);
+        assert!(t2.contains("# mine") && t2.contains("disabled = true") && t2.contains("symbol"));
+        let s: serde_json::Value = serde_json::from_str(&super::module_states(&t2)).unwrap();
+        assert_eq!(s["git_branch"]["on"], false);
+        assert_eq!(s["directory"]["on"], true);
+        assert_eq!(s["time"]["on"], false);
     }
 }

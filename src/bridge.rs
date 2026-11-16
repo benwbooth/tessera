@@ -342,6 +342,25 @@ pub mod ffi {
         fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32);
         #[qsignal]
         fn starship_ready(self: Pin<&mut Controller>, key: QString, json: QString);
+        /// The prompt builder (Preferences › Prompt): Starship's presets,
+        /// Tessera's own config, the user's, module switches, previews.
+        #[qinvokable]
+        fn prompt_presets(self: &Controller) -> QString;
+        #[qinvokable]
+        fn prompt_preset(self: &Controller, name: &QString) -> QString;
+        #[qinvokable]
+        fn prompt_tessera_config(self: &Controller) -> QString;
+        #[qinvokable]
+        fn prompt_user_config(self: &Controller) -> QString;
+        #[qinvokable]
+        fn save_prompt_config(self: Pin<&mut Controller>, toml: &QString) -> QString;
+        #[qinvokable]
+        fn prompt_modules(self: &Controller, toml: &QString) -> QString;
+        #[qinvokable]
+        fn prompt_set_module(self: &Controller, toml: &QString, module: &QString, on: bool) -> QString;
+        /// A preview of a config, in the background: starship_ready(key, json).
+        #[qinvokable]
+        fn request_prompt_preview(self: Pin<&mut Controller>, key: &QString, toml: &QString, cwd: &QString, width: i32);
 
         /// An AI request (src/ai.rs) in the background. `task`: "inline",
         /// "command", "check", "fix" or "chat" (which model, system prompt and
@@ -836,6 +855,45 @@ impl ffi::Controller {
                 let r = c.as_ref().rust().revision + 1;
                 c.as_mut().set_revision(r);
             });
+        });
+    }
+
+    fn prompt_presets(&self) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::prompt::presets()).unwrap_or_default())
+    }
+
+    fn prompt_preset(&self, name: &ffi::QString) -> ffi::QString {
+        qs(&crate::prompt::preset(&name.to_string()))
+    }
+
+    fn prompt_tessera_config(&self) -> ffi::QString {
+        qs(&crate::prompt::tessera_config())
+    }
+
+    fn prompt_user_config(&self) -> ffi::QString {
+        qs(&crate::prompt::user_config())
+    }
+
+    fn save_prompt_config(mut self: Pin<&mut Self>, toml: &ffi::QString) -> ffi::QString {
+        let r = crate::prompt::save_tessera_config(&toml.to_string());
+        self.as_mut().bump();
+        qs(&r.err().unwrap_or_default())
+    }
+
+    fn prompt_modules(&self, toml: &ffi::QString) -> ffi::QString {
+        qs(&crate::prompt::module_states(&toml.to_string()))
+    }
+
+    fn prompt_set_module(&self, toml: &ffi::QString, module: &ffi::QString, on: bool) -> ffi::QString {
+        qs(&crate::prompt::set_module(&toml.to_string(), &module.to_string(), on))
+    }
+
+    fn request_prompt_preview(self: Pin<&mut Self>, key: &ffi::QString, toml: &ffi::QString, cwd: &ffi::QString, width: i32) {
+        let (key, toml, cwd) = (key.to_string(), toml.to_string(), local_path(cwd));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let json = crate::prompt::preview(&toml, &cwd, width.max(30) as u32, &key);
+            let _ = qt.queue(move |c| c.starship_ready(qs(&key), qs(&json)));
         });
     }
 

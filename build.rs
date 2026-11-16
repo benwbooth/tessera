@@ -61,6 +61,7 @@ fn main() {
         QmlFile::from("qml/RichViewer.qml"),
         QmlFile::from("qml/NotebookView.qml"),
         QmlFile::from("qml/Chip.qml"),
+        QmlFile::from("qml/StarshipLine.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");

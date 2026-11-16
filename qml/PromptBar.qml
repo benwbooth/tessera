@@ -52,6 +52,8 @@ Item {
     onWidthChanged: if (useStarship) resizeRefresh.restart()
     Timer { id: resizeRefresh; interval: 200; onTriggered: bar.refresh() }
     onShellPidChanged: refresh()
+    // (The prompt's config changed in Preferences.)
+    Connections { target: bar.controller; function onRevisionChanged() { bar.refresh() } }
     function color(c, fallback) {
         if (!c) return fallback
         return c[0] === "p" ? ansi(parseInt(c.slice(1)), fallback) : c
