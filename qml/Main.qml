@@ -22,6 +22,10 @@ ApplicationWindow {
     readonly property bool macOS: Qt.platform.os === "osx"
     palette.toolTipBase: Theme.panel
     palette.toolTipText: Theme.text
+    palette.highlight: Theme.mix(Theme.panel, Theme.accent, 0.35)
+    palette.highlightedText: Theme.text
+    palette.light: Theme.mix(Theme.panel, Theme.accent, 0.22)
+    palette.midlight: Theme.mix(Theme.panel, Theme.accent, 0.35)
     flags: macOS ? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
                  : (Qt.Window | Qt.FramelessWindowHint)
     title: (controller.isAdmin() ? "Administrator: " : "")

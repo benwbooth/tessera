@@ -116,8 +116,12 @@ Window {
     palette.text: Theme.text
     palette.button: Theme.field
     palette.buttonText: Theme.text
-    palette.highlight: Theme.accent
-    palette.highlightedText: Theme.bg
+    // (A tint of the accent with the ordinary text color: readable whatever
+    // the theme's accent is, dark or light.)
+    palette.highlight: Theme.mix(Theme.panel, Theme.accent, 0.35)
+    palette.highlightedText: Theme.text
+    palette.light: Theme.mix(Theme.panel, Theme.accent, 0.22)
+    palette.midlight: Theme.mix(Theme.panel, Theme.accent, 0.35)
     palette.mid: Theme.divider
     palette.dark: Theme.divider
     palette.light: Theme.field
