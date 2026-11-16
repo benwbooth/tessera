@@ -219,6 +219,7 @@ pub mod ffi {
         /// native text rendering, and QML registration of TerminalView.
         fn tessera_create_app(session: &QString);
         fn tessera_show_windows();
+        fn tessera_test_wheel(x: f64, y: f64, dy: i32, px: i32, phase: i32);
         fn tessera_session_id() -> QString;
         fn tessera_exec() -> i32;
         /// The app icon for window decorations that read it from the window.
@@ -334,6 +335,9 @@ pub mod ffi {
         fn ai_run(self: Pin<&mut Controller>, key: &QString, task: &QString, messages_json: &QString, ctx_json: &QString);
         #[qinvokable]
         fn ai_cancel(self: &Controller, key: &QString);
+        /// For tests: a wheel notch at a point in the window.
+        #[qinvokable]
+        fn test_wheel(self: &Controller, x: f64, y: f64, dy: i32, px: i32, phase: i32);
         /// Ask the language server for the editor's language (src/lsp.rs), in
         /// the background: `what` "diagnostics", "hover" or "complete" at a
         /// UTF-16 cursor. The answer: lsp_ready(key, what, json).
@@ -735,6 +739,10 @@ impl ffi::Controller {
 
     fn lsp_available(&self, lang: &ffi::QString) -> ffi::QString {
         qs(&crate::lsp::server_for(&lang.to_string()).map(|c| c[0].clone()).unwrap_or_default())
+    }
+
+    fn test_wheel(&self, x: f64, y: f64, dy: i32, px: i32, phase: i32) {
+        ffi::tessera_test_wheel(x, y, dy, px, phase);
     }
 
     fn ai_cancel(&self, key: &ffi::QString) {

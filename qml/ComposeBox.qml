@@ -978,6 +978,37 @@ Rectangle {
             boundsBehavior: Flickable.StopAtBounds
             onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
             ScrollBar.vertical: ScrollBar { policy: compList.contentHeight > compList.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+            // (Test hook: three wheel notches down, then the position over time.)
+            Timer {
+                running: compPopup.visible && box.controller && box.controller.testEnv("WHEEL") !== ""
+                interval: 1500
+                property int step: 0
+                onTriggered: {
+                    // "pad": a touchpad swipe (begin, eight moves 16 ms apart, lift).
+                    const p = compList.mapToItem(null, compList.width / 2, compList.height / 2)
+                    if (box.controller.testEnv("WHEEL") === "pad") { padSwipe.p = p; padSwipe.n = 0; padSwipe.start(); return }
+                    for (let i = 0; i < 3; i++) box.controller.testWheel(p.x, p.y, -120, 0, 0)
+                    wheelLog.n = 0; wheelLog.start()
+                }
+            }
+            Timer {
+                id: padSwipe
+                property var p
+                property int n: 0
+                interval: 16; repeat: true
+                onTriggered: {
+                    if (n === 0) box.controller.testWheel(p.x, p.y, 0, 0, 1)
+                    if (n < 8) box.controller.testWheel(p.x, p.y, -60, -25, 2)
+                    else { box.controller.testWheel(p.x, p.y, 0, 0, 3); stop(); console.log("wheel test: lifted at contentY=" + Math.round(compList.contentY)); wheelLog.n = 0; wheelLog.start() }
+                    n++
+                }
+            }
+            Timer {
+                id: wheelLog
+                property int n: 0
+                interval: 100; repeat: true
+                onTriggered: { console.log("wheel test: t=" + (n * 100) + "ms contentY=" + Math.round(compList.contentY)); if (++n > 15) stop() }
+            }
             MomentumWheel { flick: compList }
             delegate: Rectangle {
                 width: compList.width

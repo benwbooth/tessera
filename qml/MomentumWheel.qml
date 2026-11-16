@@ -24,16 +24,25 @@ WheelHandler {
         if (!flick || flick.contentHeight <= flick.height) { ev.accepted = false; return }
         ev.accepted = true
         const now = Date.now()
-        if (ev.pixelDelta.y !== 0) {
-            // Touchpad: move with the fingers; fling on release.
+        // Touchpad fingers lifted (an event with no movement): keep going at
+        // the speed they had, if they were still moving.
+        if (ev.phase === Qt.ScrollEnd) {
+            if (now - lastPad < 150 && Math.abs(padVelocity) > 120)
+                flick.flick(0, Math.max(-12000, Math.min(12000, padVelocity * 1.15)))
+            padVelocity = 0
+            return
+        }
+        if (ev.pixelDelta.y === 0 && ev.angleDelta.y === 0) return
+        // A touchpad: pixel movement, or a scroll with phases.
+        if (ev.pixelDelta.y !== 0 || ev.phase === Qt.ScrollBegin || ev.phase === Qt.ScrollUpdate) {
+            // Move with the fingers.
+            const dy = ev.pixelDelta.y !== 0 ? ev.pixelDelta.y : ev.angleDelta.y / 3
             flick.cancelFlick()
-            flick.contentY = clampY(flick.contentY - ev.pixelDelta.y)
-            const dt = Math.max(1, now - lastPad)
-            const v = ev.pixelDelta.y * 1000 / dt
-            padVelocity = dt > 80 ? v : padVelocity * 0.6 + v * 0.4
+            flick.contentY = clampY(flick.contentY - dy)
+            const dt = Math.max(4, now - lastPad)
+            const v = dy * 1000 / dt
+            padVelocity = dt > 80 ? v : padVelocity * 0.5 + v * 0.5
             lastPad = now
-            if (ev.phase === Qt.ScrollEnd && Math.abs(padVelocity) > 120)
-                flick.flick(0, padVelocity)
             return
         }
         // Wheel: each notch adds speed; a quick run of notches multiplies it.
