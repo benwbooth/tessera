@@ -128,6 +128,10 @@ jobs:
           $dist = 'dist\Tessera'
           New-Item -ItemType Directory -Force $dist | Out-Null
           Copy-Item target\release\tessera.exe $dist
+          # Ghostty's terminal library (linked as a DLL on Windows).
+          $dll = Get-ChildItem target\release\build -Recurse -Filter ghostty-vt.dll | Select-Object -First 1
+          if (-not $dll) { throw "ghostty-vt.dll not found" }
+          Copy-Item $dll.FullName $dist
           & (Join-Path $env:QT_ROOT_DIR 'bin\windeployqt.exe') --release --qmldir qml --no-compiler-runtime "$dist\tessera.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # The Visual C++ runtime, app-local, so nothing else needs installing.
