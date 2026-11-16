@@ -1574,6 +1574,7 @@ ApplicationWindow {
             }
         })
     }
+    Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
     Timer { id: composeTestTimer; interval: 4000; onTriggered: if (activePane) { activePane.compose.focusEditor(); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory() } }
     Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.open(menuButton); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
@@ -2113,6 +2114,7 @@ ApplicationWindow {
         if (controller.testEnv("CONTEXT") !== "") contextTestTimer.start()
         if (controller.testEnv("COMPOSE") !== "") composeTestTimer.start()
         if (controller.testEnv("ASSISTANT") !== "") assistantTestTimer.start()
+        if (controller.testEnv("RICH") !== "") richTestTimer.start()
         if (controller.daemonState() === "outdated") daemonTimer.start()
         controller.aiAutodetect()
         if (controller.screenshotPath() !== "") shotTimer.start()

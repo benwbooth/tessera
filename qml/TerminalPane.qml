@@ -135,6 +135,7 @@ Item {
         }
         onHandBack: term.forceActiveFocus()
         onKeysPicked: (k) => pane.editorKeysPicked(k)
+        onOpenRich: pane.openRich()
         onEditingChanged: if (editing) pane.preferEditor = true
     }
 
@@ -264,6 +265,25 @@ Item {
 
     property alias findBar: findBar
     property alias compose: compose
+    // The last output's rich view, over the terminal.
+    function openRich() {
+        let o = {}
+        try { o = JSON.parse(term.lastOutput()) } catch (e) {}
+        if (!o.kind) return
+        rich.kind = o.kind
+        rich.text = o.text
+        rich.visible = true
+        rich.forceActiveFocus()
+    }
+    RichViewer {
+        id: rich
+        visible: false
+        z: 20
+        anchors.fill: term
+        fontFamily: term.fontFamily
+        themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
+        onClosed: { visible = false; if (pane.editorOn) compose.focusEditor(); else term.forceActiveFocus() }
+    }
     FindBar {
         id: findBar
         view: term

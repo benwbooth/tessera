@@ -58,6 +58,7 @@ fn main() {
         QmlFile::from("qml/ComposeBox.qml"),
         QmlFile::from("qml/PromptBar.qml"),
         QmlFile::from("qml/AssistantPanel.qml"),
+        QmlFile::from("qml/RichViewer.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");

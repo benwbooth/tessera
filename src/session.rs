@@ -106,6 +106,10 @@ pub struct Session {
     raw_image: Option<Vec<u8>>,
     /// The command just started: its first output bytes are checked.
     output_starts: bool,
+    /// The running command's output (for a rich view), and the last
+    /// finished one's: (kind, text).
+    cmd_out: Option<Vec<u8>>,
+    last_rich: (String, String),
     exited: bool,
     last_cursor_row: Option<u16>,
     last_full_size: (u16, u16),
@@ -317,6 +321,8 @@ pub fn session_open(
         file_buf: None,
         raw_image: None,
         output_starts: false,
+        cmd_out: None,
+        last_rich: (String::new(), String::new()),
         exited: false,
         last_cursor_row: None,
         last_full_size: (0, 0),
@@ -697,12 +703,72 @@ impl Session {
         }
     }
 
+    /// Keep each command's output (between its marks), and when it ends,
+    /// tell the window if it's something with a rich view (JSON, a table, ...).
+    fn capture_output(&mut self, data: &[u8]) {
+        const START: &[u8] = b"\x1b]133;C";
+        const END: &[u8] = b"\x1b]133;D";
+        let find = |hay: &[u8], pat: &[u8]| hay.windows(pat.len()).position(|w| w == pat);
+        let mut rest = data;
+        loop {
+            if let Some(buf) = self.cmd_out.as_mut() {
+                match find(rest, END) {
+                    Some(i) => {
+                        buf.extend_from_slice(&rest[..i]);
+                        let raw = self.cmd_out.take().unwrap();
+                        let mut text = crate::images::plain_text(&raw);
+                        // zsh's partial-line marker ("%" and padding) before its prompt.
+                        while let Some(last) = text.trim_end_matches('\n').rsplit('\n').next().map(str::to_string) {
+                            let t = last.trim();
+                            if (t == "%" || t == "#") && text.trim_end_matches('\n').len() >= last.len() {
+                                let keep = text.trim_end_matches('\n').len() - last.len();
+                                text.truncate(keep);
+                            } else {
+                                break;
+                            }
+                        }
+                        let kind = crate::images::detect_text(&text);
+
+                        if !kind.is_empty() {
+                            self.events.push(json!({"type": "rich", "kind": kind, "size": text.len()}));
+                        }
+                        self.last_rich = (kind.to_string(), text);
+                        rest = &rest[i + END.len()..];
+                    }
+                    None => {
+                        if buf.len() + rest.len() <= 4 << 20 {
+                            buf.extend_from_slice(rest);
+                        } else {
+                            self.cmd_out = None;
+                        }
+                        return;
+                    }
+                }
+            }
+            match find(rest, START) {
+                Some(s) => {
+                    let after = &rest[s..];
+                    let end = after.iter().position(|&b| b == 7).map(|i| i + 1).unwrap_or(after.len());
+                    self.cmd_out = Some(Vec::new());
+                    rest = &rest[s + end..];
+                }
+                None => return,
+            }
+        }
+    }
+
+    /// The last finished command's output: {kind, text} (kind "" for plain).
+    pub fn last_output(&self) -> String {
+        json!({"kind": self.last_rich.0, "text": self.last_rich.1}).to_string()
+    }
+
     fn process_output(&mut self, data: &[u8]) {
         let transformed;
         let data = if self.gateway.is_none() {
             self.scan_marks(data);
             self.scan_aliases(data);
             transformed = self.transform_images(data);
+            self.capture_output(&transformed);
             &transformed[..]
         } else {
             data

@@ -486,7 +486,15 @@ void TerminalItem::handleEvents()
         } else if (type == u"aliases") {
             m_aliases = QString::fromUtf8(QJsonDocument(e.value(u"map").toObject()).toJson(QJsonDocument::Compact));
             emit aliasesChanged();
+        } else if (type == u"rich") {
+            m_richKind = e.value(u"kind").toString();
         } else if (type == u"command") {
+            m_richKind.clear();
+            // (A "rich" event for this command comes first, in the same batch.)
+            for (const QJsonValue& w : events) {
+                const QJsonObject o = w.toObject();
+                if (o.value(u"type").toString() == u"rich") m_richKind = o.value(u"kind").toString();
+            }
             m_lastStatus = e.value(u"status").toInt();
             m_lastDuration = qint64(e.value(u"ms").toDouble());
             emit commandFinished();
@@ -1352,6 +1360,11 @@ void TerminalItem::copy()
 }
 
 void TerminalItem::paste() { pasteText(QGuiApplication::clipboard()->text()); }
+
+QString TerminalItem::lastOutput() const
+{
+    return m_session ? qs(m_session->last_output()) : QString();
+}
 
 void TerminalItem::scrollLines(int n)
 {

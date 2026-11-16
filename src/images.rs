@@ -209,3 +209,97 @@ mod tests {
         assert!(iterm2_file(b"File=inline=0:AAAA").is_none());
     }
 }
+
+/// What a command's text output is, for a rich view: "json", "csv", "tsv",
+/// "html", "svg", "markdown", or "" (plain text). Clear-cut cases only.
+pub fn detect_text(text: &str) -> &'static str {
+    let t = text.trim();
+    if t.len() < 2 {
+        return "";
+    }
+    let lower: String = t.chars().take(256).collect::<String>().to_lowercase();
+    if lower.starts_with("<svg") || (lower.starts_with("<?xml") && lower.contains("<svg")) {
+        return "svg";
+    }
+    if lower.starts_with("<!doctype html") || lower.starts_with("<html") || (lower.starts_with('<') && (lower.contains("<body") || lower.contains("<div") || lower.contains("<table") || lower.contains("<p>"))) {
+        return "html";
+    }
+    if (t.starts_with('{') && t.ends_with('}')) || (t.starts_with('[') && t.ends_with(']')) {
+        if serde_json::from_str::<serde_json::Value>(t).is_ok() && t.len() > 20 {
+            return "json";
+        }
+        // JSON lines.
+        if t.lines().count() > 1 && t.lines().all(|l| l.trim().is_empty() || serde_json::from_str::<serde_json::Value>(l).is_ok()) {
+            return "json";
+        }
+    }
+    let lines: Vec<&str> = t.lines().filter(|l| !l.trim().is_empty()).take(200).collect();
+    if lines.len() >= 3 {
+        for (sep, kind) in [('\t', "tsv"), (',', "csv")] {
+            let counts: Vec<usize> = lines.iter().map(|l| l.matches(sep).count()).collect();
+            if counts[0] >= 1 && counts.iter().all(|&c| c == counts[0]) {
+                return kind;
+            }
+        }
+    }
+    let md_marks = lines.iter().filter(|l| l.starts_with("# ") || l.starts_with("## ") || l.starts_with("- ") || l.starts_with("* ") || l.starts_with("```") || l.starts_with("| ") || l.starts_with("> ")).count();
+    if lines.len() >= 3 && md_marks * 3 >= lines.len() && lines.iter().any(|l| l.starts_with('#')) {
+        return "markdown";
+    }
+    ""
+}
+
+/// Terminal output as plain text: escape sequences and carriage returns out.
+pub fn plain_text(raw: &[u8]) -> String {
+    let s = String::from_utf8_lossy(&un_onlcr(raw)).into_owned();
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{1b}' => match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    for x in chars.by_ref() {
+                        if ('@'..='~').contains(&x) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') | Some('P') | Some('_') => {
+                    // OSC / DCS / APC: through BEL or ST.
+                    while let Some(x) = chars.next() {
+                        if x == '\u{7}' {
+                            break;
+                        }
+                        if x == '\u{1b}' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    chars.next();
+                }
+            },
+            '\r' => {}
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod detect_tests {
+    use super::*;
+
+    #[test]
+    fn kinds() {
+        assert_eq!(detect_text("{\"name\": \"tessera\", \"stars\": 3}"), "json");
+        assert_eq!(detect_text("a,b,c\n1,2,3\n4,5,6\n"), "csv");
+        assert_eq!(detect_text("<!DOCTYPE html><html><body>x</body></html>"), "html");
+        assert_eq!(detect_text("<svg xmlns='http://www.w3.org/2000/svg'></svg>"), "svg");
+        assert_eq!(detect_text("# Title\n\n- one\n- two\n"), "markdown");
+        assert_eq!(detect_text("total 12\ndrwxr-xr-x 2 ben users 4096 src\n-rw-r--r-- 1 ben users 3 a, b\n"), "");
+        assert_eq!(plain_text(b"\x1b[31mred\x1b[0m\r\nnext"), "red\nnext");
+    }
+}

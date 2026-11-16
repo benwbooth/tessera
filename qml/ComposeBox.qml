@@ -23,6 +23,7 @@ Rectangle {
     property var promptSegments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
     signal submitted(string text)
     signal keysPicked(string keys)     // the corner switch: "emacs", "vi", "vscode"
+    signal openRich()                  // show the last output's rich view
     signal handBack()                  // Esc: type into the terminal instead
 
     readonly property alias text: edit.text
@@ -673,6 +674,12 @@ Rectangle {
             label: "\u2726 Fix"
             tip: "Ask the AI to correct the command that just failed"
             onClicked: box.askFix()
+        }
+        Chip {
+            visible: box.view !== null && box.view.richKind !== ""
+            label: "\u25eb " + (({ json: "JSON", csv: "Table", tsv: "Table", html: "HTML", markdown: "Markdown", svg: "SVG" })[box.view ? box.view.richKind : ""] || "View")
+            tip: "Show the last command's output formatted"
+            onClicked: box.openRich()
         }
         Chip { label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {

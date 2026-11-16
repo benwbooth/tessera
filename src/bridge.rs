@@ -125,6 +125,8 @@ pub mod ffi {
         fn full_screen(self: &Session) -> bool;
         /// An image's pixels (RGBA) for drawing it.
         fn image_pixels(self: &Session, id: u32) -> ImagePixels;
+        /// The last finished command's output as JSON {kind, text}.
+        fn last_output(self: &Session) -> String;
         /// The shell is at its prompt (from shell integration's marks).
         fn at_prompt(self: &Session) -> bool;
 

@@ -42,6 +42,9 @@ class TerminalItem : public QQuickItem {
     Q_PROPERTY(int lastStatus READ lastStatus NOTIFY commandFinished)
     // The shell's aliases as JSON {name: value} (shell integration reports them).
     Q_PROPERTY(QString aliases READ aliases NOTIFY aliasesChanged)
+    // The last command's output, when it has a rich view ("json", "csv",
+    // "tsv", "html", "svg", "markdown"; "" otherwise).
+    Q_PROPERTY(QString richKind READ richKind NOTIFY commandFinished)
     Q_PROPERTY(qint64 lastDuration READ lastDuration NOTIFY commandFinished)
     Q_PROPERTY(int tmuxPaneId READ tmuxPaneId NOTIFY sessionIdChanged)
     Q_PROPERTY(QString tmuxGateway READ tmuxGateway NOTIFY tmuxGatewayChanged)
@@ -281,10 +284,13 @@ private:
     bool m_atPrompt = false, m_fullScreen = false;
     int m_lastStatus = 0;
     QString m_aliases = QStringLiteral("{}");
+    QString m_richKind;
     qint64 m_lastDuration = 0;
 public:
     int lastStatus() const { return m_lastStatus; }
     QString aliases() const { return m_aliases; }
+    QString richKind() const { return m_richKind; }
+    Q_INVOKABLE QString lastOutput() const;
     Q_SIGNAL void aliasesChanged();
     qint64 lastDuration() const { return m_lastDuration; }
     Q_SIGNAL void commandFinished();
