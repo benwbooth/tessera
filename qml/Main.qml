@@ -31,7 +31,8 @@ ApplicationWindow {
     property int currentTab: 0
     property var activeView: null
     property real fontSize: 0          // a zoom (Ctrl+=/-) over the profile's size; 0 = none
-    property var commandHistory: []    // the input editor's, shared by the window's panes
+    // The input editor's history (every shell's, merged), shared by the window's panes.
+    property var commandHistory: { try { return JSON.parse(controller.historyAll(5000)) } catch (e) { return [] } }
     property real zoomBase: 11         // the profile's size when zooming started
     readonly property int zoomPercent: fontSize > 0 ? Math.round(100 * fontSize / zoomBase) : 100
     property var tmuxGateways: ({})    // gateway key -> gateway TerminalView
@@ -101,8 +102,11 @@ ApplicationWindow {
             zoomPercent: win.zoomPercent
             inputEditor: win.settings.input_editor !== false
             editorKeys: win.settings.editor_keys || "emacs"
+            editorPrompt: win.settings.editor_prompt !== false
+            promptSegments: win.settings.prompt_segments || ["dir", "git", "status", "duration", "|", "host", "time"]
             commandHistory: win.commandHistory
             controller: controller
+            onEditorKeysPicked: (k) => win.setSetting("editor_keys", k)
             dimInactive: win.settings.dim_inactive
             dimAmount: win.settings.dim_amount
             showTitle: win.settings.pane_titles

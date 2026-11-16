@@ -56,6 +56,7 @@ fn main() {
         QmlFile::from("qml/WindowControls.qml"),
         QmlFile::from("qml/MomentumWheel.qml"),
         QmlFile::from("qml/ComposeBox.qml"),
+        QmlFile::from("qml/PromptBar.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");

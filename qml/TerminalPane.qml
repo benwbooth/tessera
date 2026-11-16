@@ -37,8 +37,12 @@ Item {
     // The input editor (ComposeBox) and what it needs from the window.
     // Has the keys (the terminal or its editor).
     readonly property bool focused: term.activeFocus || compose.editing
+    signal editorKeysPicked(string keys)
+    property bool preferEditor: true   // the keys go to the editor (not the terminal) when the pane gets them
     property bool inputEditor: false
     property string editorKeys: "emacs"
+    property bool editorPrompt: true
+    property var promptSegments: ["dir", "git", "status", "duration", "|", "host", "time"]
     property var commandHistory: []
     property var controller: null
     // REPLs the editor also serves (the shell needs its integration's prompt marks).
@@ -86,18 +90,11 @@ Item {
         anchors.bottom: compose.visible ? compose.top : parent.bottom
         focus: true
         onContextMenuRequested: (x, y) => pane.contextMenu(term, x, y)
-        // The pane taking the keys (switching to it, clicking it) gives them
-        // to the editor while it's up.
-        onActiveFocusChanged: if (activeFocus && compose.visible) Qt.callLater(compose.focusEditor)
-        // Typing into the terminal while the editor is up goes to the editor.
-        Keys.onPressed: (e) => {
-            if (compose.visible && e.text !== "" && e.text.charCodeAt(0) >= 32
-                    && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
-                compose.focusEditor()
-                compose.insert(e.text)
-                e.accepted = true
-            }
-        }
+        // Type in the terminal (click it) or in the editor under it (click
+        // there): the pane remembers which, and goes back to it when it gets
+        // the keys again (switching tabs or panes).
+        onActiveFocusChanged: if (activeFocus && compose.visible && pane.preferEditor) Qt.callLater(compose.focusEditor)
+        PointHandler { onActiveChanged: if (active) pane.preferEditor = false }
     }
 
     ComposeBox {
@@ -114,16 +111,20 @@ Item {
         lang: pane.replLang !== "" ? pane.replLang : "bash"
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         cwd: term.pwd !== "" ? term.pwd : pane.procCwd
+        showPrompt: pane.editorPrompt
+        promptSegments: pane.promptSegments
         onSubmitted: (t) => {
             if (t.indexOf("\n") < 0) term.sendText(t + "\r")
             else { term.pasteText(t); term.sendText("\r") }
             term.scrollToBottom()
         }
         onHandBack: term.forceActiveFocus()
+        onKeysPicked: (k) => pane.editorKeysPicked(k)
         onVisibleChanged: {
-            if (visible && term.activeFocus) focusEditor()
+            if (visible && term.activeFocus && pane.preferEditor) focusEditor()
             else if (!visible && editing) term.forceActiveFocus()
         }
+        onEditingChanged: if (editing) pane.preferEditor = true
     }
 
     // Badge: large text behind the content, top right (iTerm2's badges).

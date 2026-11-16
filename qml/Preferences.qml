@@ -617,6 +617,17 @@ Window {
                                 Item { Layout.fillWidth: true }
                             }
                             Row2 {
+                                label: "Command help"
+                                hint: prefs.controller.helpStatus !== "" ? prefs.controller.helpStatus
+                                      : "Completions show help from man and info pages, tldr-pages (examples, fetched once) and fish-shell's completions (subcommands and options for thousands of commands)."
+                                PlainButton {
+                                    text: "Download / Update"
+                                    enabled2: !prefs.controller.helpStatus.startsWith("Downloading")
+                                    onClicked: prefs.controller.downloadCommandHelp()
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Row2 {
                                 label: "Undo Close"
                                 hint: "A closed tab or pane can be brought back (Ctrl+Shift+Z) for this long; its shell keeps running meanwhile."
                                 Stepper {

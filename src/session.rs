@@ -96,6 +96,8 @@ pub struct Session {
     /// of the last read in case a mark is split across reads.
     mark: u8,
     mark_tail: Vec<u8>,
+    /// When the running command started (mark C), for its duration.
+    command_started: Option<std::time::Instant>,
     exited: bool,
     last_cursor_row: Option<u16>,
     last_full_size: (u16, u16),
@@ -301,6 +303,7 @@ pub fn session_open(
         carry: Vec::new(),
         mark: 0,
         mark_tail: Vec::new(),
+        command_started: None,
         exited: false,
         last_cursor_row: None,
         last_full_size: (0, 0),
@@ -518,8 +521,21 @@ impl Session {
             if at >= hay.len() {
                 break;
             }
-            if matches!(hay[at], b'A' | b'B' | b'C' | b'D') {
-                last = Some(hay[at]);
+            match hay[at] {
+                b'C' => {
+                    self.command_started = Some(std::time::Instant::now());
+                    last = Some(b'C');
+                }
+                b'D' => {
+                    // "D;<exit status>": the command finished.
+                    let status: String = hay[at + 1..].iter().skip_while(|&&c| c == b';').take_while(|c| c.is_ascii_digit()).map(|&c| c as char).collect();
+                    if let Some(t) = self.command_started.take() {
+                        self.events.push(json!({"type": "command", "status": status.parse::<i64>().unwrap_or(0), "ms": t.elapsed().as_millis() as u64}));
+                    }
+                    last = Some(b'D');
+                }
+                b'A' | b'B' => last = Some(hay[at]),
+                _ => {}
             }
             i = at;
         }

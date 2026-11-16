@@ -253,6 +253,20 @@ void TerminalItem::setThemeJson(const QString& v)
 {
     if (v == m_themeJson) return;
     m_themeJson = v;
+    // The theme's colors right away: a new terminal (no shell yet) mustn't
+    // show a stand-in grey, and neither must the window's chrome (it follows
+    // the active terminal's background).
+    {
+        const QJsonObject t = QJsonDocument::fromJson(v.toUtf8()).object();
+        const QColor bg(t.value(u"background").toString());
+        const QColor fg(t.value(u"foreground").toString());
+        if (bg.isValid() && bg != m_bg) {
+            m_bg = bg;
+            emit backgroundChanged();
+            update();
+        }
+        if (fg.isValid()) m_fg = fg;
+    }
     if (m_session) {
         const QByteArray b = v.toUtf8();
         m_session->set_theme(rs(b));
@@ -460,6 +474,10 @@ void TerminalItem::handleEvents()
             QGuiApplication::clipboard()->setText(e.value(u"text").toString());
         } else if (type == u"grid") {
             m_forceFull = true;
+        } else if (type == u"command") {
+            m_lastStatus = e.value(u"status").toInt();
+            m_lastDuration = qint64(e.value(u"ms").toDouble());
+            emit commandFinished();
         } else if (type == u"prompt") {
             const bool at = e.value(u"state").toString() != u"C";
             if (at != m_atPrompt) {

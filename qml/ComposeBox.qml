@@ -17,20 +17,24 @@ Rectangle {
     property var history: []           // oldest first (shared by the window)
     property var themeData: ({})       // the terminal's theme (ansi colors)
     property string cwd: ""            // the shell's folder (for path completion)
+    property bool showPrompt: true     // Tessera's prompt bar above the editor
+    property var promptSegments: ["dir", "git", "status", "duration", "|", "host", "time"]
     signal submitted(string text)
+    signal keysPicked(string keys)     // the corner switch: "emacs", "vi", "vscode"
     signal handBack()                  // Esc: type into the terminal instead
 
     readonly property alias text: edit.text
     readonly property bool editing: edit.activeFocus
     readonly property real lineHeight: Math.ceil(fm.height)
     readonly property int lines: Math.max(1, edit.lineCount)
-    implicitHeight: Math.min(lines, 10) * lineHeight + 14
+    implicitHeight: Math.min(lines, 10) * lineHeight + 14 + (promptBar.visible ? promptBar.height : 0)
 
     color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
     Rectangle { width: parent.width; height: 1; color: Theme.divider }
 
     FontMetrics { id: fm; font: edit.font }
 
+    readonly property color cursorColor: themeData && themeData.cursor ? themeData.cursor : Theme.fg
     function ansi(i, fallback) {
         const a = box.themeData && box.themeData.ansi
         return a && a[i] ? a[i] : fallback
@@ -51,7 +55,10 @@ Rectangle {
         const t = edit.text
         if (t.trim() !== "") {
             const h = box.history
-            if (h.length === 0 || h[h.length - 1] !== t) h.push(t)
+            const old = h.indexOf(t)
+            if (old >= 0) h.splice(old, 1)
+            h.push(t)
+            if (controller) controller.historyAdd(t, box.cwd)
         }
         histIndex = -1
         draft = ""
@@ -216,19 +223,27 @@ Rectangle {
     property bool compOpen: false
     property bool compChosen: false    // Up/Down used: Enter takes the item
     property int compIndex: 0
+    property bool historyMode: false   // the dropdown lists history (Ctrl+R, the clock)
+    function openHistory() {
+        historyMode = true; compOpen = true; compChosen = true; compIndex = 0
+        requestComplete()
+        edit.forceActiveFocus()
+    }
     function requestComplete() {
         if (!controller) return
-        const r = JSON.parse(controller.complete(edit.text, edit.cursorPosition, box.cwd))
+        const r = JSON.parse(historyMode ? controller.historySearch(edit.text)
+                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd))
         comp = r
         if (compIndex >= r.items.length) compIndex = 0
         if (r.items.length === 0 && !r.pending) closeComp()
         if (r.pending) compRetry.restart()
     }
     function openComp() { compOpen = true; compChosen = false; compIndex = 0; requestComplete() }
-    function closeComp() { compOpen = false; compChosen = false }
+    function closeComp() { compOpen = false; compChosen = false; historyMode = false }
     function acceptComp(i) {
         const it = comp.items[i === undefined ? compIndex : i]
         if (!it) return
+        if (historyMode) { setText(it.insert); closeComp(); return }
         edit.remove(comp.start, comp.end)
         let ins = it.insert
         // A finished word gets its space; a folder or "--opt=" keeps going.
@@ -248,7 +263,8 @@ Rectangle {
             const p = edit.cursorPosition, t = edit.text
             const prev = t[p - 1] || " ", next = t[p] || " "
             const inWord = !/\s/.test(prev) && /\s/.test(next)
-            if (box.compOpen) { if (inWord || prev === "/") box.requestComplete(); else box.closeComp() }
+            if (box.compOpen && box.historyMode) box.requestComplete()
+            else if (box.compOpen) { if (inWord || prev === "/") box.requestComplete(); else box.closeComp() }
             else if (inWord && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete() }
         }
     }
@@ -450,12 +466,29 @@ Rectangle {
     }
 
     // ---- view -------------------------------------------------------------
+    PromptBar {
+        id: promptBar
+        visible: box.showPrompt
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: 4
+        height: visible ? implicitHeight : 0
+        view: box.view
+        controller: box.controller
+        cwd: box.cwd
+        themeData: box.themeData
+        segments: box.promptSegments
+        fontFamily: edit.font.family
+        fontSize: edit.font.pointSize
+    }
+
     Flickable {
         id: flick
         anchors.fill: parent
         anchors.leftMargin: 10
         anchors.rightMargin: modeTag.width + 18
-        anchors.topMargin: 7
+        anchors.topMargin: 7 + (promptBar.visible ? promptBar.height + 4 : 0)
         anchors.bottomMargin: 7
         contentWidth: width
         contentHeight: edit.contentHeight
@@ -479,11 +512,28 @@ Rectangle {
             color: Theme.fg
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
+            // A block cursor like the terminal's, the character under it in
+            // the background color (a hollow box when the editor isn't typing).
             cursorDelegate: Rectangle {
-                width: box.keys === "vi" && box.viNormal ? Math.max(2, fm.averageCharacterWidth) : 2
-                color: Theme.accent
-                opacity: box.keys === "vi" && box.viNormal ? 0.6 : 1
-                visible: edit.activeFocus
+                id: cur
+                readonly property string under: {
+                    const c = edit.text[edit.cursorPosition]
+                    return c === undefined || c === "\n" || c === "\u2029" ? "" : c
+                }
+                width: Math.max(2, fm.advanceWidth(under !== "" ? under : " "))
+                height: fm.height
+                color: edit.activeFocus ? box.cursorColor : "transparent"
+                border.width: edit.activeFocus ? 0 : 1
+                border.color: box.cursorColor
+                opacity: box.keys === "vi" && !box.viNormal && edit.activeFocus ? 0.85 : 1
+                Text {
+                    anchors.fill: parent
+                    text: cur.under
+                    font: edit.font
+                    color: Theme.bg
+                    renderType: Text.NativeRendering
+                    visible: edit.activeFocus
+                }
             }
             onCursorRectangleChanged: flick.ensureVisible(cursorRectangle)
             // (Re-coloring also signals a change: react to real edits only.)
@@ -503,6 +553,10 @@ Rectangle {
                     box.openComp(); done = true
                 }
                 if (!done && e.key === Qt.Key_Space && (e.modifiers & Qt.ControlModifier)) { box.openComp(); done = true }
+                if (!done && e.key === Qt.Key_R && (e.modifiers & Qt.ControlModifier) && !(box.keys === "vi" && box.viNormal)) {
+                    if (box.historyMode) box.closeComp(); else box.openHistory()
+                    done = true
+                }
                 if (!done) done = box.commonKey(e)
                 if (!done && !(box.keys === "vi" && box.viNormal)) done = box.smartKey(e)
                 if (!done) {
@@ -531,19 +585,60 @@ Rectangle {
         renderType: Text.NativeRendering
     }
 
-    Text {
+    // The corner: a problem, or the language / vi mode; the history button
+    // and the key switch (Emacs, vi, VS Code).
+    Row {
         id: modeTag
         anchors.right: parent.right
-        anchors.rightMargin: 10
-        anchors.top: parent.top
-        anchors.topMargin: 8
-        text: box.problem !== "" ? "\u26a0 " + box.problem
-              : box.keys === "vi" ? (box.viNormal ? "NORMAL" : "INSERT") : box.lang
-        color: box.problem !== "" ? box.ansi(9, "#e05a5a") : Theme.textDim
-        opacity: 0.7
-        font.pixelSize: 10
-        font.weight: Font.DemiBold
-        font.letterSpacing: 0.5
+        anchors.rightMargin: 8
+        anchors.top: flick.top
+        anchors.topMargin: -2
+        spacing: 6
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: box.problem !== "" ? "\u26a0 " + box.problem
+                  : box.keys === "vi" ? (box.viNormal ? "NORMAL" : "INSERT") : box.lang
+            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : Theme.textDim
+            opacity: 0.75
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+            font.letterSpacing: 0.5
+        }
+        Chip { label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
+        Chip {
+            id: keysChip
+            label: ({ emacs: "Emacs", vi: "vi", vscode: "VS Code" })[box.keys] || box.keys
+            tip: "Editor keys"
+            onClicked: keysMenu.popup(keysChip, 0, keysChip.height + 2)
+        }
+    }
+    component Chip: Rectangle {
+        id: chip
+        property string label
+        property string tip
+        signal clicked()
+        width: chipText.implicitWidth + 12
+        height: 18
+        radius: 5
+        color: chipHover.hovered ? Theme.mix(box.color, Theme.fg, 0.12) : Theme.mix(box.color, Theme.fg, 0.05)
+        Text { id: chipText; anchors.centerIn: parent; text: chip.label; color: Theme.textDim; font.pixelSize: 10; font.weight: Font.DemiBold }
+        HoverHandler { id: chipHover }
+        TapHandler { onTapped: chip.clicked() }
+        ToolTip.visible: chipHover.hovered && tip !== ""
+        ToolTip.text: tip
+        ToolTip.delay: 600
+    }
+    Menu {
+        id: keysMenu
+        Repeater {
+            model: [["emacs", "Emacs (readline)"], ["vi", "vi"], ["vscode", "VS Code"]]
+            delegate: MenuItem {
+                text: modelData[1]
+                checkable: true
+                checked: box.keys === modelData[0]
+                onTriggered: { box.keysPicked(modelData[0]); edit.forceActiveFocus() }
+            }
+        }
     }
 
     // ---- syntax -----------------------------------------------------------
@@ -657,15 +752,15 @@ Rectangle {
         Text {
             id: docText
             readonly property var item: box.comp.items[box.compIndex]
-            visible: item !== undefined && item.detail.length > 60
+            visible: item !== undefined && ((item.doc || "") !== "" || item.detail.length > 60)
             anchors.top: compList.bottom
             anchors.topMargin: 6
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: 10
-            text: item ? item.detail : ""
+            text: item ? (item.doc || item.detail) : ""
             wrapMode: Text.Wrap
-            maximumLineCount: 5
+            maximumLineCount: (item && item.doc) ? 16 : 5
             elide: Text.ElideRight
             color: Theme.text
             opacity: 0.85

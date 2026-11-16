@@ -19,6 +19,9 @@ pub struct Item {
     pub insert: String,
     pub detail: String,
     pub kind: &'static str, // command, subcommand, option, file, dir, branch, host, variable, value
+    /// Longer help for the panel under the list (a command's tldr page).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub doc: String,
 }
 
 /// Help for one command: its options and subcommands (each subcommand's
@@ -418,6 +421,132 @@ pub fn parse_man(text: &str) -> Vec<(String, String)> {
     out
 }
 
+/// GNU info pages (for commands documented there rather than in man):
+/// options as "‘-a’" / "‘--all’" lines with the description indented below.
+pub fn parse_info(text: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let mut flags = Vec::new();
+        while i < lines.len() {
+            let t = lines[i].trim();
+            let q = t.strip_prefix('\u{2018}').and_then(|r| r.strip_suffix('\u{2019}')).or_else(|| t.strip_prefix('`').and_then(|r| r.strip_suffix('\'')));
+            match q {
+                Some(f) if f.starts_with('-') => {
+                    flags.push(f.to_string());
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+        if flags.is_empty() {
+            i += 1;
+            continue;
+        }
+        let mut desc = String::new();
+        while i < lines.len() && !lines[i].trim().is_empty() && lines[i].starts_with("     ") {
+            if !desc.is_empty() {
+                desc.push(' ');
+            }
+            desc.push_str(lines[i].trim());
+            i += 1;
+            if desc.len() > 240 {
+                break;
+            }
+        }
+        let desc = desc.split_whitespace().collect::<Vec<_>>().join(" ");
+        for f in flags {
+            let name: String = f.chars().take_while(|c| !matches!(c, '=' | '[' | ' ')).collect();
+            if name.len() >= 2 && !out.iter().any(|(n, _)| *n == name) {
+                out.push((name, desc.clone()));
+            }
+        }
+    }
+    out
+}
+
+fn info_options(page: &str) -> Vec<(String, String)> {
+    let Ok(o) = std::process::Command::new("info").args(["--output=-", page]).stderr(std::process::Stdio::null()).output() else { return Vec::new() };
+    if !o.status.success() {
+        return Vec::new();
+    }
+    parse_info(&String::from_utf8_lossy(&o.stdout))
+}
+
+// ---- help: tldr-pages ----------------------------------------------------------
+
+fn tldr_dir() -> PathBuf {
+    fish_download_dir().with_file_name("tldr")
+}
+
+/// Fetch tldr-pages once, in the background (common, Linux, macOS and
+/// Windows pages; English).
+fn ensure_tldr() {
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if tldr_dir().join("pages").exists() || STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let _ = update_tldr();
+    });
+}
+
+/// Download (or update) tldr-pages. Returns how many pages there are.
+pub fn update_tldr() -> Result<usize, String> {
+    let dir = tldr_dir();
+    let d = dir.to_string_lossy().into_owned();
+    let git = |args: &[&str]| -> Result<(), String> {
+        let ok = std::process::Command::new("git").args(args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().map_err(|e| e.to_string())?;
+        if ok.success() { Ok(()) } else { Err(format!("git {} failed", args.first().unwrap_or(&""))) }
+    };
+    if dir.join(".git").exists() {
+        git(&["-C", &d, "pull", "-q", "--depth", "1"])?;
+    } else {
+        let _ = std::fs::create_dir_all(dir.parent().unwrap());
+        let tmp = format!("{d}.part");
+        let _ = std::fs::remove_dir_all(&tmp);
+        git(&["clone", "-q", "--depth", "1", "--filter=blob:none", "--sparse", "https://github.com/tldr-pages/tldr.git", &tmp])?;
+        git(&["-C", &tmp, "sparse-checkout", "set", "pages/common", "pages/linux", "pages/osx", "pages/windows"])?;
+        std::fs::rename(&tmp, &dir).map_err(|e| e.to_string())?;
+    }
+    Ok(["common", "linux", "osx", "windows"].iter().map(|p| std::fs::read_dir(dir.join("pages").join(p)).map(|r| r.count()).unwrap_or(0)).sum())
+}
+
+pub fn tldr_count() -> usize {
+    ["common", "linux", "osx", "windows"].iter().map(|p| std::fs::read_dir(tldr_dir().join("pages").join(p)).map(|r| r.count()).unwrap_or(0)).sum()
+}
+
+/// A command's tldr page: its description and examples (what, command).
+pub fn tldr_page(cmd: &str) -> Option<(String, Vec<(String, String)>)> {
+    ensure_tldr();
+    let platform = if cfg!(target_os = "macos") { "osx" } else if cfg!(windows) { "windows" } else { "linux" };
+    let base = tldr_dir().join("pages");
+    let text = [platform, "common"].iter().find_map(|p| std::fs::read_to_string(base.join(p).join(format!("{cmd}.md"))).ok())?;
+    Some(parse_tldr(&text))
+}
+
+pub fn parse_tldr(text: &str) -> (String, Vec<(String, String)>) {
+    let mut desc = Vec::new();
+    let mut examples = Vec::new();
+    let mut what: Option<String> = None;
+    for line in text.lines() {
+        if let Some(d) = line.strip_prefix("> ") {
+            if !d.starts_with("More information") {
+                desc.push(d.trim().to_string());
+            }
+        } else if let Some(w) = line.strip_prefix("- ") {
+            what = Some(w.trim_end_matches(':').replace(['[', ']'], ""));
+        } else if let Some(c) = line.strip_prefix('`').and_then(|l| l.strip_suffix('`')) {
+            if let Some(w) = what.take() {
+                // "{{path/to/file}}" placeholders read as path/to/file.
+                examples.push((w, c.replace("{{", "").replace("}}", "")));
+            }
+        }
+    }
+    (desc.join(" "), examples)
+}
+
 fn man_options(page: &str) -> Vec<(String, String)> {
     if cfg!(windows) {
         return Vec::new();
@@ -440,7 +569,11 @@ fn man_options(page: &str) -> Vec<(String, String)> {
             text.push(c);
         }
     }
-    parse_man(&text)
+    let opts = parse_man(&text);
+    if opts.is_empty() {
+        return info_options(page);
+    }
+    opts
 }
 
 // ---- help: cache ------------------------------------------------------------
@@ -543,6 +676,7 @@ fn paths(prefix: &str, cwd: &str, dirs_only: bool) -> Vec<Item> {
                 label,
                 detail: String::new(),
                 kind: if is_dir { "dir" } else { "file" },
+                doc: String::new(),
             })
         })
         .collect();
@@ -637,16 +771,29 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
         } else {
             let mut cands: Vec<Item> = BUILTINS
                 .iter()
-                .map(|(n, d)| Item { label: n.to_string(), insert: n.to_string(), detail: d.to_string(), kind: "command" })
+                .map(|(n, d)| Item { label: n.to_string(), insert: n.to_string(), detail: d.to_string(), kind: "command", doc: String::new() })
                 .collect();
-            cands.extend(path_commands().iter().map(|n| Item { label: n.clone(), insert: n.clone(), detail: String::new(), kind: "command" }));
+            cands.extend(path_commands().iter().map(|n| Item { label: n.clone(), insert: n.clone(), detail: String::new(), kind: "command", doc: String::new() }));
             let mut seen = HashSet::new();
             cands.retain(|i| seen.insert(i.label.clone()));
             items = rank(cands, &typed, |i| i.label.clone());
             items.truncate(60);
             let names: Vec<String> = items.iter().filter(|i| i.detail.is_empty()).take(30).map(|i| i.label.clone()).collect();
             let descs = describe_commands(&names);
-            for i in items.iter_mut() {
+            for (n, i) in items.iter_mut().enumerate() {
+                // tldr-pages: what it is, and its common uses.
+                if n < 30 {
+                    if let Some((desc, examples)) = tldr_page(&i.label) {
+                        if i.detail.is_empty() {
+                            i.detail = desc.clone();
+                        }
+                        let mut doc = desc;
+                        for (what, cmd) in examples.iter().take(6) {
+                            doc.push_str(&format!("\n\u{2022} {what}\n    {cmd}"));
+                        }
+                        i.doc = doc;
+                    }
+                }
                 if i.detail.is_empty() {
                     i.detail = descs.get(&i.label).cloned().unwrap_or_default();
                 }
@@ -663,7 +810,7 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
         let sub_known = sub.as_ref().is_some_and(|s| h.subcommands.iter().any(|(n, _)| n == s));
         if let Some(var) = typed.strip_prefix('$') {
             items = rank(
-                std::env::vars().map(|(k, v)| Item { label: format!("${k}"), insert: format!("${k}"), detail: v.chars().take(80).collect(), kind: "variable" }).collect(),
+                std::env::vars().map(|(k, v)| Item { label: format!("${k}"), insert: format!("${k}"), detail: v.chars().take(80).collect(), kind: "variable", doc: String::new() }).collect(),
                 var,
                 |i| i.label[1..].to_string(),
             );
@@ -681,19 +828,19 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
             opts.extend(h.options.iter().cloned());
             let mut seen = HashSet::new();
             opts.retain(|(f, _)| seen.insert(f.clone()));
-            let cands = opts.into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "option" }).collect();
+            let cands = opts.into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "option", doc: String::new() }).collect();
             items = rank(cands, &typed, |i| i.label.clone());
         } else {
             if sub.is_none() && !h.subcommands.is_empty() {
                 items.extend(rank(
-                    h.subcommands.iter().map(|(n, d)| Item { label: n.clone(), insert: n.clone(), detail: d.clone(), kind: "subcommand" }).collect(),
+                    h.subcommands.iter().map(|(n, d)| Item { label: n.clone(), insert: n.clone(), detail: d.clone(), kind: "subcommand", doc: String::new() }).collect(),
                     &typed,
                     |i| i.label.clone(),
                 ));
             }
             if args.is_empty() && !h.values.is_empty() {
                 items.extend(rank(
-                    h.values.iter().map(|(n, d)| Item { label: n.clone(), insert: n.clone(), detail: d.clone(), kind: "value" }).collect(),
+                    h.values.iter().map(|(n, d)| Item { label: n.clone(), insert: n.clone(), detail: d.clone(), kind: "value", doc: String::new() }).collect(),
                     &typed,
                     |i| i.label.clone(),
                 ));
@@ -701,14 +848,14 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str) -> String {
             let git_ref = cmd == "git" && sub.as_deref().is_some_and(|s| ["checkout", "switch", "merge", "rebase", "branch", "log", "diff", "reset", "cherry-pick", "show", "push", "pull"].contains(&s));
             if git_ref {
                 items.extend(rank(
-                    git_branches(cwd).into_iter().map(|b| Item { insert: b.clone(), label: b, detail: String::new(), kind: "branch" }).collect(),
+                    git_branches(cwd).into_iter().map(|b| Item { insert: b.clone(), label: b, detail: String::new(), kind: "branch", doc: String::new() }).collect(),
                     &typed,
                     |i| i.label.clone(),
                 ));
             }
             if ["ssh", "scp", "sftp", "mosh", "rsync"].contains(&cmd.as_str()) && !typed.contains('/') {
                 items.extend(rank(
-                    crate::launchers::launchers().ssh_hosts.into_iter().map(|h| Item { insert: h.clone(), label: h, detail: "ssh host".into(), kind: "host" }).collect(),
+                    crate::launchers::launchers().ssh_hosts.into_iter().map(|h| Item { insert: h.clone(), label: h, detail: "ssh host".into(), kind: "host", doc: String::new() }).collect(),
                     &typed,
                     |i| i.label.clone(),
                 ));
@@ -759,6 +906,15 @@ mod tests {
         assert!(h.options.contains(&("-v".into(), "More output".into())));
         assert!(h.options.contains(&("--verbose".into(), "More output".into())));
         assert_eq!(h.sub_options["build"], vec![("--release".to_string(), "Optimized".to_string())]);
+    }
+
+    #[test]
+    fn tldr_and_info() {
+        let (d, ex) = parse_tldr("# tar\n\n> Archiving utility.\n> More information: <x>.\n\n- [c]reate an archive:\n\n`tar cf {{target.tar}} {{file}}`\n");
+        assert_eq!(d, "Archiving utility.");
+        assert_eq!(ex, vec![("create an archive".to_string(), "tar cf target.tar file".to_string())]);
+        let o = parse_info("‘-a’\n‘--all’\n     Show all\n     entries.\n\n");
+        assert_eq!(o, vec![("-a".to_string(), "Show all entries.".to_string()), ("--all".to_string(), "Show all entries.".to_string())]);
     }
 
     #[test]

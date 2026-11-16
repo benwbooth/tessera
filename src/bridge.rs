@@ -281,6 +281,17 @@ pub mod ffi {
         fn download_command_help(self: Pin<&mut Controller>);
         #[qinvokable]
         fn command_help_count(self: &Controller) -> i32;
+        /// The prompt bar's facts about a folder (git, user, host), JSON.
+        #[qinvokable]
+        fn prompt_info(self: &Controller, cwd: &QString) -> QString;
+        /// Command history (Tessera's merged with the shells'), newest last, JSON array.
+        #[qinvokable]
+        fn history_all(self: &Controller, limit: i32) -> QString;
+        #[qinvokable]
+        fn history_add(self: &Controller, cmd: &QString, cwd: &QString);
+        /// History matches for the dropdown (completion JSON).
+        #[qinvokable]
+        fn history_search(self: &Controller, query: &QString) -> QString;
         /// How the running daemon compared with this build at startup:
         /// "none", "current", "upgraded", "outdated", "newer".
         #[qinvokable]
@@ -516,14 +527,15 @@ impl ffi::Controller {
     }
 
     fn download_command_help(mut self: Pin<&mut Self>) {
-        self.as_mut().set_help_status(qs("Downloading fish's completions\u{2026}"));
+        self.as_mut().set_help_status(qs("Downloading fish's completions and tldr-pages\u{2026}"));
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let result = crate::complete::download_fish_completions();
+            let fish = crate::complete::download_fish_completions();
+            let tldr = crate::complete::update_tldr();
             let _ = qt.queue(move |mut c| {
-                let msg = match result {
-                    Ok(n) => format!("Help for {n} commands from fish-shell."),
-                    Err(e) => format!("Couldn't download: {e}"),
+                let msg = match (fish, tldr) {
+                    (Ok(f), Ok(t)) => format!("Up to date: completions for {f} commands (fish-shell), examples for {t} (tldr-pages)."),
+                    (Err(e), _) | (_, Err(e)) => format!("Couldn't download: {e}"),
                 };
                 c.as_mut().set_help_status(qs(&msg));
             });
@@ -538,8 +550,34 @@ impl ffi::Controller {
         crate::client::stop_daemon()
     }
 
+    fn history_all(&self, limit: i32) -> ffi::QString {
+        qs(&crate::history::all_json(limit.max(1) as usize))
+    }
+
+    fn history_add(&self, cmd: &ffi::QString, cwd: &ffi::QString) {
+        let cwd = cwd.to_string();
+        let cwd = match cwd.strip_prefix("file://") {
+            Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
+            None => cwd,
+        };
+        crate::history::add(&cmd.to_string(), &cwd);
+    }
+
+    fn history_search(&self, query: &ffi::QString) -> ffi::QString {
+        qs(&crate::history::search(&query.to_string()))
+    }
+
+    fn prompt_info(&self, cwd: &ffi::QString) -> ffi::QString {
+        let cwd = cwd.to_string();
+        let cwd = match cwd.strip_prefix("file://") {
+            Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
+            None => cwd,
+        };
+        qs(&crate::prompt::info(&cwd))
+    }
+
     fn command_help_count(&self) -> i32 {
-        crate::complete::fish_completion_count() as i32
+        (crate::complete::fish_completion_count() + crate::complete::tldr_count()) as i32
     }
 
     fn language_for(&self, program: &ffi::QString) -> ffi::QString {

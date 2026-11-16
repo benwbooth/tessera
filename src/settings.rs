@@ -56,6 +56,10 @@ pub struct Settings {
     // ("emacs", "vi", "vscode").
     pub input_editor: bool,
     pub editor_keys: String,
+    // -- Tessera's prompt above the editor, and its segments in order ("|"
+    // puts the rest on the right).
+    pub editor_prompt: bool,
+    pub prompt_segments: Vec<String>,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
     // -- Snippets (Edit > Snippets): text sent as if typed.
@@ -95,6 +99,8 @@ impl Default for Settings {
             undo_close_seconds: 5,
             input_editor: true,
             editor_keys: "emacs".into(),
+            editor_prompt: true,
+            prompt_segments: vec!["dir".into(), "git".into(), "status".into(), "duration".into(), "|".into(), "host".into(), "time".into()],
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),
