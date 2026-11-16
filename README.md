@@ -1,12 +1,36 @@
 # Tessera
 
-A terminal in the spirit of iTerm2, for Linux first and cross-platform by design.
+**A fast, good-looking terminal in the spirit of iTerm2 — for Linux first, cross-platform by design.**
 
-- **Engine:** [libghostty-vt](https://github.com/uzaaft/libghostty-rs) (Ghostty's terminal emulation: parsing, screen, scrollback, reflow, key/mouse encoding, selection).
-- **UI:** Rust + [cxx-qt](https://github.com/KDAB/cxx-qt) + Qt Quick. Rows are painted with QPainter (native FreeType text, glyphs placed exactly on cells) only when they change, and composited as GPU textures.
-- **Sessions survive the window:** a small daemon (`tessera daemon`, started on demand) owns the shells. Close the window, rebuild, or crash, and the next launch reattaches every shell with its recent output.
-- **tmux control mode (`tmux -CC`) built in:** tmux windows become native tabs, panes become native splits, and splitting/closing/new-tab turn into tmux commands.
-- Tabs, splits (iTerm2-style dimming of unfocused panes), copy-on-select, bracketed paste, mouse reporting, alternate-scroll, Kitty keyboard protocol (via libghostty).
+Tessera pairs Ghostty's terminal engine with a native Qt Quick UI written in
+Rust: tabs that look like tabs, splits, profiles, hundreds of color schemes,
+built-in `tmux -CC`, and shells that survive closing the window.
+
+![Tessera with split panes, git, bat and a color test](docs/screenshots/hero.png)
+
+<table>
+<tr>
+<td><img src="docs/screenshots/light.png" alt="Tessera Light theme"></td>
+<td><img src="docs/screenshots/oled.png" alt="Tessera OLED theme"></td>
+</tr>
+<tr>
+<td align="center">Tessera Light</td>
+<td align="center">Tessera OLED — true black for OLED screens, bar included</td>
+</tr>
+</table>
+
+## Highlights
+
+- **Ghostty inside.** Emulation by [libghostty-vt](https://github.com/uzaaft/libghostty-rs): parsing, reflow, scrollback, Kitty keyboard protocol, mouse reporting, OSC 8 links, OSC 133 prompts.
+- **Native text.** Rows are painted with QPainter (FreeType, glyphs on exact cells) only when they change, then composited as GPU textures. Box drawing and block characters are drawn as shapes, so lines join at any line height; Powerline and Nerd Font symbols keep their colors.
+- **Shells that outlive the window.** A small daemon owns the shells. Close the window, update, or crash, and the next launch reattaches every shell — splits, scrollback, screen and all. After a reboot, tabs come back in their folders under their last screen.
+- **`tmux -CC` built in.** tmux windows become native tabs and panes native splits.
+- **Shell integration without setup.** zsh and fish load it automatically: command marks, jump between prompts, select a command's output, new tabs in the same folder, and prompts that redraw cleanly when the window or text size changes.
+- **A modern window.** The tab bar is the title bar, with KDE-style buttons on the right. Tabs drag to reorder, out to a new window, or into another window, shells and all. A split **+** button opens profiles, other shells and SSH hosts from `~/.ssh/config`.
+- **285 color schemes** built in (the permissively licensed part of [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)), searchable, with separate light and dark themes that follow the desktop. One click fetches the rest of the collection; `.itermcolors` files import.
+- **iTerm2's feature set:** profiles, find in scrollback (regex, smart case), triggers, minimum contrast, broadcast input, maximize pane, arrangements, snippets, paste history, badges, cursor guide, transparency, session logging, undo close, a rich right-click menu, and momentum scrolling that speeds up as you keep going.
+
+![The color scheme gallery in Preferences](docs/screenshots/themes.png)
 
 ## Like iTerm2
 
@@ -22,12 +46,6 @@ Windows, the native ones on macOS). Drag tabs to reorder them, out of the
 window to make a new one, or onto another window to move them there; their
 shells move along.
 
-Highlights: profiles, find in scrollback, 14 color themes plus .itermcolors import (separate
-light/dark themes following the desktop), broadcast input, maximize pane,
-window arrangements, tab colors, badges, cursor guide, transparency, session
-logging, confirm-close when a job is running, restore sessions with their
-splits.
-
 ## Keys
 
 iTerm2's Cmd shortcuts become Ctrl+Shift.
@@ -36,7 +54,7 @@ iTerm2's Cmd shortcuts become Ctrl+Shift.
 |---|---|
 | New tab / window | Ctrl+Shift+T / Ctrl+Shift+N |
 | Split right / down | Ctrl+Shift+D / Ctrl+Shift+E |
-| Close pane | Ctrl+Shift+W |
+| Close tab / pane | Ctrl+Shift+W / Ctrl+Alt+W |
 | Maximize pane | Ctrl+Shift+Enter |
 | Copy / paste | Ctrl+Shift+C / Ctrl+Shift+V (selecting also copies; Shift+Insert or middle click pastes the selection) |
 | Select all / clear buffer | Ctrl+Shift+A / Ctrl+Shift+K |
@@ -44,7 +62,7 @@ iTerm2's Cmd shortcuts become Ctrl+Shift.
 | Next / previous tab | Ctrl+PgDn / Ctrl+PgUp, Ctrl+Tab, Alt+1…9 |
 | Move tab | Ctrl+Shift+PgUp / Ctrl+Shift+PgDn |
 | Move between panes | Ctrl+Alt+arrows, Ctrl+Shift+] / [ |
-| Font size | Ctrl+= / Ctrl+- / Ctrl+0 |
+| Text size | Ctrl+= / Ctrl+- / Ctrl+0 (the % shows in the bar; click it for 100%) |
 | Full screen | F11 |
 | Find cursor | Ctrl+Shift+/ |
 | Preferences | Ctrl+, |

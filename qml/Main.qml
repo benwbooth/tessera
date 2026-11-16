@@ -150,7 +150,9 @@ ApplicationWindow {
             property bool activity: false
             property bool bell: false
             property var lastView: null
-            readonly property var lastPane: lastView ? win.paneOf(lastView) : null
+            // The pane the title follows: the last focused, else the first.
+            readonly property var titleView: { win.treeRev; if (lastView) return lastView; const ps = win.panesIn(rootSplit, []); return ps.length ? ps[0].view : null }
+            readonly property var lastPane: titleView ? win.paneOf(titleView) : null
             readonly property var prof: win.profileFor(profile)
             readonly property string tabTitle: customTitle !== "" ? customTitle
                 : fixedTitle !== "" ? fixedTitle
@@ -158,9 +160,9 @@ ApplicationWindow {
                 // What's running in it (vim, htop, ssh...); at a prompt, the
                 // shell's own title or the folder.
                 : lastPane && lastPane.job !== "" ? lastPane.job
-                : (win.settings.tab_titles_per_tab && lastView && lastView.title ? lastView.title
+                : (win.settings.tab_titles_per_tab && titleView && titleView.title ? titleView.title
                    : launchTitle !== "" ? launchTitle
-                   : win.folderName(lastView && lastView.pwd ? lastView.pwd : (lastPane ? lastPane.procCwd : ""))
+                   : win.folderName(titleView && titleView.pwd ? titleView.pwd : (lastPane ? lastPane.procCwd : ""))
                      || (lastPane && lastPane.shellName) || prof.name)
             PaneSplit {
                 id: rootSplit
@@ -1505,7 +1507,7 @@ ApplicationWindow {
         repeat: true
         onTriggered: {
             for (const t of tabs) {
-                const v = t.lastView
+                const v = t.titleView
                 const p = v ? paneOf(v) : null
                 if (!p) continue
                 let info = { job: "", cwd: "", shell: "" }
