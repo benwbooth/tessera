@@ -12,6 +12,7 @@ mod proto;
 mod settings;
 mod shell_integration;
 mod snapshot;
+mod syntax;
 mod session;
 mod tmux;
 

@@ -33,7 +33,21 @@ Item {
     property string job: ""            // the program running in it (empty at a prompt)
     property string procCwd: ""        // its folder, read from the process
     property string shellName: ""      // the shell at the prompt
-    property int zoomPercent: 100      // the window's text zoom, shown with the size
+    property int zoomPercent: 100
+    // The input editor (ComposeBox) and what it needs from the window.
+    // Has the keys (the terminal or its editor).
+    readonly property bool focused: term.activeFocus || compose.editing
+    property bool inputEditor: false
+    property string editorKeys: "emacs"
+    property var commandHistory: []
+    property var controller: null
+    // REPLs the editor also serves (the shell needs its integration's prompt marks).
+    readonly property var replPrograms: ["python", "python3", "ipython", "bpython", "node", "deno", "bun"]
+    readonly property string replLang: {
+        const j = pane.job.replace(/^.*\//, "")
+        return replPrograms.some(r => j === r || j.startsWith("python")) && controller ? controller.languageFor(j) : ""
+    }
+    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || replLang !== "")      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW
     SplitView.preferredHeight: prefH
@@ -51,14 +65,14 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         height: visible ? 22 : 0
-        color: term.activeFocus ? Theme.tabHover : Theme.chrome
+        color: pane.focused ? Theme.tabHover : Theme.chrome
         Text {
             anchors.fill: parent
             anchors.leftMargin: 8
             anchors.rightMargin: 8
             verticalAlignment: Text.AlignVCenter
             text: term.title || (term.pwd ? term.pwd : pane.profileName)
-            color: term.activeFocus ? Theme.text : Theme.textDim
+            color: pane.focused ? Theme.text : Theme.textDim
             elide: Text.ElideMiddle
             font.pixelSize: 11
         }
@@ -69,9 +83,46 @@ Item {
         anchors.top: titleBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.bottom: compose.visible ? compose.top : parent.bottom
         focus: true
         onContextMenuRequested: (x, y) => pane.contextMenu(term, x, y)
+        // The pane taking the keys (switching to it, clicking it) gives them
+        // to the editor while it's up.
+        onActiveFocusChanged: if (activeFocus && compose.visible) Qt.callLater(compose.focusEditor)
+        // Typing into the terminal while the editor is up goes to the editor.
+        Keys.onPressed: (e) => {
+            if (compose.visible && e.text !== "" && e.text.charCodeAt(0) >= 32
+                    && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+                compose.focusEditor()
+                compose.insert(e.text)
+                e.accepted = true
+            }
+        }
+    }
+
+    ComposeBox {
+        id: compose
+        visible: pane.editorOn
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: implicitHeight
+        view: term
+        controller: pane.controller
+        keys: pane.editorKeys
+        history: pane.commandHistory
+        lang: pane.replLang !== "" ? pane.replLang : "bash"
+        themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
+        onSubmitted: (t) => {
+            if (t.indexOf("\n") < 0) term.sendText(t + "\r")
+            else { term.pasteText(t); term.sendText("\r") }
+            term.scrollToBottom()
+        }
+        onHandBack: term.forceActiveFocus()
+        onVisibleChanged: {
+            if (visible && term.activeFocus) focusEditor()
+            else if (!visible && editing) term.forceActiveFocus()
+        }
     }
 
     // Badge: large text behind the content, top right (iTerm2's badges).
@@ -199,6 +250,7 @@ Item {
     }
 
     property alias findBar: findBar
+    property alias compose: compose
     FindBar {
         id: findBar
         view: term
@@ -224,6 +276,6 @@ Item {
         anchors.fill: parent
         color: Theme.dark ? "black" : "white"
         opacity: Theme.dark ? pane.dimAmount : pane.dimAmount * 1.5
-        visible: pane.dimInactive && !term.activeFocus && pane.split
+        visible: pane.dimInactive && !pane.focused && pane.split
     }
 }

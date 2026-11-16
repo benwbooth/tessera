@@ -91,6 +91,11 @@ pub struct Session {
     /// Set while this (daemon) session is a tmux control-mode gateway.
     gateway: Option<Rc<RefCell<Gateway>>>,
     carry: Vec<u8>,
+    /// Shell integration's prompt marks (OSC 133): the last one seen
+    /// ('A' prompt, 'B' input, 'C' command running, 'D' done), and the tail
+    /// of the last read in case a mark is split across reads.
+    mark: u8,
+    mark_tail: Vec<u8>,
     exited: bool,
     last_cursor_row: Option<u16>,
     last_full_size: (u16, u16),
@@ -294,6 +299,8 @@ pub fn session_open(
         events: Vec::new(),
         gateway: None,
         carry: Vec::new(),
+        mark: 0,
+        mark_tail: Vec::new(),
         exited: false,
         last_cursor_row: None,
         last_full_size: (0, 0),
@@ -499,7 +506,43 @@ impl Session {
         sig
     }
 
+    /// Follow the prompt marks in `data`; an event when the state changes.
+    fn scan_marks(&mut self, data: &[u8]) {
+        const PAT: &[u8] = b"\x1b]133;";
+        let mut hay = std::mem::take(&mut self.mark_tail);
+        hay.extend_from_slice(data);
+        let mut last = None;
+        let mut i = 0;
+        while let Some(p) = hay[i..].windows(PAT.len()).position(|w| w == PAT) {
+            let at = i + p + PAT.len();
+            if at >= hay.len() {
+                break;
+            }
+            if matches!(hay[at], b'A' | b'B' | b'C' | b'D') {
+                last = Some(hay[at]);
+            }
+            i = at;
+        }
+        let keep = hay.len().min(PAT.len());
+        self.mark_tail = hay[hay.len() - keep..].to_vec();
+        if let Some(m) = last {
+            // A then B at once is "at the prompt, ready for input".
+            if m != self.mark {
+                self.mark = m;
+                self.events.push(json!({"type": "prompt", "state": (m as char).to_string()}));
+            }
+        }
+    }
+
+    /// The shell is waiting for a command (shell integration says so).
+    pub fn at_prompt(&self) -> bool {
+        matches!(self.mark, b'A' | b'B' | b'D')
+    }
+
     fn process_output(&mut self, data: &[u8]) {
+        if self.gateway.is_none() {
+            self.scan_marks(data);
+        }
         if let Some(gw) = self.gateway.clone() {
             let rest = gw.borrow_mut().feed(data);
             self.events.append(&mut gw.borrow_mut().events);

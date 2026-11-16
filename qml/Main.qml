@@ -31,6 +31,7 @@ ApplicationWindow {
     property int currentTab: 0
     property var activeView: null
     property real fontSize: 0          // a zoom (Ctrl+=/-) over the profile's size; 0 = none
+    property var commandHistory: []    // the input editor's, shared by the window's panes
     property real zoomBase: 11         // the profile's size when zooming started
     readonly property int zoomPercent: fontSize > 0 ? Math.round(100 * fontSize / zoomBase) : 100
     property var tmuxGateways: ({})    // gateway key -> gateway TerminalView
@@ -98,6 +99,10 @@ ApplicationWindow {
             scrollback: prof.unlimited_scrollback ? 10000000 : prof.scrollback
             copyOnSelect: win.settings.copy_on_select
             zoomPercent: win.zoomPercent
+            inputEditor: win.settings.input_editor !== false
+            editorKeys: win.settings.editor_keys || "emacs"
+            commandHistory: win.commandHistory
+            controller: controller
             dimInactive: win.settings.dim_inactive
             dimAmount: win.settings.dim_amount
             showTitle: win.settings.pane_titles
@@ -1522,6 +1527,7 @@ ApplicationWindow {
             }
         }
     }
+    Timer { id: composeTestTimer; interval: 4000; onTriggered: if (activePane) { activePane.compose.focusEditor(); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit() } }
     Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.open(menuButton); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
     P.Menu {
@@ -2017,6 +2023,7 @@ ApplicationWindow {
         if (controller.findQuery() !== "") findTimer.start()
         if (controller.testEnv("ZOOM") !== "") zoomTestTimer.start()
         if (controller.testEnv("CONTEXT") !== "") contextTestTimer.start()
+        if (controller.testEnv("COMPOSE") !== "") composeTestTimer.start()
         if (controller.screenshotPath() !== "") shotTimer.start()
     }
 

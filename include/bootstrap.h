@@ -11,6 +11,7 @@
 #include <QtWidgets/QApplication>
 
 #include "terminal_item.h"
+#include "syntax_highlighter.h"
 
 // Wayland desktops place windows themselves; with the session-restore
 // extension (xx-session-management) they put each one back where it was.
@@ -53,6 +54,7 @@ inline void tessera_create_app(const QString& session)
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("tessera"),
                                                  QIcon::fromTheme(QStringLiteral("utilities-terminal"))));
     qmlRegisterType<TerminalItem>("Tessera.Native", 1, 0, "TerminalView");
+    qmlRegisterType<SyntaxHighlighter>("Tessera.Native", 1, 0, "SyntaxHighlighter");
 }
 
 inline void tessera_set_icon(const QString& path)

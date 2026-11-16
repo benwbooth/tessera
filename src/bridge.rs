@@ -96,6 +96,8 @@ pub mod ffi {
         fn wants_mouse(self: &Session, qt_mods: u32) -> bool;
         /// A full-screen program is running (the alternate screen is up).
         fn full_screen(self: &Session) -> bool;
+        /// The shell is at its prompt (from shell integration's marks).
+        fn at_prompt(self: &Session) -> bool;
 
         /// The fd to watch for readability (daemon socket or tmux wake pipe).
         fn fd(self: &Session) -> i64;
@@ -262,6 +264,12 @@ pub mod ffi {
         /// Open another window (a new process that starts fresh, restoring nothing).
         #[qinvokable]
         fn new_window(self: &Controller);
+        /// The input editor's syntax analysis (src/syntax.rs) as JSON.
+        #[qinvokable]
+        fn syntax(self: &Controller, lang: &QString, text: &QString) -> QString;
+        /// The input editor's language for the program at the prompt.
+        #[qinvokable]
+        fn language_for(self: &Controller, program: &QString) -> QString;
         /// Windows: open an elevated window (the UAC prompt first).
         #[qinvokable]
         fn new_admin_window(self: &Controller);
@@ -471,6 +479,14 @@ impl ffi::Controller {
                 ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), args.as_ptr(), std::ptr::null(), SW_SHOWNORMAL);
             }
         }
+    }
+
+    fn syntax(&self, lang: &ffi::QString, text: &ffi::QString) -> ffi::QString {
+        qs(&crate::syntax::analyze(&lang.to_string(), &text.to_string()))
+    }
+
+    fn language_for(&self, program: &ffi::QString) -> ffi::QString {
+        qs(crate::syntax::language_for(&program.to_string()))
     }
 
     fn new_window(&self) {

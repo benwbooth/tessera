@@ -33,6 +33,11 @@ class TerminalItem : public QQuickItem {
     Q_PROPERTY(QString sessionId READ sessionId NOTIFY sessionIdChanged)
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     Q_PROPERTY(QString pwd READ pwd NOTIFY pwdChanged)
+    // The shell waits at its prompt (shell integration), and whether a
+    // full-screen program (alternate screen) is up: the input editor shows
+    // only at a prompt with no full-screen program.
+    Q_PROPERTY(bool atPrompt READ atPrompt NOTIFY promptChanged)
+    Q_PROPERTY(bool fullScreen READ fullScreen NOTIFY promptChanged)
     Q_PROPERTY(int tmuxPaneId READ tmuxPaneId NOTIFY sessionIdChanged)
     Q_PROPERTY(QString tmuxGateway READ tmuxGateway NOTIFY tmuxGatewayChanged)
     Q_PROPERTY(bool exited READ exited NOTIFY exitedChanged)
@@ -130,6 +135,7 @@ public:
     Q_INVOKABLE void killSession();
     Q_INVOKABLE void tmuxCommand(const QString& command);
     Q_INVOKABLE void scrollToBottom();
+    Q_INVOKABLE void scrollLines(int n);
     Q_INVOKABLE void selectAll();
     Q_INVOKABLE void clearScrollback();
     Q_INVOKABLE void copyWithStyles();
@@ -256,6 +262,12 @@ private:
     bool m_rawValid[4] = {};
 
     int m_cols = 0, m_rows = 0;
+    bool m_atPrompt = false, m_fullScreen = false;
+public:
+    bool atPrompt() const { return m_atPrompt; }
+    bool fullScreen() const { return m_fullScreen; }
+    Q_SIGNAL void promptChanged();
+private:
     Qt::KeyboardModifiers m_hoverMods;
     void updatePointer(QPointF pos);
     QColor m_bg = QColor(0x1d, 0x1f, 0x21);

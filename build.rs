@@ -55,6 +55,7 @@ fn main() {
         QmlFile::from("qml/SplitButton.qml"),
         QmlFile::from("qml/WindowControls.qml"),
         QmlFile::from("qml/MomentumWheel.qml"),
+        QmlFile::from("qml/ComposeBox.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");
@@ -67,6 +68,7 @@ fn main() {
     .qt_module("QuickShapes")
     .qt_module("Widgets")
     .cpp_file("include/terminal_item.h")
+    .cpp_file("include/syntax_highlighter.h")
     .cpp_file("cpp/terminal_item.cpp")
     .files(["src/bridge.rs"])
     .build();

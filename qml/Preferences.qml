@@ -599,6 +599,23 @@ Window {
                             SectionTitle { text: "Closing" }
                             ToggleRow { label: "Confirm closing multiple sessions"; checked: prefs.settings.confirm_close_multiple; onToggled: (on) => prefs.setG("confirm_close_multiple", on) }
                             ToggleRow { label: "Confirm closing the window"; checked: prefs.settings.confirm_quit; onToggled: (on) => prefs.setG("confirm_quit", on) }
+                            SectionTitle { text: "Input editor" }
+                            ToggleRow {
+                                label: "Edit commands in an editor under the terminal"
+                                hint: "At a shell prompt (with shell integration) and in Python or Node: Enter runs, Shift+Enter adds a line, with highlighting and syntax checking."
+                                checked: prefs.settings.input_editor !== false
+                                onToggled: (on) => prefs.setG("input_editor", on)
+                            }
+                            Row2 {
+                                label: "Editor keys"
+                                hint: "Emacs: the shell's own (readline) keys. vi: Esc for normal mode. VS Code: Ctrl+Z, Alt+Up/Down moves lines, Ctrl+/ comments."
+                                ChoiceBox {
+                                    values: [["emacs", "Emacs (readline)"], ["vi", "vi"], ["vscode", "VS Code"]]
+                                    value: prefs.settings.editor_keys || "emacs"
+                                    onChosen: (v) => prefs.setG("editor_keys", v)
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
                             Row2 {
                                 label: "Undo Close"
                                 hint: "A closed tab or pane can be brought back (Ctrl+Shift+Z) for this long; its shell keeps running meanwhile."

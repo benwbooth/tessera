@@ -460,6 +460,12 @@ void TerminalItem::handleEvents()
             QGuiApplication::clipboard()->setText(e.value(u"text").toString());
         } else if (type == u"grid") {
             m_forceFull = true;
+        } else if (type == u"prompt") {
+            const bool at = e.value(u"state").toString() != u"C";
+            if (at != m_atPrompt) {
+                m_atPrompt = at;
+                emit promptChanged();
+            }
         } else {
             if (type == u"tmuxStart") {
                 m_tmuxGateway = e.value(u"gateway").toString();
@@ -513,6 +519,10 @@ void TerminalItem::pullFrame(bool full)
         emit backgroundChanged();
     }
     m_fg = QColor::fromRgb(QRgb(f.default_fg));
+    if (const bool fs = m_session->full_screen(); fs != m_fullScreen) {
+        m_fullScreen = fs;
+        emit promptChanged();
+    }
     // A program starting or ending changes the pointer without it moving.
     if (isUnderMouse() && !(m_hoverMods & Qt::ControlModifier)) updatePointer(QPointF(-1, -1));
     if (f.cols != m_cols || f.rows != m_rows) {
@@ -1258,6 +1268,14 @@ void TerminalItem::copy()
 }
 
 void TerminalItem::paste() { pasteText(QGuiApplication::clipboard()->text()); }
+
+void TerminalItem::scrollLines(int n)
+{
+    if (!m_session) return;
+    m_session->scroll_lines(n);
+    m_momentum->stop();
+    polish();
+}
 
 void TerminalItem::pasteText(const QString& text)
 {

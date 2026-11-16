@@ -52,6 +52,10 @@ pub struct Settings {
     pub warn_multiline_paste: bool,
     // -- Shell > Undo Close: seconds a closed session stays revivable (0: off).
     pub undo_close_seconds: u32,
+    // -- The input editor under the terminal at a prompt, and its keys
+    // ("emacs", "vi", "vscode").
+    pub input_editor: bool,
+    pub editor_keys: String,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
     // -- Snippets (Edit > Snippets): text sent as if typed.
@@ -89,6 +93,8 @@ impl Default for Settings {
             focus_follows_mouse: false,
             warn_multiline_paste: false,
             undo_close_seconds: 5,
+            input_editor: true,
+            editor_keys: "emacs".into(),
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),
