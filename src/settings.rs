@@ -52,8 +52,6 @@ pub struct Settings {
     pub warn_multiline_paste: bool,
     // -- Shell > Undo Close: seconds a closed session stays revivable (0: off).
     pub undo_close_seconds: u32,
-    // -- Ctrl+W closes the tab (off: it goes to the shell, which deletes a word).
-    pub ctrl_w_closes_tab: bool,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
     // -- Snippets (Edit > Snippets): text sent as if typed.
@@ -91,7 +89,6 @@ impl Default for Settings {
             focus_follows_mouse: false,
             warn_multiline_paste: false,
             undo_close_seconds: 5,
-            ctrl_w_closes_tab: true,
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),

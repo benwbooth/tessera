@@ -593,12 +593,6 @@ Window {
                             SectionTitle { text: "Closing" }
                             ToggleRow { label: "Confirm closing multiple sessions"; checked: prefs.settings.confirm_close_multiple; onToggled: (on) => prefs.setG("confirm_close_multiple", on) }
                             ToggleRow { label: "Confirm closing the window"; checked: prefs.settings.confirm_quit; onToggled: (on) => prefs.setG("confirm_quit", on) }
-                            ToggleRow {
-                                label: "Ctrl+W closes the tab"
-                                hint: "Off: Ctrl+W goes to the shell (delete the word before the cursor). Ctrl+Shift+W closes a pane either way."
-                                checked: prefs.settings.ctrl_w_closes_tab !== false
-                                onToggled: (on) => prefs.setG("ctrl_w_closes_tab", on)
-                            }
                             Row2 {
                                 label: "Undo Close"
                                 hint: "A closed tab or pane can be brought back (Ctrl+Shift+Z) for this long; its shell keeps running meanwhile."

@@ -38,7 +38,7 @@ click in a terminal opens a context menu.
 | Split Vertically/Horizontally with Current Profile | ✅ | Ctrl+Shift+D / Ctrl+Shift+E ("Split Right/Down") |
 | Split Vertically/Horizontally (default profile) | ✅ | |
 | Save Contents / Save Selected Text | ✅ | |
-| Close | ✅ | Ctrl+Shift+W, asks when a job is running (per profile) |
+| Close | ✅ | Ctrl+Shift+W closes the tab, Ctrl+Alt+W one pane; asks when a job is running (per profile) |
 | Close All Panes in Tab | ✅ | |
 | Close Terminal Window | ✅ | |
 | Undo Close | ✅ | Ctrl+Shift+Z; closed shells stay alive for N seconds (General) |

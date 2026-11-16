@@ -1006,11 +1006,11 @@ ApplicationWindow {
 
     Shortcut { sequence: "Ctrl+Shift+T"; onActivated: newTab({}) }
     Shortcut { sequence: "Ctrl+Shift+N"; autoRepeat: false; onActivated: controller.newWindow() }
-    Shortcut { sequence: "Ctrl+Shift+W"; autoRepeat: false; onActivated: closeActivePane() }
+    // Ctrl+W stays the shell's (delete a word).
+    Shortcut { sequence: "Ctrl+Alt+W"; autoRepeat: false; onActivated: closeActivePane() }
     Shortcut {
-        sequence: "Ctrl+W"
+        sequence: "Ctrl+Shift+W"
         autoRepeat: false
-        enabled: win.settings.ctrl_w_closes_tab !== false
         onActivated: if (currentTab >= 0 && currentTab < tabs.length) closeTab(tabs[currentTab])
     }
     Shortcut { sequence: "Ctrl+Shift+D"; autoRepeat: false; onActivated: splitPane(activePane, Qt.Horizontal) }
@@ -1089,7 +1089,8 @@ ApplicationWindow {
                 onTriggered: saveContentsTo(activeView.selectedText(), "Save Selected Text") }
             P.MenuSeparator {}
             P.MenuItem { icon.name: "edit-undo"; text: "Undo Close\tCtrl+Shift+Z"; enabled: closedStack.length > 0; onTriggered: undoClose() }
-            P.MenuItem { icon.name: "view-close"; text: "Close\tCtrl+Shift+W"; onTriggered: closeActivePane() }
+            P.MenuItem { icon.name: "tab-close"; text: "Close Tab\tCtrl+Shift+W"; enabled: tabs.length > 0; onTriggered: closeTab(tabs[currentTab]) }
+            P.MenuItem { icon.name: "view-close"; text: "Close Pane\tCtrl+Alt+W"; onTriggered: closeActivePane() }
             P.MenuItem { icon.name: "tab-close"; text: "Close All Panes in Tab"; enabled: tabs.length > 0; onTriggered: closeTab(tabs[currentTab]) }
             P.MenuItem { icon.name: "window-close"; text: "Close Window\tCtrl+Shift+Q"; onTriggered: win.close() }
             P.MenuSeparator {}
@@ -1458,7 +1459,7 @@ ApplicationWindow {
         P.MenuItem { icon.name: "window-new"; text: "Move Tab to New Window"; enabled: tabMenu.t !== null && tabMenu.t.tmuxWindow < 0 && tabs.length > 1
             onTriggered: moveToNewWindow(tabMenu.t) }
         P.MenuSeparator {}
-        P.MenuItem { icon.name: "tab-close"; text: "Close Tab" + (win.settings.ctrl_w_closes_tab !== false ? "\tCtrl+W" : ""); onTriggered: closeTab(tabMenu.t) }
+        P.MenuItem { icon.name: "tab-close"; text: "Close Tab\tCtrl+Shift+W"; onTriggered: closeTab(tabMenu.t) }
         P.MenuItem { icon.name: "tab-close-other"; text: "Close Other Tabs"; enabled: tabs.length > 1
             onTriggered: closeTabs(tabs.filter(x => x !== tabMenu.t)) }
         P.MenuItem { icon.name: "tab-close"; text: "Close Tabs to the Right"; enabled: tabMenu.at >= 0 && tabMenu.at < tabs.length - 1
@@ -1608,7 +1609,8 @@ ApplicationWindow {
         P.MenuItem { icon.name: "document-edit"; text: "Edit Session…"; onTriggered: prefs.showProfile(paneOf(contextView).profileName) }
         P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
         P.MenuSeparator {}
-        P.MenuItem { icon.name: "view-close"; text: "Close\tCtrl+Shift+W"; onTriggered: requestClosePane(paneOf(contextView)) }
+        P.MenuItem { icon.name: "view-close"; text: "Close Pane\tCtrl+Alt+W"; onTriggered: requestClosePane(paneOf(contextView)) }
+        P.MenuItem { icon.name: "tab-close"; text: "Close Tab\tCtrl+Shift+W"; onTriggered: { const t = tabOf(paneOf(contextView)); if (t) closeTab(t) } }
     }
 
     Preferences {
