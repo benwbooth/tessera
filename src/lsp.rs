@@ -17,7 +17,20 @@ fn candidates(lang: &str) -> &'static [&'static [&'static str]] {
     match lang {
         "bash" => &[&["bash-language-server", "start"]],
         "python" => &[&["basedpyright-langserver", "--stdio"], &["pyright-langserver", "--stdio"], &["pylsp"]],
-        "javascript" => &[&["typescript-language-server", "--stdio"]],
+        "javascript" | "typescript" => &[&["typescript-language-server", "--stdio"]],
+        "rust" => &[&["rust-analyzer"]],
+        "go" => &[&["gopls"]],
+        "c" | "cpp" => &[&["clangd"]],
+        "java" => &[&["jdtls"]],
+        "ruby" => &[&["ruby-lsp"], &["solargraph", "stdio"]],
+        "lua" => &[&["lua-language-server"]],
+        "sql" => &[&["sqls"]],
+        "json" => &[&["vscode-json-language-server", "--stdio"], &["vscode-json-languageserver", "--stdio"]],
+        "yaml" => &[&["yaml-language-server", "--stdio"]],
+        "toml" => &[&["taplo", "lsp", "stdio"]],
+        "html" => &[&["vscode-html-language-server", "--stdio"]],
+        "css" => &[&["vscode-css-language-server", "--stdio"]],
+        "markdown" => &[&["marksman", "server"]],
         _ => &[],
     }
 }
@@ -31,11 +44,12 @@ pub fn server_for(lang: &str) -> Option<Vec<String>> {
     candidates(lang).iter().find(|c| on_path(c[0])).map(|c| c.iter().map(|s| s.to_string()).collect())
 }
 
-fn language_id(lang: &str) -> &'static str {
+fn language_id(lang: &str) -> &str {
     match lang {
-        "python" => "python",
-        "javascript" => "javascript",
-        _ => "shellscript",
+        "bash" => "shellscript",
+        "c" => "c",
+        "cpp" => "cpp",
+        l => l,
     }
 }
 
@@ -43,6 +57,21 @@ fn extension(lang: &str) -> &'static str {
     match lang {
         "python" => "py",
         "javascript" => "js",
+        "typescript" => "ts",
+        "rust" => "rs",
+        "go" => "go",
+        "c" => "c",
+        "cpp" => "cpp",
+        "java" => "java",
+        "ruby" => "rb",
+        "lua" => "lua",
+        "sql" => "sql",
+        "json" => "json",
+        "yaml" => "yaml",
+        "toml" => "toml",
+        "html" => "html",
+        "css" => "css",
+        "markdown" => "md",
         _ => "sh",
     }
 }

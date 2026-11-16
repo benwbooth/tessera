@@ -16,8 +16,10 @@ Rectangle {
     // program at the prompt implies (autoLang).
     property string autoLang: "bash"
     property string langOverride: ""
-    readonly property string lang: langOverride !== "" ? langOverride : autoLang
-    readonly property var languages: [["bash", "Shell (bash/zsh)"], ["python", "Python"], ["javascript", "JavaScript"]]
+    // (Pasted code in another language is recognised when it's clear.)
+    property string contentLang: ""
+    readonly property string lang: langOverride !== "" ? langOverride : contentLang !== "" ? contentLang : autoLang
+    readonly property var languages: { try { return JSON.parse(controller.syntaxLanguages()) } catch (e) { return [["bash", "Shell"]] } }
     property string keys: "emacs"      // "emacs", "vi", "vscode"
     property var history: []           // oldest first (shared by the window)
     property var themeData: ({})       // the terminal's theme (ansi colors)
@@ -574,6 +576,7 @@ Rectangle {
                 if (text === seen) return
                 seen = text
                 idle.restart()
+                box.contentLang = box.controller && (text.indexOf("\n") >= 0 || /^\s*[{\[]|^#!/.test(text)) ? box.controller.detectLanguage(text) : ""
                 box.analyze(false)
                 compAuto.restart()
                 // A suggestion stays while what's typed still leads into it.
@@ -586,11 +589,32 @@ Rectangle {
                 checkTimer.restart()
             }
             Keys.priority: Keys.BeforeItem
+            // A Shift tapped on its own: right Shift is a new line (Shift+Enter),
+            // left Shift takes the AI's suggestion (or asks for one).
+            property int shiftSide: 0          // 1 left, 2 right, 0 none / spoiled
+            property double shiftAt: 0
+            function shiftSideOf(e) {
+                // X11/Wayland keycodes 50/62, Windows scan codes 42/54, macOS key codes 56/60.
+                const n = e.nativeScanCode, v = e.nativeVirtualKey
+                if (n === 50 || n === 42 || v === 56 || v === 0xffe1) return 1
+                if (n === 62 || n === 54 || v === 60 || v === 0xffe2) return 2
+                return 0
+            }
+            Keys.onReleased: (e) => {
+                if (e.key === Qt.Key_Shift && shiftSide !== 0 && Date.now() - shiftAt < 450) {
+                    if (shiftSide === 2) box.newline()
+                    else if (!box.acceptGhost()) box.askGhostNow()
+                    e.accepted = true
+                }
+                if (e.key === Qt.Key_Shift) shiftSide = 0
+            }
             Keys.onPressed: (e) => {
+                if (e.key === Qt.Key_Shift && !e.isAutoRepeat) { shiftSide = shiftSideOf(e); shiftAt = Date.now() }
+                else shiftSide = 0
                 let done = false
                 const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
                 if (box.ghost !== "" && cursorPosition === length && plain
-                        && ((e.key === Qt.Key_Tab && !(box.compOpen && box.comp.items.length > 0)) || e.key === Qt.Key_Right || e.key === Qt.Key_End))
+                        && (e.key === Qt.Key_Right || e.key === Qt.Key_End))
                     done = box.acceptGhost()
                 if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
                 if (!done && e.key === Qt.Key_F1) { box.hoverAtPosition(cursorPosition); done = true }
@@ -715,7 +739,7 @@ Rectangle {
     }
     Menu {
         id: langMenu
-        MenuItem { text: "Automatic (" + box.autoLang + ")"; checkable: true; checked: box.langOverride === ""; onTriggered: box.langOverride = "" }
+        MenuItem { text: "Automatic (" + (box.contentLang !== "" ? box.contentLang : box.autoLang) + ")"; checkable: true; checked: box.langOverride === ""; onTriggered: box.langOverride = "" }
         MenuSeparator {}
         Repeater {
             model: box.languages
@@ -786,6 +810,7 @@ Rectangle {
         aiBusy = "fix"
         controller.aiRun(aiKey + "-cmd", "fix", JSON.stringify([{ role: "user", content: "Command: " + last + "\nExit status: " + box.view.lastStatus + "\nThe terminal's last lines:\n" + tail }]), aiContext())
     }
+    function askGhostNow() { ghostTimer.stop(); ghostTimer.triggered() }
     function acceptGhost() {
         if (ghost === "") return false
         edit.insert(edit.length, ghost)

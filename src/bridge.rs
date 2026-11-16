@@ -310,6 +310,12 @@ pub mod ffi {
         /// The input editor's language for the program at the prompt.
         #[qinvokable]
         fn language_for(self: &Controller, program: &QString) -> QString;
+        /// The languages the editor knows: JSON [[name, label]].
+        #[qinvokable]
+        fn syntax_languages(self: &Controller) -> QString;
+        /// What a text is clearly written in ("" when it's just a command).
+        #[qinvokable]
+        fn detect_language(self: &Controller, text: &QString) -> QString;
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
         fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString) -> QString;
@@ -842,6 +848,14 @@ impl ffi::Controller {
 
     fn command_help_count(&self) -> i32 {
         (crate::complete::fish_completion_count() + crate::complete::tldr_count()) as i32
+    }
+
+    fn syntax_languages(&self) -> ffi::QString {
+        qs(&crate::syntax::languages_json())
+    }
+
+    fn detect_language(&self, text: &ffi::QString) -> ffi::QString {
+        qs(crate::syntax::detect_language(&text.to_string()))
     }
 
     fn language_for(&self, program: &ffi::QString) -> ffi::QString {

@@ -13,32 +13,135 @@ struct Lang {
     query: Query,
 }
 
-fn lang(name: &str) -> Option<&'static Lang> {
-    fn make(language: Language, highlights: &str) -> Option<Lang> {
-        let query = Query::new(&language, highlights).ok()?;
-        Some(Lang { language, query })
-    }
-    static BASH: OnceLock<Option<Lang>> = OnceLock::new();
-    static PYTHON: OnceLock<Option<Lang>> = OnceLock::new();
-    static JS: OnceLock<Option<Lang>> = OnceLock::new();
-    match name {
-        "python" => PYTHON.get_or_init(|| make(tree_sitter_python::LANGUAGE.into(), tree_sitter_python::HIGHLIGHTS_QUERY)).as_ref(),
-        "javascript" => JS.get_or_init(|| make(tree_sitter_javascript::LANGUAGE.into(), tree_sitter_javascript::HIGHLIGHT_QUERY)).as_ref(),
-        _ => BASH.get_or_init(|| make(tree_sitter_bash::LANGUAGE.into(), tree_sitter_bash::HIGHLIGHT_QUERY)).as_ref(),
-    }
+/// The languages the editor knows: (name, label).
+pub const LANGUAGES: &[(&str, &str)] = &[
+    ("bash", "Shell (bash/zsh/sh)"),
+    ("python", "Python"),
+    ("javascript", "JavaScript"),
+    ("typescript", "TypeScript"),
+    ("rust", "Rust"),
+    ("go", "Go"),
+    ("c", "C"),
+    ("cpp", "C++"),
+    ("java", "Java"),
+    ("ruby", "Ruby"),
+    ("lua", "Lua"),
+    ("sql", "SQL"),
+    ("json", "JSON"),
+    ("yaml", "YAML"),
+    ("toml", "TOML"),
+    ("html", "HTML"),
+    ("css", "CSS"),
+    ("markdown", "Markdown"),
+];
+
+fn make(name: &str) -> Option<Lang> {
+    let (language, query): (Language, String) = match name {
+        "bash" => (tree_sitter_bash::LANGUAGE.into(), tree_sitter_bash::HIGHLIGHT_QUERY.into()),
+        "python" => (tree_sitter_python::LANGUAGE.into(), tree_sitter_python::HIGHLIGHTS_QUERY.into()),
+        "javascript" => (tree_sitter_javascript::LANGUAGE.into(), tree_sitter_javascript::HIGHLIGHT_QUERY.into()),
+        // (TypeScript's rules add to JavaScript's.)
+        "typescript" => (
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            format!("{}\n{}", tree_sitter_javascript::HIGHLIGHT_QUERY, tree_sitter_typescript::HIGHLIGHTS_QUERY),
+        ),
+        "rust" => (tree_sitter_rust::LANGUAGE.into(), tree_sitter_rust::HIGHLIGHTS_QUERY.into()),
+        "go" => (tree_sitter_go::LANGUAGE.into(), tree_sitter_go::HIGHLIGHTS_QUERY.into()),
+        "c" => (tree_sitter_c::LANGUAGE.into(), tree_sitter_c::HIGHLIGHT_QUERY.into()),
+        "cpp" => (tree_sitter_cpp::LANGUAGE.into(), format!("{}\n{}", tree_sitter_c::HIGHLIGHT_QUERY, tree_sitter_cpp::HIGHLIGHT_QUERY)),
+        "java" => (tree_sitter_java::LANGUAGE.into(), tree_sitter_java::HIGHLIGHTS_QUERY.into()),
+        "ruby" => (tree_sitter_ruby::LANGUAGE.into(), tree_sitter_ruby::HIGHLIGHTS_QUERY.into()),
+        "lua" => (tree_sitter_lua::LANGUAGE.into(), tree_sitter_lua::HIGHLIGHTS_QUERY.into()),
+        "sql" => (tree_sitter_sequel::LANGUAGE.into(), tree_sitter_sequel::HIGHLIGHTS_QUERY.into()),
+        "json" => (tree_sitter_json::LANGUAGE.into(), tree_sitter_json::HIGHLIGHTS_QUERY.into()),
+        "yaml" => (tree_sitter_yaml::LANGUAGE.into(), tree_sitter_yaml::HIGHLIGHTS_QUERY.into()),
+        "toml" => (tree_sitter_toml_ng::LANGUAGE.into(), tree_sitter_toml_ng::HIGHLIGHTS_QUERY.into()),
+        "html" => (tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.into()),
+        "css" => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.into()),
+        "markdown" => (tree_sitter_md::LANGUAGE.into(), tree_sitter_md::HIGHLIGHT_QUERY_BLOCK.into()),
+        _ => return None,
+    };
+    // A query a grammar's version can't read leaves it unhighlighted (but
+    // still checked).
+    let query = Query::new(&language, &query).or_else(|_| Query::new(&language, "")).ok()?;
+    Some(Lang { language, query })
 }
 
-/// The editor's language for the program at the prompt.
+fn lang(name: &str) -> Option<&'static Lang> {
+    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<&'static Lang>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let mut c = cache.lock().unwrap();
+    let name = if LANGUAGES.iter().any(|(n, _)| *n == name) { name } else { "bash" };
+    *c.entry(name.to_string()).or_insert_with(|| make(name).map(|l| &*Box::leak(Box::new(l))))
+}
+
+/// The editor's language for the program at the prompt (a REPL), or "" when
+/// it's a shell.
 pub fn language_for(program: &str) -> &'static str {
     let p = program.rsplit(['/', '\\']).next().unwrap_or(program).trim_start_matches('-').to_lowercase();
     let p = p.trim_end_matches(".exe");
-    if p.starts_with("python") || p == "ipython" || p == "bpython" {
+    if p.starts_with("python") || p == "ipython" || p == "bpython" || p == "ptpython" {
         "python"
-    } else if p == "node" || p == "deno" || p == "bun" {
+    } else if matches!(p, "node" | "deno" | "bun") {
         "javascript"
+    } else if matches!(p, "ts-node" | "tsx") {
+        "typescript"
+    } else if matches!(p, "irb" | "pry") {
+        "ruby"
+    } else if p.starts_with("lua") {
+        "lua"
+    } else if matches!(p, "psql" | "mysql" | "mariadb" | "sqlite3" | "duckdb" | "pgcli" | "mycli" | "litecli" | "clickhouse-client") {
+        "sql"
+    } else if matches!(p, "evcxr" | "irust") {
+        "rust"
+    } else if matches!(p, "gore" | "yaegi") {
+        "go"
+    } else if p == "cling" {
+        "cpp"
+    } else if matches!(p, "jshell") {
+        "java"
     } else {
         "bash"
     }
+}
+
+/// What a text is written in, when it says so clearly (a shebang, JSON, or
+/// several lines with unmistakable marks); "" otherwise (it's a command).
+pub fn detect_language(text: &str) -> &'static str {
+    let t = text.trim_start();
+    if let Some(first) = t.lines().next().filter(|l| l.starts_with("#!")) {
+        for (k, v) in [("python", "python"), ("node", "javascript"), ("ruby", "ruby"), ("lua", "lua"), ("bash", "bash"), ("zsh", "bash"), ("sh", "bash")] {
+            if first.contains(k) {
+                return v;
+            }
+        }
+    }
+    let lines: Vec<&str> = t.lines().filter(|l| !l.trim().is_empty()).collect();
+    if (t.starts_with('{') || t.starts_with('[')) && serde_json::from_str::<serde_json::Value>(t.trim()).is_ok() {
+        return "json";
+    }
+    if lines.len() < 2 {
+        return "";
+    }
+    let has = |pats: &[&str]| lines.iter().filter(|l| pats.iter().any(|p| l.trim_start().starts_with(p))).count();
+    let score = [
+        ("python", has(&["def ", "import ", "from ", "class ", "elif ", "print("]) * 2 + lines.iter().filter(|l| l.trim_end().ends_with(':')).count()),
+        ("rust", has(&["fn ", "let mut ", "use ", "impl ", "pub fn ", "struct ", "#[derive"]) * 2),
+        ("go", has(&["func ", "package ", "import (", ":= "]) * 2 + lines.iter().filter(|l| l.contains(" := ")).count()),
+        ("javascript", has(&["const ", "function ", "console.log", "export ", "import {"]) * 2 + lines.iter().filter(|l| l.contains("=> ")).count()),
+        ("sql", lines.iter().filter(|l| { let u = l.trim_start().to_uppercase(); ["SELECT ", "INSERT ", "UPDATE ", "DELETE ", "CREATE ", "FROM ", "WHERE "].iter().any(|k| u.starts_with(k)) }).count() * 2),
+        ("c", has(&["#include", "int main", "printf("]) * 2),
+        ("html", has(&["<!doctype", "<html", "<div", "<p>", "<body"]) * 2),
+        ("yaml", lines.iter().filter(|l| { let x = l.trim_start(); (x.starts_with("- ") || x.contains(": ")) && !x.contains('=') && !x.contains('|') }).count()),
+    ];
+    let best = score.iter().max_by_key(|(_, s)| *s).unwrap();
+    // Clear marks on at least half the lines.
+    if best.1 >= 3 && best.1 * 2 >= lines.len() { best.0 } else { "" }
+}
+
+/// The languages for the editor's menu (JSON [[name, label]]).
+pub fn languages_json() -> String {
+    serde_json::to_string(&LANGUAGES.iter().map(|(n, l)| [n, l]).collect::<Vec<_>>()).unwrap_or_default()
 }
 
 /// {"spans": [[start, length, kind]], "errors": [[start, length, message]]}
@@ -136,5 +239,13 @@ mod tests {
         assert_eq!(language_for("/usr/bin/python3.12"), "python");
         assert_eq!(language_for("-zsh"), "bash");
         assert_eq!(language_for("node"), "javascript");
+        assert_eq!(language_for("psql"), "sql");
+        assert_eq!(detect_language("#!/usr/bin/env python3\nprint(1)"), "python");
+        assert_eq!(detect_language("def f(x):\n    return x\nimport os\n"), "python");
+        assert_eq!(detect_language("git status && ls -la"), "");
+        assert_eq!(detect_language("{\"a\": 1}"), "json");
+        for (n, _) in LANGUAGES {
+            assert!(lang(n).is_some(), "{n} loads");
+        }
     }
 }
