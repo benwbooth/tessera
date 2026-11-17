@@ -70,7 +70,7 @@ fn runners(lang: &str) -> &'static [Runner] {
         "go" => &[r!("yaegi", "yaegi", Stdin, "yaegi"), r!("go", "go run {f}", File("go"), "go")],
         "c" => &[r!("tcc", "tcc -run -", Stdin, "tinycc"), r!("cc", "cc -o {b} {f} && {b}", File("c"), "gcc")],
         // (cling: C++'s interpreter, statements as they come.)
-        "cpp" => &[r!("cling", "cling -w --nologo", Stdin, "cling"), r!("c++", "c++ -std=c++20 -o {b} {f} && {b}", File("cpp"), "gcc")],
+        "cpp" => &[r!("cling", "cling -std=c++23 -w --nologo", Stdin, "cling"), r!("c++", "c++ -std=c++23 -o {b} {f} && {b}", File("cpp"), "gcc")],
         // (Statements: jbang --code, or JShell; a class: see command.)
         "java" => &[r!("jbang", "jbang --code", Inline, "jbang"), r!("jshell", "jshell --feedback silent -", Stdin, "jdk")],
         "kotlin" => &[r!("kotlin", "kotlin -e", Inline, "kotlin")],
@@ -180,6 +180,15 @@ fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+/// The installed g++'s major version.
+fn gcc_major() -> Option<u32> {
+    if !on_path("g++") {
+        return None;
+    }
+    let o = std::process::Command::new("g++").arg("-dumpversion").output().ok()?;
+    String::from_utf8_lossy(&o.stdout).trim().split('.').next()?.parse().ok()
+}
+
 /// Go for yaegi: the standard packages it uses imported (unless it says).
 fn go_imports(code: &str) -> String {
     if code.contains("import") {
@@ -275,6 +284,14 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
             return format!("{rs}{deps} -e {}", quote(&rust_expr(code_t)));
         }
     }
+    // (C++ with modules, import std; and the like: GCC 15 or later builds
+    // it, in the snippet's folder, where its module cache goes.)
+    if lang == "cpp" && code_t.lines().any(|l| { let t = l.trim_start(); t.starts_with("import ") || t.starts_with("export module") || t.starts_with("module ") }) {
+        let local = gcc_major().is_some_and(|v| v >= 15);
+        let n = if local { "" } else if on_path("nix") { "gcc" } else { return String::new() };
+        let prog = if code_t.contains("main(") { code_t.to_string() } else { format!("{}\nint main() {{\n{}\n}}\n", code_t.lines().filter(|l| l.trim_start().starts_with("import ")).collect::<Vec<_>>().join("\n"), code_t.lines().filter(|l| !l.trim_start().starts_with("import ")).collect::<Vec<_>>().join("\n")) };
+        return file_command(&prog, How::File("cpp"), "(cd {d} && g++ -std=c++23 -fmodules -fsearch-include-path bits/std.cc snippet.cpp -o snippet) && {b}", n, shell);
+    }
     // (An Erlang module: escript runs it.)
     if lang == "erlang" && code_t.contains("-module(") {
         let n = if on_path("escript") { "" } else { "erlang" };
@@ -321,7 +338,7 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
         "yaegi" => go_imports(code.trim_end()),
         "cling" => {
             let c = code.trim_end();
-            let c = if c.contains("#include") { c.to_string() } else { format!("#include <iostream>\n#include <string>\n#include <vector>\n#include <map>\n#include <algorithm>\n{c}") };
+            let c = if c.contains("#include") { c.to_string() } else { format!("#include <iostream>\n#include <string>\n#include <vector>\n#include <map>\n#include <algorithm>\n#include <format>\n#include <print>\n{c}") };
             if c.contains("main(") { format!("{c}\nmain();") } else { c }
         }
         "erl" => { let c = code.trim_end(); if c.ends_with('.') { c.to_string() } else { format!("{c}.") } }
@@ -636,6 +653,8 @@ mod tests {
         }
         assert!(complete_program("go", "fmt.Println(1)").contains("import (\"fmt\")"));
         assert_eq!(command("markdown", "# hi", "/", "zsh"), "");
+        let m = command("cpp", "import std;\nstd::println(\"{}\", 1);", "/", "zsh");
+        assert!(m.is_empty() || (m.contains("-fmodules") && m.contains("int main()")), "{m}");
         let h = command("haskell", "main = putStrLn \"hi\"", "/", "zsh");
         assert!(h.is_empty() || (h.contains("runghc") && h.contains("<<'TESSERA_END'")), "{h}");
         let h = command("haskell", "print (sum [1..10])", "/", "zsh");
@@ -650,6 +669,7 @@ mod tests {
         assert!(missing_python_modules("import os\nimport surely_not_a_module_xyz").contains(&"surely_not_a_module_xyz".to_string()));
     }
 }
+
 
 
 
