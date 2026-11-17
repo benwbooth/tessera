@@ -1643,6 +1643,22 @@ ApplicationWindow {
             if (activePane) console.log("key test: after " + k + " termFocus=" + activePane.view.activeFocus + " editorFocus=" + activePane.compose.editing + " focusItem=" + win.activeFocusItem + " editor=" + JSON.stringify(activePane.compose.text) + " ghost=" + JSON.stringify(activePane.compose.ghost) + " dropdown=" + activePane.compose.compOpen)
         }
     }
+    // (Test hook: TESSERA_TEST_DRAG="x1,y1,x2,y2,mods[,right]" drags (or right-clicks) after 12 s.)
+    Timer {
+        id: dragTestTimer
+        interval: 12000
+        property var p: controller.testEnv("DRAG").split(",").map(Number)
+        property int step: 0
+        repeat: true
+        onTriggered: {
+            const [x1, y1, x2, y2, m, right] = p
+            if (right) { controller.testMouse(0, x2, y2, 2, m); controller.testMouse(2, x2, y2, 2, m); stop(); return }
+            if (step === 0) { controller.testMouse(0, x1, y1, 1, m); interval = 30 }
+            else if (step <= 10) controller.testMouse(1, x1 + (x2 - x1) * step / 10, y1 + (y2 - y1) * step / 10, 1, m)
+            else { controller.testMouse(2, x2, y2, 1, m); stop() }
+            step++
+        }
+    }
     Timer { id: notebookTestTimer; interval: 9000; onTriggered: if (activePane) activePane.viewMode = "notebook" }
     Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
@@ -2193,6 +2209,7 @@ ApplicationWindow {
         if (controller.testEnv("ASSISTANT") !== "") assistantTestTimer.start()
         if (controller.testEnv("RICH") !== "") richTestTimer.start()
         if (controller.testEnv("NOTEBOOK") !== "") notebookTestTimer.start()
+        if (controller.testEnv("DRAG") !== "") dragTestTimer.start()
         if (controller.openDoc() !== "") Qt.callLater(openNotebook, controller.openDoc())
         if (controller.testEnv("KEYS") !== "") keysTestTimer.start()
         if (controller.daemonState() === "outdated") daemonTimer.start()

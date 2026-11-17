@@ -1043,6 +1043,7 @@ FocusScope {
                 MomentumWheel { flick: tf }
                 TextEdit {
                     id: tv
+                    BlockSelect { }
                     readOnly: true
                     selectByMouse: true
                     selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)

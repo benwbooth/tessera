@@ -136,7 +136,9 @@ Rectangle {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: cell.c.command !== "" ? cell.c.command : "(command)"
+                    text: cell.c.command !== "" ? cell.c.command.trim().replace(/\s*\n\s*/g, "  \u23ce  ") : "(command)"
+                    maximumLineCount: 1
+                    wrapMode: Text.NoWrap
                     elide: Text.ElideRight
                     color: Theme.text
                     font.family: nb.fontFamily
@@ -236,6 +238,7 @@ Rectangle {
                         MomentumWheel { flick: tf }
                         TextEdit {
                             id: tt
+                            BlockSelect { }
                             y: 4
                             readOnly: true
                             selectByMouse: true
@@ -263,6 +266,7 @@ Rectangle {
                         MomentumWheel { flick: pf }
                         TextEdit {
                             id: pt
+                            BlockSelect { }
                             y: 4
                             width: pf.width - 12
                             readOnly: true
@@ -288,6 +292,7 @@ Rectangle {
                         MomentumWheel { flick: df }
                         TextEdit {
                             id: dt
+                            BlockSelect { }
                             y: 4
                             width: df.width - 12
                             readOnly: true

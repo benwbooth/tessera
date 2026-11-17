@@ -99,6 +99,23 @@ inline void tessera_test_wheel(double x, double y, int dy, int px, int phase)
     }
 }
 
+// For tests: a mouse event in the main window (kind 0 press, 1 move, 2 release;
+// button 1 left, 2 right).
+inline void tessera_test_mouse(int kind, double x, double y, int button, int mods)
+{
+    for (QWindow* w : QGuiApplication::topLevelWindows()) {
+        if (!w->property("showAtStart").toBool() || !w->isVisible()) continue;
+        const QPointF p(x, y);
+        const Qt::MouseButton b = button == 2 ? Qt::RightButton : Qt::LeftButton;
+        const QEvent::Type t = kind == 0 ? QEvent::MouseButtonPress : kind == 1 ? QEvent::MouseMove : QEvent::MouseButtonRelease;
+        const Qt::MouseButton which = kind == 1 ? Qt::NoButton : b;
+        const Qt::MouseButtons held = kind == 2 ? Qt::MouseButtons() : Qt::MouseButtons(b);
+        QMouseEvent e(t, p, p, w->mapToGlobal(p), which, held, Qt::KeyboardModifiers(mods));
+        QGuiApplication::sendEvent(w, &e);
+        return;
+    }
+}
+
 // For tests: a key press and release, to whatever has the keys in the main
 // window (scan: the native scan code, for telling left and right Shift apart).
 inline void tessera_test_key(int key, int mods, const QString& text, int scan)
