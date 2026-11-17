@@ -729,6 +729,198 @@ fn score(cand: &str, typed: &str) -> Option<u32> {
     Some(100 + gaps)
 }
 
+// ---- cd: places to go --------------------------------------------------------
+
+fn home_dir() -> String {
+    std::env::var("HOME").unwrap_or_default()
+}
+
+/// A path as typed: ~ for home.
+fn tilde(p: &str) -> String {
+    let h = home_dir();
+    if !h.is_empty() && (p == h || p.starts_with(&format!("{h}/"))) { format!("~{}", &p[h.len()..]) } else { p.to_string() }
+}
+
+/// Folders by how often and how lately they were visited: zoxide's
+/// database (if it's installed), and the history (where commands ran, and
+/// where cd commands went). Highest first.
+fn frecent_dirs() -> Vec<(String, f64)> {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<(String, f64)>)>> = std::sync::Mutex::new(None);
+    if let Some((at, v)) = CACHE.lock().unwrap().as_ref() {
+        if at.elapsed() < std::time::Duration::from_secs(20) {
+            return v.clone();
+        }
+    }
+    let mut score: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    if let Ok(o) = std::process::Command::new("zoxide").args(["query", "--list", "--score"]).stderr(std::process::Stdio::null()).output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            let l = l.trim();
+            if let Some((sc, path)) = l.split_once(' ') {
+                if let Ok(v) = sc.trim().parse::<f64>() {
+                    *score.entry(path.trim().to_string()).or_default() += v;
+                }
+            }
+        }
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    // (zoxide's weights: within an hour x4, a day x2, a week x0.5, older x0.25.)
+    let weight = |t: u64| {
+        if t == 0 {
+            return 0.25;
+        }
+        match now.saturating_sub(t) {
+            a if a < 3600 => 4.0,
+            a if a < 86400 => 2.0,
+            a if a < 604800 => 0.5,
+            _ => 0.25,
+        }
+    };
+    let home = home_dir();
+    for e in crate::history::all() {
+        let cwd = e.cwd.strip_prefix("file://").map(|r| r.find('/').map(|i| r[i..].to_string()).unwrap_or_default()).unwrap_or(e.cwd.clone());
+        if !cwd.is_empty() {
+            *score.entry(cwd.clone()).or_default() += weight(e.t);
+        }
+        // (cd somewhere: there, as the shell would resolve it.)
+        let mut w = e.cmd.split_whitespace();
+        if matches!(w.next(), Some("cd" | "pushd")) {
+            if let Some(a) = w.next().filter(|a| !a.starts_with('-')) {
+                let a = a.trim_matches(|c| c == '\'' || c == '"');
+                let p = if let Some(r) = a.strip_prefix("~") { format!("{home}{r}") } else if a.starts_with('/') { a.to_string() } else if !cwd.is_empty() { format!("{cwd}/{a}") } else { continue };
+                let p = Path::new(&p).components().fold(PathBuf::new(), |mut acc, c| {
+                    match c {
+                        std::path::Component::ParentDir => {
+                            acc.pop();
+                        }
+                        std::path::Component::CurDir => {}
+                        c => acc.push(c),
+                    }
+                    acc
+                });
+                *score.entry(p.to_string_lossy().trim_end_matches('/').to_string()).or_default() += weight(e.t) * 2.0;
+            }
+        }
+    }
+    let mut v: Vec<(String, f64)> = score.into_iter().filter(|(p, _)| !p.is_empty() && Path::new(p).is_dir()).collect();
+    v.sort_by(|a, b| b.1.total_cmp(&a.1));
+    v.truncate(400);
+    *CACHE.lock().unwrap() = Some((std::time::Instant::now(), v.clone()));
+    v
+}
+
+/// Folders up to three levels under `dir` (a bounded walk), hidden ones and
+/// build output left out.
+fn folders_below(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut level = vec![dir.to_path_buf()];
+    for _ in 0..3 {
+        let mut next = Vec::new();
+        for d in level {
+            let Ok(rd) = std::fs::read_dir(&d) else { continue };
+            for e in rd.flatten() {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                if n.starts_with('.') || matches!(n.as_ref(), "node_modules" | "target" | "__pycache__" | "result") {
+                    continue;
+                }
+                if e.file_type().is_ok_and(|t| t.is_dir()) {
+                    next.push(e.path());
+                    if out.len() + next.len() > 3000 {
+                        out.extend(next);
+                        return out;
+                    }
+                }
+            }
+        }
+        out.extend(next.iter().cloned());
+        level = next;
+    }
+    out
+}
+
+/// Where `cd <typed>` might go besides the folder's own subfolders:
+/// frequent and recent places, folders further down, CDPATH's.
+fn cd_places(typed: &str, cwd: &str) -> Vec<Item> {
+    let t = typed.trim_end_matches('/');
+    let mut out: Vec<(u32, f64, Item)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut add = |path: &str, rank: u32, weight: f64, detail: &str, out: &mut Vec<(u32, f64, Item)>| {
+        let p = path.trim_end_matches('/');
+        if p.is_empty() || p == cwd.trim_end_matches('/') || !seen.insert(p.to_string()) {
+            return;
+        }
+        let shown = format!("{}/", tilde(p));
+        out.push((rank, weight, Item { insert: shell_quote_path(&shown).replace("\\~", "~"), label: shown, detail: detail.to_string(), kind: "dir", doc: String::new() }));
+    };
+    // How well a folder matches, as zoxide does: what's typed matches its
+    // name (closely, else letter by letter); typed with slashes, each part
+    // is in one of its folders, in order, the last part in its name.
+    let matches = |p: &str| -> Option<u32> {
+        if t.is_empty() {
+            return Some(50);
+        }
+        let comps: Vec<String> = tilde(p).split('/').filter(|c| !c.is_empty()).map(|c| c.to_lowercase()).collect();
+        let name = comps.last()?.clone();
+        if !t.contains('/') {
+            return score(&name, t);
+        }
+        let parts: Vec<String> = t.split('/').filter(|x| !x.is_empty()).map(|x| x.to_lowercase()).collect();
+        let (last, rest) = parts.split_last()?;
+        if !name.contains(last.as_str()) {
+            return None;
+        }
+        let mut i = 0;
+        for part in rest {
+            while i < comps.len() - 1 && !comps[i].contains(part.as_str()) {
+                i += 1;
+            }
+            if i >= comps.len() - 1 {
+                return None;
+            }
+            i += 1;
+        }
+        Some(if name.starts_with(last.as_str()) { 5 } else { 15 })
+    };
+    // (Temporary folders only when asked for.)
+    let tmp = std::env::temp_dir().to_string_lossy().to_string();
+    let want_tmp = t.starts_with("/tmp") || t.starts_with(&tmp);
+    for (p, w) in frecent_dirs() {
+        if !want_tmp && (p.starts_with("/tmp/") || p.starts_with(&format!("{tmp}/"))) {
+            continue;
+        }
+        if let Some(m) = matches(&p) {
+            add(&p, m, w, "often", &mut out);
+        }
+    }
+    if !t.is_empty() && !t.contains('/') {
+        for d in folders_below(Path::new(cwd)) {
+            // (The folder's own subfolders are listed already.)
+            if d.parent() == Some(Path::new(cwd)) {
+                continue;
+            }
+            let p = d.to_string_lossy().to_string();
+            let name = p.rsplit('/').next().unwrap_or(&p).to_string();
+            if let Some(m) = score(&name, t).filter(|s| *s < 100) {
+                add(&p, m + 30, 0.0, "below", &mut out);
+            }
+        }
+        if let Ok(cdpath) = std::env::var("CDPATH") {
+            for base in cdpath.split(':').filter(|b| !b.is_empty()) {
+                for e in std::fs::read_dir(base).into_iter().flatten().flatten() {
+                    let p = e.path().to_string_lossy().to_string();
+                    if e.path().is_dir() && score(&e.file_name().to_string_lossy(), t).is_some_and(|s| s < 100) {
+                        add(&p, 40, 0.0, "CDPATH", &mut out);
+                    }
+                }
+            }
+        }
+    }
+    // Best match, then most visited.
+    out.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)));
+    let limit = if t.is_empty() { 15 } else { 60 };
+    out.into_iter().take(limit).map(|(_, _, i)| i).collect()
+}
+
 fn rank(mut items: Vec<Item>, typed: &str, key: impl Fn(&Item) -> String) -> Vec<Item> {
     let mut scored: Vec<(u32, Item)> = items.drain(..).filter_map(|i| score(&key(&i), typed).map(|s| (s, i))).collect();
     // Loose (fuzzy) matches only when nothing matches more closely.
@@ -952,6 +1144,18 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
             }
             let dirs_only = matches!(cmd.as_str(), "cd" | "pushd" | "rmdir" | "z");
             items.extend(rank(paths(&typed, cwd, dirs_only), name_of(&typed), |i| i.label.clone()));
+            // (cd: also where you go often or lately, folders further down, CDPATH.)
+            if matches!(cmd.as_str(), "cd" | "pushd" | "z") && args.is_empty() {
+                let places = cd_places(&typed, cwd);
+                // (A subfolder matching only letter by letter gives way to
+                // a place that matches properly.)
+                if !places.is_empty() && !name_of(&typed).is_empty() {
+                    let t = name_of(&typed).to_string();
+                    items.retain(|i| i.kind != "dir" || score(i.label.trim_end_matches('/'), &t).is_some_and(|s| s < 100));
+                }
+                let have: std::collections::HashSet<String> = items.iter().map(|i| i.insert.clone()).collect();
+                items.extend(places.into_iter().filter(|i| !have.contains(&i.insert)));
+            }
         }
     }
     json!({"start": start, "end": end, "items": items, "pending": pending}).to_string()
@@ -1060,3 +1264,4 @@ mod live {
         }
     }
 }
+
