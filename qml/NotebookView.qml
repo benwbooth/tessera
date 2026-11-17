@@ -223,9 +223,21 @@ FocusScope {
         cells.setProperty(i, "editing", true)
         touch()
     }
+    // A new card from a command: the view goes to the end and stays there as
+    // the card is laid out and its output grows, until it's scrolled up.
+    property bool sticking: false
+    property bool pinning: false
+    function follow() { sticking = true; Qt.callLater(pin) }
+    function pin() {
+        if (!sticking) return
+        pinning = true
+        list.positionViewAtEnd()
+        pinning = false
+    }
     function focusCell(i, edit) {
         if (i < 0 || i >= cells.count) return
         current = i
+        sticking = false
         list.positionViewAtIndex(i, ListView.Contain)
         if (edit) {
             cells.setProperty(i, "editing", true)
@@ -299,7 +311,7 @@ FocusScope {
         cells.append(c)
         current = cells.count - 1
         run(cells.count - 1)
-        Qt.callLater(list.positionViewAtEnd)
+        follow()
     }
     property bool ownRun: false         // a cell run from here is running in the shell
     function updateOwnRun() {
@@ -375,7 +387,7 @@ FocusScope {
             touch()
         }
         updateOwnRun()
-        if (added) Qt.callLater(list.positionViewAtEnd)
+        if (added) follow()
     }
     Connections {
         target: nb.view
@@ -871,6 +883,13 @@ FocusScope {
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
         MomentumWheel { flick: list }
+        property real lastY: 0
+        onContentHeightChanged: if (nb.sticking) Qt.callLater(nb.pin)
+        onHeightChanged: if (nb.sticking) Qt.callLater(nb.pin)
+        onContentYChanged: {
+            if (!nb.pinning && contentY < lastY - 2) nb.sticking = false
+            lastY = contentY
+        }
         Keys.onPressed: (e) => {
             const i = nb.current
             const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))

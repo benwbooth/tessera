@@ -57,7 +57,9 @@ Item {
         return replPrograms.some(r => j === r || j.startsWith("python")) && controller ? controller.languageFor(j) : ""
     }
     onEditorOnChanged: {
-        if (editorOn && term.activeFocus && preferEditor) compose.focusEditor()
+        // (Back at the prompt after a command or a full-screen program like
+        // vim: the editor takes the keys again, even if the terminal had them.)
+        if (editorOn && focused) { preferEditor = true; Qt.callLater(compose.focusEditor) }
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
     readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || replLang !== "")      // the window's text zoom, shown with the size
