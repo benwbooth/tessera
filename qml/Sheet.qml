@@ -42,6 +42,7 @@ Popup {
     modal: true
     focus: true
     padding: 0
+    topPadding: 0.001   // (off the half pixel: 130% scale smears native text there)
     closePolicy: Popup.CloseOnEscape
 
     onOpened: {

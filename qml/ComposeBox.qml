@@ -861,6 +861,7 @@ Rectangle {
         width: 260
         height: Math.min(360, langList.contentHeight + langFilter.height + 24)
         padding: 6
+        topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         onOpened: { langFilter.text = ""; langFilter.forceActiveFocus() }
         onClosed: edit.forceActiveFocus()

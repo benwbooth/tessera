@@ -79,6 +79,7 @@ T.ComboBox {
         width: Math.max(control.width, 160)
         implicitHeight: Math.min(contentItem.implicitHeight + 8, 320)
         padding: 4
+        topPadding: 4.001   // (off the half pixel: 130% scale smears native text there)
         contentItem: ListView {
             id: list
             clip: true

@@ -9,6 +9,7 @@ T.Menu {
     implicitWidth: Math.max(140, contentItem.implicitWidth + leftPadding + rightPadding)
     implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
     padding: 4
+    topPadding: 4.001   // (off the half pixel: 130% scale smears native text there)
     margins: 4
     delegate: SlimMenuItem {}
     contentItem: ListView {

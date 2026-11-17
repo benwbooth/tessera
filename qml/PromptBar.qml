@@ -712,6 +712,7 @@ Item {
         width: 300
         height: Math.min(420, addList.contentHeight + addFilter.height + 22)
         padding: 6
+        topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         property var star: []
         onOpened: { addFilter.text = ""; addFilter.forceActiveFocus(); try { star = JSON.parse(bar.controller.promptStarModules()) } catch (e) { star = [] } }
@@ -798,6 +799,7 @@ Item {
         width: 280
         height: Math.min(380, choiceList.contentHeight + 12)
         padding: 6
+        topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         contentItem: ListView {
             id: choiceList
@@ -872,6 +874,7 @@ Item {
         property string name: ""
         width: 300
         padding: 10
+        topPadding: 10.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         component Swatches: Flow {
             id: sw
