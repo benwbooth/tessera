@@ -705,11 +705,11 @@ FocusScope {
     }
     // Output lines closer together than the font's own spacing (the
     // terminal's rows are this tight).
-    property int outputLineHeight: 82   // percent
+    property int outputLineHeight: 72   // percent
     function tight(html) { return "<div style=\"line-height:" + outputLineHeight + "%\">" + html + "</div>" }
     function tightText(t) { return tight("<span style=\"white-space:pre-wrap\">" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</span>") }
     function palette(html) { return html.replace(/var\(--vt-palette-(\d+)\)/g, (m, n) => paletteColor(parseInt(n))) }
-    function colored(text) { return controller ? palette(controller.ansiHtml(text)) : "" }
+    function colored(text) { return controller ? tight(palette(controller.ansiHtml(text))) : "" }
     function shortDir(p) {
         const home = controller ? controller.homeDir() : ""
         return home !== "" && p.startsWith(home) ? "~" + p.slice(home.length) : p

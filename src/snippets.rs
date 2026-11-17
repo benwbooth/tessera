@@ -42,7 +42,7 @@ fn runners(lang: &str) -> &'static [Runner] {
     match lang {
         "python" => &[r!("python3", "python3 -c", Inline, "python3"), r!("python", "python -c", Inline, ""), r!("uv", "uv run --no-project python -c", Inline, "uv")],
         "javascript" => &[r!("node", "node -e", Inline, "nodejs"), r!("deno", "deno eval", Inline, "deno"), r!("bun", "bun -e", Inline, "bun")],
-        "typescript" | "tsx" => &[r!("deno", "deno run -A {f}", File("ts"), "deno"), r!("bun", "bun {f}", File("ts"), "bun"), r!("tsx", "tsx {f}", File("ts"), "tsx")],
+        "typescript" | "tsx" => &[r!("deno", "deno eval --ext=ts", Inline, "deno"), r!("bun", "bun -e", Inline, "bun")],
         "ruby" => &[r!("ruby", "ruby -e", Inline, "ruby")],
         "perl" => &[r!("perl", "perl -e", Inline, "perl")],
         "lua" => &[r!("lua", "lua -e", Inline, "lua"), r!("luajit", "luajit -e", Inline, "luajit")],
@@ -62,27 +62,28 @@ fn runners(lang: &str) -> &'static [Runner] {
         "octave" | "matlab" => &[r!("octave", "octave --eval", Inline, "octave")],
         "sql" => &[r!("duckdb", "duckdb -c", Inline, "duckdb"), r!("sqlite3", "sqlite3 :memory:", Stdin, "sqlite")],
         "rust" => &[
-            r!("evcxr", "evcxr", Stdin, "evcxr nixpkgs#cargo nixpkgs#rustc"),
-            r!("rust-script", "rust-script {f}", File("rs"), "rust-script"),
+            r!("evcxr", "evcxr", Stdin, ""),
+            r!("rust-script", "rust-script -e", Inline, "rust-script nixpkgs#cargo nixpkgs#rustc"),
             r!("rustc", "rustc -o {b} {f} && {b}", File("rs"), "rustc"),
         ],
         "go" => &[r!("go", "go run {f}", File("go"), "go")],
-        "c" => &[r!("tcc", "tcc -run {f}", File("c"), ""), r!("cc", "cc -o {b} {f} && {b}", File("c"), "gcc")],
+        "c" => &[r!("tcc", "tcc -run {f}", File("c"), "tinycc"), r!("cc", "cc -o {b} {f} && {b}", File("c"), "gcc")],
         "cpp" => &[r!("c++", "c++ -std=c++20 -o {b} {f} && {b}", File("cpp"), "gcc")],
-        "java" => &[r!("jbang", "jbang {f}", File("java"), "jbang"), r!("java", "java {f}", File("java"), "jdk")],
-        "kotlin" => &[r!("kotlin", "kotlin {f}", File("main.kts"), "kotlin")],
-        "scala" => &[r!("scala-cli", "scala-cli run {f}", File("sc"), "scala-cli")],
-        "clojure" => &[r!("bb", "bb {f}", File("clj"), "babashka"), r!("clojure", "clojure -M {f}", File("clj"), "clojure")],
+        // (Statements: jbang --code, or JShell; a class: see command.)
+        "java" => &[r!("jbang", "jbang --code", Inline, "jbang"), r!("jshell", "jshell --feedback silent -", Stdin, "jdk")],
+        "kotlin" => &[r!("kotlin", "kotlin -e", Inline, "kotlin")],
+        "scala" => &[r!("scala-cli", "scala-cli run -e", Inline, "scala-cli")],
+        "clojure" => &[r!("bb", "bb -e", Inline, "babashka"), r!("clojure", "clojure -M -e", Inline, "clojure")],
         "haskell" => &[r!("runghc", "runghc {f}", File("hs"), "ghc")],
         "ocaml" => &[r!("ocaml", "ocaml {f}", File("ml"), "ocaml")],
-        "racket" => &[r!("racket", "racket {f}", File("rkt"), "racket")],
-        "scheme" => &[r!("guile", "guile {f}", File("scm"), "guile")],
+        "racket" => &[r!("racket", "racket -e", Inline, "racket")],
+        "scheme" => &[r!("guile", "guile -c", Inline, "guile")],
         "common-lisp" | "lisp" => &[r!("sbcl", "sbcl --script {f}", File("lisp"), "sbcl")],
         "dart" => &[r!("dart", "dart run {f}", File("dart"), "dart")],
         "swift" => &[r!("swift", "swift {f}", File("swift"), "swift")],
         "zig" => &[r!("zig", "zig run {f}", File("zig"), "zig")],
         "nim" => &[r!("nim", "nim r --hints:off {f}", File("nim"), "nim")],
-        "crystal" => &[r!("crystal", "crystal run {f}", File("cr"), "crystal")],
+        "crystal" => &[r!("crystal", "crystal eval", Inline, "crystal")],
         "d" => &[r!("rdmd", "rdmd {f}", File("d"), "dmd")],
         "v" => &[r!("v", "v run {f}", File("v"), "vlang")],
         "fsharp" => &[r!("dotnet", "dotnet fsi {f}", File("fsx"), "dotnet-sdk")],
@@ -127,12 +128,59 @@ pub fn runnable(lang: &str) -> bool {
     !runners(lang).is_empty()
 }
 
+/// The program `nix run nixpkgs#<pkg>` starts (its mainProgram), where
+/// that's the runner: then it's `nix run`, else `nix shell ... -c`.
+fn nix_main(pkg: &str) -> Option<&'static str> {
+    Some(match pkg {
+        "python3" => "python3",
+        "nodejs" => "node",
+        "deno" => "deno",
+        "bun" => "bun",
+        "ruby" => "ruby",
+        "perl" => "perl",
+        "lua" => "lua",
+        "php" => "php",
+        "julia" => "julia",
+        "uv" => "uv",
+        "jq" => "jq",
+        "duckdb" => "duckdb",
+        "rust-script" => "rust-script",
+        "jbang" => "jbang",
+        "scala-cli" => "scala-cli",
+        "babashka" => "bb",
+        "ghc" => "ghc",
+        "racket" => "racket",
+        "guile" => "guile",
+        "crystal" => "crystal",
+        "elixir" => "elixir",
+        "nushell" => "nu",
+        "fish" => "fish",
+        _ => return None,
+    })
+}
+
+/// `cmd` (a runner's command, its program first) run from nixpkgs.
+fn from_nix(pkg: &str, cmd: &str) -> String {
+    let (prog, rest) = cmd.split_once(' ').unwrap_or((cmd, ""));
+    if nix_main(pkg) == Some(prog) {
+        format!("nix run nixpkgs#{pkg} -- {rest}").trim_end().to_string()
+    } else {
+        format!("nix shell nixpkgs#{pkg} -c {cmd}")
+    }
+}
+
 fn on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }
 
 fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Rust for rust-script -e (a block): statements as they are, a program's
+/// main called at the end.
+fn rust_expr(code: &str) -> String {
+    if code.contains("fn main") { format!("{code}\nmain()") } else { code.to_string() }
 }
 
 /// Make a bare snippet a whole program where the language needs one
@@ -154,7 +202,6 @@ fn complete_program(lang: &str, code: &str) -> String {
         "c" if !code.contains("main(") => format!("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nint main(void) {{\n{code}\nreturn 0;\n}}\n"),
         "cpp" if !code.contains("main(") => format!("#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {{\n{code}\nreturn 0;\n}}\n"),
         "rust" if !code.contains("fn main") => format!("fn main() {{\n{code}\n}}\n"),
-        "java" if !code.contains("class ") => format!("public class Main {{\n  public static void main(String[] args) throws Exception {{\n{code}\n  }}\n}}\n"),
         "racket" if !code.trim_start().starts_with("#lang") => format!("#lang racket\n{code}\n"),
         "php" => code.trim_start().trim_start_matches("<?php").to_string(),
         _ => code.to_string(),
@@ -200,18 +247,47 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
                 let deps: String = crates.iter().map(|c| format!(":dep {c}\n")).collect();
                 return file_command(&format!("{deps}{code_t}"), How::Stdin, "evcxr", "", shell);
             }
-            let nix = if on_path("rust-script") { "" } else if on_path("nix") { "rust-script nixpkgs#cargo nixpkgs#rustc" } else { return String::new() };
-            let body = complete_program("rust", code_t);
-            return file_command(&format!("// cargo-deps: {}\n{body}", crates.join(", ")), How::File("rs"), "rust-script {f}", nix, shell);
+            let rs = if on_path("rust-script") && on_path("cargo") {
+                "rust-script".to_string()
+            } else if on_path("nix") {
+                "nix shell nixpkgs#rust-script nixpkgs#cargo nixpkgs#rustc -c rust-script".to_string()
+            } else {
+                return String::new();
+            };
+            let deps: String = crates.iter().map(|c| format!(" -d {c}")).collect();
+            return format!("{rs}{deps} -e {}", quote(&rust_expr(code_t)));
         }
     }
-    let mut pick = list.iter().find(|r| on_path(r.program)).map(|r| (r, ""));
-    if pick.is_none() && on_path("nix") {
-        pick = list.iter().find(|r| !r.nix.is_empty()).map(|r| (r, r.nix));
+    // (A Java class: JBang from its input, or java's own source launcher.)
+    if lang == "java" && code_t.contains("class ") {
+        if on_path("jbang") || (!on_path("java") && on_path("nix")) {
+            let jb = if on_path("jbang") { "jbang".to_string() } else { from_nix("jbang", "jbang") };
+            return file_command(code_t, How::Stdin, &format!("{jb} -"), "", shell);
+        }
+        if on_path("java") {
+            return file_command(code_t, How::File("java"), "java {f}", "", shell);
+        }
     }
+    // A runner that takes the code as it is (an argument, its input) before
+    // one that needs a file: installed, then from nixpkgs; then the others.
+    let nix_ok = on_path("nix");
+    let direct = |r: &&Runner| !matches!(r.how, How::File(_));
+    let pick = list
+        .iter()
+        .filter(direct)
+        .find(|r| on_path(r.program))
+        .map(|r| (r, ""))
+        .or_else(|| list.iter().filter(direct).find(|r| nix_ok && !r.nix.is_empty()).map(|r| (r, r.nix)))
+        .or_else(|| list.iter().find(|r| on_path(r.program)).map(|r| (r, "")))
+        .or_else(|| list.iter().find(|r| nix_ok && !r.nix.is_empty()).map(|r| (r, r.nix)));
     let Some((run, nix)) = pick else { return String::new() };
-    // (evcxr runs statements as they come: no main to wrap them in.)
-    let code = if run.program == "evcxr" { code.trim_end().to_string() } else { complete_program(lang, code.trim_end()) };
+    // (evcxr runs statements as they come; rust-script -e takes them as a
+    // block, a main called at its end.)
+    let code = match run.program {
+        "evcxr" => code.trim_end().to_string(),
+        "rust-script" => rust_expr(code.trim_end()),
+        _ => complete_program(lang, code.trim_end()),
+    };
     // (Go that imports modules: a module of its own, tidied, fetches them.)
     let go_mods = lang == "go"
         && code.lines().any(|l| {
@@ -223,7 +299,7 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
     }
     match run.how {
         How::Inline if nix.is_empty() => format!("{} {}", run.cmd, quote(&code)),
-        How::Inline => format!("nix shell nixpkgs#{nix} -c {} {}", run.cmd, quote(&code)),
+        How::Inline => format!("{} {}", from_nix(nix, run.cmd), quote(&code)),
         how => file_command(&code, how, run.cmd, nix, shell),
     }
 }
@@ -468,7 +544,7 @@ pub fn rank(reply: &str, recent_json: &str) -> String {
     let best = guesses
         .into_iter()
         .map(|(n, p)| {
-            let boost = recent.iter().position(|r| *r == n).map(|i| 0.5 / (1.0 + i as f64)).unwrap_or(0.0);
+            let boost = recent.iter().position(|r| *r == n).map(|i| 0.15 / (1.0 + i as f64)).unwrap_or(0.0);
             (n, p, p * (1.0 + boost))
         })
         .max_by(|a, b| a.2.total_cmp(&b.2));
@@ -498,10 +574,11 @@ mod tests {
     fn ranks() {
         assert_eq!(rank(r#"[["python", 0.8], ["bash", 0.1]]"#, "[]"), "python");
         assert_eq!(rank(r#"[["bash", 0.7], ["python", 0.2]]"#, "[]"), "");
-        // (Recent use breaks a near tie.)
+        // (Recent use breaks a near tie, and only that.)
         assert_eq!(rank(r#"[["javascript", 0.45], ["typescript", 0.4]]"#, r#"["typescript"]"#), "typescript");
         assert_eq!(rank("Python", "[]"), "python");
         assert_eq!(rank(r#"[["C++", 0.9]]"#, "[]"), "cpp");
+        assert_eq!(rank(r#"[["rust", 0.6], ["java", 0.45]]"#, r#"["java"]"#), "rust");
     }
 
     #[test]
@@ -522,4 +599,5 @@ mod tests {
         assert!(missing_python_modules("import os\nimport surely_not_a_module_xyz").contains(&"surely_not_a_module_xyz".to_string()));
     }
 }
+
 

@@ -45,7 +45,8 @@ Rectangle {
             if (t === box.langAsked) return
             // (The plainest marks at once; the AI's answer, when it comes, decides.)
             box.aiLang = box.controller.detectLanguage(t)
-            if (!box.inlineReady) return
+            // (A sure mark, println!( or console.log(, isn't second-guessed.)
+            if (box.aiLang !== "" || !box.inlineReady) return
             box.langAsked = t
             box.controller.aiRun(box.aiKey + "-lang", "language", JSON.stringify([{ role: "user", content: t }]), box.aiContext())
         }
