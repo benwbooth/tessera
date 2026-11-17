@@ -1091,7 +1091,7 @@ impl ffi::Controller {
         let (key, cwd) = (key.to_string(), local_path(cwd));
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let json = crate::prompt::starship(&cwd, status, duration_ms.max(0.0) as u64, width.max(20) as u32, pid.max(0) as u32);
+            let json = crate::prompt::starship(&cwd, status, duration_ms.max(0.0) as u64, width.max(1) as u32, pid.max(0) as u32);
             let _ = qt.queue(move |c| c.starship_ready(qs(&key), qs(&json)));
         });
     }

@@ -142,7 +142,7 @@ pub fn starship_with(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: 
         if right {
             cmd.arg("--right");
         }
-        cmd.args(["--status", &status.to_string(), "--cmd-duration", &duration_ms.to_string(), "--terminal-width", &width.max(20).to_string(), "--jobs", "0"]);
+        cmd.args(["--status", &status.to_string(), "--cmd-duration", &duration_ms.to_string(), "--terminal-width", &width.max(1).to_string(), "--jobs", "0"]);
         if let Some(env) = shell_env(pid) {
             cmd.env_clear().envs(env);
         }

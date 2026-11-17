@@ -117,13 +117,34 @@ Item {
     property var starRight: []
     readonly property string key: "prompt-" + Math.random().toString(36).slice(2)
     property var starMods: ({})        // Starship modules drawn one by one: {name: runs}
+    // How wide Starship's whole prompt may be (its $fill pads to it): the room
+    // the other widgets leave it on the left. On the right it gets no fill:
+    // its width would change the room it's given, over and over.
+    function fillCols() {
+        const d = layout.indexOf("|"), i = layout.indexOf("starship")
+        if (i < 0 || (d >= 0 && i > d)) return 1
+        let others = 0
+        for (let k = 0; k < leftRow.children.length; k++) {
+            const c = leftRow.children[k]
+            if (c.wd !== undefined && c.wd.name !== "starship" && c.visible) others += c.width + leftRow.spacing
+        }
+        const room = bar.width - 8 - others - addButton.width - 12 - (rightRow.width > 0 ? rightRow.width + 16 : 0)
+        return Math.max(1, Math.floor(room / Math.max(1, sfm.averageCharacterWidth)))
+    }
+    // (Nothing redrawn while a widget is dragged: that would drop it.)
+    property int lastCols: 0
+    // (The others changed size: Starship's room did too. Its own size doesn't count.)
+    function roomChanged() { if (layout.indexOf("starship") >= 0 && dragFrom < 0 && fillCols() !== lastCols) resizeRefresh.restart() }
+    property bool refreshHeld: false
+    property var heldStar: null
+    property var heldMods: null
     function refresh() {
         if (!controller || !visible) return
+        if (dragFrom >= 0) { refreshHeld = true; return }
         const st = bar.view ? bar.view.lastStatus : 0, du = bar.view ? bar.view.lastDuration : 0
         if (layout.indexOf("starship") >= 0 || layout.indexOf("starship_right") >= 0) {
-            // (Starship's $fill pads to this: the room left of the + and the right side.)
-            const cols = Math.max(20, Math.floor((bar.width - 16 - addButton.width - 12 - (rightRow.width > 0 ? rightRow.width + 10 : 0)) / Math.max(1, sfm.averageCharacterWidth)))
-            controller.requestStarship(key, bar.cwd, st, du, cols, bar.shellPid)
+            lastCols = fillCols()
+            controller.requestStarship(key, bar.cwd, st, du, lastCols, bar.shellPid)
         }
         const mods = layout.filter(w => w.startsWith("star:")).map(w => w.substring(5))
         if (mods.length > 0) controller.requestPromptModules(key, JSON.stringify(mods), bar.cwd, st, du, bar.shellPid)
@@ -134,14 +155,16 @@ Item {
         target: bar.controller
         function onStarshipReady(k, json) {
             if (k !== bar.key) return
+            if (bar.dragFrom >= 0) { bar.heldStar = json; return }
             try { const r = JSON.parse(json); bar.starLines = r.lines; bar.starRight = r.right } catch (e) {}
         }
         function onPromptModulesReady(k, json) {
             if (k !== bar.key) return
+            if (bar.dragFrom >= 0) { bar.heldMods = json; return }
             try { bar.starMods = JSON.parse(json) } catch (e) {}
         }
     }
-    onWidthChanged: if (layout.indexOf("starship") >= 0) resizeRefresh.restart()
+    onWidthChanged: roomChanged()
     Timer { id: resizeRefresh; interval: 200; onTriggered: bar.refresh() }
     onShellPidChanged: refresh()
     // (The prompt's config changed in Preferences.)
@@ -157,7 +180,7 @@ Item {
         function onCommandFinished() { bar.refresh() }
     }
     property date now: new Date()
-    Timer { interval: 15000; running: bar.visible; repeat: true; onTriggered: { bar.now = new Date(); bar.refresh() } }
+    Timer { interval: 15000; running: bar.visible; repeat: true; onTriggered: { if (bar.dragFrom >= 0) return; bar.now = new Date(); bar.refresh() } }
 
     function path() {
         let p = bar.cwd.replace(/^file:\/\/[^/]*/, "")
@@ -465,50 +488,51 @@ Item {
     property int dragFrom: -1           // the layout index being dragged
     property real dragX: 0
     property real dragY: 0
-    readonly property bool dragOff: dragFrom >= 0 && Math.abs(dragY - height / 2) > height / 2 + 26
+    // (Well off the bar, up or down: removed. A drag that drifts a little stays.)
+    readonly property bool dragOff: dragFrom >= 0 && Math.abs(dragY - height / 2) > height / 2 + 56
     property var dropAt: -1             // the layout index it would go before
     property real dropX: 0
+    // Where a dragged widget would go: the left side or the right (the bar's
+    // halves), before the first widget there whose middle is past the pointer.
     function dropTarget() {
-        // Each shown widget's middle, and the divider between the sides.
+        const right = bar.dragX > bar.width / 2
+        const row = right ? rightRow : leftRow
         const marks = []
-        for (const row of [leftRow, rightRow]) {
-            for (let k = 0; k < row.children.length; k++) {
-                const c = row.children[k]
-                if (c.wi === undefined || !c.visible) continue
-                const p = c.mapToItem(bar, 0, 0)
-                marks.push({ i: c.wi, x: p.x + c.width / 2, left: p.x - 4, right: p.x + c.width + 4 })
-            }
+        for (let k = 0; k < row.children.length; k++) {
+            const c = row.children[k]
+            if (c.wd === undefined || !c.visible) continue
+            const p = c.mapToItem(bar, 0, 0)
+            marks.push({ i: c.wi, x: p.x + c.width / 2, left: p.x - 4, right: p.x + c.width + 4 })
         }
-        const d = layout.indexOf("|")
-        const divX = (leftRow.x + leftRow.width + rightRow.x) / 2
-        marks.push({ i: d >= 0 ? d : layout.length, x: divX, left: divX, right: divX, divider: true })
         marks.sort((a, b) => a.x - b.x)
-        for (const m of marks) {
-            if (bar.dragX < m.x) {
-                bar.dropX = m.divider ? m.x : m.left
-                // (Before the divider: the end of the left side; past it, the right's start.)
-                return m.divider ? (d >= 0 ? d : layout.length) : m.i
-            }
-        }
-        const last = marks[marks.length - 1]
-        bar.dropX = last.divider ? last.x : last.right
-        return layout.length
+        for (const m of marks)
+            if (bar.dragX < m.x) { bar.dropX = m.left; return m.i }
+        const d = layout.indexOf("|")
+        if (marks.length) bar.dropX = marks[marks.length - 1].right
+        else bar.dropX = right ? rightRow.x + rightRow.width - 2 : leftRow.x
+        // (The end of the side: before the divider, or the very end.)
+        return right ? layout.length : (d >= 0 ? d : layout.length)
+    }
+    function releaseHeld() {
+        if (heldStar !== null) { try { const r = JSON.parse(heldStar); starLines = r.lines; starRight = r.right } catch (e) {} heldStar = null }
+        if (heldMods !== null) { try { starMods = JSON.parse(heldMods) } catch (e) {} heldMods = null }
+        if (refreshHeld) { refreshHeld = false; Qt.callLater(refresh) }
     }
     function finishDrag() {
         if (dragFrom < 0) return
         const from = dragFrom
         dragFrom = -1
+        Qt.callLater(releaseHeld)
         if (dragOff) { removeWidget(from); return }
-        if (layout.indexOf("|") < 0) {
-            // (No right side yet: a drop past the middle starts one.)
-            const l = layout.concat(["|"])
-            const x = l.splice(from, 1)[0]
-            const at = Math.min(dropAt, l.length)
-            l.splice(at >= l.indexOf("|") && dragX > width / 2 ? l.length : (at > from ? at - 1 : at), 0, x)
-            saveLayout(l)
-            return
-        }
-        if (dropAt !== from && dropAt !== from + 1) moveWidget(from, dropAt)
+        const right = dragX > width / 2
+        const l = withDivider(layout)
+        let to = dropAt
+        // (Dropped at the right side's end with no divider yet: after it.)
+        if (layout.indexOf("|") < 0 && right) to = l.length
+        if (to === from || to === from + 1) return
+        const x = l.splice(from, 1)[0]
+        l.splice(to > from ? to - 1 : to, 0, x)
+        saveLayout(l)
     }
 
     // ---- a widget on the bar -------------------------------------------------
@@ -599,6 +623,7 @@ Item {
 
     Row {
         id: leftRow
+        onImplicitWidthChanged: bar.roomChanged()
         anchors.left: parent.left
         anchors.leftMargin: 8
         anchors.verticalCenter: parent.verticalCenter
@@ -607,6 +632,7 @@ Item {
     }
     Row {
         id: rightRow
+        onImplicitWidthChanged: bar.roomChanged()
         anchors.right: addButton.left
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
