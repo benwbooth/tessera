@@ -904,6 +904,7 @@ Rectangle {
         aiBusy = "fix"
         controller.aiRun(aiKey + "-cmd", "fix", JSON.stringify([{ role: "user", content: "Command: " + last + "\nExit status: " + box.view.lastStatus + "\nThe terminal's last lines:\n" + tail }]), aiContext())
     }
+    property string ghostAsked: ""      // the text an AI suggestion was asked for
     function askGhostNow() { ghostTimer.stop(); ghostTimer.triggered() }
     function acceptGhost() {
         if (ghost === "") return false
@@ -919,6 +920,7 @@ Rectangle {
             const t = edit.text
             if (!box.aiInline || !box.inlineReady || t.trim().length < 2 || t.startsWith("#") || box.historyMode
                     || edit.cursorPosition !== t.length || t.indexOf("\n") >= 0) return
+            box.ghostAsked = t
             box.controller.aiRun(box.aiKey + "-inline", "inline", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(8) + "\n\nComplete this command line: " + t }]), box.aiContext())
         }
     }
@@ -940,7 +942,10 @@ Rectangle {
         function onAiDone(key, reply, error) {
             if (key === box.aiKey + "-inline") {
                 const t = edit.text
-                box.ghost = !error && reply.startsWith(t) && reply.length > t.length ? reply.substring(t.length).split("\n")[0] : ""
+                // (Only for what it was asked about, or that typed on further:
+                // a late reply after the line was run or cleared is dropped.)
+                const fits = box.ghostAsked !== "" && t.trim().length >= 2 && t.startsWith(box.ghostAsked) && edit.cursorPosition === t.length
+                box.ghost = fits && !error && reply.startsWith(t) && reply.length > t.length ? reply.substring(t.length).split("\n")[0] : ""
                 box.lastGhostBase = t
                 // (Still being written, then: a check's complaint doesn't apply.)
                 if (box.ghost !== "") { box.aiNote = ""; box.checkedText = "" }

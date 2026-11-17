@@ -13,6 +13,15 @@ Item {
     property var themeData: ({})
     property var segments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
     property string fontFamily: "monospace"
+    // Nerd Font symbols (Powerline, git, language icons) in Symbols Nerd Font:
+    // otherwise whatever font the system picks for a private-use character
+    // draws it, often something else entirely.
+    function glyphs(t) {
+        const esc = String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        if (!/[\ue000-\uf8ff\udb80-\udbff]/.test(esc)) return "<span style='white-space:pre'>" + esc + "</span>"
+        return "<span style='white-space:pre'>" + esc.replace(/([\ue000-\uf8ff]|[\udb80-\udbff][\udc00-\udfff])+/g,
+            (m) => "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + m + "</span>") + "</span>"
+    }
     property real fontSize: 11
     property int shellPid: 0
     property string engine: "auto"     // "auto", "starship", "builtin"
@@ -92,7 +101,7 @@ Item {
             return { text: "  " + path(), fg: Theme.bg, bg: ansi(5, "#c678dd") }
         case "git": {
             if (!i.branch) return null
-            let t = (i.detached ? "➦ " : " ") + i.branch
+            let t = (i.detached ? "➦ " : "") + i.branch
             const marks = []
             if (i.conflicts) marks.push("=" + i.conflicts)
             if (i.staged) marks.push("+" + i.staged)
@@ -102,7 +111,7 @@ Item {
             if (i.behind) marks.push("⇣" + i.behind)
             if (marks.length) t += "  " + marks.join(" ")
             const dirty = i.staged || i.modified || i.untracked || i.conflicts
-            return { text: t, fg: dirty ? ansi(3, "#e5c07b") : ansi(2, "#98c379"), bg: Theme.mix(Theme.bg, Theme.fg, 0.12) }
+            return { text: t, fg: dirty ? ansi(3, "#e5c07b") : ansi(2, "#98c379"), bg: Theme.mix(Theme.bg, Theme.fg, 0.12), icon: i.detached ? "" : "branch" }
         }
         case "status":
             if (!bar.view || bar.view.lastStatus === 0) return null
@@ -143,7 +152,7 @@ Item {
     component Seg: Item {
         id: seg
         property var s
-        implicitWidth: label.implicitWidth + (s.bg !== "" ? 18 : 2)
+        implicitWidth: label.implicitWidth + (icon.visible ? icon.width + 4 : 0) + (s.bg !== "" ? 18 : 2)
         height: 18
         anchors.verticalCenter: parent.verticalCenter
         Rectangle {
@@ -152,11 +161,34 @@ Item {
             radius: height / 2
             color: seg.s.bg
         }
+        // The branch mark, drawn (a font's Powerline glyph varies, or is missing).
+        Canvas {
+            id: icon
+            visible: seg.s.icon === "branch"
+            width: 8
+            height: 12
+            anchors.verticalCenter: parent.verticalCenter
+            x: (seg.width - label.implicitWidth - width - 4) / 2
+            property color ink: seg.s.fg
+            onInkChanged: requestPaint()
+            onPaint: {
+                const c = getContext("2d")
+                c.reset()
+                c.strokeStyle = ink
+                c.fillStyle = ink
+                c.lineWidth = 1.3
+                c.beginPath(); c.moveTo(2, 2.5); c.lineTo(2, 9.5); c.stroke()
+                c.beginPath(); c.moveTo(6.2, 4); c.bezierCurveTo(6.2, 7, 2, 6.5, 2, 9); c.stroke()
+                for (const p of [[2, 2], [2, 10], [6.2, 3.2]]) { c.beginPath(); c.arc(p[0], p[1], 1.6, 0, Math.PI * 2); c.fill() }
+            }
+        }
         Text {
             id: label
             anchors.centerIn: parent
+            anchors.horizontalCenterOffset: icon.visible ? (icon.width + 4) / 2 : 0
             anchors.verticalCenterOffset: 0.001
-            text: seg.s.text
+            text: bar.glyphs(seg.s.text)
+            textFormat: Text.RichText
             color: seg.s.fg
             font.family: bar.fontFamily
             font.pointSize: Math.max(8, bar.fontSize - 1)
@@ -190,7 +222,8 @@ Item {
             visible: run.cap === ""
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: 0.001
-            text: run.r.t
+            text: bar.glyphs(run.r.t)
+            textFormat: Text.RichText
             color: run.ink
             font.family: bar.fontFamily
             font.pointSize: Math.max(8, bar.fontSize - 1)
