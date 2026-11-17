@@ -792,8 +792,11 @@ FocusScope {
     }
     // Output lines closer together than the font's own spacing (the
     // terminal's rows are this tight).
-    property int outputLineHeight: 72   // percent
-    function tight(html) { return "<div style=\"line-height:" + outputLineHeight + "%\">" + html + "</div>" }
+    // (Each line one terminal row high, at the terminal's font size: output
+    // reads as it did in the terminal.)
+    readonly property real outputRow: view && view.cellHeight > 0 ? view.cellHeight : 0
+    readonly property real outputPointSize: view && view.fontPointSize > 0 ? view.fontPointSize : 10
+    function tight(html) { return "<div style=\"line-height:" + (outputRow > 0 ? Math.round(outputRow) + "px" : "100%") + "\">" + html + "</div>" }
     function tightText(t) { return tight("<span style=\"white-space:pre-wrap\">" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</span>") }
     function palette(html) { return html.replace(/var\(--vt-palette-(\d+)\)/g, (m, n) => paletteColor(parseInt(n))) }
     function colored(text) { return controller ? tight(palette(controller.ansiHtml(text))) : "" }
@@ -1569,7 +1572,7 @@ FocusScope {
         selectedTextColor: Theme.text
         color: Theme.text
         font.family: nb.fontFamily
-        font.pointSize: 10
+        font.pointSize: nb.outputPointSize
         renderType: Text.NativeRendering
     }
     Component {
