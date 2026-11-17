@@ -58,6 +58,6 @@ A multi-line editor under the terminal while the shell waits at its prompt
 
 ## 6. Notebooks — done
 
-- Terminal as a notebook (Ctrl+Shift+J): a cell per command, resizable and expandable outputs, Markdown rich or as text, cells kept on disk per session.
-- Jupyter `.ipynb`: open, edit, run and save in a pane (`src/jupyter.rs`: kernelspecs, ZMTP 3.0 and signed messages, no Python needed in Tessera itself; `qml/JupyterView.qml`). Kernels: installed ones, Python from Nix, or the pane's shell. Terminal cells export as a Bash notebook.
+- One notebook per pane (Ctrl+Shift+J, `qml/NotebookView.qml`): a card per command with resizable, expandable outputs and per-cell views (Markdown rich or as text); cells written there too, run by the pane's shell or a Jupyter kernel. Kept per session (terminal cells in `cells/`, the notebook's own cells and order in `notebooks/`).
+- Jupyter `.ipynb`: the same notebook from a file (`src/jupyter.rs`: kernelspecs, ZMTP 3.0 and signed messages, no Python needed in Tessera itself). Kernels: installed ones, Python from Nix, or the pane's shell. A pane's notebook saves as `.ipynb`.
 - Later: ipywidgets, a variables view, the stdin channel (`input()`), notebook diffs.

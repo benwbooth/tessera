@@ -122,7 +122,6 @@ ApplicationWindow {
             onEditorKeysPicked: (k) => win.setSetting("editor_keys", k)
             markdownStyle: win.settings.markdown_style || "rich"
             onMarkdownStylePicked: (m) => win.setSetting("markdown_style", m)
-            onOpenNotebookRequested: (p) => win.openNotebook(p)
             dimInactive: win.settings.dim_inactive
             dimAmount: win.settings.dim_amount
             showTitle: win.settings.pane_titles
@@ -502,7 +501,7 @@ ApplicationWindow {
             if (opts.command) props.commandOverride = opts.command
             if (opts.title) t.launchTitle = opts.title
             if (opts.attachId) props.attachId = opts.attachId
-            if (opts.doc) props.docPath = opts.doc
+            if (opts.doc) { props.docPath = opts.doc; props.viewMode = "notebook" }
             const cwd = opts.cwd !== undefined ? opts.cwd : cwdFor(prof, active)
             if (cwd) props.cwd = cwd
             const p = makePane(t.root, props)
@@ -1679,6 +1678,8 @@ ApplicationWindow {
         }
     }
     Timer { id: notebookTestTimer; interval: 9000; onTriggered: if (activePane) activePane.viewMode = "notebook" }
+    // (Test hook: TESSERA_TEST_TAB=<n> goes to that tab once the window is restored.)
+    Timer { id: tabTestTimer; interval: 5000; onTriggered: { currentTab = parseInt(controller.testEnv("TAB")); if (activePane) focusPane(activePane) } }
     Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
     Timer { id: composeTestTimer; interval: 4000; onTriggered: if (activePane) { activePane.compose.focusEditor(); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory() } }
@@ -2228,6 +2229,7 @@ ApplicationWindow {
         if (controller.testEnv("ASSISTANT") !== "") assistantTestTimer.start()
         if (controller.testEnv("RICH") !== "") richTestTimer.start()
         if (controller.testEnv("NOTEBOOK") !== "") notebookTestTimer.start()
+        if (controller.testEnv("TAB") !== "") tabTestTimer.start()
         if (controller.testEnv("DRAG") !== "") dragTestTimer.start()
         if (controller.testEnv("FLICKER") !== "") flickerTestTimer.start()
         if (controller.openDoc() !== "") Qt.callLater(openNotebook, controller.openDoc())

@@ -119,6 +119,12 @@ fn store_path(session: &str) -> std::path::PathBuf {
     crate::settings::state_dir().join("cells").join(format!("{session}.jsonl"))
 }
 
+/// The pane's notebook (its cells written there, the order, what's shown
+/// how), kept by the GUI next to the cells.
+fn notebook_path(session: &str) -> std::path::PathBuf {
+    crate::settings::state_dir().join("notebooks").join(format!("{session}.ipynb"))
+}
+
 fn cell_line(c: &Cell) -> String {
     use base64::Engine;
     let b = base64::engine::general_purpose::STANDARD;
@@ -201,12 +207,17 @@ impl Cells {
                 let _ = std::fs::remove_file(&src);
             }
         }
+        // (The pane's notebook, kept with the session, moves with its cells.)
+        if from != session {
+            let _ = std::fs::rename(notebook_path(from), notebook_path(session));
+        }
         true
     }
 
     /// The session ended for good: its kept cells go.
     pub fn forget(session: &str) {
         let _ = std::fs::remove_file(store_path(session));
+        let _ = std::fs::remove_file(notebook_path(session));
     }
 }
 

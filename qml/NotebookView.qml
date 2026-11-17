@@ -4,78 +4,665 @@ import QtQuick.Layouts
 import QtWebEngine
 import QtQuick.Dialogs
 import Tessera
+import Tessera.Native
 
-// The pane as a notebook (like Jupyter): each command a cell, its output in
-// a pane of its own, shown for what it is — terminal text with its colors,
-// JSON, a table, HTML (a real browser view), Markdown, SVG, a picture. The
-// kind is recognised (rules, then the AI for the rest) and can be changed
-// per cell from its dropdown.
-Rectangle {
+// The pane as a notebook (like Jupyter): one card per cell. A command run in
+// the pane (typed in the editor, or in the terminal) becomes a cell, its
+// output shown for what it is: terminal text with its colors, JSON, a table,
+// HTML (a real browser view), Markdown, SVG, a picture. The kind is
+// recognised (rules, then the AI for the rest) and can be changed per cell.
+//
+// It's also a Jupyter notebook: cells can be written and run here, with this
+// pane's shell or any Jupyter kernel (Python from Nix, an installed one), and
+// Markdown cells sit between them. It opens and saves .ipynb files; one that
+// isn't a file yet is kept with the pane's session.
+//
+// Keys, while editing a cell: Shift+Enter runs it and goes on, Ctrl+Enter runs
+// it, Alt+Enter runs it and adds one below, Tab completes (from the kernel),
+// Esc leaves the cell. Between cells: Up/Down (or k/j) move, Enter edits, A/B
+// add above/below, D D deletes (Z brings it back), M/Y make it Markdown/code,
+// O hides its output, Ctrl+S saves.
+FocusScope {
     id: nb
-    property var view: null            // the TerminalView the cells come from
+    property var view: null             // the pane's TerminalView (its shell runs cells)
     property var controller: null
     property var themeData: ({})
     property string fontFamily: "monospace"
-    signal rerun(string command)
-    signal openNotebook(string path)
-    property string markdownStyle: "rich"  // Markdown cells by default: "rich" or "text"
+    property string path: ""            // the .ipynb, or "" for the pane's own notebook
+    property string storeKey: ""        // the session an unsaved notebook is kept with
+    property string markdownStyle: "rich"  // Markdown by default: "rich" or "text"
     signal markdownStylePicked(string style)
+    signal pathPicked(string path)      // saved as a file
+    signal terminalRequested()          // "show me the terminal"
 
-    color: Theme.bg
+    readonly property string key: "nb-" + Math.random().toString(36).slice(2)
+    readonly property string fileName: path.replace(/^.*\//, "")
+    readonly property string folder: path.indexOf("/") >= 0 ? path.replace(/\/[^/]*$/, "") : (view ? view.pwd : "")
+    property bool dirty: false
+    property string loadError: ""
+    property string saveError: ""
+    property var metadata: ({})
+    property bool loaded: false
 
-    // ---- cells ------------------------------------------------------------------
-    property var cells: []
-    property var kinds: ({})           // id -> chosen view (the dropdown)
-    property var aiKinds: ({})         // id -> what the AI made of it
-    property var heights: ({})         // id -> output height the user dragged to
-    property int expandedId: -1        // the cell filling the window, if any
-    function setHeight(id, h) { const m = Object.assign({}, heights); if (h > 0) m[id] = h; else delete m[id]; heights = m }
-    function reload() {
-        if (!view) return
-        try { cells = JSON.parse(view.cells()) } catch (e) { cells = [] }
+    // ---- kernel -------------------------------------------------------------------
+    property var kernels: []            // [{name, display, language}]
+    property string kernelName: "tessera-shell"
+    property string kernelState: ""     // "", starting, idle, busy, dead
+    property string kernelMessage: ""
+    property string language: "bash"
+    property string languageVersion: ""
+    readonly property var kernel: kernels.find(k => k.name === kernelName) || null
+    readonly property bool shellKernel: kernelName === "tessera-shell"
+    readonly property bool kernelUp: shellKernel || kernelState === "idle" || kernelState === "busy"
+    readonly property string codeLang: shellKernel ? "bash" : language
+    property var queue: []              // cells waiting for the kernel to come up
+
+    function listKernels() {
+        let ks = []
+        if (view) ks.push({ name: "tessera-shell", display: "This pane's shell", language: "bash" })
+        try { ks = ks.concat(JSON.parse(controller.jupyterKernels())) } catch (e) {}
+        kernels = ks
+    }
+    function pickKernel(spec) {
+        // The notebook's own kernel, else one for its language; a shell
+        // notebook (or none said) runs in the pane's shell.
+        const want = spec && spec.name ? spec.name : ""
+        const lang = (spec && spec.language) || (metadata.language_info && metadata.language_info.name) || ""
+        if (want === "" && lang === "" || want === "bash" || lang === "bash" || want === "tessera-shell") {
+            kernelName = view ? "tessera-shell" : (kernels.length ? kernels[0].name : "")
+            language = "bash"
+            return
+        }
+        const k = kernels.find(x => x.name === want)
+            || kernels.find(x => x.language === lang && x.name === "python3")
+            || kernels.find(x => x.language === lang && x.name !== "tessera-nix-python")
+            || kernels.find(x => x.language === lang)
+        kernelName = k ? k.name : (kernels.length ? kernels[0].name : "")
+        language = k ? k.language : lang
+    }
+    function startKernel() {
+        if (!controller || kernelName === "" || shellKernel) return
+        kernelState = "starting"
+        kernelMessage = ""
+        controller.jupyterStart(key, kernelName, folder)
+    }
+    function stopRunning() {
+        for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).tid <= 0) cells.setProperty(i, "running", false)
+        queue = []
+    }
+    function restartKernel() {
+        if (shellKernel) return
+        controller.jupyterStop(key)
+        stopRunning()
+        kernelState = ""
+        startKernel()
+    }
+    function changeKernel(name) {
+        if (name === kernelName) return
+        controller.jupyterStop(key)
+        stopRunning()
+        kernelState = ""
+        kernelName = name
+        language = kernel ? kernel.language : language
+        touch()
+    }
+    Connections {
+        target: nb.controller
+        function onJupyterEvent(key, json) {
+            if (key !== nb.key) return
+            let e
+            try { e = JSON.parse(json) } catch (x) { return }
+            if (e.type !== "complete") nb.kernelEvent(e)
+        }
+    }
+    function indexOf(cid) {
+        for (let i = 0; i < cells.count; ++i) if (cells.get(i).cid === cid) return i
+        return -1
+    }
+    function kernelEvent(e) {
+        if (e.type === "status") {
+            kernelState = e.state
+            if (e.message !== undefined) kernelMessage = e.message
+            if (e.state === "idle" && queue.length > 0) { const q = queue; queue = []; for (const c of q) execute(c) }
+            if (e.state === "dead") stopRunning()
+        } else if (e.type === "info") {
+            if (e.language) language = e.language
+            languageVersion = e.version || ""
+        } else {
+            const i = indexOf(e.cell)
+            if (i < 0) return
+            if (e.type === "count") cells.setProperty(i, "count", e.count)
+            else if (e.type === "clear") {
+                if (e.wait) cells.setProperty(i, "clearPending", true)
+                else cells.setProperty(i, "outputs", "[]")
+            } else if (e.type === "output") addOutput(i, e.output)
+            else if (e.type === "done") {
+                cells.setProperty(i, "running", false)
+                if (e.count !== null && e.count !== undefined) cells.setProperty(i, "count", e.count)
+                cells.setProperty(i, "ended", Date.now())
+                cells.setProperty(i, "failed", e.status !== "ok")
+                // (Stopped at an error: the cells waiting after it don't run.)
+                if (e.status === "error") for (let j = 0; j < cells.count; ++j) if (cells.get(j).running && cells.get(j).tid <= 0 && cells.get(j).started > cells.get(i).started) cells.setProperty(j, "running", false)
+                touch()
+            }
+        }
+    }
+    function addOutput(i, out) {
+        let outs = []
+        try { outs = JSON.parse(cells.get(i).outputs) } catch (x) {}
+        if (cells.get(i).clearPending) { outs = []; cells.setProperty(i, "clearPending", false) }
+        // (Stream text goes on the last stream output of the same name.)
+        const last = outs[outs.length - 1]
+        if (out.output_type === "stream" && last && last.output_type === "stream" && last.name === out.name) last.text += out.text
+        else outs.push(out)
+        cells.setProperty(i, "outputs", JSON.stringify(outs))
+        touch()
+    }
+
+    // ---- the cells ----------------------------------------------------------------
+    // tid: the terminal's cell (a command the shell ran), its output read from
+    // the terminal; otherwise the outputs are Jupyter's (JSON).
+    ListModel { id: cells }
+    property int current: 0
+    property int nextId: 1
+    property var kinds: ({})            // cid -> chosen view (the dropdown)
+    property var aiKinds: ({})          // cid -> what the AI made of it
+    property var heights: ({})          // cid -> output height the user dragged to
+    property string expandedId: ""      // the cell filling the window, if any
+    property int execCount: 0
+    function setHeight(cid, h) { const m = Object.assign({}, heights); if (h > 0) m[cid] = h; else delete m[cid]; heights = m; touch() }
+    function newCell(type, source) {
+        return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
+                 type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
+                 started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false }
+    }
+    function insertCell(at, type, edit) {
+        at = Math.max(0, Math.min(cells.count, at))
+        const c = newCell(type, "")
+        c.editing = true
+        cells.insert(at, c)
+        current = at
+        touch()
+        if (edit !== false) Qt.callLater(focusCell, at, true)
+    }
+    function deleteCell(i) {
+        if (i < 0 || i >= cells.count) return
+        const c = cells.get(i)
+        undoCell = { at: i, cell: JSON.parse(JSON.stringify(c)) }
+        if (c.tid > 0) retire(c.tid)
+        cells.remove(i)
+        current = Math.max(0, Math.min(i, cells.count - 1))
+        touch()
+        Qt.callLater(focusCell, current, false)
+    }
+    property var undoCell: null
+    function undoDelete() {
+        if (!undoCell) return
+        cells.insert(Math.min(undoCell.at, cells.count), undoCell.cell)
+        if (undoCell.cell.tid > 0) { retired = retired.filter(t => t !== undoCell.cell.tid); link(undoCell.cell.tid, undoCell.cell.cid) }
+        current = undoCell.at
+        undoCell = null
+        touch()
+    }
+    function moveCell(i, d) {
+        const j = i + d
+        if (j < 0 || j >= cells.count) return
+        cells.move(i, j, 1)
+        current = j
+        touch()
+    }
+    function setType(i, type) {
+        if (cells.get(i).type === type) return
+        if (cells.get(i).tid > 0) retire(cells.get(i).tid)
+        cells.setProperty(i, "type", type)
+        cells.setProperty(i, "tid", 0)
+        cells.setProperty(i, "outputs", "[]")
+        cells.setProperty(i, "count", -1)
+        cells.setProperty(i, "ended", 0)
+        cells.setProperty(i, "editing", true)
+        touch()
+    }
+    function focusCell(i, edit) {
+        if (i < 0 || i >= cells.count) return
+        current = i
+        list.positionViewAtIndex(i, ListView.Contain)
+        if (edit) {
+            cells.setProperty(i, "editing", true)
+            Qt.callLater(() => { const x = list.itemAtIndex(i); if (x) x.focusEditor() })
+        } else {
+            list.forceActiveFocus()
+        }
+    }
+    function stopEditing(i) {
+        const c = cells.get(i)
+        if (!c) return
+        // (Code that was run, or Markdown with something in it, goes back to its card.)
+        if (c.type === "markdown" ? c.source.trim() !== "" : c.ended > 0 || c.tid > 0 || c.running) cells.setProperty(i, "editing", false)
+        list.forceActiveFocus()
+    }
+
+    // ---- running ------------------------------------------------------------------
+    function run(i) {
+        const c = cells.get(i)
+        if (!c) return
+        if (c.type === "markdown") { if (c.source.trim() !== "") cells.setProperty(i, "editing", false); return }
+        if (c.type !== "code" || c.source.trim() === "") return
+        if (c.tid > 0) retire(c.tid)
+        cells.setProperty(i, "tid", 0)
+        cells.setProperty(i, "outputs", "[]")
+        cells.setProperty(i, "running", true)
+        cells.setProperty(i, "failed", false)
+        cells.setProperty(i, "status", 0)
+        cells.setProperty(i, "started", Date.now())
+        cells.setProperty(i, "ended", 0)
+        cells.setProperty(i, "mine", true)
+        cells.setProperty(i, "editing", false)
+        touch()
+        if (shellKernel) { shellRun(c.cid, c.source); return }
+        if (kernelUp) execute(c.cid)
+        else {
+            queue = queue.concat([c.cid])
+            if (kernelState === "" || kernelState === "dead") startKernel()
+        }
+    }
+    function execute(cid) {
+        const i = indexOf(cid)
+        if (i < 0) return
+        if (!controller.jupyterExecute(key, cid, cells.get(i).source)) {
+            cells.setProperty(i, "running", false)
+            addOutput(i, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The kernel isn't reachable: restart it."] })
+        }
+    }
+    function runAll() { for (let i = 0; i < cells.count; ++i) if (cells.get(i).type === "code") run(i) }
+    function runAbove(n) { for (let i = 0; i < n; ++i) if (cells.get(i).type === "code") run(i) }
+    function interrupt() {
+        if (shellKernel) { if (view) view.sendText("\x03"); return }
+        controller.jupyterInterrupt(key)
+    }
+    function clearOutputs() {
+        for (let i = 0; i < cells.count; ++i) {
+            const c = cells.get(i)
+            if (c.running) continue
+            if (c.tid > 0) retire(c.tid)
+            cells.setProperty(i, "tid", 0)
+            cells.setProperty(i, "outputs", "[]")
+            cells.setProperty(i, "count", -1)
+            cells.setProperty(i, "ended", 0)
+        }
+        touch()
+    }
+    // Code from the pane's editor, for a kernel that isn't the shell: a new
+    // cell at the end, run.
+    function submit(code) {
+        const c = newCell("code", code)
+        cells.append(c)
+        current = cells.count - 1
+        run(cells.count - 1)
         Qt.callLater(list.positionViewAtEnd)
+    }
+    property bool ownRun: false         // a cell run from here is running in the shell
+    function updateOwnRun() {
+        let on = false
+        for (let i = 0; i < cells.count && !on; ++i) { const c = cells.get(i); on = c.running && c.mine && (c.tid > 0 || shellWaiting.indexOf(c.cid) >= 0) }
+        ownRun = on
+    }
+
+    // ---- the shell: cells the terminal made ----------------------------------------
+    // Each command the shell runs (shell integration's marks) is a terminal
+    // cell. One sent from here fills the cell that sent it; any other (typed
+    // in the editor or the terminal) is added at the end.
+    property var shellWaiting: []       // our cells sent to the shell, in order
+    property var linked: ({})           // terminal cell id -> our cell
+    property var retired: []            // terminal cells not shown (deleted, run again)
+    property int fileStart: 0            // a file's notebook: the terminal's cells before it opened aren't its
+    function link(tid, cid) { const m = Object.assign({}, linked); m[tid] = cid; linked = m }
+    function retire(tid) {
+        if (retired.indexOf(tid) < 0) retired = retired.concat([tid])
+        const m = Object.assign({}, linked); delete m[tid]; linked = m
+    }
+    function shellRun(cid, code) {
+        if (!view) return
+        shellWaiting = shellWaiting.concat([cid])
+        updateOwnRun()
+        if (code.indexOf("\n") < 0) view.sendText(code + "\r")
+        else { view.pasteText(code); view.sendText("\r") }
+    }
+    function termCells() { try { return JSON.parse(view.cells()) } catch (e) { return [] } }
+    function fromTerm(i, t) {
+        const c = cells.get(i)
+        if (c.source === "" && t.command !== "") cells.setProperty(i, "source", t.command.replace(/\n+$/, ""))
+        cells.setProperty(i, "cwd", t.cwd)
+        cells.setProperty(i, "started", t.started)
+        cells.setProperty(i, "running", !t.done)
+        cells.setProperty(i, "status", t.status)
+        cells.setProperty(i, "failed", t.done && t.status !== 0)
+        cells.setProperty(i, "ended", t.done ? t.started + t.duration : 0)
+        cells.setProperty(i, "tkind", t.kind)
+        cells.setProperty(i, "tsize", t.size)
+        if (t.done && c.mine && c.count < 0) cells.setProperty(i, "count", ++execCount)
+    }
+    function syncTerm() {
+        if (!view || !loaded) return
+        const ts = termCells()
+        const byId = {}
+        for (const t of ts) byId[t.id] = t
+        // (Cells the terminal no longer keeps go, unless they're a file's.)
+        const oldest = ts.length ? ts[0].id : 0
+        for (let i = cells.count - 1; i >= 0; --i) {
+            const c = cells.get(i)
+            if (c.tid <= 0) continue
+            if (byId[c.tid]) fromTerm(i, byId[c.tid])
+            else if (path === "" && oldest > 0 && c.tid < oldest) cells.remove(i)
+        }
+        let added = false
+        for (const t of ts) {
+            if (linked[t.id] !== undefined || retired.indexOf(t.id) >= 0 || t.id <= fileStart) continue
+            let at = -1
+            if (shellWaiting.length > 0) {
+                at = indexOf(shellWaiting[0])
+                shellWaiting = shellWaiting.slice(1)
+            }
+            if (at < 0) {
+                const c = newCell("code", "")
+                cells.append(c)
+                at = cells.count - 1
+                added = true
+            }
+            cells.setProperty(at, "tid", t.id)
+            link(t.id, cells.get(at).cid)
+            fromTerm(at, t)
+            touch()
+        }
+        updateOwnRun()
+        if (added) Qt.callLater(list.positionViewAtEnd)
     }
     Connections {
         target: nb.view
         function onCellsChanged(id, done) {
-            nb.reload()
-            if (done) nb.classify(id)
+            // (0: the terminal's kept cells came back after a restart.)
+            if (id === 0 && nb.path === "" && !nb.storeFound) nb.loadStore()
+            if (id === 0) nb.termRev++
+            nb.syncTerm()
+            if (done && id > 0) nb.classify(id)
         }
     }
-    Component.onCompleted: reload()
-    onVisibleChanged: if (visible) reload()
     // While a command runs, its cell's output is read again now and then.
     property int tick: 0
-    Timer { interval: 400; repeat: true; running: nb.visible && nb.cells.length > 0 && !nb.cells[nb.cells.length - 1].done; onTriggered: nb.tick++ }
+    property int termRev: 0             // the terminal's cells came back: read outputs again
+    Timer { interval: 400; repeat: true; running: nb.visible && nb.ownRunOrAny; onTriggered: nb.tick++ }
+    property bool ownRunOrAny: false
+    Timer { interval: 300; repeat: true; running: nb.visible; onTriggered: { let r = false; for (let i = 0; i < cells.count && !r; ++i) r = cells.get(i).running && cells.get(i).tid > 0; nb.ownRunOrAny = r } }
 
     // The rules found nothing: ask the AI (the suggestions model) what it is.
-    readonly property string aiKey: "nb-" + Math.random().toString(36).slice(2)
-    function classify(id) {
-        const c = cells.find(x => x.id === id)
-        if (!c || c.kind !== "" || c.size < 80 || !controller || !controller.aiReady("inline")) return
-        const sample = view.cellOutput(id, "text").slice(0, 2000)
-        controller.aiRun(aiKey + "-" + id, "classify", JSON.stringify([{ role: "user", content: sample }]), JSON.stringify({ cwd: c.cwd }))
+    readonly property string aiKey: "nbk-" + Math.random().toString(36).slice(2)
+    function classify(tid) {
+        const cid = linked[tid]
+        const i = cid !== undefined ? indexOf(cid) : -1
+        if (i < 0) return
+        const c = cells.get(i)
+        if (c.tkind !== "" || c.tsize < 80 || !controller || !controller.aiReady("inline")) return
+        const sample = view.cellOutput(tid, "text").slice(0, 2000)
+        controller.aiRun(aiKey + "-" + cid, "classify", JSON.stringify([{ role: "user", content: sample }]), JSON.stringify({ cwd: c.cwd }))
     }
     Connections {
         target: nb.controller
         function onAiDone(key, reply, error) {
             if (!key.startsWith(nb.aiKey + "-") || error) return
-            const id = parseInt(key.slice(nb.aiKey.length + 1))
+            const cid = key.slice(nb.aiKey.length + 1)
             const k = reply.trim().toLowerCase().replace(/[^a-z]/g, "")
             if (["json", "csv", "tsv", "html", "markdown", "svg", "diff", "yaml", "xml"].indexOf(k) < 0) return
-            const a = Object.assign({}, nb.aiKinds); a[id] = k; nb.aiKinds = a
+            // (A guess of JSON has to read as JSON, or JSON lines.)
+            if (k === "json") {
+                const i = nb.indexOf(cid)
+                const t = i >= 0 && nb.view ? nb.view.cellOutput(cells.get(i).tid, "text").trim() : ""
+                const parses = (x) => { try { JSON.parse(x); return true } catch (e) { return false } }
+                if (!parses(t) && !t.split("\n").every(l => l.trim() === "" || parses(l))) return
+            }
+            const a = Object.assign({}, nb.aiKinds); a[cid] = k; nb.aiKinds = a
         }
     }
-
     readonly property var viewNames: [["auto", "Auto"], ["terminal", "Terminal"], ["text", "Plain text"], ["json", "JSON"], ["csv", "Table (CSV)"], ["tsv", "Table (TSV)"],
                                       ["html", "HTML"], ["markdown", "Markdown (rich)"], ["mdtext", "Markdown (text)"], ["svg", "SVG"], ["diff", "Diff"], ["image", "Image"]]
-    function shownKind(c) {
-        const chosen = kinds[c.id]
+    function shownKind(cid, tkind) {
+        const chosen = kinds[cid]
         if (chosen && chosen !== "auto") return chosen
-        const k = c.kind !== "" ? c.kind : aiKinds[c.id] || "terminal"
+        const k = tkind !== "" ? tkind : aiKinds[cid] || "terminal"
         return k === "markdown" && markdownStyle === "text" ? "mdtext" : k
     }
-    // The terminal's palette colors in a cell's HTML (var(--vt-palette-N)).
+
+    // ---- reading and writing .ipynb -------------------------------------------------
+    function joined(v) { return Array.isArray(v) ? v.join("") : (v === undefined || v === null ? "" : String(v)) }
+    function lines(s) {
+        // Jupyter's way: a list of lines, each keeping its newline.
+        const out = []
+        let at = 0
+        while (at < s.length) {
+            const n = s.indexOf("\n", at)
+            if (n < 0) { out.push(s.slice(at)); break }
+            out.push(s.slice(at, n + 1))
+            at = n + 1
+        }
+        return out
+    }
+    function normalOutput(o) {
+        const r = Object.assign({}, o)
+        if (r.text !== undefined) r.text = joined(r.text)
+        if (r.data) {
+            const d = {}
+            for (const k in r.data) d[k] = typeof r.data[k] === "string" || Array.isArray(r.data[k]) ? (k.startsWith("text/") || k === "image/svg+xml" ? joined(r.data[k]) : joined(r.data[k]).replace(/\n/g, "")) : r.data[k]
+            r.data = d
+        }
+        return r
+    }
+    // Cells from a notebook's JSON (a file, or the pane's kept one).
+    function fill(nbj, keepTids) {
+        cells.clear()
+        metadata = nbj.metadata || {}
+        const t = metadata.tessera || {}
+        let maxCount = 0
+        for (const c of nbj.cells || []) {
+            const x = newCell(c.cell_type === "markdown" ? "markdown" : c.cell_type === "raw" ? "raw" : "code", joined(c.source))
+            if (c.id) x.nbid = c.id
+            const m = Object.assign({}, c.metadata || {})
+            const tm = m.tessera || {}
+            delete m.tessera
+            x.meta = JSON.stringify(m)
+            if (keepTids && tm.tid > 0) { x.tid = tm.tid; x.mine = !!tm.mine; if (tm.cid) x.cid = tm.cid }
+            if (tm.cwd) x.cwd = tm.cwd
+            if (x.type === "code") {
+                x.outputs = JSON.stringify((c.outputs || []).map(normalOutput))
+                x.count = c.execution_count === null || c.execution_count === undefined ? -1 : c.execution_count
+                maxCount = Math.max(maxCount, x.count)
+                x.hideOutput = !!(c.metadata && c.metadata.jupyter && c.metadata.jupyter.outputs_hidden)
+                if (tm.status !== undefined) { x.status = tm.status; x.failed = tm.status !== 0 }
+                if (tm.duration_ms !== undefined) { x.started = tm.started || 1; x.ended = x.started + tm.duration_ms }
+                x.editing = x.source === "" && x.tid <= 0
+            } else {
+                x.editing = x.source.trim() === ""
+                if (c.attachments) x.meta = JSON.stringify(Object.assign({}, m, { "tessera.attachments": c.attachments }))
+            }
+            cells.append(x)
+        }
+        execCount = maxCount
+        const l = {}
+        for (let i = 0; i < cells.count; ++i) if (cells.get(i).tid > 0) l[cells.get(i).tid] = cells.get(i).cid
+        linked = l
+        retired = keepTids ? (t.retired || []) : []
+        kinds = t.kinds || {}
+        heights = t.heights || {}
+        pickKernel(metadata.kernelspec)
+    }
+    function load() {
+        loaded = false
+        loadError = ""
+        saveError = ""
+        controller.jupyterStop(key)
+        kernelState = ""
+        shellWaiting = []
+        listKernels()
+        if (path === "") {
+            // The pane's own notebook: what was kept with its session, then the
+            // terminal's cells.
+            cells.clear(); linked = ({}); retired = []; kinds = ({}); heights = ({}); metadata = ({})
+            fileStart = 0
+            pickKernel(null)
+            loadStore()
+        } else {
+            const r = JSON.parse(controller.readTextFile(path))
+            cells.clear(); metadata = ({})
+            if (r.error !== undefined) {
+                // A new notebook (nothing there yet), or one that can't be read.
+                if (!/No such file/i.test(r.error)) loadError = r.error
+                pickKernel(null)
+                cells.append(Object.assign(newCell("code", ""), { editing: true }))
+            } else {
+                try { fill(JSON.parse(r.text), false) }
+                catch (e) { loadError = "Not a notebook: " + e; pickKernel(null) }
+                if (cells.count === 0) cells.append(Object.assign(newCell("code", ""), { editing: true }))
+            }
+            // (The terminal's cells from before it opened aren't the file's.)
+            const ts = view ? termCells() : []
+            fileStart = ts.length ? ts[ts.length - 1].id : 0
+        }
+        dirty = false
+        current = 0
+        loaded = true
+        syncTerm()
+        Qt.callLater(path === "" ? list.positionViewAtEnd : list.positionViewAtBeginning)
+    }
+    // ---- the pane's own notebook, kept with its session ----
+    property bool storeFound: false
+    function storePath() { return controller && storeKey !== "" ? controller.stateFolder() + "/notebooks/" + storeKey + ".ipynb" : "" }
+    function loadStore() {
+        const p = storePath()
+        if (p === "") return
+        const r = JSON.parse(controller.readTextFile(p))
+        if (r.error !== undefined) return
+        try { fill(JSON.parse(r.text), true); storeFound = true } catch (e) {}
+        dirty = false
+    }
+    onStoreKeyChanged: if (loaded && path === "" && !storeFound) { loadStore(); syncTerm() }
+    function touch() {
+        dirty = true
+        if (path === "" && loaded) storeTimer.restart()
+    }
+    Timer { id: storeTimer; interval: 1500; onTriggered: nb.keep() }
+    function keep() {
+        const p = storePath()
+        if (p === "" || path !== "") return
+        controller.writeTextFile(p, serialize(true))
+        storeFound = true
+        dirty = false
+    }
+    // Keys sorted, as Jupyter writes them (smaller diffs).
+    function sorted(v) {
+        if (Array.isArray(v)) return v.map(sorted)
+        if (v && typeof v === "object") { const o = {}; for (const k of Object.keys(v).sort()) o[k] = sorted(v[k]); return o }
+        return v
+    }
+    // The terminal's output of a cell, as Jupyter outputs.
+    function termOutputs(tid) {
+        const outs = []
+        if (!view) return outs
+        const text = view.cellOutput(tid, "text")
+        if (text.trim() !== "") outs.push({ name: "stdout", output_type: "stream", text: text.endsWith("\n") ? text : text + "\n" })
+        const img = view.cellOutput(tid, "image")
+        if (img !== "") outs.push({ data: { "image/png": img }, metadata: {}, output_type: "display_data" })
+        return outs
+    }
+    // kept: the pane's own copy (terminal cells by reference, not their output).
+    function serialize(kept) {
+        const out = []
+        let n = 0
+        for (let i = 0; i < cells.count; ++i) {
+            const c = cells.get(i)
+            let meta = {}
+            try { meta = JSON.parse(c.meta) } catch (e) {}
+            const att = meta["tessera.attachments"]
+            delete meta["tessera.attachments"]
+            const cell = { cell_type: c.type, id: c.nbid, metadata: meta, source: lines(c.source) }
+            if (c.type === "code") {
+                let outs = []
+                if (c.tid > 0) {
+                    outs = kept ? [] : termOutputs(c.tid)
+                    meta.tessera = { cwd: c.cwd, status: c.status, duration_ms: Math.max(0, c.ended - c.started), started: c.started }
+                    if (kept) Object.assign(meta.tessera, { tid: c.tid, mine: c.mine, cid: c.cid })
+                } else try { outs = JSON.parse(c.outputs) } catch (e) {}
+                cell.execution_count = c.count >= 0 ? c.count : (c.tid > 0 && !kept ? ++n : null)
+                if (c.hideOutput) meta.jupyter = Object.assign({}, meta.jupyter || {}, { outputs_hidden: true })
+                cell.outputs = outs.map(o => {
+                    const r = Object.assign({}, o)
+                    if (typeof r.text === "string") r.text = lines(r.text)
+                    if (r.data) {
+                        const d = {}
+                        for (const k in r.data) d[k] = typeof r.data[k] === "string" && (k.startsWith("text/") || k === "image/svg+xml") ? lines(r.data[k]) : r.data[k]
+                        r.data = d
+                    }
+                    if ((r.output_type === "display_data" || r.output_type === "execute_result") && !r.metadata) r.metadata = {}
+                    return r
+                })
+            } else if (att) cell.attachments = att
+            out.push(cell)
+        }
+        const md = Object.assign({}, metadata)
+        delete md.tessera
+        if (shellKernel) md.kernelspec = { name: "bash", display_name: "Bash", language: "bash" }
+        else if (kernel) md.kernelspec = { name: kernel.name, display_name: kernel.display, language: kernel.language }
+        md.language_info = Object.assign({}, md.language_info || {}, { name: codeLang })
+        if (languageVersion !== "" && !shellKernel) md.language_info.version = languageVersion
+        const t = {}
+        if (Object.keys(kinds).length) t.kinds = kinds
+        if (Object.keys(heights).length) t.heights = heights
+        if (kept && retired.length) t.retired = retired.slice(-500)
+        if (Object.keys(t).length) md.tessera = t
+        return JSON.stringify(sorted({ cells: out, metadata: md, nbformat: 4, nbformat_minor: 5 }), null, 1) + "\n"
+    }
+    property string written: ""         // the path just saved to (not read back)
+    function save() {
+        if (path === "") { saveDialog.open(); return }
+        writeTo(path)
+    }
+    function writeTo(p) {
+        const err = controller.writeTextFile(p, serialize(false))
+        if (err !== "") { saveError = err; return false }
+        saveError = ""
+        dirty = false
+        if (p !== path) {
+            // (The pane's notebook is now this file's: the shell's cells so far are in it.)
+            written = p
+            pathPicked(p)
+        }
+        return true
+    }
+    onPathChanged: {
+        if (!controller) return
+        if (path !== "" && path === written) { written = ""; return }
+        load()
+    }
+    Component.onCompleted: if (controller) load()
+    onControllerChanged: if (controller && !loaded) load()
+    Component.onDestruction: { if (controller) { if (path === "" && dirty) keep(); controller.jupyterStop(key) } }
+    FileDialog {
+        id: saveDialog
+        title: "Save as Jupyter Notebook"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "ipynb"
+        nameFilters: ["Jupyter notebooks (*.ipynb)"]
+        currentFolder: nb.folder !== "" ? "file://" + nb.folder : ""
+        onAccepted: nb.writeTo(decodeURIComponent(String(selectedFile).replace(/^file:\/\//, "")))
+    }
+    Shortcut { sequence: "Ctrl+S"; enabled: nb.visible && nb.activeFocus; context: Qt.WindowShortcut; onActivated: nb.save() }
+
+    // (Test hooks: TESSERA_TEST_NB_RUN_ALL runs every cell once it's open,
+    // NB_SAVE saves, NB_SCROLL_END scrolls down, NB_EXPORT=<path> saves there.)
+    Timer { interval: 1500; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_RUN_ALL") !== ""; onTriggered: nb.runAll() }
+    Timer { interval: 20000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SAVE") !== ""; onTriggered: nb.save() }
+    Timer { interval: 16000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_END") !== ""; onTriggered: list.positionViewAtEnd() }
+    Timer { interval: 3000; running: nb.visible && nb.controller !== null && nb.controller.testEnv("NB_EXPORT") !== ""; onTriggered: nb.writeTo(nb.controller.testEnv("NB_EXPORT")) }
+
+    // ---- colors -----------------------------------------------------------------------
+    function ansi(n, d) { const a = themeData.ansi || []; return a[n] || d }
     function paletteColor(n) {
         const a = themeData.ansi || []
         if (n < 16) return a[n] || ["#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5"][n % 8]
@@ -87,362 +674,479 @@ Rectangle {
         return Qt.rgba(g, g, g, 1).toString()
     }
     function palette(html) { return html.replace(/var\(--vt-palette-(\d+)\)/g, (m, n) => paletteColor(parseInt(n))) }
+    function colored(text) { return controller ? palette(controller.ansiHtml(text)) : "" }
     function shortDir(p) {
         const home = controller ? controller.homeDir() : ""
         return home !== "" && p.startsWith(home) ? "~" + p.slice(home.length) : p
     }
-    function seconds(ms) { return ms < 1000 ? ms + " ms" : ms < 60000 ? (ms / 1000).toFixed(1) + " s" : Math.floor(ms / 60000) + " m " + Math.round((ms % 60000) / 1000) + " s" }
+    function seconds(ms) { ms = Math.max(0, ms); return ms < 1000 ? ms + " ms" : ms < 60000 ? (ms / 1000).toFixed(1) + " s" : Math.floor(ms / 60000) + " m " + Math.round((ms % 60000) / 1000) + " s" }
+    function htmlPage(body) {
+        const c = (x) => String(x)
+        return "<!doctype html><html><head><meta charset='utf-8'><style>"
+            + "html,body{margin:0;padding:0}body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:13px/1.5 'Noto Sans','Segoe UI',system-ui,sans-serif;padding:4px 2px;overflow-x:auto}"
+            + "a{color:" + c(Theme.accent) + "}table{border-collapse:collapse;font-size:12px}th,td{border:1px solid " + c(Theme.divider) + ";padding:3px 8px;text-align:right}"
+            + "th{background:" + c(Theme.field) + "}tr:nth-child(even) td{background:" + c(Theme.mix(Theme.bg, Theme.fg, 0.03)) + "}"
+            + "code,pre{font-family:'" + fontFamily + "',monospace}pre{background:" + c(Theme.field) + ";padding:8px;border-radius:6px;overflow:auto}"
+            + "img,svg{max-width:100%}"
+            + "</style></head><body>" + body + "</body></html>"
+    }
+    readonly property var mimeOrder: ["text/html", "image/svg+xml", "image/png", "image/jpeg", "image/gif", "text/markdown", "text/latex", "application/json", "text/plain"]
+    function bestMime(data) {
+        for (const m of mimeOrder) if (data[m] !== undefined) return m
+        const ks = Object.keys(data)
+        return ks.length ? ks[0] : ""
+    }
+    // Markdown as a page: rich (headings, tables, a proportional font) or as
+    // a terminal Markdown viewer draws it (monospace, #s kept in color).
+    function markdownCss(asText) {
+        const c = (x) => String(x), a = themeData.ansi || []
+        const col = (n, d) => c(a[n] || d)
+        if (asText) return "body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:13px/1.45 '" + fontFamily + "',monospace;margin:8px 10px}"
+            + "h1,h2,h3,h4,h5,h6{font-size:1em;font-weight:bold;margin:1em 0 .4em}"
+            + "h1{color:" + col(5, "#c678dd") + "}h2{color:" + col(4, "#61afef") + "}h3{color:" + col(6, "#56b6c2") + "}h4,h5,h6{color:" + col(2, "#98c379") + "}"
+            + "h1::before{content:'# '}h2::before{content:'## '}h3::before{content:'### '}h4::before{content:'#### '}h5::before{content:'##### '}h6::before{content:'###### '}"
+            + "h1{text-decoration:underline}p{margin:.5em 0}"
+            + "a{color:" + col(4, "#61afef") + "}strong{color:" + c(Theme.fg) + "}em{color:" + col(3, "#e5c07b") + "}"
+            + "code{font:inherit;color:" + col(3, "#e5c07b") + "}"
+            + "pre{background:" + c(Theme.field) + ";padding:6px 10px;margin:.5em 0;overflow:auto}pre code{color:" + c(Theme.text) + "}"
+            + "ul{list-style:none;padding-left:2ch}ul>li::before{content:'\\2022';color:" + col(4, "#61afef") + ";display:inline-block;width:2ch;margin-left:-2ch}"
+            + "ol{padding-left:3ch}li{margin:.1em 0}"
+            + "blockquote{margin:.5em 0;padding-left:1ch;color:" + c(Theme.textDim) + ";border-left:2px solid " + col(8, "#5c6370") + "}"
+            + "table{border-collapse:collapse}th,td{border:1px solid " + c(Theme.divider) + ";padding:0 1ch}th{color:" + c(Theme.fg) + "}"
+            + "img{max-width:100%}hr{border:0;border-top:1px dashed " + c(Theme.divider) + "}"
+            + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
+        return "body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:14px/1.6 'Noto Sans','Segoe UI',system-ui,sans-serif;margin:12px 18px;max-width:900px}"
+            + "a{color:" + c(Theme.accent) + "}h1,h2{border-bottom:1px solid " + c(Theme.divider) + ";padding-bottom:.25em}"
+            + "h1{font-size:1.8em}h2{font-size:1.4em}h1,h2,h3,h4{margin:1.1em 0 .5em;line-height:1.25}"
+            + "body>:first-child{margin-top:0}"
+            + "code{font-family:" + fontFamily + ",monospace;font-size:.88em;background:" + c(Theme.field) + ";padding:.15em .35em;border-radius:5px}"
+            + "pre{background:" + c(Theme.field) + ";padding:10px 12px;border-radius:7px;overflow:auto}pre code{background:none;padding:0}"
+            + "blockquote{margin:0;padding:0 1em;color:" + c(Theme.textDim) + ";border-left:3px solid " + c(Theme.divider) + "}"
+            + "table{border-collapse:collapse}th,td{border:1px solid " + c(Theme.divider) + ";padding:5px 10px}th{background:" + c(Theme.field) + "}"
+            + "img{max-width:100%}hr{border:0;border-top:1px solid " + c(Theme.divider) + "}"
+            + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
+    }
 
+    // ---- the strip: running, the kernel, saving -------------------------------------------
+    component Tool: Chip {
+        base: Theme.panel
+        Layout.minimumWidth: implicitWidth
+    }
+    readonly property bool narrow: width < 900
+    readonly property bool tiny: width < 560
+    Rectangle {
+        id: bar
+        width: parent.width
+        height: 32
+        color: Theme.panel
+        z: 2
+        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.divider }
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 8
+            spacing: 6
+            clip: true
+            Text {
+                visible: !nb.tiny
+                text: nb.path !== "" ? nb.fileName + (nb.dirty ? " •" : "") : "Notebook"
+                color: Theme.text
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                elide: Text.ElideMiddle
+                Layout.maximumWidth: nb.narrow ? 120 : 240
+                renderType: Text.NativeRendering
+                ToolTip.visible: nameHover.hovered
+                ToolTip.text: nb.path === "" ? "This pane's notebook: kept with its session. Save it as a .ipynb to keep it as a file." : nb.path
+                ToolTip.delay: 400
+                HoverHandler { id: nameHover }
+            }
+            Item { width: 2; visible: !nb.tiny }
+            Tool { label: nb.narrow ? "▶▶" : "▶▶ Run All"; tip: "Run every cell, top to bottom"; onClicked: nb.runAll() }
+            Tool { label: "■"; tip: "Interrupt"; onClicked: nb.interrupt() }
+            Tool { visible: !nb.shellKernel; label: nb.narrow ? "↻" : "↻ Restart"; tip: "Restart the kernel (its variables are lost)"; onClicked: nb.restartKernel() }
+            Tool { label: nb.narrow ? "⌫" : "Clear"; tip: "Clear every cell's output"; onClicked: nb.clearOutputs() }
+            Rectangle { width: 1; height: 14; color: Theme.divider }
+            Tool { label: nb.narrow ? "+" : "+ Code"; tip: "Add a code cell below (B)"; onClicked: nb.insertCell(nb.current + 1, "code") }
+            Tool { label: nb.narrow ? "+M↓" : "+ Markdown"; tip: "Add a Markdown cell below"; onClicked: nb.insertCell(nb.current + 1, "markdown") }
+            Item { Layout.fillWidth: true }
+            // The kernel: which, and how it's doing.
+            Rectangle {
+                width: 8; height: 8; radius: 4
+                color: nb.shellKernel || nb.kernelState === "idle" ? nb.ansi(2, "#98c379")
+                     : nb.kernelState === "busy" ? nb.ansi(3, "#e5c07b")
+                     : nb.kernelState === "starting" ? Theme.accent
+                     : nb.kernelState === "dead" ? nb.ansi(1, "#e06c75") : Theme.textDim
+                SequentialAnimation on opacity {
+                    running: nb.kernelState === "starting" || nb.kernelState === "busy"
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.3; duration: 500 }
+                    NumberAnimation { to: 1; duration: 500 }
+                    onRunningChanged: if (!running) parent.opacity = 1
+                }
+                ToolTip.visible: dotHover.hovered
+                ToolTip.text: nb.shellKernel ? "ready" : nb.kernelState === "" ? "not started (starts with the first run)" : nb.kernelState
+                HoverHandler { id: dotHover }
+            }
+            SlimCombo {
+                id: kernelBox
+                implicitWidth: nb.narrow ? 140 : 190
+                Layout.minimumWidth: 90
+                Layout.preferredWidth: implicitWidth
+                model: nb.kernels.length ? nb.kernels.map(k => k.display) : ["No kernels found"]
+                currentIndex: Math.max(0, nb.kernels.findIndex(k => k.name === nb.kernelName))
+                onActivated: (i) => { if (nb.kernels[i]) nb.changeKernel(nb.kernels[i].name) }
+                onPressedChanged: if (pressed) nb.listKernels()
+                ToolTip.visible: hovered && !popup.visible
+                ToolTip.delay: 500
+                ToolTip.text: "What runs the code cells: this pane's shell, or a Jupyter kernel"
+            }
+            Tool {
+                label: nb.path === "" ? (nb.narrow ? "Save…" : "Save as .ipynb…") : nb.dirty ? "Save" : "Saved"
+                tip: nb.path === "" ? "Save as a Jupyter notebook (a file to run again or share)" : "Save the notebook (Ctrl+S)"
+                onClicked: nb.save()
+            }
+            Tool { visible: nb.view !== null; label: ">_"; tip: "Show the terminal (Ctrl+Shift+J)"; onClicked: nb.terminalRequested() }
+        }
+    }
+    // Starting, failing: said under the strip.
+    Rectangle {
+        id: banner
+        anchors.top: bar.bottom
+        width: parent.width
+        visible: bannerText.text !== ""
+        height: visible ? bannerText.implicitHeight + 14 : 0
+        z: 2
+        color: nb.kernelState === "dead" || nb.loadError !== "" || nb.saveError !== "" ? Theme.mix(Theme.panel, nb.ansi(1, "#e06c75"), 0.18) : Theme.mix(Theme.panel, Theme.accent, 0.12)
+        Text {
+            id: bannerText
+            x: 12
+            width: parent.width - 24 - (bannerActions.visible ? bannerActions.width + 8 : 0)
+            anchors.verticalCenter: parent.verticalCenter
+            wrapMode: Text.Wrap
+            maximumLineCount: 8
+            elide: Text.ElideRight
+            color: Theme.text
+            font.pixelSize: 12
+            text: nb.loadError !== "" ? "Couldn't read " + nb.fileName + ": " + nb.loadError
+                : nb.saveError !== "" ? "Couldn't save: " + nb.saveError
+                : nb.shellKernel ? ""
+                : nb.kernelState === "dead" ? (nb.kernelMessage || "The kernel stopped.")
+                : nb.kernelState === "starting" ? (nb.kernelName === "tessera-nix-python"
+                      ? "Starting Python from Nix… the first time, Nix fetches it (a minute or two)."
+                      : nb.kernelMessage || "Starting the kernel…")
+                : nb.kernels.length <= 1 && nb.kernelName === "" ? "No Jupyter kernel found. Install one (pip install ipykernel), or pick This pane's shell."
+                : ""
+        }
+        Row {
+            id: bannerActions
+            visible: nb.kernelState === "dead"
+            anchors.right: parent.right
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            Chip { base: banner.color; label: "Restart"; onClicked: nb.restartKernel() }
+        }
+    }
+
+    // ---- the cards -----------------------------------------------------------------------
+    Rectangle { anchors.fill: parent; color: Theme.bg; z: -1 }
+    property bool dPending: false
+    Timer { id: dTimer; interval: 700; onTriggered: nb.dPending = false }
     ListView {
         id: list
-        anchors.fill: parent
-        anchors.margins: 10
-        anchors.topMargin: nb.cells.length > 0 ? 34 : 10
+        anchors.top: banner.bottom
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
+        topMargin: 10
+        bottomMargin: 10
         spacing: 12
-        model: nb.cells
+        model: cells
         clip: true
+        focus: true
+        cacheBuffer: 1500
         interactive: false   // (a drag selects text; the wheel, touchpad and bar scroll)
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
         MomentumWheel { flick: list }
+        Keys.onPressed: (e) => {
+            const i = nb.current
+            const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+            const enter = e.key === Qt.Key_Return || e.key === Qt.Key_Enter
+            if (enter && (e.modifiers & Qt.ShiftModifier)) { nb.run(i); nb.focusCell(Math.min(cells.count - 1, i + 1), false); e.accepted = true }
+            else if (enter && (e.modifiers & Qt.ControlModifier)) { nb.run(i); e.accepted = true }
+            else if (enter) { nb.focusCell(i, true); e.accepted = true }
+            else if ((e.key === Qt.Key_Up || e.key === Qt.Key_K) && plain) { nb.focusCell(Math.max(0, i - 1), false); e.accepted = true }
+            else if ((e.key === Qt.Key_Down || e.key === Qt.Key_J) && plain) { nb.focusCell(Math.min(cells.count - 1, i + 1), false); e.accepted = true }
+            else if (e.key === Qt.Key_A && plain) { nb.insertCell(i, "code"); e.accepted = true }
+            else if (e.key === Qt.Key_B && plain) { nb.insertCell(i + 1, "code"); e.accepted = true }
+            else if (e.key === Qt.Key_M && plain) { nb.setType(i, "markdown"); e.accepted = true }
+            else if (e.key === Qt.Key_Y && plain) { nb.setType(i, "code"); e.accepted = true }
+            else if (e.key === Qt.Key_Z && plain) { nb.undoDelete(); e.accepted = true }
+            else if (e.key === Qt.Key_O && plain && cells.get(i)) { cells.setProperty(i, "hideOutput", !cells.get(i).hideOutput); nb.touch(); e.accepted = true }
+            else if (e.key === Qt.Key_D && plain) {
+                if (nb.dPending) { nb.dPending = false; nb.deleteCell(i) } else { nb.dPending = true; dTimer.restart() }
+                e.accepted = true
+            } else if (e.key === Qt.Key_Delete && plain) { nb.deleteCell(i); e.accepted = true }
+        }
 
         delegate: Rectangle {
             id: cell
-            required property var modelData
             required property int index
-            readonly property var c: modelData
-            readonly property string kind: nb.shownKind(c)
-            property bool collapsed: false
+            required property string cid
+            required property string type
+            required property string source
+            required property int tid
+            required property bool mine
+            required property string outputs
+            required property int count
+            required property bool running
+            required property bool failed
+            required property double started
+            required property double ended
+            required property string cwd
+            required property int status
+            required property string tkind
+            required property bool editing
+            required property bool hideOutput
+            readonly property bool selected: nb.current === index
+            readonly property bool code: type !== "markdown"
+            readonly property bool fromTerm: tid > 0
+            readonly property var outs: { try { return JSON.parse(outputs) } catch (e) { return [] } }
+            readonly property string kind: fromTerm ? nb.shownKind(cid, tkind) : ""
+            readonly property bool hasOutput: code && (fromTerm || outs.length > 0)
+            readonly property bool expanded: nb.expandedId === cid
+            readonly property bool plainMd: !code && !editing
             width: list.width - 12
-            readonly property bool expanded: nb.expandedId === c.id
-            height: header.height + (collapsed ? 0 : body.height + 12)
+            height: (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
+                     + (hasOutput ? (hideOutput ? 22 : body.height + 12) : 4))
             radius: 8
-            color: Theme.mix(Theme.bg, Theme.fg, 0.035)
-            border.color: Theme.divider
+            color: plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
+            border.color: selected && list.activeFocus ? Theme.mix(Theme.divider, Theme.accent, 0.55)
+                        : plainMd ? (cellHover.hovered || selected ? Theme.divider : "transparent") : Theme.divider
+            function focusEditor() { if (editorLoader.item) editorLoader.item.focusIn() }
+            HoverHandler { id: cellHover }
+            TapHandler { onTapped: { nb.current = cell.index; if (!(editorLoader.item && editorLoader.item.hasFocus)) list.forceActiveFocus() } }
 
-            // ---- header: status, command, folder, time, view ----
+            // ---- header: status, the code, folder, time, view ----
             RowLayout {
                 id: header
+                visible: !cell.plainMd
                 x: 10
                 width: parent.width - 20
                 height: 26
                 spacing: 6
+                // Status; a click runs it (or stops it).
                 Text {
-                    text: !cell.c.done ? "◌" : cell.c.status === 0 ? "✓" : "✘"
-                    color: !cell.c.done ? Theme.accent : cell.c.status === 0 ? nb.themeData.ansi ? nb.themeData.ansi[2] : "#98c379" : nb.themeData.ansi ? nb.themeData.ansi[1] : "#e06c75"
+                    text: cell.running ? "◌" : cell.ended > 0 || cell.fromTerm ? (cell.failed ? "✘" : "✓") : cell.code ? "▶" : "M↓"
+                    color: cell.running ? Theme.accent : cell.ended > 0 || cell.fromTerm ? (cell.failed ? nb.ansi(1, "#e06c75") : nb.ansi(2, "#98c379"))
+                         : statusHover.hovered ? Theme.accent : Theme.textDim
                     font.pixelSize: 13
                     font.weight: Font.Bold
-                    RotationAnimation on rotation { running: !cell.c.done; from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
+                    Layout.minimumWidth: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    RotationAnimation on rotation { running: cell.running; from: 0; to: 360; duration: 1200; loops: Animation.Infinite; onRunningChanged: if (!running) parent.rotation = 0 }
+                    HoverHandler { id: statusHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: { nb.current = cell.index; cell.running ? nb.interrupt() : nb.run(cell.index) } }
+                    ToolTip.visible: statusHover.hovered
+                    ToolTip.delay: 500
+                    ToolTip.text: cell.running ? "Interrupt" : cell.code ? "Run (Ctrl+Enter)" : "Show it (Ctrl+Enter)"
+                }
+                Text {
+                    visible: cell.count >= 0 && cell.code
+                    text: "[" + cell.count + "]"
+                    color: Theme.textDim
+                    font.family: nb.fontFamily
+                    font.pixelSize: 10
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: cell.c.command !== "" ? cell.c.command.trim().replace(/\s*\n\s*/g, "  \u23ce  ") : "(command)"
+                    text: cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.trim().replace(/\s*\n\s*/g, "  ⏎  ") : "(empty)"
                     maximumLineCount: 1
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
-                    color: Theme.text
+                    color: cell.editing ? Theme.textDim : Theme.text
                     font.family: nb.fontFamily
                     font.pointSize: 9
                     font.weight: Font.DemiBold
                     renderType: Text.NativeRendering
-                    TapHandler { onTapped: cell.collapsed = !cell.collapsed }
+                    HoverHandler { cursorShape: Qt.IBeamCursor }
+                    TapHandler { onTapped: nb.focusCell(cell.index, true) }
                 }
-                Text { text: nb.shortDir(cell.c.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
+                Text { visible: cell.cwd !== "" && !nb.narrow; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
                 Text {
-                    text: (cell.c.done ? nb.seconds(cell.c.duration) + "  ·  " : "") + Qt.formatTime(new Date(cell.c.started), "hh:mm")
-                          + (cell.c.done && cell.c.status !== 0 ? "  ·  exit " + cell.c.status : "")
+                    visible: cell.started > 1
+                    text: (cell.ended > 0 ? nb.seconds(cell.ended - cell.started) + "  ·  " : "") + Qt.formatTime(new Date(cell.started), "hh:mm")
+                          + (cell.ended > 0 && cell.fromTerm && cell.status !== 0 ? "  ·  exit " + cell.status : "")
                     color: Theme.textDim
                     font.pixelSize: 10
                 }
                 Chip {
                     id: kindChip
+                    visible: cell.fromTerm
                     base: cell.color
-                    label: (nb.viewNames.find(v => v[0] === cell.kind) || ["", cell.kind])[1] + ((nb.kinds[cell.c.id] || "auto") === "auto" ? " \u00b7 auto" : "") + " \u25be"
-                    tip: "Show the output as\u2026"
+                    Layout.minimumWidth: implicitWidth
+                    label: (nb.viewNames.find(v => v[0] === cell.kind) || ["", cell.kind])[1] + ((nb.kinds[cell.cid] || "auto") === "auto" ? " · auto" : "") + " ▾"
+                    tip: "Show the output as…"
                     onClicked: kindMenu.popup(kindChip, 0, kindChip.height + 2)
                 }
-                Chip { base: cell.color; label: "Copy"; tip: "Copy the output"
-                       onClicked: { clip.text = nb.view.cellOutput(cell.c.id, "text"); clip.selectAll(); clip.copy() } }
-                Chip { base: cell.color; label: "\u21bb"; tip: "Put the command back in the editor"; onClicked: nb.rerun(cell.c.command) }
+                Chip { visible: cell.hasOutput; base: cell.color; label: "Copy"; tip: "Copy the output"; Layout.minimumWidth: implicitWidth
+                       onClicked: nb.copyText(nb.outputText(cell.index)) }
+                Chip { visible: cell.code && !cell.running && cell.source.trim() !== ""; base: cell.color; label: "↻"; tip: "Run it again"; Layout.minimumWidth: implicitWidth
+                       onClicked: { nb.current = cell.index; nb.run(cell.index) } }
                 Chip {
+                    visible: cell.hasOutput
                     base: cell.color
-                    label: cell.expanded ? "\u2921 Restore" : "\u2922 Expand"
+                    Layout.minimumWidth: implicitWidth
+                    label: cell.expanded ? "⤡ Restore" : "⤢ Expand"
                     tip: cell.expanded ? "Back to its own size" : "Fill the window with this output"
                     onClicked: {
-                        nb.expandedId = cell.expanded ? -1 : cell.c.id
-                        cell.collapsed = false
+                        nb.expandedId = cell.expanded ? "" : cell.cid
+                        cells.setProperty(cell.index, "hideOutput", false)
                         const i = cell.index
                         Qt.callLater(() => list.positionViewAtIndex(i, ListView.Beginning))
                     }
                 }
+                Chip { id: moreChip; base: cell.color; label: "⋯"; tip: "More"; Layout.minimumWidth: implicitWidth
+                       onClicked: moreMenu.popup(moreChip, 0, moreChip.height + 2) }
                 // (Test hook: TESSERA_TEST_EXPAND_CELL fills the window with the first cell.)
-                Timer { interval: 2500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("EXPAND_CELL") !== ""; onTriggered: nb.expandedId = cell.c.id }
+                Timer { interval: 2500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("EXPAND_CELL") !== ""; onTriggered: nb.expandedId = cell.cid }
                 // (Test hook: TESSERA_TEST_OPEN_KIND_MENU opens the first cell's menu.)
-                Timer { interval: 1500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("OPEN_KIND_MENU") !== ""; onTriggered: kindMenu.popup(kindChip, 0, kindChip.height + 2) }
-                SlimMenu {
-                    id: kindMenu
-                    Repeater {
-                        model: nb.viewNames
-                        delegate: SlimMenuItem {
-                            required property var modelData
-                            text: modelData[1]
-                            checkable: true
-                            checked: (nb.kinds[cell.c.id] || "auto") === modelData[0]
-                            onTriggered: {
-                                const k = Object.assign({}, nb.kinds); k[cell.c.id] = modelData[0]; nb.kinds = k
-                                // (Rich or text Markdown becomes the default too.)
-                                if (modelData[0] === "markdown" || modelData[0] === "mdtext") nb.markdownStylePicked(modelData[0] === "mdtext" ? "text" : "rich")
-                            }
+                Timer { interval: 1500; running: cell.index === 0 && cell.fromTerm && nb.controller !== null && nb.controller.testEnv("OPEN_KIND_MENU") !== ""; onTriggered: kindMenu.popup(kindChip, 0, kindChip.height + 2) }
+            }
+            SlimMenu {
+                id: kindMenu
+                Repeater {
+                    model: nb.viewNames
+                    delegate: SlimMenuItem {
+                        required property var modelData
+                        text: modelData[1]
+                        checkable: true
+                        checked: (nb.kinds[cell.cid] || "auto") === modelData[0]
+                        onTriggered: {
+                            const k = Object.assign({}, nb.kinds); k[cell.cid] = modelData[0]; nb.kinds = k
+                            nb.touch()
+                            // (Rich or text Markdown becomes the default too.)
+                            if (modelData[0] === "markdown" || modelData[0] === "mdtext") nb.markdownStylePicked(modelData[0] === "mdtext" ? "text" : "rich")
                         }
                     }
                 }
             }
+            SlimMenu {
+                id: moreMenu
+                SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; onTriggered: nb.focusCell(cell.index, true) }
+                SlimMenuItem { text: "Run the cells above"; visible: cell.code; onTriggered: nb.runAbove(cell.index) }
+                SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
+                SlimMenuItem { text: cell.hideOutput ? "Show the output" : "Hide the output"; visible: cell.hasOutput; onTriggered: { cells.setProperty(cell.index, "hideOutput", !cell.hideOutput); nb.touch() } }
+                SlimMenuItem { text: "Move up"; enabled: cell.index > 0; onTriggered: nb.moveCell(cell.index, -1) }
+                SlimMenuItem { text: "Move down"; enabled: cell.index < cells.count - 1; onTriggered: nb.moveCell(cell.index, 1) }
+                SlimMenuItem { text: "Add code below"; onTriggered: nb.insertCell(cell.index + 1, "code") }
+                SlimMenuItem { text: "Add Markdown below"; onTriggered: nb.insertCell(cell.index + 1, "markdown") }
+                SlimMenuItem { text: "Delete"; onTriggered: nb.deleteCell(cell.index) }
+            }
 
-            // ---- body: the output, in its own scrolling pane ----
+            // ---- the code (or Markdown) being written ----
+            Rectangle {
+                id: editorBox
+                visible: cell.editing
+                anchors.top: header.bottom
+                x: 10
+                width: parent.width - 20
+                height: visible ? editorLoader.height + 2 : 0
+                radius: 6
+                color: Theme.field
+                border.color: editorLoader.item && editorLoader.item.hasFocus ? Theme.accent : Theme.divider
+                Loader {
+                    id: editorLoader
+                    active: cell.editing
+                    width: parent.width - 2
+                    x: 1; y: 1
+                    sourceComponent: cellEditor
+                    onLoaded: { item.cellIndex = Qt.binding(() => cell.index); item.lang = Qt.binding(() => cell.type === "markdown" ? "markdown" : cell.type === "raw" ? "" : nb.codeLang) }
+                }
+            }
+
+            // ---- a Markdown cell, shown ----
+            Item {
+                id: mdBody
+                visible: cell.plainMd
+                x: 4
+                y: 4
+                width: parent.width - 8
+                height: visible ? Math.max(24, mdView.implicitHeight) : 0
+                Loader {
+                    id: mdView
+                    active: cell.plainMd
+                    width: parent.width
+                    height: item ? item.implicitHeight : 0
+                    sourceComponent: markdownPage
+                    onLoaded: { item.md = Qt.binding(() => cell.source); item.baseDir = Qt.binding(() => nb.folder); item.asText = Qt.binding(() => nb.markdownStyle === "text") }
+                }
+                // (The page takes the clicks: double-click to write, a chip for more.)
+                Row {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 6
+                    y: 4
+                    z: 3
+                    spacing: 4
+                    visible: cellHover.hovered || cell.selected
+                    Chip { base: Theme.bg; label: "Edit"; tip: "Write the Markdown"; onClicked: nb.focusCell(cell.index, true) }
+                    Chip { id: mdMore; base: Theme.bg; label: "⋯"; tip: "More"; onClicked: moreMenu.popup(mdMore, 0, mdMore.height + 2) }
+                }
+            }
+
+            // ---- the output, in its own scrolling pane ----
+            Text {
+                visible: cell.hasOutput && cell.hideOutput
+                anchors.top: editorBox.visible ? editorBox.bottom : header.bottom
+                x: 12
+                text: "… output hidden (O shows it)"
+                color: Theme.textDim
+                font.pixelSize: 11
+                TapHandler { onTapped: { cells.setProperty(cell.index, "hideOutput", false); nb.touch() } }
+            }
             Item {
                 id: body
-                visible: !cell.collapsed
-                anchors.top: header.bottom
+                visible: cell.hasOutput && !cell.hideOutput
+                anchors.top: editorBox.visible ? editorBox.bottom : header.bottom
+                anchors.topMargin: editorBox.visible ? 6 : 0
                 x: 10
                 width: parent.width - 20
                 // Its natural size up to 460 px, or what it was dragged to, or the
                 // whole window when expanded.
                 readonly property real natural: loader.item ? loader.item.implicitHeight : 0
-                height: cell.expanded ? Math.max(80, list.height - header.height - 12)
-                      : nb.heights[cell.c.id] > 0 ? nb.heights[cell.c.id] : Math.min(natural, 460)
+                height: !visible ? 0 : cell.expanded ? Math.max(80, list.height - header.height - 12)
+                      : nb.heights[cell.cid] > 0 ? nb.heights[cell.cid] : Math.min(Math.max(natural, 16), 460)
                 clip: true
                 Loader {
                     id: loader
                     anchors.fill: parent
                     // (Re-read while the command runs.)
-                    property int tick: nb.tick
-                    sourceComponent: cell.kind === "html" ? htmlView
+                    // (and once more when it's done)
+                    // (and when the terminal's kept cells come back after a restart)
+                    property var tick: [cell.running ? nb.tick : cell.ended, nb.termRev]
+                    property int tid: cell.tid
+                    property var outs: cell.outs
+                    property string cwd: cell.cwd
+                    property string command: cell.source
+                    property bool running: cell.running
+                    readonly property string kind: cell.kind
+                    sourceComponent: !cell.fromTerm ? jupyterOutputs
+                                   : cell.kind === "html" ? htmlView
                                    : cell.kind === "markdown" || cell.kind === "mdtext" ? markdownView
                                    : cell.kind === "image" ? imageView
                                    : ["json", "csv", "tsv", "svg"].indexOf(cell.kind) >= 0 ? richView
                                    : cell.kind === "diff" ? diffView
                                    : cell.kind === "text" ? plainView : termView
                 }
-                Component {
-                    id: termView
-                    Flickable {
-                        id: tf
-                        interactive: false   // (a drag selects text; the wheel and bar scroll)
-                        implicitHeight: Math.max(20, tt.implicitHeight + 8)
-                        contentWidth: Math.max(width, tt.implicitWidth)
-                        contentHeight: tt.implicitHeight + 8
-                        clip: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar { policy: tf.contentHeight > tf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
-                        ScrollBar.horizontal: ScrollBar {}
-                        MomentumWheel { flick: tf }
-                        TextEdit {
-                            id: tt
-                            BlockSelect { }
-                            y: 4
-                            readOnly: true
-                            selectByMouse: true
-                            selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)
-                            selectedTextColor: Theme.text
-                            textFormat: TextEdit.RichText
-                            text: { loader.tick; return nb.view ? nb.palette(nb.view.cellOutput(cell.c.id, "html")) : "" }
-                            color: Theme.text
-                            font.family: nb.fontFamily
-                            font.pointSize: 10
-                            renderType: Text.NativeRendering
-                        }
-                    }
-                }
-                Component {
-                    id: plainView
-                    Flickable {
-                        id: pf
-                        interactive: false   // (a drag selects text; the wheel and bar scroll)
-                        implicitHeight: Math.max(20, pt.implicitHeight + 8)
-                        contentHeight: pt.implicitHeight + 8
-                        clip: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar { policy: pf.contentHeight > pf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
-                        MomentumWheel { flick: pf }
-                        TextEdit {
-                            id: pt
-                            BlockSelect { }
-                            y: 4
-                            width: pf.width - 12
-                            readOnly: true
-                            selectByMouse: true
-                            wrapMode: TextEdit.Wrap
-                            text: { loader.tick; return nb.view ? nb.view.cellOutput(cell.c.id, "text") : "" }
-                            color: Theme.text
-                            font.family: nb.fontFamily
-                            font.pointSize: 10
-                        }
-                    }
-                }
-                Component {
-                    id: diffView
-                    Flickable {
-                        id: df
-                        interactive: false   // (a drag selects text; the wheel and bar scroll)
-                        implicitHeight: Math.max(20, dt.implicitHeight + 8)
-                        contentHeight: dt.implicitHeight + 8
-                        clip: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar { policy: df.contentHeight > df.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
-                        MomentumWheel { flick: df }
-                        TextEdit {
-                            id: dt
-                            BlockSelect { }
-                            y: 4
-                            width: df.width - 12
-                            readOnly: true
-                            selectByMouse: true
-                            selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)
-                            selectedTextColor: Theme.text
-                            textFormat: TextEdit.RichText
-                            wrapMode: TextEdit.WrapAnywhere
-                            font.family: nb.fontFamily
-                            font.pointSize: 10
-                            color: Theme.text
-                            text: {
-                                loader.tick
-                                const a = nb.themeData.ansi || []
-                                const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/ /g, "&nbsp;")
-                                return (nb.view ? nb.view.cellOutput(cell.c.id, "text") : "").split("\n").map(l =>
-                                    l.startsWith("+") && !l.startsWith("+++") ? "<font color='" + (a[2] || "#98c379") + "'>" + esc(l) + "</font>"
-                                    : l.startsWith("-") && !l.startsWith("---") ? "<font color='" + (a[1] || "#e06c75") + "'>" + esc(l) + "</font>"
-                                    : l.startsWith("@@") ? "<font color='" + (a[6] || "#56b6c2") + "'>" + esc(l) + "</font>" : esc(l)).join("<br>")
-                            }
-                        }
-                    }
-                }
-                Component {
-                    id: richView
-                    RichViewer {
-                        embedded: true
-                        maxHeight: 100000
-                        kind: cell.kind
-                        text: { loader.tick; return nb.view ? nb.view.cellOutput(cell.c.id, "text") : "" }
-                        fontFamily: nb.fontFamily
-                        themeData: nb.themeData
-                    }
-                }
-                Component {
-                    id: imageView
-                    Item {
-                        implicitHeight: (pic.sourceSize.height > 0 ? pic.sourceSize.height * Math.min(1, body.width / pic.sourceSize.width) : 100) + 8
-                        Image {
-                            id: pic
-                            anchors.fill: parent
-                            anchors.topMargin: 4
-                            anchors.bottomMargin: 4
-                            fillMode: Image.PreserveAspectFit
-                            horizontalAlignment: Image.AlignLeft
-                            source: { const b = nb.view ? nb.view.cellOutput(cell.c.id, "image") : ""; return b !== "" ? "data:image/png;base64," + b : "" }
-                        }
-                    }
-                }
-                Component {
-                    id: markdownView
-                    // Markdown drawn as a page: headings, lists, tables, code and
-                    // pictures (relative ones from the command's folder), in the
-                    // theme's colors. Its HTML may show but never run scripts.
-                    WebEngineView {
-                        id: md
-                        implicitHeight: 360
-                        backgroundColor: Theme.bg
-                        settings.javascriptEnabled: false
-                        settings.pluginsEnabled: false
-                        settings.localContentCanAccessFileUrls: true
-                        settings.localContentCanAccessRemoteUrls: true
-                        settings.showScrollBars: true
-                        readonly property bool asText: cell.kind === "mdtext"
-                        onAsTextChanged: show()
-                        // Monospace, the way a terminal Markdown viewer draws it: headings
-                        // keep their #s in color, bullets, a bar for quotes.
-                        function textCss() {
-                            const c = (x) => String(x), a = nb.themeData.ansi || []
-                            const col = (n, d) => c(a[n] || d)
-                            return "body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:13px/1.45 '" + nb.fontFamily + "',monospace;margin:8px 10px}"
-                                + "h1,h2,h3,h4,h5,h6{font-size:1em;font-weight:bold;margin:1em 0 .4em}"
-                                + "h1{color:" + col(5, "#c678dd") + "}h2{color:" + col(4, "#61afef") + "}h3{color:" + col(6, "#56b6c2") + "}h4,h5,h6{color:" + col(2, "#98c379") + "}"
-                                + "h1::before{content:'# '}h2::before{content:'## '}h3::before{content:'### '}h4::before{content:'#### '}h5::before{content:'##### '}h6::before{content:'###### '}"
-                                + "h1{text-decoration:underline}p{margin:.5em 0}"
-                                + "a{color:" + col(4, "#61afef") + "}strong{color:" + c(Theme.fg) + "}em{color:" + col(3, "#e5c07b") + "}"
-                                + "code{font:inherit;color:" + col(3, "#e5c07b") + "}"
-                                + "pre{background:" + c(Theme.field) + ";padding:6px 10px;margin:.5em 0;overflow:auto}pre code{color:" + c(Theme.text) + "}"
-                                + "ul{list-style:none;padding-left:2ch}ul>li::before{content:'\\2022';color:" + col(4, "#61afef") + ";display:inline-block;width:2ch;margin-left:-2ch}"
-                                + "ol{padding-left:3ch}li{margin:.1em 0}"
-                                + "blockquote{margin:.5em 0;padding-left:1ch;color:" + c(Theme.textDim) + ";border-left:2px solid " + col(8, "#5c6370") + "}"
-                                + "table{border-collapse:collapse}th,td{border:1px solid " + c(Theme.divider) + ";padding:0 1ch}th{color:" + c(Theme.fg) + "}"
-                                + "img{max-width:100%}hr{border:0;border-top:1px dashed " + c(Theme.divider) + "}"
-                                + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
-                        }
-                        function css() {
-                            if (asText) return textCss()
-                            const c = (x) => String(x)
-                            return "body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:14px/1.6 'Noto Sans','Segoe UI',system-ui,sans-serif;margin:12px 18px;max-width:900px}"
-                                + "a{color:" + c(Theme.accent) + "}h1,h2{border-bottom:1px solid " + c(Theme.divider) + ";padding-bottom:.25em}"
-                                + "h1{font-size:1.8em}h2{font-size:1.4em}h1,h2,h3,h4{margin:1.1em 0 .5em;line-height:1.25}"
-                                + "code{font-family:" + nb.fontFamily + ",monospace;font-size:.88em;background:" + c(Theme.field) + ";padding:.15em .35em;border-radius:5px}"
-                                + "pre{background:" + c(Theme.field) + ";padding:10px 12px;border-radius:7px;overflow:auto}pre code{background:none;padding:0}"
-                                + "blockquote{margin:0;padding:0 1em;color:" + c(Theme.textDim) + ";border-left:3px solid " + c(Theme.divider) + "}"
-                                + "table{border-collapse:collapse}th,td{border:1px solid " + c(Theme.divider) + ";padding:5px 10px}th{background:" + c(Theme.field) + "}"
-                                + "img{max-width:100%}hr{border:0;border-top:1px solid " + c(Theme.divider) + "}"
-                                + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
-                        }
-                        // Relative pictures are found next to the file shown (cat dir/README.md).
-                        function baseDir() {
-                            const cwd = cell.c.cwd || "/"
-                            const f = (cell.c.command || "").trim().split(/\s+/).pop()
-                            if (!/\.(md|markdown|mdx)$/i.test(f) || f.indexOf("/") < 0) return cwd
-                            let d = f.replace(/\/[^/]*$/, "")
-                            if (d.startsWith("~")) d = (nb.controller ? nb.controller.homeDir() : "") + d.slice(1)
-                            return d.startsWith("/") ? d : cwd + "/" + d
-                        }
-                        function show() {
-                            const body = nb.view ? nb.view.cellOutput(cell.c.id, "markdown") : ""
-                            loadHtml("<!doctype html><html><head><meta charset='utf-8'><style>" + css() + "</style></head><body>" + body + "</body></html>",
-                                     "file://" + baseDir() + "/")
-                        }
-                        Component.onCompleted: show()
-                        Connections { target: loader; function onTickChanged() { if (!cell.c.done) md.show() } }
-                        onLoadingChanged: (r) => {
-                            if (r.status === WebEngineView.LoadSucceededStatus)
-                                runJavaScript("Math.ceil(document.documentElement.scrollHeight)", (h) => { if (h > 0) md.implicitHeight = Math.max(60, h) })
-                        }
-                        onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
-                        onNavigationRequested: (req) => {
-                            // (Links open in the browser, not in the cell.)
-                            if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation) {
-                                req.reject(); Qt.openUrlExternally(req.url)
-                            }
-                        }
-                    }
-                }
-                Component {
-                    id: htmlView
-                    WebEngineView {
-                        id: web
-                        implicitHeight: 360
-                        backgroundColor: "white"
-                        // Pages may not reach local files or run plugins.
-                        settings.localContentCanAccessFileUrls: false
-                        settings.pluginsEnabled: false
-                        Component.onCompleted: loadHtml(nb.view ? nb.view.cellOutput(cell.c.id, "text") : "", "about:blank")
-                        onLoadingChanged: (r) => {
-                            if (r.status === WebEngineView.LoadSucceededStatus)
-                                runJavaScript("Math.ceil(document.body ? document.body.getBoundingClientRect().height + 24 : 0)", (h) => { if (h > 0) web.implicitHeight = Math.max(60, h) })
-                        }
-                        onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
-                    }
-                }
             }
 
             // ---- the bottom edge: drag to resize, double-click for its own size ----
             Item {
                 id: grip
-                visible: !cell.collapsed
+                visible: body.visible
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: 10
@@ -459,72 +1163,599 @@ Rectangle {
                     target: null
                     xAxis.enabled: false
                     cursorShape: Qt.SizeVerCursor
-                    onActiveChanged: if (active) { grip.startHeight = body.height; if (cell.expanded) nb.expandedId = -1 }
-                    onTranslationChanged: if (active) nb.setHeight(cell.c.id, Math.max(48, Math.round(grip.startHeight + translation.y)))
+                    onActiveChanged: if (active) { grip.startHeight = body.height; if (cell.expanded) nb.expandedId = "" }
+                    onTranslationChanged: if (active) nb.setHeight(cell.cid, Math.max(48, Math.round(grip.startHeight + translation.y)))
                 }
-                TapHandler { onDoubleTapped: { nb.setHeight(cell.c.id, 0); if (cell.expanded) nb.expandedId = -1 } }
+                TapHandler { onDoubleTapped: { nb.setHeight(cell.cid, 0); if (cell.expanded) nb.expandedId = "" } }
             }
         }
-
-        Text {
+        footer: Item {
+            width: list.width
+            height: cells.count > 0 ? 40 : 0
+            Row {
+                anchors.centerIn: parent
+                spacing: 8
+                visible: cells.count > 0
+                Chip { base: Theme.bg; label: "+ Code"; tip: "Add a code cell at the end"; onClicked: nb.insertCell(cells.count, "code") }
+                Chip { base: Theme.bg; label: "+ Markdown"; tip: "Add a Markdown cell at the end"; onClicked: nb.insertCell(cells.count, "markdown") }
+            }
+        }
+        Column {
             anchors.centerIn: parent
             width: parent.width - 60
-            visible: nb.cells.length === 0
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.Wrap
-            text: "Notebook: each command you run becomes a cell, its output shown for what it is (a table, JSON, HTML, a picture, ...). Switch back to the terminal from the editor's corner."
-            color: Theme.textDim
-            font.pixelSize: 13
+            spacing: 12
+            visible: cells.count === 0
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                text: "Notebook: each command you run becomes a cell, its output shown for what it is (a table, JSON, HTML, a picture, ...). "
+                    + "Write cells here too, run by this pane's shell or a Jupyter kernel, and save it all as a .ipynb."
+                color: Theme.textDim
+                font.pixelSize: 13
+            }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 8
+                Chip { base: Theme.bg; label: "+ Code"; onClicked: nb.insertCell(0, "code") }
+                Chip { base: Theme.bg; label: "+ Markdown"; onClicked: nb.insertCell(0, "markdown") }
+            }
         }
     }
     TextEdit { id: clip; visible: false }
+    function copyText(t) { clip.text = t; clip.selectAll(); clip.copy() }
+    function outputText(i) {
+        const c = cells.get(i)
+        if (!c) return ""
+        if (c.tid > 0) return view ? view.cellOutput(c.tid, "text") : ""
+        let outs = []
+        try { outs = JSON.parse(c.outputs) } catch (e) {}
+        return outs.map(o => o.output_type === "stream" ? o.text
+                           : o.output_type === "error" ? o.ename + ": " + o.evalue + "\n"
+                           : o.data && o.data["text/plain"] !== undefined ? o.data["text/plain"] : "").join("")
+    }
 
-    // ---- as a Jupyter notebook: each command a code cell (Bash), its output kept --
-    function exportIpynb(path) {
-        const lines = (s) => { const o = []; let at = 0; while (at < s.length) { const n = s.indexOf("\n", at); if (n < 0) { o.push(s.slice(at)); break } o.push(s.slice(at, n + 1)); at = n + 1 } return o }
-        const out = []
-        let n = 0
-        for (const c of cells) {
-            if (!c.done || c.command.trim() === "") continue
-            const outs = []
-            const text = view.cellOutput(c.id, "text")
-            if (text.trim() !== "") outs.push({ name: "stdout", output_type: "stream", text: lines(text.endsWith("\n") ? text : text + "\n") })
-            const img = c.kind === "image" ? view.cellOutput(c.id, "image") : ""
-            if (img !== "") outs.push({ data: { "image/png": img }, metadata: {}, output_type: "display_data" })
-            out.push({ cell_type: "code", execution_count: ++n, id: "cell-" + c.id, metadata: { tessera: { cwd: c.cwd, status: c.status, duration_ms: c.duration } },
-                       outputs: outs, source: lines(c.command) })
+    // ---- a cell's editor ------------------------------------------------------------------
+    Component {
+        id: cellEditor
+        Item {
+            id: ed
+            property int cellIndex: -1
+            property string lang: "bash"
+            readonly property bool hasFocus: edit.activeFocus
+            implicitHeight: edit.implicitHeight + 14
+            height: implicitHeight
+            function focusIn() { edit.forceActiveFocus(); if (edit.cursorPosition === 0 && edit.length > 0) edit.cursorPosition = edit.length }
+            TextEdit {
+                id: edit
+                x: 10; y: 7
+                width: parent.width - 20
+                text: cells.get(ed.cellIndex) ? cells.get(ed.cellIndex).source : ""
+                font.family: nb.fontFamily
+                font.pointSize: 10
+                color: Theme.text
+                selectionColor: Theme.mix(Theme.field, Theme.accent, 0.45)
+                selectedTextColor: Theme.text
+                wrapMode: TextEdit.Wrap
+                selectByMouse: true
+                persistentSelection: false
+                renderType: Text.NativeRendering
+                textFormat: TextEdit.PlainText
+                tabStopDistance: 4 * fm.advanceWidth(" ")
+                FontMetrics { id: fm; font: edit.font }
+                onTextChanged: {
+                    if (ed.cellIndex < 0 || ed.cellIndex >= cells.count || cells.get(ed.cellIndex).source === text) return
+                    cells.setProperty(ed.cellIndex, "source", text)
+                    nb.touch()
+                    hlTimer.restart()
+                    comp.visible = false
+                }
+                onActiveFocusChanged: if (activeFocus) nb.current = ed.cellIndex
+                Keys.onPressed: (e) => ed.key(e)
+                Text {
+                    visible: edit.text === ""
+                    text: cells.get(ed.cellIndex) && cells.get(ed.cellIndex).type === "markdown" ? "Markdown — Shift+Enter shows it"
+                        : nb.shellKernel ? "A command — Shift+Enter runs it in this pane's shell" : "Code — Shift+Enter runs it"
+                    color: Theme.textDim
+                    font: edit.font
+                }
+            }
+            SyntaxHighlighter {
+                id: hl
+                document: edit.textDocument
+                errorColor: "transparent"
+                colors: ({
+                    keyword: nb.ansi(5, "#c678dd"), string: nb.ansi(2, "#98c379"), comment: Theme.textDim,
+                    number: nb.ansi(3, "#d19a66"), constant: nb.ansi(3, "#d19a66"), function: nb.ansi(4, "#61afef"),
+                    operator: nb.ansi(6, "#56b6c2"), property: nb.ansi(6, "#56b6c2"), variable: Theme.text,
+                    embedded: nb.ansi(13, "#c678dd"), type: nb.ansi(3, "#e5c07b"), constructor: nb.ansi(3, "#e5c07b"),
+                    punctuation: Theme.textDim, escape: nb.ansi(6, "#56b6c2"), attribute: nb.ansi(3, "#e5c07b"),
+                    tag: nb.ansi(1, "#e06c75")
+                })
+            }
+            Timer { id: hlTimer; interval: 120; onTriggered: ed.highlight() }
+            Component.onCompleted: highlight()
+            onLangChanged: highlight()
+            function highlight() {
+                if (!nb.controller || lang === "") return
+                try {
+                    const r = JSON.parse(nb.controller.syntax(lang, edit.text))
+                    r.errors = []
+                    hl.analysis = JSON.stringify(r)
+                } catch (e) {}
+            }
+            function indentOf(line) { const m = line.match(/^[ \t]*/); return m ? m[0] : "" }
+            // Run, then go on: the next cell, or a new one at the end.
+            function runAndAdvance() {
+                const i = cellIndex
+                nb.run(i)
+                if (i + 1 >= cells.count) nb.insertCell(cells.count, "code", true)
+                else nb.focusCell(i + 1, cells.get(i + 1).editing)
+            }
+            function key(e) {
+                const ctrl = e.modifiers & Qt.ControlModifier, shift = e.modifiers & Qt.ShiftModifier, alt = e.modifiers & Qt.AltModifier
+                const enter = e.key === Qt.Key_Return || e.key === Qt.Key_Enter
+                if (comp.visible) {
+                    if (e.key === Qt.Key_Down) { comp.pick = Math.min(comp.items.length - 1, comp.pick + 1); e.accepted = true; return }
+                    if (e.key === Qt.Key_Up) { comp.pick = Math.max(0, comp.pick - 1); e.accepted = true; return }
+                    if (enter || e.key === Qt.Key_Tab) { comp.accept(); e.accepted = true; return }
+                    if (e.key === Qt.Key_Escape) { comp.visible = false; e.accepted = true; return }
+                }
+                if (enter && shift) { runAndAdvance(); e.accepted = true }
+                else if (enter && ctrl) { nb.run(cellIndex); list.forceActiveFocus(); e.accepted = true }
+                else if (enter && alt) { nb.run(cellIndex); nb.insertCell(cellIndex + 1, "code"); e.accepted = true }
+                else if (enter) {
+                    // A new line, indented like this one (more after a ":").
+                    const before = edit.text.slice(0, edit.cursorPosition)
+                    const line = before.slice(before.lastIndexOf("\n") + 1)
+                    let ind = indentOf(line)
+                    if (lang === "python" && /:\s*$/.test(line)) ind += "    "
+                    edit.remove(edit.selectionStart, edit.selectionEnd)
+                    edit.insert(edit.cursorPosition, "\n" + ind)
+                    e.accepted = true
+                } else if (e.key === Qt.Key_Escape) { nb.current = cellIndex; nb.stopEditing(cellIndex); e.accepted = true }
+                else if (e.key === Qt.Key_Tab && !ctrl) {
+                    const before = edit.text.slice(0, edit.cursorPosition)
+                    if (edit.selectedText === "" && /[\w.\]\)'"]$/.test(before) && !nb.shellKernel && nb.kernelUp) comp.ask()
+                    else edit.insert(edit.cursorPosition, "    ")
+                    e.accepted = true
+                } else if (e.key === Qt.Key_Backtab) {
+                    // Dedent the line.
+                    const p = edit.cursorPosition, start = edit.text.lastIndexOf("\n", p - 1) + 1
+                    const n = edit.text.slice(start, start + 4).match(/^ {1,4}/)
+                    if (n) edit.remove(start, start + n[0].length)
+                    e.accepted = true
+                } else if (e.key === Qt.Key_Up && !shift && edit.text.lastIndexOf("\n", edit.cursorPosition - 1) < 0 && cellIndex > 0) {
+                    nb.focusCell(cellIndex - 1, cells.get(cellIndex - 1).editing); e.accepted = true
+                } else if (e.key === Qt.Key_Down && !shift && edit.text.indexOf("\n", edit.cursorPosition) < 0 && cellIndex + 1 < cells.count) {
+                    nb.focusCell(cellIndex + 1, cells.get(cellIndex + 1).editing); e.accepted = true
+                }
+            }
+            // Completion from the kernel.
+            Rectangle {
+                id: comp
+                visible: false
+                z: 10
+                property var items: []
+                property int pick: 0
+                property int start: 0
+                property int end: 0
+                property string req: ""
+                width: Math.min(360, Math.max(160, compList.contentItem.childrenRect.width + 16))
+                height: Math.min(8, items.length) * 22 + 8
+                radius: 6
+                color: Theme.mix(Theme.bg, Theme.fg, 0.08)
+                border.color: Theme.divider
+                x: Math.min(parent.width - width, edit.x + edit.cursorRectangle.x)
+                y: edit.y + edit.cursorRectangle.y + edit.cursorRectangle.height + 2
+                function ask() {
+                    req = nb.key + "-comp-" + Math.random().toString(36).slice(2)
+                    nb.controller.jupyterComplete(nb.key, req, edit.text, edit.cursorPosition)
+                }
+                function accept() {
+                    const m = items[pick]
+                    visible = false
+                    if (!m) return
+                    edit.remove(start, Math.max(start, edit.cursorPosition))
+                    edit.insert(start, m)
+                }
+                Connections {
+                    target: nb.controller
+                    function onJupyterEvent(key, json) {
+                        if (key !== nb.key || json.indexOf(comp.req) < 0) return
+                        const e = JSON.parse(json)
+                        if (e.type !== "complete" || e.request !== comp.req) return
+                        comp.items = (e.matches || []).slice(0, 200)
+                        comp.start = e.start; comp.end = e.end; comp.pick = 0
+                        if (comp.items.length === 1) { comp.accept(); return }
+                        comp.visible = comp.items.length > 0
+                    }
+                }
+                ListView {
+                    id: compList
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    clip: true
+                    model: comp.items
+                    currentIndex: comp.pick
+                    delegate: Rectangle {
+                        required property string modelData
+                        required property int index
+                        width: compList.width
+                        height: 22
+                        radius: 4
+                        color: index === comp.pick ? Theme.mix(Theme.panel, Theme.accent, 0.35) : "transparent"
+                        Text {
+                            x: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData
+                            color: Theme.text
+                            font.family: nb.fontFamily
+                            font.pointSize: 9
+                        }
+                        TapHandler { onTapped: { comp.pick = index; comp.accept() } }
+                    }
+                }
+            }
         }
-        const nb = { cells: out, metadata: { kernelspec: { display_name: "Bash", language: "bash", name: "bash" }, language_info: { name: "bash" } }, nbformat: 4, nbformat_minor: 5 }
-        const err = controller.writeTextFile(path, JSON.stringify(nb, null, 1) + "\n")
-        if (err === "") openNotebook(path)
-        else exportError = err
     }
-    property string exportError: ""
-    // (Test hook: TESSERA_TEST_NB_EXPORT=<path> saves the cells there and opens it.)
-    Timer { interval: 3000; running: nb.visible && nb.controller !== null && nb.controller.testEnv("NB_EXPORT") !== ""; onTriggered: nb.exportIpynb(nb.controller.testEnv("NB_EXPORT")) }
-    Row {
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.topMargin: 6
-        anchors.rightMargin: 16
-        z: 5
-        spacing: 6
-        visible: nb.cells.length > 0
-        Text { visible: nb.exportError !== ""; text: nb.exportError; color: Theme.textDim; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-        Chip {
-            base: Theme.bg
-            label: "Save as Jupyter Notebook\u2026"
-            tip: "These commands and their outputs as a .ipynb, opened to run again or share"
-            onClicked: exportDialog.open()
+
+    // ---- a terminal cell's output, by kind ---------------------------------------------------
+    // (Each reads its Loader: tid, tick, kind, cwd, command.)
+    component OutText: TextEdit {
+        BlockSelect { }
+        readOnly: true
+        selectByMouse: true
+        selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)
+        selectedTextColor: Theme.text
+        color: Theme.text
+        font.family: nb.fontFamily
+        font.pointSize: 10
+        renderType: Text.NativeRendering
+    }
+    Component {
+        id: termView
+        Flickable {
+            id: tf
+            readonly property var src: parent
+            interactive: false   // (a drag selects text; the wheel and bar scroll)
+            implicitHeight: Math.max(16, tt.implicitHeight + 8)
+            contentWidth: Math.max(width, tt.implicitWidth)
+            contentHeight: tt.implicitHeight + 8
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: tf.contentHeight > tf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
+            ScrollBar.horizontal: ScrollBar {}
+            MomentumWheel { flick: tf }
+            OutText {
+                id: tt
+                y: 4
+                textFormat: TextEdit.RichText
+                text: { tf.src.tick; return nb.view ? nb.palette(nb.view.cellOutput(tf.src.tid, "html")) : "" }
+            }
         }
     }
-    FileDialog {
-        id: exportDialog
-        title: "Save as Jupyter Notebook"
-        fileMode: FileDialog.SaveFile
-        defaultSuffix: "ipynb"
-        nameFilters: ["Jupyter notebooks (*.ipynb)"]
-        currentFolder: nb.cells.length ? "file://" + nb.cells[nb.cells.length - 1].cwd : ""
-        onAccepted: nb.exportIpynb(decodeURIComponent(String(selectedFile).replace(/^file:\/\//, "")))
+    Component {
+        id: plainView
+        Flickable {
+            id: pf
+            readonly property var src: parent
+            interactive: false
+            implicitHeight: Math.max(16, pt.implicitHeight + 8)
+            contentHeight: pt.implicitHeight + 8
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: pf.contentHeight > pf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
+            MomentumWheel { flick: pf }
+            OutText {
+                id: pt
+                y: 4
+                width: pf.width - 12
+                wrapMode: TextEdit.Wrap
+                text: { pf.src.tick; return nb.view ? nb.view.cellOutput(pf.src.tid, "text") : "" }
+            }
+        }
+    }
+    Component {
+        id: diffView
+        Flickable {
+            id: df
+            readonly property var src: parent
+            interactive: false
+            implicitHeight: Math.max(16, dt.implicitHeight + 8)
+            contentHeight: dt.implicitHeight + 8
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: df.contentHeight > df.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
+            MomentumWheel { flick: df }
+            OutText {
+                id: dt
+                y: 4
+                width: df.width - 12
+                textFormat: TextEdit.RichText
+                wrapMode: TextEdit.WrapAnywhere
+                text: {
+                    df.src.tick
+                    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/ /g, "&nbsp;")
+                    return (nb.view ? nb.view.cellOutput(df.src.tid, "text") : "").split("\n").map(l =>
+                        l.startsWith("+") && !l.startsWith("+++") ? "<font color='" + nb.ansi(2, "#98c379") + "'>" + esc(l) + "</font>"
+                        : l.startsWith("-") && !l.startsWith("---") ? "<font color='" + nb.ansi(1, "#e06c75") + "'>" + esc(l) + "</font>"
+                        : l.startsWith("@@") ? "<font color='" + nb.ansi(6, "#56b6c2") + "'>" + esc(l) + "</font>" : esc(l)).join("<br>")
+                }
+            }
+        }
+    }
+    Component {
+        id: richView
+        RichViewer {
+            readonly property var src: parent
+            embedded: true
+            maxHeight: 100000
+            kind: src.kind
+            text: { src.tick; return nb.view ? nb.view.cellOutput(src.tid, "text") : "" }
+            fontFamily: nb.fontFamily
+            themeData: nb.themeData
+        }
+    }
+    Component {
+        id: imageView
+        Item {
+            readonly property var src: parent
+            implicitHeight: (pic.sourceSize.height > 0 ? pic.sourceSize.height * Math.min(1, width / pic.sourceSize.width) : 100) + 8
+            Image {
+                id: pic
+                anchors.fill: parent
+                anchors.topMargin: 4
+                anchors.bottomMargin: 4
+                fillMode: Image.PreserveAspectFit
+                horizontalAlignment: Image.AlignLeft
+                source: { const b = nb.view ? nb.view.cellOutput(parent.src.tid, "image") : ""; return b !== "" ? "data:image/png;base64," + b : "" }
+            }
+        }
+    }
+    Component {
+        id: markdownView
+        // A command's Markdown (cat README.md): relative pictures from the
+        // file's folder.
+        Item {
+            id: mv
+            readonly property var src: parent
+            implicitHeight: page.implicitHeight
+            function baseDir() {
+                const cwd = src.cwd || "/"
+                const f = (src.command || "").trim().split(/\s+/).pop()
+                if (!/\.(md|markdown|mdx)$/i.test(f) || f.indexOf("/") < 0) return cwd
+                let d = f.replace(/\/[^/]*$/, "")
+                if (d.startsWith("~")) d = (nb.controller ? nb.controller.homeDir() : "") + d.slice(1)
+                return d.startsWith("/") ? d : cwd + "/" + d
+            }
+            Loader {
+                id: page
+                anchors.fill: parent
+                sourceComponent: markdownPage
+                onLoaded: {
+                    item.html = Qt.binding(() => { mv.src.tick; return nb.view ? nb.view.cellOutput(mv.src.tid, "markdown") : "" })
+                    item.baseDir = Qt.binding(() => mv.baseDir())
+                    item.asText = Qt.binding(() => mv.src.kind === "mdtext")
+                    item.scrolls = true
+                }
+            }
+        }
+    }
+    Component {
+        id: htmlView
+        WebEngineView {
+            id: web
+            readonly property var src: parent
+            implicitHeight: 360
+            backgroundColor: "white"
+            // Pages may not reach local files or run plugins.
+            settings.localContentCanAccessFileUrls: false
+            settings.pluginsEnabled: false
+            Component.onCompleted: loadHtml(nb.view ? nb.view.cellOutput(src.tid, "text") : "", "about:blank")
+            onLoadingChanged: (r) => {
+                if (r.status === WebEngineView.LoadSucceededStatus)
+                    runJavaScript("Math.ceil(document.body ? document.body.getBoundingClientRect().height + 24 : 0)", (h) => { if (h > 0) web.implicitHeight = Math.max(60, h) })
+            }
+            onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+        }
+    }
+    // Markdown drawn as a page, in the theme's colors (scripts never run):
+    // `md` (Markdown) or `html` (already made), pictures from baseDir.
+    Component {
+        id: markdownPage
+        WebEngineView {
+            id: mp
+            property string md: ""
+            property string html: ""
+            property string baseDir: ""
+            property bool asText: false
+            property bool scrolls: false    // its own scrollbar (an output), or as tall as it is (a cell)
+            implicitHeight: 40
+            backgroundColor: "transparent"
+            settings.javascriptEnabled: false
+            settings.pluginsEnabled: false
+            settings.localContentCanAccessFileUrls: true
+            settings.localContentCanAccessRemoteUrls: true
+            settings.showScrollBars: scrolls
+            function show() {
+                if (!nb.controller) return
+                const body = md !== "" ? nb.controller.markdownHtml(md) : html
+                loadHtml("<!doctype html><html><head><meta charset='utf-8'><style>" + nb.markdownCss(asText) + (scrolls ? "" : "body{margin:4px 10px;overflow:hidden}") + "</style></head><body>" + body + "</body></html>",
+                         "file://" + (baseDir || "/") + "/")
+            }
+            Timer { id: again; interval: 60; onTriggered: mp.show() }
+            onMdChanged: again.restart()
+            onHtmlChanged: again.restart()
+            onAsTextChanged: again.restart()
+            onBaseDirChanged: again.restart()
+            Component.onCompleted: again.restart()
+            // (Its height: measured a few times as it lays out, fonts and pictures coming in.)
+            onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus) { measure.n = 0; measure.start() } }
+            onContentsSizeChanged: if (contentsSize.height > 0) mp.implicitHeight = Math.max(24, Math.ceil(contentsSize.height))
+            Timer {
+                id: measure
+                interval: 80
+                repeat: true
+                property int n: 0
+                onTriggered: {
+                    mp.runJavaScript("Math.ceil(document.body.getBoundingClientRect().bottom + parseFloat(getComputedStyle(document.body).marginBottom || 0))", (h) => { if (h > 0) mp.implicitHeight = Math.max(24, h) })
+                    if (++n > 12) stop()
+                }
+            }
+            onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+            onNavigationRequested: (req) => {
+                // (Links open in the browser, not in the cell.)
+                if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation) { req.reject(); Qt.openUrlExternally(req.url) }
+            }
+        }
+    }
+
+    // ---- a Jupyter cell's outputs ----------------------------------------------------------
+    Component {
+        id: jupyterOutputs
+        Flickable {
+            id: jf
+            readonly property var src: parent
+            interactive: false
+            implicitHeight: oc.height + 4
+            contentHeight: oc.height + 4
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: jf.contentHeight > jf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
+            MomentumWheel { flick: jf }
+            Column {
+                id: oc
+                y: 2
+                width: jf.width - 10
+                spacing: 4
+                Repeater {
+                    model: jf.src.outs
+                    delegate: Loader {
+                        required property var modelData
+                        width: oc.width
+                        property var out: modelData
+                        sourceComponent: {
+                            const o = modelData
+                            if (o.output_type === "stream" || o.output_type === "error") return textOut
+                            const m = nb.bestMime(o.data || {})
+                            if (m === "image/png" || m === "image/jpeg" || m === "image/gif") return imageOut
+                            if (m === "text/html" || m === "image/svg+xml") return htmlOut
+                            if (m === "text/markdown") return markdownOut
+                            return textOut
+                        }
+                    }
+                }
+                Text {
+                    visible: jf.src.outs.length === 0
+                    text: jf.src.running ? "" : "(no output)"
+                    color: Theme.textDim
+                    font.pixelSize: 11
+                }
+            }
+        }
+    }
+    Component {
+        id: textOut
+        // stdout/stderr, a traceback, a value's text: with its colors.
+        Rectangle {
+            id: tbox
+            readonly property var o: parent ? parent.out : ({})
+            readonly property bool bad: o.output_type === "error" || (o.output_type === "stream" && o.name === "stderr")
+            implicitHeight: tv.implicitHeight + 8
+            height: implicitHeight
+            color: bad ? Theme.mix(Theme.bg, nb.ansi(1, "#e06c75"), 0.07) : "transparent"
+            radius: 4
+            Flickable {
+                id: tf
+                interactive: false
+                anchors.fill: parent
+                anchors.margins: 4
+                contentWidth: Math.max(width, tv.implicitWidth)
+                contentHeight: tv.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.horizontal: ScrollBar {}
+                OutText {
+                    id: tv
+                    textFormat: TextEdit.RichText
+                    text: {
+                        const o = tbox.o
+                        if (!o) return ""
+                        if (o.output_type === "stream") return nb.colored(o.text || "")
+                        if (o.output_type === "error") return nb.colored((o.traceback || []).join("\n") || (o.ename + ": " + o.evalue))
+                        const d = o.data || {}
+                        const t = d["text/plain"] !== undefined ? d["text/plain"]
+                                : d["application/json"] !== undefined ? JSON.stringify(d["application/json"], null, 2)
+                                : d["text/latex"] !== undefined ? d["text/latex"]
+                                : d["application/vnd.jupyter.widget-view+json"] !== undefined ? "(an interactive widget: not shown here)"
+                                : "(" + Object.keys(d).join(", ") + ")"
+                        return nb.colored(t)
+                    }
+                }
+            }
+        }
+    }
+    Component {
+        id: imageOut
+        Item {
+            readonly property var o: parent ? parent.out : ({})
+            readonly property string mime: nb.bestMime(o.data || {})
+            implicitHeight: pic.status === Image.Ready ? Math.min(pic.sourceSize.height, pic.sourceSize.height * width / Math.max(1, pic.sourceSize.width)) + 4 : 40
+            height: implicitHeight
+            Image {
+                id: pic
+                width: Math.min(parent.width, sourceSize.width)
+                height: parent.height - 4
+                fillMode: Image.PreserveAspectFit
+                horizontalAlignment: Image.AlignLeft
+                smooth: true
+                mipmap: true
+                source: o.data ? "data:" + mime + ";base64," + String(o.data[mime]).replace(/\s/g, "") : ""
+            }
+        }
+    }
+    Component {
+        id: htmlOut
+        // HTML (tables, plots) and SVG in a browser view; links open outside.
+        WebEngineView {
+            id: web
+            readonly property var o: parent ? parent.out : ({})
+            implicitHeight: 60
+            height: implicitHeight
+            backgroundColor: Theme.bg
+            settings.localContentCanAccessFileUrls: false
+            settings.pluginsEnabled: false
+            settings.showScrollBars: true
+            Component.onCompleted: {
+                const d = o.data || {}
+                loadHtml(nb.htmlPage(d["text/html"] !== undefined ? d["text/html"] : d["image/svg+xml"]), "about:blank")
+            }
+            onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus) measure.start() }
+            // (Plots draw after loading: measured again shortly.)
+            Timer {
+                id: measure
+                interval: 60
+                repeat: true
+                property int n: 0
+                onTriggered: {
+                    web.runJavaScript("Math.ceil(document.documentElement.scrollHeight)", (h) => { if (h > 0) web.implicitHeight = Math.min(900, Math.max(24, h)) })
+                    if (++n > 20) { stop(); n = 0 }
+                }
+            }
+            onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+            onNavigationRequested: (req) => {
+                if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation) { req.reject(); Qt.openUrlExternally(req.url) }
+            }
+        }
+    }
+    Component {
+        id: markdownOut
+        Loader {
+            readonly property var o: parent ? parent.out : ({})
+            height: item ? item.implicitHeight : 40
+            sourceComponent: markdownPage
+            onLoaded: { item.md = o.data ? nb.joined(o.data["text/markdown"]) : ""; item.baseDir = nb.folder; item.asText = nb.markdownStyle === "text" }
+        }
     }
 }

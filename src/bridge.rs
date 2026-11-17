@@ -788,6 +788,12 @@ impl ffi::Controller {
 
     fn write_text_file(&self, path: &ffi::QString, text: &ffi::QString) -> ffi::QString {
         let p = std::path::PathBuf::from(local_path(path));
+        // (Tessera's own files make their folder; a user's file needs it there.)
+        if p.starts_with(crate::settings::state_dir()) {
+            if let Some(d) = p.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+        }
         let mut tmp = p.clone().into_os_string();
         tmp.push(".tmp");
         let r = std::fs::write(&tmp, text.to_string()).and_then(|_| std::fs::rename(&tmp, &p));
