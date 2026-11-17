@@ -64,6 +64,7 @@ T.ComboBox {
             color: Theme.text
             font.pixelSize: 12
             font.weight: control.currentIndex === row.index ? Font.DemiBold : Font.Normal
+            font.underline: row.hovered
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
             renderType: Text.NativeRendering

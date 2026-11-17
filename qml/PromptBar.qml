@@ -331,6 +331,7 @@ Item {
     component Seg: Item {
         id: seg
         property var s
+        property bool hot: false
         implicitWidth: label.implicitWidth + (icon.visible ? icon.width + 4 : 0) + (s.bg !== "" ? 18 : 2)
         height: 18
         anchors.verticalCenter: parent.verticalCenter
@@ -372,6 +373,7 @@ Item {
             font.family: bar.fontFamily
             font.pointSize: Math.max(8, bar.fontSize - 1)
             font.weight: seg.s.bold !== undefined ? (seg.s.bold ? Font.Bold : Font.Normal) : seg.s.bg !== "" ? Font.DemiBold : Font.Normal
+            font.underline: seg.hot
             renderType: Text.NativeRendering
             PathHits { anchors.fill: parent; t: seg.s.text; font: label.font; ink: label.color }
         }
@@ -384,6 +386,7 @@ Item {
     component Run: Rectangle {
         id: run
         property var r
+        property bool hot: false
         readonly property string cap: r.t.length === 1 && "\ue0b0\ue0b2\ue0b4\ue0b6\ue0bc\ue0be\ue0b8\ue0ba".indexOf(r.t) >= 0 ? r.t : ""
         readonly property color ink: bar.color(r.fg, Theme.fg)
         width: cap !== "" ? Math.ceil(height / 2) : Math.ceil(rt.implicitWidth)
@@ -400,6 +403,7 @@ Item {
             font.family: bar.fontFamily
             font.pointSize: Math.max(8, bar.fontSize - 1)
             font.bold: run.r.b
+            font.underline: run.hot && run.r.t.trim() !== ""
             renderType: Text.NativeRendering
             PathHits { anchors.fill: parent; t: run.cap === "" ? run.r.t : ""; font: rt.font; ink: rt.color }
         }
@@ -547,10 +551,13 @@ Item {
         height: implicitHeight
         anchors.verticalCenter: parent ? parent.verticalCenter : undefined
         opacity: bar.dragFrom === wi ? 0.35 : 1
+        // (Hovered, and not on a folder of its path: underlined, it's clickable.)
+        readonly property bool hot: hover.hovered && bar.hoverPath === "" && bar.dragFrom < 0
         Loader {
             id: body
             sourceComponent: w.wd.kind === "seg" ? segBody : w.wd.kind === "lines" ? linesBody : runsBody
             property var wd: w.wd
+            property bool hot: w.hot
         }
         Rectangle {
             anchors.fill: parent
@@ -596,13 +603,13 @@ Item {
         ToolTip.delay: 900
         ToolTip.text: bar.title(w.wd.name) + " — click for choices, drag to move, right-click to style"
     }
-    Component { id: segBody; Seg { s: parent.wd.seg } }
+    Component { id: segBody; Seg { s: parent.wd.seg; hot: parent ? parent.hot : false } }
     Component {
         id: runsBody
         Row {
             id: rr
             readonly property var wd: parent ? parent.wd : null
-            Repeater { model: rr.wd ? rr.wd.runs : []; delegate: Run { required property var modelData; r: modelData } }
+            Repeater { model: rr.wd ? rr.wd.runs : []; delegate: Run { required property var modelData; r: modelData; hot: rr.parent ? rr.parent.hot : false } }
         }
     }
     Component {
@@ -615,7 +622,7 @@ Item {
                 model: lc.wd ? lc.wd.lines : []
                 delegate: Row {
                     required property var modelData
-                    Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData } }
+                    Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData; hot: lc.parent ? lc.parent.hot : false } }
                 }
             }
         }
@@ -761,6 +768,7 @@ Item {
                             text: modelData.head ? modelData.head : (parent.parent.on ? "✓ " : "") + modelData.label
                             color: modelData.head ? Theme.textDim : Theme.text
                             font.pixelSize: modelData.head ? 10 : 12
+                            font.underline: !modelData.head && ah.hovered
                             font.weight: modelData.head ? Font.DemiBold : Font.Normal
                             renderType: Text.NativeRendering
                         }
@@ -823,6 +831,7 @@ Item {
                     font.pixelSize: modelData.section ? 10 : 12
                     font.weight: modelData.section || modelData.current ? Font.DemiBold : Font.Normal
                     font.family: modelData.section ? Qt.application.font.family : bar.fontFamily
+                    font.underline: !modelData.section && ch.hovered
                     elide: Text.ElideMiddle
                     renderType: Text.NativeRendering
                 }
@@ -945,7 +954,7 @@ Item {
                     radius: 11
                     color: on ? Theme.mix(Theme.bg, Theme.accent, 0.45) : th.hovered ? Theme.tabHover : Theme.mix(Theme.bg, Theme.fg, 0.06)
                     border.color: Theme.divider
-                    Text { id: tl; anchors.centerIn: parent; anchors.verticalCenterOffset: 0.001; text: tg.label; color: Theme.text; font.pixelSize: 11; renderType: Text.NativeRendering }
+                    Text { id: tl; anchors.centerIn: parent; anchors.verticalCenterOffset: 0.001; text: tg.label; color: Theme.text; font.pixelSize: 11; font.underline: th.hovered; renderType: Text.NativeRendering }
                     HoverHandler { id: th; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: tg.clicked() }
                 }

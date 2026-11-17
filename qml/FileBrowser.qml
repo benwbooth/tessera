@@ -206,6 +206,7 @@ Item {
             verticalAlignment: Text.AlignVCenter
             color: on ? (nh.hovered ? Theme.text : Theme.textDim) : Theme.divider
             font.pointSize: fb.pointSize
+            font.underline: on && nh.hovered
             HoverHandler { id: nh; cursorShape: Qt.PointingHandCursor }
             TapHandler { enabled: parent.on; onTapped: parent.clicked() }
         }
@@ -235,6 +236,7 @@ Item {
             text: "   cd here"
             color: ch.hovered ? fb.ansi(2, "#98c379") : Theme.textDim
             font.pointSize: fb.pointSize - 1
+            font.underline: ch.hovered
             HoverHandler { id: ch; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: fb.commandRequested("cd " + fb.shq(fb.dir)) }
         }
@@ -309,6 +311,7 @@ Item {
                     font.family: fb.fontFamily
                     font.pointSize: fb.pointSize
                     font.bold: ent.e.dir || ent.e.exec
+                    font.underline: eh.hovered
                 }
                 // details: ls -l
                 Text {
@@ -320,7 +323,7 @@ Item {
                     // (StyledText colors by <font color>, not a span's style.)
                     text: "<font color='" + Theme.textDim + "'>" + (ent.e.mode + " " + fb.esc(fb.pad(ent.e.user, fb.longW.user)) + " " + fb.esc(fb.pad(ent.e.group, fb.longW.group))
                           + " " + fb.pad(fb.sizeText(ent.e), fb.longW.size, true) + " " + fb.when(ent.e.mtime)).replace(/ /g, "&nbsp;") + "</font> "
-                          + "<font color='" + fb.tint(ent.e) + "'>" + (ent.e.dir || ent.e.exec ? "<b>" : "") + fb.label(ent.e) + (ent.e.dir || ent.e.exec ? "</b>" : "") + "</font>"
+                          + "<font color='" + fb.tint(ent.e) + "'>" + (ent.e.dir || ent.e.exec ? "<b>" : "") + (eh.hovered ? "<u>" : "") + fb.label(ent.e) + (eh.hovered ? "</u>" : "") + (ent.e.dir || ent.e.exec ? "</b>" : "") + "</font>"
                           + (ent.e.link ? "<font color='" + Theme.textDim + "'> ⇒ " + fb.esc(ent.e.target) + "</font>" : "")
                     color: Theme.text
                     font.family: fb.fontFamily
@@ -361,6 +364,7 @@ Item {
                         font.family: fb.fontFamily
                         font.pointSize: fb.pointSize - 1
                         font.bold: ent.e.dir
+                        font.underline: eh.hovered
                     }
                 }
             }
@@ -405,7 +409,7 @@ Item {
                 height: 18
                 radius: 4
                 color: on ? Theme.mix(Theme.bg, Theme.accent, 0.4) : bh.hovered ? Theme.tabHover : "transparent"
-                Text { id: bt; anchors.centerIn: parent; anchors.verticalCenterOffset: 0.001; text: parent.label; color: Theme.text; font.pixelSize: 11 }
+                Text { id: bt; anchors.centerIn: parent; anchors.verticalCenterOffset: 0.001; text: parent.label; color: Theme.text; font.pixelSize: 11; font.underline: bh.hovered }
                 HoverHandler { id: bh; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: parent.clicked() }
                 ToolTip.visible: bh.hovered && tip !== ""

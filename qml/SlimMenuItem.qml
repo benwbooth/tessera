@@ -30,6 +30,7 @@ T.MenuItem {
             color: item.enabled ? Theme.text : Theme.textDim
             font.pixelSize: 12
             font.weight: item.checked ? Font.DemiBold : Font.Normal
+            font.underline: item.hovered && item.enabled
             elide: Text.ElideRight
             renderType: Text.NativeRendering
         }

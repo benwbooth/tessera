@@ -14,7 +14,7 @@ Rectangle {
     implicitHeight: 18
     radius: 5
     color: chipHover.hovered ? Theme.mix(base, Theme.fg, 0.12) : Theme.mix(base, Theme.fg, 0.05)
-    Text { id: chipText; anchors.centerIn: parent; text: chip.label; color: Theme.textDim; font.pixelSize: 10; font.weight: Font.DemiBold }
+    Text { id: chipText; anchors.centerIn: parent; text: chip.label; color: Theme.textDim; font.pixelSize: 10; font.weight: Font.DemiBold; font.underline: chipHover.hovered }
     HoverHandler { id: chipHover }
     TapHandler { onTapped: chip.clicked() }
     ToolTip.visible: chipHover.hovered && tip !== ""

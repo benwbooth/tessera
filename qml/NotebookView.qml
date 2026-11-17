@@ -1142,8 +1142,9 @@ FocusScope {
                     font.family: nb.fontFamily
                     font.pointSize: 9
                     font.weight: Font.DemiBold
+                    font.underline: srcHover.hovered && !cell.editing
                     renderType: Text.NativeRendering
-                    HoverHandler { cursorShape: Qt.IBeamCursor }
+                    HoverHandler { id: srcHover; cursorShape: Qt.IBeamCursor }
                     TapHandler { onTapped: nb.focusCell(cell.index, true) }
                 }
                 Text { topPadding: 0.001; visible: cell.cwd !== "" && !nb.narrow; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
@@ -1276,6 +1277,8 @@ FocusScope {
                 text: "… output hidden (O shows it)"
                 color: Theme.textDim
                 font.pixelSize: 11
+                font.underline: hiddenHover.hovered
+                HoverHandler { id: hiddenHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: { cells.setProperty(cell.index, "hideOutput", false); nb.touch() } }
             }
             Item {
