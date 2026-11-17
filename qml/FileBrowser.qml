@@ -1,0 +1,490 @@
+import QtQuick
+import QtQuick.Controls
+import Tessera
+
+// A folder, browsable, in a notebook card (an `ls` or `cd` card). On the
+// surface it reads as ls output: names with icons in columns going down
+// then across (ls's own layout), `ls -l` lines, or tiles, in the
+// terminal's font, one terminal row per line. Underneath: a click on a
+// folder goes into it (back, forward and up, a path bar once away from
+// where it started), a double click opens a file, a right click has the
+// file manager's actions (Dolphin, Finder), and a small bar (on hover)
+// switches the view, the sort, folders first and hidden files. Those
+// choices are kept (settings: file_browser) for the next card.
+Item {
+    id: fb
+    property var controller: null
+    property string startDir: ""
+    property bool flagAll: false        // ls -a
+    property bool flagLong: false       // ls -l
+    property string fontFamily: "monospace"
+    property real pointSize: 10
+    property real rowHeight: 18
+    property var themeData: ({})
+    property int refresh: 0             // bump to read the folder again
+    signal commandRequested(string command)
+    signal insertRequested(string text)
+
+    // ---- the settings (kept), and this card's own view of them ----------
+    readonly property var saved: { if (!controller) return {}; controller.revision; try { return JSON.parse(controller.settings()).file_browser || {} } catch (e) { return {} } }
+    property string viewOver: ""        // this card's choice (else the flags, else what was last chosen)
+    readonly property string view: viewOver !== "" ? viewOver : flagLong ? "details" : (saved.view || "list")
+    readonly property string sortBy: saved.sort || "name"
+    readonly property bool desc: !!saved.desc
+    readonly property bool foldersFirst: !!saved.folders_first
+    readonly property bool showHidden: flagAll || !!saved.hidden
+    function save(k, v) {
+        const s = Object.assign({}, saved)
+        s[k] = v
+        if (controller) controller.setSetting("file_browser", JSON.stringify(s))
+    }
+    function setView(v) { viewOver = v; save("view", v) }
+
+    // ---- where it is ----------------------------------------------------
+    property string dir: startDir
+    property var back: []
+    property var forward: []
+    function go(d) {
+        if (d === dir) return
+        back = back.concat([dir]); forward = []
+        dir = d
+        selected = ""
+    }
+    function goBack() { if (!back.length) return; forward = [dir].concat(forward); dir = back[back.length - 1]; back = back.slice(0, -1) }
+    function goForward() { if (!forward.length) return; back = back.concat([dir]); dir = forward[0]; forward = forward.slice(1) }
+    function up() { const p = dir.replace(/\/[^/]+\/?$/, ""); go(p === "" ? "/" : p) }
+    onStartDirChanged: { dir = startDir; back = []; forward = [] }
+
+    readonly property var raw: { refresh; if (!controller || dir === "") return []; try { return JSON.parse(controller.listDir(dir, showHidden)) } catch (e) { return [] } }
+    readonly property var entries: {
+        const a = raw.slice()
+        const name = (x) => x.name.toLowerCase().replace(/^\./, "")
+        const cmp = {
+            name: (x, y) => name(x).localeCompare(name(y), undefined, { numeric: true }),
+            size: (x, y) => (x.dir ? x.items : x.size) - (y.dir ? y.items : y.size) || name(x).localeCompare(name(y)),
+            date: (x, y) => x.mtime - y.mtime || name(x).localeCompare(name(y)),
+            type: (x, y) => ext(x).localeCompare(ext(y)) || name(x).localeCompare(name(y)),
+        }[sortBy] || ((x, y) => 0)
+        a.sort((x, y) => {
+            if (foldersFirst && x.dir !== y.dir) return x.dir ? -1 : 1
+            const r = cmp(x, y)
+            return desc ? -r : r
+        })
+        return a
+    }
+    function ext(e) { return e.dir ? "" : (e.name.indexOf(".") > 0 ? e.name.replace(/^.*\./, "").toLowerCase() : "") }
+
+    // ---- how an entry looks (lsd's way) ---------------------------------
+    function ansi(n, d) { const a = themeData.ansi || []; return a[n] || d }
+    function tint(e) {
+        if (e.dir) return ansi(4, "#61afef")
+        if (e.link) return ansi(6, "#56b6c2")
+        if (e.exec) return ansi(2, "#98c379")
+        return ({ image: ansi(5, "#c678dd"), video: ansi(5, "#c678dd"), audio: ansi(6, "#56b6c2"), archive: ansi(1, "#e06c75"), document: ansi(3, "#e5c07b") })[e.kind] || Theme.text
+    }
+    function icon(e) {
+        if (e.dir) return e.link ? "" : ""
+        if (e.link) return ""
+        return ({ image: "", video: "", audio: "", archive: "", document: "", text: "",
+                  config: "", code: "", executable: "" })[e.kind] || ""
+    }
+    function human(n) {
+        if (n < 1024) return n + " B"
+        const u = ["KB", "MB", "GB", "TB"]
+        let i = -1
+        do { n /= 1024; i++ } while (n >= 1024 && i < u.length - 1)
+        return (n < 10 ? n.toFixed(1) : Math.round(n)) + " " + u[i]
+    }
+    function when(t) {
+        const d = new Date(t * 1000)
+        return Qt.formatDateTime(d, "ddd MMM d HH:mm:ss yyyy").replace(/ (\d) /, "  $1 ")
+    }
+    function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    function label(e) {
+        return "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + icon(e) + "</span> " + esc(e.name) + (e.dir ? "/" : "")
+    }
+    FontMetrics { id: fm; font.family: fb.fontFamily; font.pointSize: fb.pointSize }
+    readonly property real cw: fm.averageCharacterWidth > 0 ? fm.averageCharacterWidth : 8
+    readonly property real row: Math.max(fm.height, rowHeight)
+
+    // ---- ls's column layout: as many columns as fit, filled going down ----
+    readonly property var grid: {
+        const n = entries.length
+        const w = entries.map(e => (e.name.length + 3 + (e.dir ? 1 : 0)) * cw)
+        const avail = Math.max(cw * 10, width - 8)
+        let best = { cols: 1, rows: n, widths: [Math.max(0, ...w)] }
+        for (let cols = 2; cols <= n; cols++) {
+            const rows = Math.ceil(n / cols)
+            if (Math.ceil(n / rows) < cols) continue
+            const widths = []
+            for (let c = 0; c < cols; c++) widths.push(Math.max(0, ...w.slice(c * rows, (c + 1) * rows)) + 2 * cw)
+            if (widths.reduce((a, b) => a + b, 0) > avail) break
+            best = { cols: cols, rows: rows, widths: widths }
+        }
+        return best
+    }
+    readonly property var colX: { const x = [0]; for (const w of grid.widths) x.push(x[x.length - 1] + w); return x }
+    // `ls -l`'s columns, padded to their widest.
+    readonly property var longW: {
+        const m = (f) => Math.max(1, ...entries.map(f))
+        return { user: m(e => e.user.length), group: m(e => e.group.length), size: m(e => sizeText(e).length) }
+    }
+    function sizeText(e) { return e.dir ? (e.items >= 0 ? e.items + (e.items === 1 ? " item" : " items") : "") : human(e.size) }
+    function pad(s, n, right) { s = String(s); while (s.length < n) s = right ? " " + s : s + " "; return s }
+
+    readonly property real tileW: Math.max(96, cw * 14)
+    readonly property int tileCols: Math.max(1, Math.floor((width - 8) / (tileW + 8)))
+    readonly property real headerH: (back.length > 0 || dir !== startDir) ? row + 6 : 0
+    readonly property real bodyH: entries.length === 0 ? row
+                                : view === "details" ? entries.length * row
+                                : view === "tiles" ? Math.ceil(entries.length / tileCols) * (tileW + 24)
+                                : grid.rows * row
+    implicitHeight: headerH + bodyH + 8
+
+    property string selected: ""        // a path
+    property var menuEntry: null        // what the right click was on (null: the folder)
+    property string error: ""
+    function act(op, path, arg) {
+        const r = controller.fileAction(op, path, arg || "")
+        error = r
+        if (r === "") refresh++
+        return r === ""
+    }
+    function openEntry(e) {
+        if (e.dir) go(e.path)
+        else act("open", e.path)
+    }
+    function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
+
+    // ---- the path bar (once away from where it started) -----------------
+    Row {
+        id: pathBar
+        visible: fb.headerH > 0
+        y: 2
+        x: 2
+        height: fb.row
+        spacing: 2
+        component NavButton: Text {
+            property bool on: true
+            signal clicked()
+            width: fb.cw * 2.5
+            height: fb.row
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            color: on ? (nh.hovered ? Theme.text : Theme.textDim) : Theme.divider
+            font.pointSize: fb.pointSize
+            HoverHandler { id: nh; cursorShape: Qt.PointingHandCursor }
+            TapHandler { enabled: parent.on; onTapped: parent.clicked() }
+        }
+        NavButton { text: "←"; on: fb.back.length > 0; onClicked: fb.goBack() }
+        NavButton { text: "→"; on: fb.forward.length > 0; onClicked: fb.goForward() }
+        NavButton { text: "↑"; on: fb.dir !== "/"; onClicked: fb.up() }
+        Repeater {
+            // Each folder of the path, to go back up to.
+            model: { const parts = fb.dir.split("/").filter(p => p !== ""); const out = [{ name: "/", path: "/" }]; let acc = ""; for (const p of parts) { acc += "/" + p; out.push({ name: p, path: acc }) } return out }
+            delegate: Text {
+                required property var modelData
+                required property int index
+                height: fb.row
+                verticalAlignment: Text.AlignVCenter
+                text: (index > 1 ? "/" : "") + modelData.name
+                color: ph.hovered ? fb.ansi(4, "#61afef") : Theme.textDim
+                font.family: fb.fontFamily
+                font.pointSize: fb.pointSize
+                font.underline: ph.hovered
+                HoverHandler { id: ph; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: fb.go(modelData.path) }
+            }
+        }
+        Text {
+            height: fb.row
+            verticalAlignment: Text.AlignVCenter
+            text: "   cd here"
+            color: ch.hovered ? fb.ansi(2, "#98c379") : Theme.textDim
+            font.pointSize: fb.pointSize - 1
+            HoverHandler { id: ch; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: fb.commandRequested("cd " + fb.shq(fb.dir)) }
+        }
+    }
+
+    // ---- the entries ----------------------------------------------------
+    Item {
+        id: body
+        y: fb.headerH + 4
+        width: parent.width
+        height: fb.bodyH
+        // (A right click on nothing: the folder's own menu.)
+        TapHandler { acceptedButtons: Qt.RightButton; onTapped: { fb.menuEntry = null; folderMenu.popup() } }
+        TapHandler { onTapped: fb.selected = "" }
+        Text {
+            visible: fb.entries.length === 0
+            text: fb.raw.length === 0 && fb.dir !== "" ? "(empty)" : ""
+            color: Theme.textDim
+            font.family: fb.fontFamily
+            font.pointSize: fb.pointSize
+        }
+        Repeater {
+            model: fb.entries
+            delegate: Rectangle {
+                id: ent
+                required property var modelData
+                required property int index
+                readonly property var e: modelData
+                readonly property bool sel: fb.selected === e.path
+                readonly property int c: Math.floor(index / Math.max(1, fb.grid.rows))
+                readonly property int r: index % Math.max(1, fb.grid.rows)
+                x: fb.view === "details" ? 0 : fb.view === "tiles" ? (index % fb.tileCols) * (fb.tileW + 8) : fb.colX[c]
+                y: fb.view === "details" ? index * fb.row : fb.view === "tiles" ? Math.floor(index / fb.tileCols) * (fb.tileW + 24) : r * fb.row
+                width: fb.view === "details" ? body.width : fb.view === "tiles" ? fb.tileW : fb.grid.widths[c] - fb.cw
+                height: fb.view === "tiles" ? fb.tileW + 20 : fb.row
+                radius: 3
+                color: sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : eh.hovered ? Theme.mix(Theme.bg, Theme.fg, 0.07) : "transparent"
+                HoverHandler { id: eh; cursorShape: ent.e.dir ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                TapHandler {
+                    onTapped: { fb.selected = ent.e.path; if (ent.e.dir) fb.go(ent.e.path) }
+                    onDoubleTapped: if (!ent.e.dir) fb.act("open", ent.e.path)
+                }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: { fb.selected = ent.e.path; fb.menuEntry = ent.e; itemMenu.popup() } }
+                ToolTip.visible: eh.hovered && fb.view !== "details"
+                ToolTip.delay: 900
+                ToolTip.text: ent.e.mode + "  " + ent.e.user + " " + ent.e.group + "  " + fb.sizeText(ent.e) + "\n" + fb.when(ent.e.mtime) + (ent.e.link ? "\n→ " + ent.e.target : "")
+                // list: icon and name
+                Text {
+                    visible: fb.view === "list"
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0.001
+                    textFormat: Text.StyledText
+                    text: fb.label(ent.e)
+                    color: fb.tint(ent.e)
+                    font.family: fb.fontFamily
+                    font.pointSize: fb.pointSize
+                    font.bold: ent.e.dir || ent.e.exec
+                }
+                // details: ls -l
+                Text {
+                    visible: fb.view === "details"
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0.001
+                    textFormat: Text.StyledText
+                    text: "<span style='color:" + Theme.textDim + "'>" + ent.e.mode + " " + fb.esc(fb.pad(ent.e.user, fb.longW.user)) + " " + fb.esc(fb.pad(ent.e.group, fb.longW.group))
+                          + " " + fb.pad(fb.sizeText(ent.e), fb.longW.size, true) + " " + fb.when(ent.e.mtime) + "</span> "
+                          + "<span style='color:" + fb.tint(ent.e) + "'>" + (ent.e.dir || ent.e.exec ? "<b>" : "") + fb.label(ent.e) + (ent.e.dir || ent.e.exec ? "</b>" : "") + "</span>"
+                          + (ent.e.link ? "<span style='color:" + Theme.textDim + "'> ⇒ " + fb.esc(ent.e.target) + "</span>" : "")
+                    color: Theme.text
+                    font.family: fb.fontFamily
+                    font.pointSize: fb.pointSize
+                }
+                // tiles: a thumbnail or a big icon, the name under it
+                Item {
+                    visible: fb.view === "tiles"
+                    anchors.fill: parent
+                    Image {
+                        id: thumb
+                        visible: ent.e.kind === "image" && status === Image.Ready
+                        x: 6; y: 4
+                        width: parent.width - 12
+                        height: fb.tileW - 8
+                        source: fb.view === "tiles" && ent.e.kind === "image" ? "file://" + ent.e.path : ""
+                        sourceSize.width: 192
+                        sourceSize.height: 192
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectFit
+                    }
+                    Text {
+                        visible: !thumb.visible
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: (fb.tileW - height) / 2 + 0.001
+                        text: fb.icon(ent.e)
+                        color: fb.tint(ent.e)
+                        font.family: "Symbols Nerd Font Mono"
+                        font.pixelSize: fb.tileW * 0.45
+                    }
+                    Text {
+                        y: fb.tileW + 0.001
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        text: ent.e.name + (ent.e.dir ? "/" : "")
+                        elide: Text.ElideMiddle
+                        color: fb.tint(ent.e)
+                        font.family: fb.fontFamily
+                        font.pointSize: fb.pointSize - 1
+                        font.bold: ent.e.dir
+                    }
+                }
+            }
+        }
+    }
+    Text {
+        visible: fb.error !== ""
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        anchors.margins: 4
+        text: fb.error
+        color: fb.ansi(1, "#e06c75")
+        font.pixelSize: 11
+        TapHandler { onTapped: fb.error = "" }
+    }
+
+    // ---- the bar (on hover): view, sort, folders first, hidden ----------
+    HoverHandler { id: fbHover }
+    Rectangle {
+        id: bar
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 2
+        z: 5
+        width: barRow.implicitWidth + 8
+        height: 22
+        radius: 6
+        color: Theme.mix(Theme.bg, Theme.fg, 0.1)
+        border.color: Theme.divider
+        opacity: fbHover.hovered || itemMenu.opened || folderMenu.opened || sortMenu.opened ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+        Row {
+            id: barRow
+            anchors.centerIn: parent
+            spacing: 2
+            component BarItem: Rectangle {
+                property string label
+                property bool on: false
+                property string tip
+                signal clicked()
+                width: bt.implicitWidth + 10
+                height: 18
+                radius: 4
+                color: on ? Theme.mix(Theme.bg, Theme.accent, 0.4) : bh.hovered ? Theme.tabHover : "transparent"
+                Text { id: bt; anchors.centerIn: parent; anchors.verticalCenterOffset: 0.001; text: parent.label; color: Theme.text; font.pixelSize: 11 }
+                HoverHandler { id: bh; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: parent.clicked() }
+                ToolTip.visible: bh.hovered && tip !== ""
+                ToolTip.delay: 600
+                ToolTip.text: tip
+            }
+            BarItem { label: "☰"; tip: "List (as ls)"; on: fb.view === "list"; onClicked: fb.setView("list") }
+            BarItem { label: "≡"; tip: "Details (as ls -l)"; on: fb.view === "details"; onClicked: fb.setView("details") }
+            BarItem { label: "▦"; tip: "Tiles"; on: fb.view === "tiles"; onClicked: fb.setView("tiles") }
+            BarItem { id: sortItem; label: "Sort: " + ({ name: "name", size: "size", date: "date", type: "type" })[fb.sortBy] + (fb.desc ? " ↓" : " ↑"); onClicked: sortMenu.popup(sortItem, 0, sortItem.height + 2) }
+            BarItem { label: " first"; tip: "Folders first"; on: fb.foldersFirst; onClicked: fb.save("folders_first", !fb.foldersFirst) }
+            BarItem { label: ".hidden"; tip: "Show hidden files"; on: fb.showHidden; onClicked: fb.save("hidden", !fb.saved.hidden) }
+        }
+    }
+    SlimMenu {
+        id: sortMenu
+        Repeater {
+            model: [["name", "Name"], ["size", "Size"], ["date", "Date modified"], ["type", "Type"]]
+            delegate: SlimMenuItem {
+                required property var modelData
+                text: modelData[1]
+                checkable: true
+                checked: fb.sortBy === modelData[0]
+                onTriggered: fb.save("sort", modelData[0])
+            }
+        }
+        SlimMenuItem { text: "Descending"; checkable: true; checked: fb.desc; onTriggered: fb.save("desc", !fb.desc) }
+    }
+
+    // ---- right click: an entry's actions ----------------------------------
+    TextEdit { id: clip; visible: false }
+    function copyText(t) { clip.text = t; clip.selectAll(); clip.copy() }
+    property var held: null             // {op: "copy"|"move", path}: for Paste
+    SlimMenu {
+        id: itemMenu
+        readonly property var e: fb.menuEntry || ({ dir: false, path: "", name: "" })
+        SlimMenuItem { text: itemMenu.e.dir ? "Open" : "Open"; onTriggered: fb.openEntry(itemMenu.e) }
+        SlimMenuItem { text: "Open with the desktop"; visible: itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.act("open", itemMenu.e.path) }
+        SlimMenuItem { text: itemMenu.e.dir ? "Go here in the shell (cd)" : "Run it"; visible: itemMenu.e.dir || itemMenu.e.exec; height: visible ? implicitHeight : 0
+            onTriggered: fb.commandRequested(itemMenu.e.dir ? "cd " + fb.shq(itemMenu.e.path) : fb.shq(itemMenu.e.path)) }
+        SlimMenuItem { text: "Insert the path in the editor"; onTriggered: fb.insertRequested(fb.shq(itemMenu.e.path) + " ") }
+        SlimMenuItem { text: "Copy the path"; onTriggered: fb.copyText(itemMenu.e.path) }
+        SlimMenuItem { text: "Copy the name"; onTriggered: fb.copyText(itemMenu.e.name) }
+        SlimMenuItem { text: "Copy"; onTriggered: fb.held = { op: "copy", path: itemMenu.e.path } }
+        SlimMenuItem { text: "Cut"; onTriggered: fb.held = { op: "move", path: itemMenu.e.path } }
+        SlimMenuItem { text: "Paste into it"; visible: itemMenu.e.dir && fb.held !== null; height: visible ? implicitHeight : 0
+            onTriggered: { if (fb.act(fb.held.op, fb.held.path, itemMenu.e.path) && fb.held.op === "move") fb.held = null } }
+        SlimMenuItem { text: "Rename…"; onTriggered: fb.ask("rename", itemMenu.e) }
+        SlimMenuItem { text: "Duplicate"; onTriggered: fb.act("duplicate", itemMenu.e.path) }
+        SlimMenuItem { text: "Move to the trash"; onTriggered: fb.act("trash", itemMenu.e.path) }
+        SlimMenuItem { text: "Show in the file manager"; onTriggered: fb.act("reveal", itemMenu.e.path) }
+        SlimMenuItem { text: "Properties"; onTriggered: { fb.propsFor = itemMenu.e; props.open() } }
+    }
+    // ---- right click on nothing: the folder's actions ---------------------
+    SlimMenu {
+        id: folderMenu
+        SlimMenuItem { text: "New folder…"; onTriggered: fb.ask("mkdir", null) }
+        SlimMenuItem { text: "New file…"; onTriggered: fb.ask("touch", null) }
+        SlimMenuItem { text: "Paste"; enabled: fb.held !== null; onTriggered: { if (fb.act(fb.held.op, fb.held.path, fb.dir) && fb.held.op === "move") fb.held = null } }
+        SlimMenuItem { text: "List (as ls)"; checkable: true; checked: fb.view === "list"; onTriggered: fb.setView("list") }
+        SlimMenuItem { text: "Details (as ls -l)"; checkable: true; checked: fb.view === "details"; onTriggered: fb.setView("details") }
+        SlimMenuItem { text: "Tiles"; checkable: true; checked: fb.view === "tiles"; onTriggered: fb.setView("tiles") }
+        SlimMenuItem { text: "Sort…"; onTriggered: sortMenu.popup() }
+        SlimMenuItem { text: "Folders first"; checkable: true; checked: fb.foldersFirst; onTriggered: fb.save("folders_first", !fb.foldersFirst) }
+        SlimMenuItem { text: "Show hidden files"; checkable: true; checked: fb.showHidden; onTriggered: fb.save("hidden", !fb.saved.hidden) }
+        SlimMenuItem { text: "Refresh"; onTriggered: fb.refresh++ }
+        SlimMenuItem { text: "Go here in the shell (cd)"; onTriggered: fb.commandRequested("cd " + fb.shq(fb.dir)) }
+        SlimMenuItem { text: "Open in the file manager"; onTriggered: fb.act("open", fb.dir) }
+        SlimMenuItem { text: "Copy the folder's path"; onTriggered: fb.copyText(fb.dir) }
+    }
+
+    // ---- a name to ask for (rename, new folder, new file) ------------------
+    property string asking: ""
+    property var askFor: null
+    function ask(op, e) {
+        asking = op
+        askFor = e
+        nameField.text = op === "rename" ? e.name : op === "mkdir" ? "New Folder" : "New File.txt"
+        namePop.open()
+        // (The name without its extension selected, as file managers do.)
+        Qt.callLater(() => { nameField.forceActiveFocus(); const dot = nameField.text.lastIndexOf("."); nameField.select(0, op !== "mkdir" && dot > 0 && !(e && e.dir) ? dot : nameField.text.length) })
+    }
+    Popup {
+        id: namePop
+        anchors.centerIn: parent
+        width: 300
+        padding: 10
+        topPadding: 10.001   // (off the half pixel: 130% scale smears native text there)
+        modal: true
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        contentItem: Column {
+            spacing: 6
+            Text { text: ({ rename: "Rename", mkdir: "New folder", touch: "New file" })[fb.asking] || ""; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold }
+            TextField {
+                id: nameField
+                width: parent.width
+                color: Theme.text
+                font.pixelSize: 12
+                background: Rectangle { radius: 5; color: Theme.bg; border.color: nameField.activeFocus ? Theme.accent : Theme.divider }
+                Keys.onEscapePressed: namePop.close()
+                onAccepted: {
+                    const ok = fb.asking === "rename" ? fb.act("rename", fb.askFor.path, text) : fb.act(fb.asking, fb.dir, text)
+                    if (ok) namePop.close()
+                }
+            }
+            Text { visible: fb.error !== ""; width: parent.width; wrapMode: Text.Wrap; text: fb.error; color: fb.ansi(1, "#e06c75"); font.pixelSize: 11 }
+        }
+    }
+    // ---- properties ------------------------------------------------------
+    property var propsFor: null
+    Popup {
+        id: props
+        anchors.centerIn: parent
+        width: 360
+        padding: 12
+        topPadding: 12.001   // (off the half pixel: 130% scale smears native text there)
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        contentItem: Column {
+            spacing: 4
+            Text { text: fb.propsFor ? fb.label(fb.propsFor) : ""; textFormat: Text.StyledText; color: fb.propsFor ? fb.tint(fb.propsFor) : Theme.text; font.family: fb.fontFamily; font.pointSize: fb.pointSize + 1; font.bold: true }
+            Repeater {
+                model: fb.propsFor ? [["Where", fb.propsFor.path], ["Kind", fb.propsFor.kind + (fb.propsFor.link ? " (link to " + fb.propsFor.target + ")" : "")],
+                                      ["Size", fb.sizeText(fb.propsFor) + (fb.propsFor.dir ? "" : " (" + fb.propsFor.size + " bytes)")],
+                                      ["Modified", fb.when(fb.propsFor.mtime)], ["Permissions", fb.propsFor.mode], ["Owner", fb.propsFor.user + " : " + fb.propsFor.group]] : []
+                delegate: Row {
+                    required property var modelData
+                    spacing: 8
+                    Text { width: 80; text: modelData[0]; color: Theme.textDim; font.pixelSize: 11 }
+                    Text { width: 250; text: modelData[1]; wrapMode: Text.WrapAnywhere; color: Theme.text; font.family: fb.fontFamily; font.pixelSize: 11 }
+                }
+            }
+        }
+    }
+}

@@ -77,6 +77,9 @@ pub struct Settings {
     pub prompt_layout: Vec<String>,
     // -- Each widget's look: {name: {fg, bg, pill, prefix, suffix, bold}}.
     pub prompt_styles: serde_json::Value,
+    // -- The notebook's file browser (ls cards), as last set: {view, sort,
+    // desc, folders_first, hidden}.
+    pub file_browser: serde_json::Value,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
     // -- Snippets (Edit > Snippets): text sent as if typed.
@@ -124,6 +127,7 @@ impl Default for Settings {
             prompt_segments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"].map(String::from).to_vec(),
             prompt_layout: Vec::new(),
             prompt_styles: serde_json::json!({}),
+            file_browser: serde_json::json!({}),
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),

@@ -66,6 +66,7 @@ fn main() {
         QmlFile::from("qml/SlimMenu.qml"),
         QmlFile::from("qml/SlimMenuItem.qml"),
         QmlFile::from("qml/StarshipLine.qml"),
+        QmlFile::from("qml/FileBrowser.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");

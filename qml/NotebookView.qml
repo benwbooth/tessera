@@ -533,6 +533,8 @@ FocusScope {
         let first = w[0]
         try { const al = JSON.parse(view ? view.aliases : "{}"); if (al[first]) first = al[first].trim().split(/\s+/)[0] } catch (e) {}
         if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && w.slice(1).filter(a => !a.startsWith("-")).length <= 1) return "files"
+        // (cd, then the folder it went to.)
+        if (["cd", "pushd", "z", "zi"].indexOf(w[0]) >= 0 && w.length <= 2) return "files"
         if ((first === "env" || first === "printenv") && w.length === 1) return "env"
         if (c === "export" || c === "export -p" || c === "declare -x" || c === "typeset -x") return "env"
         return ""
@@ -1597,124 +1599,36 @@ FocusScope {
             }
         }
     }
-    // ---- ls: the folder's entries, to click (live: the folder as it is now) ----
+    // ---- ls and cd: the folder, to browse (FileBrowser.qml) ----
     function localPath(p) { let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x }
     function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
-    function humanSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " K" : n < 1073741824 ? (n / 1048576).toFixed(1) + " M" : (n / 1073741824).toFixed(1) + " G" }
-    property var fileMenuFor: null
-    SlimMenu {
-        id: fileMenu
-        SlimMenuItem { text: nb.fileMenuFor && nb.fileMenuFor.dir ? "Go to this folder" : "Open"; onTriggered: nb.openEntry(nb.fileMenuFor) }
-        SlimMenuItem { text: "List it"; visible: !!nb.fileMenuFor && nb.fileMenuFor.dir; height: visible ? implicitHeight : 0; onTriggered: nb.commandRequested("ls " + nb.shq(nb.fileMenuFor.path)) }
-        SlimMenuItem { text: "Insert the path in the editor"; onTriggered: nb.insertRequested(nb.shq(nb.fileMenuFor.path) + " ") }
-        SlimMenuItem { text: "Copy the path"; onTriggered: { clipHelper.text = nb.fileMenuFor.path; clipHelper.selectAll(); clipHelper.copy() } }
-        SlimMenuItem { text: "Open with the desktop"; onTriggered: nb.commandRequested("xdg-open " + nb.shq(nb.fileMenuFor.path)) }
-        SlimMenuItem { text: "Move to the trash"; onTriggered: nb.commandRequested("gio trash " + nb.shq(nb.fileMenuFor.path)) }
-    }
-    TextEdit { id: clipHelper; visible: false }
-    function openEntry(e) {
-        if (!e) return
-        if (e.dir) commandRequested("cd " + shq(e.path))
-        else if (e.exec) insertRequested(shq(e.path) + " ")
-        else commandRequested("xdg-open " + shq(e.path))
-    }
     Component {
         id: filesView
-        Item {
-            id: fv
+        FileBrowser {
             readonly property var src: parent
-            readonly property var args: (src.command || "").trim().split(/\s+/).slice(1)
-            readonly property bool all: args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all")
-            readonly property bool longList: args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test((src.command || "").trim().split(/\s+/)[0])
-            readonly property string dir: {
+            readonly property var words: (src.command || "").trim().split(/\s+/)
+            readonly property bool isCd: ["cd", "pushd", "z", "zi"].indexOf(words[0]) >= 0
+            readonly property var args: words.slice(1)
+            controller: nb.controller
+            themeData: nb.themeData
+            fontFamily: nb.fontFamily
+            pointSize: nb.outputPointSize
+            rowHeight: nb.outputRow > 0 ? nb.outputRow : 18
+            flagAll: !isCd && args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all")
+            flagLong: !isCd && (args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test(words[0]))
+            startDir: {
                 const base = nb.localPath(src.cwd)
+                const home = nb.controller ? nb.controller.homeDir() : "~"
                 const a = args.find(x => !x.startsWith("-"))
+                // (cd: where it went. With no folder, home; "cd -" and z: wherever the shell is now.)
+                if (isCd && (!a || a === "-" || words[0] === "z" || words[0] === "zi")) return a || words[0] !== "cd" ? nb.shellDir : home
                 if (!a) return base
-                const p = a.replace(/^~(?=\/|$)/, nb.controller ? nb.controller.homeDir() : "~")
+                const p = a.replace(/^['"]|['"]$/g, "").replace(/^~(?=\/|$)/, home)
                 return p.startsWith("/") ? p : base + "/" + p
             }
-            readonly property var entries: { src.tick; try { return JSON.parse(nb.controller.listDir(dir, all)) } catch (e) { return [] } }
-            implicitHeight: Math.max(24, (longList ? table.contentHeight : grid.contentHeight) + 8)
-            function icon(e) { return e.dir ? "" : e.exec ? "" : e.link ? "" : "" }
-            function tint(e) { return e.dir ? nb.ansi(4, "#61afef") : e.exec ? nb.ansi(2, "#98c379") : e.link ? nb.ansi(6, "#56b6c2") : e.hidden ? Theme.textDim : Theme.text }
-            component Entry: Rectangle {
-                id: en
-                required property var modelData
-                radius: 4
-                color: eh.hovered ? Theme.tabHover : "transparent"
-                HoverHandler { id: eh; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: nb.openEntry(en.modelData) }
-                TapHandler { acceptedButtons: Qt.RightButton; onTapped: { nb.fileMenuFor = en.modelData; fileMenu.popup() } }
-                ToolTip.visible: eh.hovered
-                ToolTip.delay: 700
-                ToolTip.text: modelData.path + (modelData.dir ? "" : "\n" + nb.humanSize(modelData.size)) + "\n" + new Date(modelData.mtime * 1000).toLocaleString()
-            }
-            GridView {
-                id: grid
-                visible: !fv.longList
-                anchors.fill: parent
-                anchors.topMargin: 4
-                interactive: false
-                clip: true
-                cellWidth: Math.max(140, Math.min(260, width / Math.max(1, Math.floor(width / 200))))
-                cellHeight: 22
-                model: fv.longList ? [] : fv.entries
-                delegate: Entry {
-                    width: grid.cellWidth - 4
-                    height: 20
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.verticalCenterOffset: 0.001
-                        x: 6
-                        width: parent.width - 10
-                        elide: Text.ElideMiddle
-                        textFormat: Text.StyledText
-                        text: "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + fv.icon(modelData) + "</span>&nbsp;" + modelData.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + (modelData.dir ? "/" : "")
-                        color: fv.tint(modelData)
-                        font.family: nb.fontFamily
-                        font.pixelSize: 12
-                        font.weight: modelData.dir ? Font.DemiBold : Font.Normal
-                        renderType: Text.NativeRendering
-                    }
-                }
-            }
-            ListView {
-                id: table
-                visible: fv.longList
-                anchors.fill: parent
-                anchors.topMargin: 4
-                interactive: false
-                clip: true
-                model: fv.longList ? fv.entries : []
-                delegate: Entry {
-                    width: table.width
-                    height: 20
-                    Row {
-                        anchors.verticalCenter: parent.verticalCenter
-                        x: 6
-                        spacing: 14
-                        Text { topPadding: 0.001; width: 76; horizontalAlignment: Text.AlignRight; text: modelData.dir ? "" : nb.humanSize(modelData.size); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
-                        Text { topPadding: 0.001; width: 130; text: Qt.formatDateTime(new Date(modelData.mtime * 1000), "yyyy-MM-dd hh:mm"); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
-                        Text { topPadding: 0.001;
-                            textFormat: Text.StyledText
-                            text: "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + fv.icon(modelData) + "</span>&nbsp;" + modelData.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + (modelData.dir ? "/" : "")
-                            color: fv.tint(modelData)
-                            font.family: nb.fontFamily
-                            font.pixelSize: 12
-                            font.weight: modelData.dir ? Font.DemiBold : Font.Normal
-                            renderType: Text.NativeRendering
-                        }
-                    }
-                }
-            }
-            Text { topPadding: 0.001;
-                visible: fv.entries.length === 0
-                y: 4
-                text: "(empty)"
-                color: Theme.textDim
-                font.pixelSize: 12
-                renderType: Text.NativeRendering
-            }
+            refresh: src.tick ? src.tick.length : 0
+            onCommandRequested: (c) => nb.commandRequested(c)
+            onInsertRequested: (t) => nb.insertRequested(t)
         }
     }
 
