@@ -38,6 +38,8 @@ Item {
     // Has the keys (the terminal or its editor).
     readonly property bool focused: term.activeFocus || compose.editing
     signal editorKeysPicked(string keys)
+    signal markdownStylePicked(string style)
+    property string markdownStyle: "rich"  // Markdown cells: "rich" or "text"
     property bool preferEditor: true   // the keys go to the editor (not the terminal) when the pane gets them
     property bool inputEditor: false
     property string editorKeys: "emacs"
@@ -296,6 +298,8 @@ Item {
         view: term
         controller: pane.controller
         fontFamily: term.fontFamily
+        markdownStyle: pane.markdownStyle
+        onMarkdownStylePicked: (m) => pane.markdownStylePicked(m)
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onRerun: (cmd) => { compose.setText(cmd); compose.focusEditor() }
     }

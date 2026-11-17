@@ -56,6 +56,9 @@ pub struct Settings {
     // ("emacs", "vi", "vscode").
     pub input_editor: bool,
     pub editor_keys: String,
+    // -- Notebook: Markdown output as a page ("rich") or as styled
+    // monospace text, the way a terminal Markdown viewer shows it ("text").
+    pub markdown_style: String,
     // -- Tessera's prompt above the editor, and its segments in order ("|"
     // puts the rest on the right).
     pub editor_prompt: bool,
@@ -106,6 +109,7 @@ impl Default for Settings {
             undo_close_seconds: 5,
             input_editor: true,
             editor_keys: "emacs".into(),
+            markdown_style: "rich".into(),
             editor_prompt: true,
             prompt_engine: "auto".into(),
             prompt_config: "own".into(),

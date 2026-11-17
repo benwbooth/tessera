@@ -162,27 +162,40 @@ pub fn strip_frame(text: &str) -> String {
         Some((!h.is_empty(), rest.to_string()))
     };
     let rules = lines.iter().filter(|l| is_rule(l)).count();
-    let framed = lines.iter().filter(|l| !is_rule(l) && !l.trim().is_empty()).all(|l| gutter(l).is_some());
-    if rules < 2 || !framed {
+    // (Mostly framed: lines outside it, like an error for a missing file, go.)
+    let others: Vec<&&str> = lines.iter().filter(|l| !is_rule(l) && !l.trim().is_empty()).collect();
+    let in_frame = others.iter().filter(|l| gutter(l).is_some()).count();
+    if rules < 2 || in_frame < 2 || in_frame * 10 < others.len() * 7 {
         return text.to_string();
     }
     let numbered = lines.iter().any(|l| gutter(l).is_some_and(|g| g.0));
     let mut out: Vec<String> = Vec::new();
-    let mut header = true;
+    let mut after_rule = false;
+    let mut joinable = false;
     for l in &lines {
-        if is_rule(l) || l.trim().is_empty() {
+        if is_rule(l) {
+            after_rule = true;
+            joinable = false;
             continue;
         }
-        let Some((num, body)) = gutter(l) else { continue };
-        if header && !num && (body.starts_with("File:") || body.starts_with("STDIN") || body.starts_with("Size:")) {
+        if l.trim().is_empty() {
             continue;
         }
-        header = false;
+        let Some((num, body)) = gutter(l) else {
+            joinable = false;
+            continue;
+        };
+        // (Each file's header, between two rules.)
+        if after_rule && !num && (body.starts_with("File:") || body.starts_with("STDIN") || body.starts_with("Size:")) {
+            continue;
+        }
+        after_rule = false;
         // (Numbered: a line without a number continues the one before.)
-        if numbered && !num && !out.is_empty() {
+        if numbered && !num && joinable {
             out.last_mut().unwrap().push_str(&body);
         } else {
             out.push(body);
+            joinable = true;
         }
     }
     out.join("\n") + "\n"
@@ -208,6 +221,12 @@ mod tests {
         assert_eq!(strip_frame("plain | text\n"), "plain | text\n");
         let html = markdown_html(&strip_frame(framed));
         assert!(html.contains("<h1>Title</h1>") && html.contains("<li>item</li>"), "{html}");
+    }
+
+    #[test]
+    fn bat_frame_with_an_error() {
+        let t = "[bat error]: 'cat': No such file or directory (os error 2)\n\u{2500}\u{2500}\u{2500}\u{2500}\u{252c}\u{2500}\u{2500}\n    \u{2502} File: README.md\n\u{2500}\u{2500}\u{2500}\u{2500}\u{253c}\u{2500}\u{2500}\n   1 \u{2502} # Kog\n   2 \u{2502} \n   3 \u{2502} Some text\n\u{2500}\u{2500}\u{2500}\u{2500}\u{2534}\u{2500}\u{2500}\n";
+        assert_eq!(strip_frame(t), "# Kog\n\nSome text\n");
     }
 
     #[test]

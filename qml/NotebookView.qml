@@ -16,6 +16,8 @@ Rectangle {
     property var themeData: ({})
     property string fontFamily: "monospace"
     signal rerun(string command)
+    property string markdownStyle: "rich"  // Markdown cells by default: "rich" or "text"
+    signal markdownStylePicked(string style)
 
     color: Theme.bg
 
@@ -23,6 +25,9 @@ Rectangle {
     property var cells: []
     property var kinds: ({})           // id -> chosen view (the dropdown)
     property var aiKinds: ({})         // id -> what the AI made of it
+    property var heights: ({})         // id -> output height the user dragged to
+    property int expandedId: -1        // the cell filling the window, if any
+    function setHeight(id, h) { const m = Object.assign({}, heights); if (h > 0) m[id] = h; else delete m[id]; heights = m }
     function reload() {
         if (!view) return
         try { cells = JSON.parse(view.cells()) } catch (e) { cells = [] }
@@ -61,12 +66,12 @@ Rectangle {
     }
 
     readonly property var viewNames: [["auto", "Auto"], ["terminal", "Terminal"], ["text", "Plain text"], ["json", "JSON"], ["csv", "Table (CSV)"], ["tsv", "Table (TSV)"],
-                                      ["html", "HTML"], ["markdown", "Markdown"], ["svg", "SVG"], ["diff", "Diff"], ["image", "Image"]]
+                                      ["html", "HTML"], ["markdown", "Markdown (rich)"], ["mdtext", "Markdown (text)"], ["svg", "SVG"], ["diff", "Diff"], ["image", "Image"]]
     function shownKind(c) {
         const chosen = kinds[c.id]
         if (chosen && chosen !== "auto") return chosen
-        if (c.kind !== "") return c.kind
-        return aiKinds[c.id] || "terminal"
+        const k = c.kind !== "" ? c.kind : aiKinds[c.id] || "terminal"
+        return k === "markdown" && markdownStyle === "text" ? "mdtext" : k
     }
     // The terminal's palette colors in a cell's HTML (var(--vt-palette-N)).
     function paletteColor(n) {
@@ -105,6 +110,7 @@ Rectangle {
             readonly property string kind: nb.shownKind(c)
             property bool collapsed: false
             width: list.width - 12
+            readonly property bool expanded: nb.expandedId === c.id
             height: header.height + (collapsed ? 0 : body.height + 12)
             radius: 8
             color: Theme.mix(Theme.bg, Theme.fg, 0.035)
@@ -152,6 +158,19 @@ Rectangle {
                 Chip { base: cell.color; label: "Copy"; tip: "Copy the output"
                        onClicked: { clip.text = nb.view.cellOutput(cell.c.id, "text"); clip.selectAll(); clip.copy() } }
                 Chip { base: cell.color; label: "\u21bb"; tip: "Put the command back in the editor"; onClicked: nb.rerun(cell.c.command) }
+                Chip {
+                    base: cell.color
+                    label: cell.expanded ? "\u2921 Restore" : "\u2922 Expand"
+                    tip: cell.expanded ? "Back to its own size" : "Fill the window with this output"
+                    onClicked: {
+                        nb.expandedId = cell.expanded ? -1 : cell.c.id
+                        cell.collapsed = false
+                        const i = cell.index
+                        Qt.callLater(() => list.positionViewAtIndex(i, ListView.Beginning))
+                    }
+                }
+                // (Test hook: TESSERA_TEST_EXPAND_CELL fills the window with the first cell.)
+                Timer { interval: 2500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("EXPAND_CELL") !== ""; onTriggered: nb.expandedId = cell.c.id }
                 // (Test hook: TESSERA_TEST_OPEN_KIND_MENU opens the first cell's menu.)
                 Timer { interval: 1500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("OPEN_KIND_MENU") !== ""; onTriggered: kindMenu.popup(kindChip, 0, kindChip.height + 2) }
                 SlimMenu {
@@ -163,7 +182,11 @@ Rectangle {
                             text: modelData[1]
                             checkable: true
                             checked: (nb.kinds[cell.c.id] || "auto") === modelData[0]
-                            onTriggered: { const k = Object.assign({}, nb.kinds); k[cell.c.id] = modelData[0]; nb.kinds = k }
+                            onTriggered: {
+                                const k = Object.assign({}, nb.kinds); k[cell.c.id] = modelData[0]; nb.kinds = k
+                                // (Rich or text Markdown becomes the default too.)
+                                if (modelData[0] === "markdown" || modelData[0] === "mdtext") nb.markdownStylePicked(modelData[0] === "mdtext" ? "text" : "rich")
+                            }
                         }
                     }
                 }
@@ -176,7 +199,11 @@ Rectangle {
                 anchors.top: header.bottom
                 x: 10
                 width: parent.width - 20
-                height: loader.item ? Math.min(loader.item.implicitHeight, 460) : 0
+                // Its natural size up to 460 px, or what it was dragged to, or the
+                // whole window when expanded.
+                readonly property real natural: loader.item ? loader.item.implicitHeight : 0
+                height: cell.expanded ? Math.max(80, list.height - header.height - 12)
+                      : nb.heights[cell.c.id] > 0 ? nb.heights[cell.c.id] : Math.min(natural, 460)
                 clip: true
                 Loader {
                     id: loader
@@ -184,7 +211,7 @@ Rectangle {
                     // (Re-read while the command runs.)
                     property int tick: nb.tick
                     sourceComponent: cell.kind === "html" ? htmlView
-                                   : cell.kind === "markdown" ? markdownView
+                                   : cell.kind === "markdown" || cell.kind === "mdtext" ? markdownView
                                    : cell.kind === "image" ? imageView
                                    : ["json", "csv", "tsv", "svg"].indexOf(cell.kind) >= 0 ? richView
                                    : cell.kind === "diff" ? diffView
@@ -273,7 +300,7 @@ Rectangle {
                     id: richView
                     RichViewer {
                         embedded: true
-                        maxHeight: 460
+                        maxHeight: 100000
                         kind: cell.kind
                         text: { loader.tick; return nb.view ? nb.view.cellOutput(cell.c.id, "text") : "" }
                         fontFamily: nb.fontFamily
@@ -283,7 +310,7 @@ Rectangle {
                 Component {
                     id: imageView
                     Item {
-                        implicitHeight: Math.min(460, pic.sourceSize.height > 0 ? pic.sourceSize.height * Math.min(1, body.width / pic.sourceSize.width) : 100) + 8
+                        implicitHeight: (pic.sourceSize.height > 0 ? pic.sourceSize.height * Math.min(1, body.width / pic.sourceSize.width) : 100) + 8
                         Image {
                             id: pic
                             anchors.fill: parent
@@ -309,7 +336,30 @@ Rectangle {
                         settings.localContentCanAccessFileUrls: true
                         settings.localContentCanAccessRemoteUrls: true
                         settings.showScrollBars: true
+                        readonly property bool asText: cell.kind === "mdtext"
+                        onAsTextChanged: show()
+                        // Monospace, the way a terminal Markdown viewer draws it: headings
+                        // keep their #s in color, bullets, a bar for quotes.
+                        function textCss() {
+                            const c = (x) => String(x), a = nb.themeData.ansi || []
+                            const col = (n, d) => c(a[n] || d)
+                            return "body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:13px/1.45 '" + nb.fontFamily + "',monospace;margin:8px 10px}"
+                                + "h1,h2,h3,h4,h5,h6{font-size:1em;font-weight:bold;margin:1em 0 .4em}"
+                                + "h1{color:" + col(5, "#c678dd") + "}h2{color:" + col(4, "#61afef") + "}h3{color:" + col(6, "#56b6c2") + "}h4,h5,h6{color:" + col(2, "#98c379") + "}"
+                                + "h1::before{content:'# '}h2::before{content:'## '}h3::before{content:'### '}h4::before{content:'#### '}h5::before{content:'##### '}h6::before{content:'###### '}"
+                                + "h1{text-decoration:underline}p{margin:.5em 0}"
+                                + "a{color:" + col(4, "#61afef") + "}strong{color:" + c(Theme.fg) + "}em{color:" + col(3, "#e5c07b") + "}"
+                                + "code{font:inherit;color:" + col(3, "#e5c07b") + "}"
+                                + "pre{background:" + c(Theme.field) + ";padding:6px 10px;margin:.5em 0;overflow:auto}pre code{color:" + c(Theme.text) + "}"
+                                + "ul{list-style:none;padding-left:2ch}ul>li::before{content:'\\2022';color:" + col(4, "#61afef") + ";display:inline-block;width:2ch;margin-left:-2ch}"
+                                + "ol{padding-left:3ch}li{margin:.1em 0}"
+                                + "blockquote{margin:.5em 0;padding-left:1ch;color:" + c(Theme.textDim) + ";border-left:2px solid " + col(8, "#5c6370") + "}"
+                                + "table{border-collapse:collapse}th,td{border:1px solid " + c(Theme.divider) + ";padding:0 1ch}th{color:" + c(Theme.fg) + "}"
+                                + "img{max-width:100%}hr{border:0;border-top:1px dashed " + c(Theme.divider) + "}"
+                                + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
+                        }
                         function css() {
+                            if (asText) return textCss()
                             const c = (x) => String(x)
                             return "body{background:" + c(Theme.bg) + ";color:" + c(Theme.text) + ";font:14px/1.6 'Noto Sans','Segoe UI',system-ui,sans-serif;margin:12px 18px;max-width:900px}"
                                 + "a{color:" + c(Theme.accent) + "}h1,h2{border-bottom:1px solid " + c(Theme.divider) + ";padding-bottom:.25em}"
@@ -321,16 +371,25 @@ Rectangle {
                                 + "img{max-width:100%}hr{border:0;border-top:1px solid " + c(Theme.divider) + "}"
                                 + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
                         }
+                        // Relative pictures are found next to the file shown (cat dir/README.md).
+                        function baseDir() {
+                            const cwd = cell.c.cwd || "/"
+                            const f = (cell.c.command || "").trim().split(/\s+/).pop()
+                            if (!/\.(md|markdown|mdx)$/i.test(f) || f.indexOf("/") < 0) return cwd
+                            let d = f.replace(/\/[^/]*$/, "")
+                            if (d.startsWith("~")) d = (nb.controller ? nb.controller.homeDir() : "") + d.slice(1)
+                            return d.startsWith("/") ? d : cwd + "/" + d
+                        }
                         function show() {
                             const body = nb.view ? nb.view.cellOutput(cell.c.id, "markdown") : ""
                             loadHtml("<!doctype html><html><head><meta charset='utf-8'><style>" + css() + "</style></head><body>" + body + "</body></html>",
-                                     "file://" + (cell.c.cwd || "/") + "/")
+                                     "file://" + baseDir() + "/")
                         }
                         Component.onCompleted: show()
                         Connections { target: loader; function onTickChanged() { if (!cell.c.done) md.show() } }
                         onLoadingChanged: (r) => {
                             if (r.status === WebEngineView.LoadSucceededStatus)
-                                runJavaScript("Math.ceil(document.documentElement.scrollHeight)", (h) => { if (h > 0) md.implicitHeight = Math.max(60, Math.min(520, h)) })
+                                runJavaScript("Math.ceil(document.documentElement.scrollHeight)", (h) => { if (h > 0) md.implicitHeight = Math.max(60, h) })
                         }
                         onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
                         onNavigationRequested: (req) => {
@@ -353,11 +412,37 @@ Rectangle {
                         Component.onCompleted: loadHtml(nb.view ? nb.view.cellOutput(cell.c.id, "text") : "", "about:blank")
                         onLoadingChanged: (r) => {
                             if (r.status === WebEngineView.LoadSucceededStatus)
-                                runJavaScript("Math.ceil(document.body ? document.body.getBoundingClientRect().height + 24 : 0)", (h) => { if (h > 0) web.implicitHeight = Math.max(60, Math.min(460, h)) })
+                                runJavaScript("Math.ceil(document.body ? document.body.getBoundingClientRect().height + 24 : 0)", (h) => { if (h > 0) web.implicitHeight = Math.max(60, h) })
                         }
                         onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
                     }
                 }
+            }
+
+            // ---- the bottom edge: drag to resize, double-click for its own size ----
+            Item {
+                id: grip
+                visible: !cell.collapsed
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 10
+                property real startHeight: 0
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 36; height: 3; radius: 1.5
+                    color: gripDrag.active ? Theme.accent : Theme.divider
+                    opacity: gripHover.hovered || gripDrag.active ? 1 : 0.5
+                }
+                HoverHandler { id: gripHover; cursorShape: Qt.SizeVerCursor }
+                DragHandler {
+                    id: gripDrag
+                    target: null
+                    xAxis.enabled: false
+                    cursorShape: Qt.SizeVerCursor
+                    onActiveChanged: if (active) { grip.startHeight = body.height; if (cell.expanded) nb.expandedId = -1 }
+                    onTranslationChanged: if (active) nb.setHeight(cell.c.id, Math.max(48, Math.round(grip.startHeight + translation.y)))
+                }
+                TapHandler { onDoubleTapped: { nb.setHeight(cell.c.id, 0); if (cell.expanded) nb.expandedId = -1 } }
             }
         }
 

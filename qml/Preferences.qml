@@ -668,6 +668,16 @@ Window {
                                 }
                                 Item { Layout.fillWidth: true }
                             }
+                            Row2 {
+                                label: "Markdown in the notebook"
+                                hint: "Rich: a page, with proportional type and pictures. Text: monospace, the way a terminal Markdown viewer draws it. Each cell's view menu can switch."
+                                ChoiceBox {
+                                    values: [["rich", "Rich page"], ["text", "Terminal text"]]
+                                    value: prefs.settings.markdown_style || "rich"
+                                    onChosen: (v) => prefs.setG("markdown_style", v)
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
                             ToggleRow {
                                 label: "Prompt above the editor"
                                 hint: "Folder, git, status and more, drawn by Tessera above the editor."

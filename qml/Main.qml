@@ -120,6 +120,8 @@ ApplicationWindow {
             commandHistory: win.commandHistory
             controller: controller
             onEditorKeysPicked: (k) => win.setSetting("editor_keys", k)
+            markdownStyle: win.settings.markdown_style || "rich"
+            onMarkdownStylePicked: (m) => win.setSetting("markdown_style", m)
             dimInactive: win.settings.dim_inactive
             dimAmount: win.settings.dim_amount
             showTitle: win.settings.pane_titles
@@ -214,6 +216,8 @@ ApplicationWindow {
         if (props.profileName === undefined) props.profileName = settings.default_profile
         const p = paneComp.createObject(null, props)
         p.host = host
+        // (Terminal or notebook is kept with the layout.)
+        p.viewModeChanged.connect(function() { if (startupDone) layoutSaver.restart() })
         p.view.activeFocusChanged.connect(function() {
             if (p.view.activeFocus) {
                 activeView = p.view
@@ -718,7 +722,7 @@ ApplicationWindow {
     function serializeNode(n, withIds) {
         if (n.view !== undefined)
             return { t: "pane", profile: n.profileName, cwd: n.view.pwd || n.view.cwd, cmd: n.commandOverride,
-                     id: withIds ? n.view.sessionId : "", w: n.width, h: n.height }
+                     mode: n.viewMode, id: withIds ? n.view.sessionId : "", w: n.width, h: n.height }
         const c = []
         for (let i = 0; i < n.count; ++i) c.push(serializeNode(n.itemAt(i), withIds))
         return { t: n.orientation === Qt.Horizontal ? "h" : "v", c: c, w: n.width, h: n.height }
@@ -741,7 +745,7 @@ ApplicationWindow {
     function buildSavedTree(t, node, alive, recreate) {
         function build(n, host) {
             if (n.t === "pane") {
-                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "" }
+                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal" }
                 if (alive) {
                     if (n.id && alive[n.id]) {
                         props.attachId = n.id
