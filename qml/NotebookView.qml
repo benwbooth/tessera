@@ -1432,6 +1432,7 @@ FocusScope {
             function focusIn() { edit.forceActiveFocus(); if (edit.cursorPosition === 0 && edit.length > 0) edit.cursorPosition = edit.length }
             TextEdit {
                 id: edit
+                property bool keepsBacktab: true   // (Shift+Tab outdents here)
                 x: 10; y: 7
                 width: parent.width - 20
                 text: cells.get(ed.cellIndex) ? cells.get(ed.cellIndex).source : ""

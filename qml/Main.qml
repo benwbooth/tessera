@@ -85,6 +85,15 @@ ApplicationWindow {
     Binding { target: Theme; property: "term"; value: win.themeFor(win.activeProfile) }
 
     function setSetting(key, value) { controller.setSetting(key, JSON.stringify(value)) }
+    // Shift+Tab from anywhere that doesn't keep it (include/bootstrap.h
+    // TesseraBacktab): the active pane's input editor, when it's up.
+    function backToEditor() {
+        const p = activePane
+        if (!p || !p.editorOn) return false
+        p.preferEditor = true
+        p.compose.focusEditor()
+        return true
+    }
     function setProfile(name, key, value) { return controller.setProfile(name, key, JSON.stringify(value)) }
 
     function optionsFor(p) {
@@ -1614,7 +1623,7 @@ ApplicationWindow {
             }
         })
     }
-    // Test hook: TESSERA_TEST_KEYS="term|editor:key,key,..." (tab, bs, enter,
+    // Test hook: TESSERA_TEST_KEYS="term|editor|away:key,key,..." (tab, bs, enter,
     // lshift, rshift, or text), one key every 150 ms after the window settles.
     Timer {
         id: keysTestTimer
@@ -1623,7 +1632,8 @@ ApplicationWindow {
         onTriggered: {
             const spec = controller.testEnv("KEYS")
             const [target, list] = spec.split(":")
-            if (activePane) { if (target === "term") { activePane.preferEditor = false; activePane.view.forceActiveFocus() } else activePane.compose.focusEditor() }
+            if (target === "away") rootLayout.forceActiveFocus()   // (somewhere that doesn't keep Shift+Tab)
+            else if (activePane) { if (target === "term") { activePane.preferEditor = false; activePane.view.forceActiveFocus() } else activePane.compose.focusEditor() }
             keys = list.split(",")
             keyStep.start()
         }

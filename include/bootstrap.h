@@ -11,6 +11,7 @@
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPointingDevice>
 #include <QtQml/qqml.h>
+#include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 #include <QtWidgets/QApplication>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
@@ -28,6 +29,29 @@
 #endif
 
 inline void tessera_webengine_initialize() { QtWebEngineQuick::initialize(); }
+
+// Shift+Tab: back to the pane's input editor from wherever the keys are (a
+// notebook card, a Markdown or HTML view, which would take it to move their
+// own focus), caught at the window before anything below it. What has a
+// use for it keeps it: an item with keepsBacktab (the editor itself, a
+// cell's editor, the terminal). The window's backToEditor() decides.
+class TesseraBacktab : public QObject {
+public:
+    using QObject::QObject;
+    bool eventFilter(QObject* o, QEvent* e) override
+    {
+        if (e->type() != QEvent::KeyPress) return false;
+        auto* w = qobject_cast<QQuickWindow*>(o);
+        if (!w) return false;
+        auto* k = static_cast<QKeyEvent*>(e);
+        if (k->key() != Qt::Key_Backtab || (k->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) return false;
+        for (QQuickItem* i = w->activeFocusItem(); i; i = i->parentItem())
+            if (i->property("keepsBacktab").toBool()) return false;
+        QVariant done;
+        if (!QMetaObject::invokeMethod(w, "backToEditor", Q_RETURN_ARG(QVariant, done))) return false;
+        return done.toBool();
+    }
+};
 
 inline void tessera_create_app(const QString& session)
 {
@@ -49,6 +73,7 @@ inline void tessera_create_app(const QString& session)
     // QApplication (not QGuiApplication): Qt.labs.platform menus then use the
     // desktop's own menus (Breeze on KDE, with theme icons and shortcuts).
     new QApplication(argc, argv);
+    qApp->installEventFilter(new TesseraBacktab(qApp));
     QApplication::setApplicationName(QStringLiteral("tessera"));
     QApplication::setApplicationDisplayName(QStringLiteral("Tessera"));
     QApplication::setOrganizationName(QStringLiteral("tessera"));

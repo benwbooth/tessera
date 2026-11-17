@@ -572,6 +572,7 @@ Rectangle {
 
         TextEdit {
             id: edit
+            property bool keepsBacktab: true   // (its own Shift+Tab: to the terminal, or outdent)
             width: flick.width
             wrapMode: TextEdit.Wrap
             textFormat: TextEdit.PlainText

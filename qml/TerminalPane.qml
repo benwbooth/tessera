@@ -94,6 +94,7 @@ Item {
     }
 
     TerminalView {
+        property bool keepsBacktab: true    // (it decides: the editor at a prompt, else the program)
         id: term
         anchors.top: titleBar.bottom
         anchors.left: parent.left
