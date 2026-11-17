@@ -190,6 +190,7 @@ FocusScope {
     property int current: 0
     property int nextId: 1
     property var kinds: ({})            // cid -> chosen view (the dropdown)
+    property var fileViews: ({})        // cid -> an ls card's own view, sort, ... (FileBrowser)
     property var aiKinds: ({})          // cid -> what the AI made of it
     property var heights: ({})          // cid -> output height the user dragged to
     property string expandedId: ""      // the cell filling the window, if any
@@ -624,6 +625,7 @@ FocusScope {
         linked = l
         retired = keepTids ? (t.retired || []) : []
         kinds = t.kinds || {}
+        fileViews = t.fileViews || {}
         heights = t.heights || {}
         pickKernel(metadata.kernelspec)
     }
@@ -638,7 +640,7 @@ FocusScope {
         if (path === "") {
             // The pane's own notebook: what was kept with its session, then the
             // terminal's cells.
-            cells.clear(); linked = ({}); retired = []; kinds = ({}); heights = ({}); metadata = ({})
+            cells.clear(); linked = ({}); retired = []; kinds = ({}); fileViews = ({}); heights = ({}); metadata = ({})
             fileStart = 0
             pickKernel(null)
             loadStore()
@@ -750,6 +752,7 @@ FocusScope {
         if (languageVersion !== "" && !shellKernel) md.language_info.version = languageVersion
         const t = {}
         if (Object.keys(kinds).length) t.kinds = kinds
+        if (Object.keys(fileViews).length) t.fileViews = fileViews
         if (Object.keys(heights).length) t.heights = heights
         if (kept && retired.length) t.retired = retired.slice(-500)
         if (Object.keys(t).length) md.tessera = t
@@ -1299,6 +1302,7 @@ FocusScope {
                     property var outs: cell.outs
                     property string cwd: cell.cwd
                     property string command: cell.source
+                    property string cid: cell.cid
                     property bool running: cell.running
                     readonly property string kind: cell.kind
                     sourceComponent: !cell.fromTerm ? jupyterOutputs
@@ -1682,6 +1686,8 @@ FocusScope {
                 return p.startsWith("/") ? p : base + "/" + p
             }
             refresh: src.tick ? src.tick.length : 0
+            kept: nb.fileViews[src.cid] || null
+            onKeptChanged2: (c) => { const m = Object.assign({}, nb.fileViews); m[src.cid] = c; nb.fileViews = m; nb.touch() }
             onCommandRequested: (c) => nb.commandRequested(c)
             onInsertRequested: (t) => nb.insertRequested(t)
         }

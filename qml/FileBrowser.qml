@@ -25,20 +25,29 @@ Item {
     signal commandRequested(string command)
     signal insertRequested(string text)
 
-    // ---- the settings (kept), and this card's own view of them ----------
-    readonly property var saved: { if (!controller) return {}; controller.revision; try { return JSON.parse(controller.settings()).file_browser || {} } catch (e) { return {} } }
-    property string viewOver: ""        // this card's choice (else the flags, else what was last chosen)
-    readonly property string view: viewOver !== "" ? viewOver : flagLong ? "details" : (saved.view || "list")
-    readonly property string sortBy: saved.sort || "name"
-    readonly property bool desc: !!saved.desc
-    readonly property bool foldersFirst: !!saved.folders_first
-    readonly property bool showHidden: flagAll || !!saved.hidden
+    // ---- this card's view: its own (the notebook keeps it, by card), first
+    // taken from the last one chosen (settings: file_browser). A change is
+    // this card's, and the default for the next card. ----------------------
+    readonly property var saved: { if (!controller) return {}; try { return JSON.parse(controller.settings()).file_browser || {} } catch (e) { return {} } }
+    property var kept: null             // the notebook's copy of this card's choices
+    signal keptChanged2(var choices)    // (to the notebook, to keep)
+    property var mine: ({})
+    Component.onCompleted: mine = kept ? Object.assign({}, kept) : Object.assign({}, saved, { view: undefined })
+    readonly property string view: mine.view ? mine.view : flagLong ? "details" : (saved.view || "list")
+    readonly property string sortBy: mine.sort || "name"
+    readonly property bool desc: !!mine.desc
+    readonly property bool foldersFirst: !!mine.folders_first
+    readonly property bool showHidden: flagAll || !!mine.hidden
     function save(k, v) {
+        const m = Object.assign({}, mine)
+        m[k] = v
+        mine = m
+        keptChanged2(m)
         const s = Object.assign({}, saved)
         s[k] = v
         if (controller) controller.setSetting("file_browser", JSON.stringify(s))
     }
-    function setView(v) { viewOver = v; save("view", v) }
+    function setView(v) { save("view", v) }
 
     // ---- where it is ----------------------------------------------------
     property string dir: startDir
@@ -407,7 +416,7 @@ Item {
             BarItem { label: "▦"; tip: "Tiles"; on: fb.view === "tiles"; onClicked: fb.setView("tiles") }
             BarItem { id: sortItem; label: "Sort: " + ({ name: "name", size: "size", date: "date", type: "type" })[fb.sortBy] + (fb.desc ? " ↓" : " ↑"); onClicked: sortMenu.popup(sortItem, 0, sortItem.height + 2) }
             BarItem { label: " first"; tip: "Folders first"; on: fb.foldersFirst; onClicked: fb.save("folders_first", !fb.foldersFirst) }
-            BarItem { label: ".hidden"; tip: "Show hidden files"; on: fb.showHidden; onClicked: fb.save("hidden", !fb.saved.hidden) }
+            BarItem { label: ".hidden"; tip: "Show hidden files"; on: fb.showHidden; onClicked: fb.save("hidden", !fb.mine.hidden) }
         }
     }
     SlimMenu {
@@ -460,7 +469,7 @@ Item {
         SlimMenuItem { text: "Tiles"; checkable: true; checked: fb.view === "tiles"; onTriggered: fb.setView("tiles") }
         SlimMenuItem { text: "Sort…"; onTriggered: sortMenu.popup() }
         SlimMenuItem { text: "Folders first"; checkable: true; checked: fb.foldersFirst; onTriggered: fb.save("folders_first", !fb.foldersFirst) }
-        SlimMenuItem { text: "Show hidden files"; checkable: true; checked: fb.showHidden; onTriggered: fb.save("hidden", !fb.saved.hidden) }
+        SlimMenuItem { text: "Show hidden files"; checkable: true; checked: fb.showHidden; onTriggered: fb.save("hidden", !fb.mine.hidden) }
         SlimMenuItem { text: "Refresh"; onTriggered: fb.refresh++ }
         SlimMenuItem { text: "Go here in the shell (cd)"; onTriggered: fb.commandRequested("cd " + fb.shq(fb.dir)) }
         SlimMenuItem { text: "Open in the file manager"; onTriggered: fb.act("open", fb.dir) }
@@ -530,16 +539,18 @@ Item {
         }
     }
     // (Test hook: TESSERA_TEST_FB=go:<name> | menu:<name> | folder | tiles | details | bar.)
+    // (…@<folder> only for the card of that folder; …#<ms> after that long.)
     Timer {
-        interval: 2500
-        running: fb.controller !== null && fb.controller.testEnv("FB") !== ""
+        readonly property string spec: fb.controller ? fb.controller.testEnv("FB") : ""
+        interval: spec.indexOf("#") >= 0 ? parseInt(spec.split("#")[1]) : 2500
+        running: spec !== "" && (spec.indexOf("@") < 0 || fb.startDir === spec.split("@")[1].split("#")[0])
         onTriggered: {
-            const t = fb.controller.testEnv("FB"), arg = t.substring(t.indexOf(":") + 1)
+            const t = spec.split("@")[0].split("#")[0], arg = t.substring(t.indexOf(":") + 1)
             const e = fb.entries.find(x => x.name === arg)
             if (t.startsWith("go:") && e) fb.openEntry(e)
             else if (t.startsWith("menu:") && e) { fb.selected = e.path; fb.menuEntry = e; itemMenu.popup(fb, 40, 30) }
             else if (t === "folder") folderMenu.popup(fb, 40, 30)
-            else if (t === "tiles" || t === "details" || t === "list") fb.viewOver = t
+            else if (t === "tiles" || t === "details" || t === "list") fb.setView(t)
         }
     }
 }
