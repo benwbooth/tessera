@@ -43,8 +43,8 @@ impl Zmtp {
         };
         stream.set_nodelay(true)?;
         let mut z = Zmtp { stream };
-        // Greeting: signature, version 3.0, NULL mechanism, client, filler.
-        let mut g = vec![0xFFu8, 0, 0, 0, 0, 0, 0, 0, 1, 0x7F, 3, 0];
+        // Greeting: signature, version 3.1, NULL mechanism, client, filler.
+        let mut g = vec![0xFFu8, 0, 0, 0, 0, 0, 0, 0, 1, 0x7F, 3, 1];
         let mut mech = b"NULL".to_vec();
         mech.resize(20, 0);
         g.extend_from_slice(&mech);
@@ -78,8 +78,16 @@ impl Zmtp {
             }
         }
         if socket_type == "SUB" {
-            // Subscribe to everything (3.0 style: a message starting with 1).
-            z.write_frame(&[1], false, false)?;
+            // Subscribe to everything: the SUBSCRIBE command (ZMTP 3.1: zmq.rs,
+            // in Deno, takes only this) and, for a 3.0 peer, a message
+            // starting with 1.
+            if peer[11] >= 1 {
+                let mut cmd = vec![9u8];
+                cmd.extend_from_slice(b"SUBSCRIBE");
+                z.write_frame(&cmd, false, true)?;
+            } else {
+                z.write_frame(&[1], false, false)?;
+            }
         }
         Ok(z)
     }
@@ -532,6 +540,10 @@ pub struct Kernel {
     /// It has answered kernel_info: it runs code now.
     ready: AtomicBool,
     stdin: Mutex<Option<Zmtp>>,
+    /// Requests answered, oldest first (forgotten after 200).
+    answered: Mutex<std::collections::VecDeque<String>>,
+    /// The cell its last run was for (its own stdout goes there).
+    running: Arc<Mutex<String>>,
     /// The header of the input request being answered.
     asking: Mutex<Option<Vec<u8>>>,
     /// The environment and folder it has (as started, then as synced).
@@ -589,7 +601,7 @@ impl Kernel {
         if let Some(env) = &shell_env {
             cmd.env_clear().envs(env.iter().cloned());
         }
-        cmd.args(&argv[1..]).envs(&spec_env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        cmd.args(&argv[1..]).envs(&spec_env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         if !cwd.is_empty() && Path::new(cwd).is_dir() {
             cmd.current_dir(cwd);
         }
@@ -601,6 +613,27 @@ impl Kernel {
         }
         let mut child = cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", argv[0]))?;
         // Its complaints, for when it dies before answering.
+        // What it writes to its own stdout (C's printf under xeus, Deno's
+        // console): into the cell running then, as its stdout.
+        let running: Arc<Mutex<String>> = Arc::default();
+        if let Some(mut out) = child.stdout.take() {
+            let (running, sink) = (running.clone(), sink.clone());
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = out.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    let cell = running.lock().unwrap().clone();
+                    if std::env::var_os("TESSERA_KERNEL_DEBUG").is_some() {
+                        eprintln!("kernel stdout ({cell}): {:?}", String::from_utf8_lossy(&buf[..n]));
+                    }
+                    if !cell.is_empty() {
+                        sink(json!({"type": "output", "cell": cell, "output": {"output_type": "stream", "name": "stdout", "text": String::from_utf8_lossy(&buf[..n])}}));
+                    }
+                }
+            });
+        }
         let stderr_tail: Arc<Mutex<String>> = Arc::default();
         if let Some(mut err) = child.stderr.take() {
             let tail = stderr_tail.clone();
@@ -626,7 +659,9 @@ impl Kernel {
             shell: Mutex::new(None),
             control: Mutex::new(None),
             stdin: Mutex::new(None),
+            answered: Mutex::default(),
             asking: Mutex::new(None),
+            running,
             child: Mutex::new(Some(child)),
             pending: Arc::default(),
             spec,
@@ -738,7 +773,19 @@ impl Kernel {
         let s2 = sink.clone();
         std::thread::spawn(move || {
             while let Ok(parts) = iopub.recv() {
-                let Some((ty, parent, c)) = k.signer.parse(&parts) else { continue };
+                if std::env::var_os("TESSERA_KERNEL_DEBUG").is_some() {
+                    eprintln!("iopub {} parts: {:?}", parts.len(), parts.iter().map(|p| String::from_utf8_lossy(&p[..p.len().min(80)]).to_string()).collect::<Vec<_>>());
+                }
+                let Some((ty, parent, c)) = k.signer.parse(&parts) else {
+                    if std::env::var_os("TESSERA_KERNEL_DEBUG").is_some() {
+                        let at = parts.iter().position(|p| p == b"<IDS|MSG>").unwrap_or(0);
+                        let r = &parts[at + 1..];
+                        if r.len() >= 5 {
+                            eprintln!("iopub refused: sig {} want {} header {}", String::from_utf8_lossy(&r[0]), k.signer.sign(&[&r[1], &r[2], &r[3], &r[4]]), String::from_utf8_lossy(&r[1]));
+                        }
+                    }
+                    continue;
+                };
                 let cell = k.pending.lock().unwrap().get(&parent).cloned();
                 match ty.as_str() {
                     "status" => {
@@ -771,7 +818,18 @@ impl Kernel {
         std::thread::spawn(move || {
             while let Ok(parts) = shell.recv() {
                 let Some((ty, parent, c)) = k.signer.parse(&parts) else { continue };
-                let Some(what) = k.pending.lock().unwrap().remove(&parent) else { continue };
+                // (Kept a while after the reply: some kernels, Deno's, send
+                // output after it.)
+                let Some(what) = k.pending.lock().unwrap().get(&parent).cloned() else { continue };
+                {
+                    let mut done = k.answered.lock().unwrap();
+                    done.push_back(parent.clone());
+                    while done.len() > 200 {
+                        if let Some(old) = done.pop_front() {
+                            k.pending.lock().unwrap().remove(&old);
+                        }
+                    }
+                }
                 match ty.as_str() {
                     "kernel_info_reply" => {
                         if !k.ready.swap(true, Ordering::SeqCst) {
@@ -803,6 +861,7 @@ impl Kernel {
     }
 
     pub fn execute(&self, cell: &str, code: &str) -> bool {
+        *self.running.lock().unwrap() = cell.to_string();
         self.send_shell(
             "execute_request",
             json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": true, "stop_on_error": true}),
@@ -1407,7 +1466,7 @@ mod tests {
                 "zsh" => "print hi-zsh",
                 "powershell" => "Write-Output hi-ps",
                 "xonsh" => "echo hi-xonsh",
-                "c" => "#include <stdio.h>\nprintf(\"hi-c\\n\"); fflush(stdout);",
+                "c" => "#include <stdio.h>\nprintf(\"hi-c\\n\"); fflush(stdout);\n6*7",
                 "cpp" => "#include <iostream>\nstd::cout << \"hi-cpp\" << std::endl;",
                 "r" => "cat(\"hi-r\\n\")",
                 "ruby" => "puts \"hi-ruby\"",
@@ -1466,6 +1525,9 @@ mod tests {
                     let mut text = String::new();
                     let mut status = String::from("timeout");
                     while let Ok(v) = rx.recv_timeout(Duration::from_secs(600)) {
+                        if std::env::var_os("TESSERA_KERNEL_DEBUG").is_some() {
+                            eprintln!("{name} event: {v}");
+                        }
                         if v["type"] == "output" {
                             let o = &v["output"];
                             text.push_str(o["text"].as_str().unwrap_or(""));
