@@ -1643,6 +1643,25 @@ ApplicationWindow {
             if (activePane) console.log("key test: after " + k + " termFocus=" + activePane.view.activeFocus + " editorFocus=" + activePane.compose.editing + " focusItem=" + win.activeFocusItem + " editor=" + JSON.stringify(activePane.compose.text) + " ghost=" + JSON.stringify(activePane.compose.ghost) + " dropdown=" + activePane.compose.compOpen)
         }
     }
+    // (Test hook: TESSERA_TEST_FLICKER=<dir>: a new tab, then back to the
+    // first, each followed by 12 frames grabbed into <dir>.)
+    property int flickFrames: -1
+    property string flickTag: ""
+    Timer {
+        id: flickerTestTimer
+        interval: 9000
+        property int step: 0
+        onTriggered: {
+            if (step === 0) { win.flickTag = "new"; win.flickFrames = 0; newTab({}) ; interval = 3000; step = 1; start() }
+            else if (step === 1) { win.flickTag = "back"; win.flickFrames = 0; currentTab = 0; interval = 3000; step = 2; start() }
+            else if (step === 2) { win.flickTag = "fwd"; win.flickFrames = 0; currentTab = 1 }
+        }
+    }
+    onFrameSwapped: {
+        if (flickFrames < 0 || flickFrames >= 12) return
+        const n = flickFrames++, tag = flickTag
+        rootLayout.grabToImage(r => r.saveToFile(controller.testEnv("FLICKER") + "/" + tag + "-" + (n < 10 ? "0" : "") + n + ".png"))
+    }
     // (Test hook: TESSERA_TEST_DRAG="x1,y1,x2,y2,mods[,right]" drags (or right-clicks) after 12 s.)
     Timer {
         id: dragTestTimer
@@ -2210,6 +2229,7 @@ ApplicationWindow {
         if (controller.testEnv("RICH") !== "") richTestTimer.start()
         if (controller.testEnv("NOTEBOOK") !== "") notebookTestTimer.start()
         if (controller.testEnv("DRAG") !== "") dragTestTimer.start()
+        if (controller.testEnv("FLICKER") !== "") flickerTestTimer.start()
         if (controller.openDoc() !== "") Qt.callLater(openNotebook, controller.openDoc())
         if (controller.testEnv("KEYS") !== "") keysTestTimer.start()
         if (controller.daemonState() === "outdated") daemonTimer.start()

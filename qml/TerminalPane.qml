@@ -295,7 +295,7 @@ Item {
         visible: pane.docPath !== ""
         enabled: visible
         path: pane.docPath
-        controller: visible ? pane.controller : null
+        controller: pane.docPath !== "" ? pane.controller : null
         term: term
         fontFamily: term.fontFamily
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }

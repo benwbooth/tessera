@@ -342,6 +342,8 @@ void TerminalItem::itemChange(ItemChange change, const ItemChangeData& value)
     if (change == ItemSceneChange || change == ItemDevicePixelRatioHasChanged) {
         updateMetrics();
     }
+    // (After the layouts around it have settled: a moment after it's shown.)
+    if (change == ItemVisibleHasChanged && value.boolValue && m_resizeWhenShown) m_resizeTimer->start();
     QQuickItem::itemChange(change, value);
 }
 
@@ -522,6 +524,14 @@ void TerminalItem::handleEvents()
 void TerminalItem::resizeGrid()
 {
     if (!m_session) return;
+    // Hidden (another tab): its size there means nothing (layouts around it
+    // collapse while hidden), and a resize makes the shell redraw its prompt,
+    // which flickers when the tab comes back. Done when it's shown instead.
+    if (!isVisible()) {
+        m_resizeWhenShown = true;
+        return;
+    }
+    m_resizeWhenShown = false;
     const int cols = qMax(2, int((width() * m_dpr - 2 * m_pad) / m_cw));
     const int rows = qMax(1, int((height() * m_dpr - 2 * m_pad) / m_ch));
     m_session->resize(uint16_t(cols), uint16_t(rows), uint32_t(m_cw), uint32_t(m_ch));
