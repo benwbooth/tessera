@@ -129,7 +129,20 @@ FocusScope {
         for (let i = 0; i < cells.count; ++i) if (cells.get(i).cid === cid) return i
         return -1
     }
-    function kernelEvent(e) {
+    // Kernels asking for input (input(), readline): cid -> {prompt, password, key}.
+    property var asking: ({})
+    function setAsking(cid, a) { const m = Object.assign({}, asking); if (a) m[cid] = a; else delete m[cid]; asking = m }
+    function answer(cid, text) {
+        const a = asking[cid]
+        if (!a) return
+        controller.jupyterInput(a.key, text)
+        // (What was asked and answered stays in the output, as Jupyter shows it.)
+        const i = indexOf(cid)
+        if (i >= 0) addOutput(i, { output_type: "stream", name: "stdout", text: (a.prompt || "") + (a.password ? "\u2022\u2022\u2022\u2022" : text) + "\n" })
+        setAsking(cid, null)
+    }
+    function kernelEvent(e, fromKey) {
+        if (e.type === "input") { setAsking(e.cell, { prompt: e.prompt || "", password: !!e.password, key: fromKey || key }); return }
         if (e.type === "status") {
             kernelState = e.state
             if (e.message !== undefined) kernelMessage = e.message
@@ -147,6 +160,7 @@ FocusScope {
                 else cells.setProperty(i, "outputs", "[]")
             } else if (e.type === "output") addOutput(i, e.output)
             else if (e.type === "done") {
+                if (asking[e.cell]) setAsking(e.cell, null)
                 cells.setProperty(i, "running", false)
                 if (e.count !== null && e.count !== undefined) cells.setProperty(i, "count", e.count)
                 cells.setProperty(i, "ended", Date.now())
@@ -381,7 +395,7 @@ FocusScope {
                 for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).lang === l && cells.get(i).tid <= 0) cells.setProperty(i, "running", false)
                 setLang(l, { queue: [] })
             }
-        } else if (e.type !== "info" && e.type !== "complete") kernelEvent(e)
+        } else if (e.type !== "info" && e.type !== "complete") kernelEvent(e, langKey(l))
     }
     function stopLangKernels() { for (const l in langKernels) controller.jupyterStop(langKey(l)); langKernels = ({}) }
     // Code in another language from the pane's editor: a cell in that
@@ -1053,6 +1067,7 @@ FocusScope {
             required property bool editing
             required property bool hideOutput
             required property string lang
+            readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
             readonly property bool code: type !== "markdown"
@@ -1064,7 +1079,7 @@ FocusScope {
             readonly property bool plainMd: !code && !editing
             width: list.width - 12
             height: (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
-                     + (hasOutput ? (hideOutput ? 22 : body.height + 12) : 4))
+                     + (hasOutput ? (hideOutput ? 22 : body.height + 12) : 4) + (ask ? askBox.height + 6 : 0))
             radius: 8
             color: plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
             border.color: selected && list.activeFocus ? Theme.mix(Theme.divider, Theme.accent, 0.55)
@@ -1295,6 +1310,40 @@ FocusScope {
                                    : cell.kind === "files" ? filesView
                                    : cell.kind === "env" ? envView
                                    : cell.kind === "text" ? plainView : termView
+                }
+            }
+
+            // ---- the kernel asking for input: its prompt, a field, Enter sends ----
+            Row {
+                id: askBox
+                visible: cell.ask !== null
+                anchors.top: body.visible ? body.bottom : header.bottom
+                anchors.topMargin: 4
+                x: 12
+                width: parent.width - 24
+                height: visible ? 26 : 0
+                spacing: 6
+                Text {
+                    id: askPrompt
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0.001
+                    text: cell.ask ? (cell.ask.prompt || (cell.ask.password ? "Password:" : "Input:")) : ""
+                    color: Theme.text
+                    font.family: nb.fontFamily
+                    font.pointSize: nb.outputPointSize
+                }
+                TextField {
+                    id: askField
+                    width: Math.max(160, parent.width - askPrompt.width - 12)
+                    height: 24
+                    echoMode: cell.ask && cell.ask.password ? TextInput.Password : TextInput.Normal
+                    color: Theme.text
+                    font.family: nb.fontFamily
+                    font.pointSize: nb.outputPointSize
+                    placeholderText: "Enter sends it"
+                    background: Rectangle { radius: 4; color: Theme.bg; border.color: askField.activeFocus ? Theme.accent : Theme.divider }
+                    onVisibleChanged: if (visible) { text = ""; Qt.callLater(forceActiveFocus) }
+                    onAccepted: nb.answer(cell.cid, text)
                 }
             }
 

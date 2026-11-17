@@ -460,6 +460,9 @@ pub mod ffi {
         /// Bring a kernel up to a shell's environment and folder (src/jupyter.rs sync).
         #[qinvokable]
         fn jupyter_sync(self: &Controller, key: &QString, pid: i32, cwd: &QString) -> bool;
+        /// Answer a kernel's input request (jupyter_event {"type": "input"}).
+        #[qinvokable]
+        fn jupyter_input(self: &Controller, key: &QString, value: &QString) -> bool;
         #[qinvokable]
         fn jupyter_execute(self: &Controller, key: &QString, cell: &QString, code: &QString) -> bool;
         #[qinvokable]
@@ -794,6 +797,10 @@ impl ffi::Controller {
             let _ = qt.queue(move |c| c.jupyter_event(qs(&k), qs(&j)));
         });
         crate::jupyter::start(&key.to_string(), &spec.to_string(), &local_path(cwd), pid.max(0) as u32, sink);
+    }
+
+    fn jupyter_input(&self, key: &ffi::QString, value: &ffi::QString) -> bool {
+        crate::jupyter::input(&key.to_string(), &value.to_string())
     }
 
     fn jupyter_sync(&self, key: &ffi::QString, pid: i32, cwd: &ffi::QString) -> bool {

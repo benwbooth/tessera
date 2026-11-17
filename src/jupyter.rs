@@ -24,6 +24,12 @@ pub struct Zmtp {
 impl Zmtp {
     /// Connect and greet as `socket_type` ("DEALER", "SUB").
     pub fn connect(port: u16, socket_type: &str, wait: Duration) -> std::io::Result<Zmtp> {
+        Self::connect_as(port, socket_type, wait, b"")
+    }
+
+    /// The same, with a DEALER identity: the shell and stdin sockets share
+    /// one, so the kernel's input requests come to the stdin socket.
+    pub fn connect_as(port: u16, socket_type: &str, wait: Duration, identity: &[u8]) -> std::io::Result<Zmtp> {
         let start = Instant::now();
         let stream = loop {
             match TcpStream::connect(("127.0.0.1", port)) {
@@ -61,7 +67,7 @@ impl Zmtp {
         };
         prop(&mut body, "Socket-Type", socket_type.as_bytes());
         if socket_type == "DEALER" {
-            prop(&mut body, "Identity", b"");
+            prop(&mut body, "Identity", identity);
         }
         z.write_frame(&body, false, true)?;
         // Their READY (a command frame).
@@ -209,16 +215,28 @@ impl Signer {
 
     /// A message ready to send; returns its id too.
     fn message(&self, msg_type: &str, content: Value) -> (String, Vec<Vec<u8>>) {
+        self.reply(msg_type, content, b"{}")
+    }
+
+    /// A message in answer to another (its header as the parent).
+    fn reply(&self, msg_type: &str, content: Value, parent_header: &[u8]) -> (String, Vec<Vec<u8>>) {
         let id = random_hex(16);
         let header = json!({"msg_id": id, "username": "tessera", "session": self.session, "date": iso_now(),
                             "msg_type": msg_type, "version": "5.3"})
         .to_string()
         .into_bytes();
-        let parent = b"{}".to_vec();
+        let parent = parent_header.to_vec();
         let meta = b"{}".to_vec();
         let content = content.to_string().into_bytes();
         let sig = self.sign(&[&header, &parent, &meta, &content]);
         (id, vec![b"<IDS|MSG>".to_vec(), sig.into_bytes(), header, parent, meta, content])
+    }
+
+    /// A received message's own header (raw), if it's signed right.
+    fn header_of(&self, parts: &[Vec<u8>]) -> Option<Vec<u8>> {
+        let at = parts.iter().position(|p| p == b"<IDS|MSG>")?;
+        let rest = &parts[at + 1..];
+        (rest.len() >= 5).then(|| rest[1].clone())
     }
 
     /// (msg_type, parent msg_id, content) of a received message, if it's signed right.
@@ -513,6 +531,9 @@ pub struct Kernel {
     gone: Arc<AtomicBool>,
     /// It has answered kernel_info: it runs code now.
     ready: AtomicBool,
+    stdin: Mutex<Option<Zmtp>>,
+    /// The header of the input request being answered.
+    asking: Mutex<Option<Vec<u8>>>,
     /// The environment and folder it has (as started, then as synced).
     synced: Mutex<(HashMap<String, String>, String)>,
 }
@@ -604,6 +625,8 @@ impl Kernel {
             signer,
             shell: Mutex::new(None),
             control: Mutex::new(None),
+            stdin: Mutex::new(None),
+            asking: Mutex::new(None),
             child: Mutex::new(Some(child)),
             pending: Arc::default(),
             spec,
@@ -619,6 +642,7 @@ impl Kernel {
             // (Fetched ones download and install the first time.)
             let wait = Duration::from_secs(if k.spec.name.starts_with("tessera-") { 1800 } else { 120 });
             let start = Instant::now();
+            let identity = format!("tessera-{}", random_hex(8)).into_bytes();
             let connect = |port: u16, ty: &str| -> Result<Zmtp, String> {
                 loop {
                     if k.gone.load(Ordering::SeqCst) {
@@ -629,7 +653,7 @@ impl Kernel {
                             return Err(format!("The kernel quit ({st}).\n{}", stderr_tail.lock().unwrap().trim()));
                         }
                     }
-                    match Zmtp::connect(port, ty, Duration::from_millis(500)) {
+                    match Zmtp::connect_as(port, ty, Duration::from_millis(500), &identity) {
                         Ok(z) => return Ok(z),
                         Err(_) if start.elapsed() < wait => continue,
                         Err(e) => return Err(format!("Couldn't reach the kernel: {e}")),
@@ -640,10 +664,14 @@ impl Kernel {
                 let iopub = connect(ports[1], "SUB")?;
                 let shell = connect(ports[0], "DEALER")?;
                 let control = connect(ports[3], "DEALER")?;
+                let stdin = connect(ports[2], "DEALER")?;
                 let shell_reader = shell.try_clone().map_err(|e| e.to_string())?;
+                let stdin_reader = stdin.try_clone().map_err(|e| e.to_string())?;
                 *k.shell.lock().unwrap() = Some(shell);
                 *k.control.lock().unwrap() = Some(control);
+                *k.stdin.lock().unwrap() = Some(stdin);
                 k.spawn_readers(iopub, shell_reader, sink.clone());
+                k.spawn_stdin_reader(stdin_reader, sink.clone());
                 // (Repeated until it answers: the SUB socket may miss the first replies.)
                 for _ in 0..40 {
                     if k.ready.load(Ordering::SeqCst) || k.gone.load(Ordering::SeqCst) {
@@ -679,6 +707,30 @@ impl Kernel {
             }
         });
         Ok(kernel)
+    }
+
+    /// The kernel asking for input (Python's input(), R's readline, ...):
+    /// {"type": "input", cell, prompt, password}; input_reply answers.
+    fn spawn_stdin_reader(self: &Arc<Self>, mut stdin: Zmtp, sink: Sink) {
+        let k = self.clone();
+        std::thread::spawn(move || {
+            while let Ok(parts) = stdin.recv() {
+                let Some((ty, parent, c)) = k.signer.parse(&parts) else { continue };
+                if ty != "input_request" {
+                    continue;
+                }
+                *k.asking.lock().unwrap() = k.signer.header_of(&parts);
+                let cell = k.pending.lock().unwrap().get(&parent).cloned().unwrap_or_default();
+                sink(json!({"type": "input", "cell": cell, "prompt": c["prompt"], "password": c["password"].as_bool().unwrap_or(false)}));
+            }
+        });
+    }
+
+    /// Answer the kernel's input request.
+    pub fn input_reply(&self, value: &str) -> bool {
+        let Some(parent) = self.asking.lock().unwrap().take() else { return false };
+        let (_, parts) = self.signer.reply("input_reply", json!({"value": value}), &parent);
+        self.stdin.lock().unwrap().as_mut().is_some_and(|s| s.send(&parts).is_ok())
     }
 
     fn spawn_readers(self: &Arc<Self>, mut iopub: Zmtp, mut shell: Zmtp, sink: Sink) {
@@ -753,7 +805,7 @@ impl Kernel {
     pub fn execute(&self, cell: &str, code: &str) -> bool {
         self.send_shell(
             "execute_request",
-            json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": false, "stop_on_error": true}),
+            json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": true, "stop_on_error": true}),
             cell,
         )
     }
@@ -1050,6 +1102,11 @@ fn get(key: &str) -> Option<Arc<Kernel>> {
 
 pub fn execute(key: &str, cell: &str, code: &str) -> bool {
     get(key).is_some_and(|k| k.execute(cell, code))
+}
+
+/// Answer a kernel's input request (what was typed).
+pub fn input(key: &str, value: &str) -> bool {
+    get(key).is_some_and(|k| k.input_reply(value))
 }
 
 /// Bring a kernel up to the shell's environment and folder (before a run).
@@ -1441,5 +1498,45 @@ mod tests {
         for h in handles {
             eprintln!("{}", h.join().unwrap_or_else(|_| "panicked".into()));
         }
+    }
+
+    /// A kernel asking for input, answered (Python from Nix): run with --ignored.
+    #[test]
+    #[ignore]
+    fn answers_input() {
+        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        let tx = Mutex::new(tx);
+        let sink: Sink = Arc::new(move |v| {
+            let _ = tx.lock().unwrap().send(v);
+        });
+        let k = Kernel::start("tessera-nix-python", "/tmp", None, sink).unwrap();
+        loop {
+            let v = rx.recv_timeout(Duration::from_secs(600)).expect("up");
+            if v["type"] == "info" {
+                break;
+            }
+        }
+        assert!(k.execute("c1", "x = input('name? '); print('hi', x)"));
+        let mut text = String::new();
+        loop {
+            let v = rx.recv_timeout(Duration::from_secs(60)).expect("event");
+            if v["type"] == "input" {
+                assert_eq!(v["prompt"], "name? ");
+                assert!(k.input_reply("Ben"));
+            }
+            if v["type"] == "output" {
+                text.push_str(v["output"]["text"].as_str().unwrap_or(""));
+            }
+            if v["type"] == "done" {
+                break;
+            }
+        }
+        while let Ok(v) = rx.recv_timeout(Duration::from_millis(800)) {
+            if v["type"] == "output" {
+                text.push_str(v["output"]["text"].as_str().unwrap_or(""));
+            }
+        }
+        k.stop();
+        assert!(text.contains("hi Ben"), "{text:?}");
     }
 }
