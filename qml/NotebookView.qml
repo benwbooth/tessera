@@ -17,7 +17,8 @@ import Tessera.Native
 // Markdown cells sit between them. It opens and saves .ipynb files; one that
 // isn't a file yet is kept with the pane's session.
 //
-// Keys, while editing a cell: Shift+Enter runs it and goes on, Ctrl+Enter runs
+// Keys, while editing a cell (as in the pane's editor): Enter runs it and goes
+// on, a tap of right Shift (or Shift+Enter) is a new line, Ctrl+Enter runs
 // it, Alt+Enter runs it and adds one below, Tab completes (from the kernel),
 // Esc leaves the cell. Between cells: Up/Down (or k/j) move, Enter edits, A/B
 // add above/below, D D deletes (Z brings it back), M/Y make it Markdown/code,
@@ -702,6 +703,11 @@ FocusScope {
         const g = (8 + (n - 232) * 10) / 255
         return Qt.rgba(g, g, g, 1).toString()
     }
+    // Output lines closer together than the font's own spacing (the
+    // terminal's rows are this tight).
+    property int outputLineHeight: 82   // percent
+    function tight(html) { return "<div style=\"line-height:" + outputLineHeight + "%\">" + html + "</div>" }
+    function tightText(t) { return tight("<span style=\"white-space:pre-wrap\">" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</span>") }
     function palette(html) { return html.replace(/var\(--vt-palette-(\d+)\)/g, (m, n) => paletteColor(parseInt(n))) }
     function colored(text) { return controller ? palette(controller.ansiHtml(text)) : "" }
     function shortDir(p) {
@@ -1292,10 +1298,15 @@ FocusScope {
                 }
                 onActiveFocusChanged: if (activeFocus) nb.current = ed.cellIndex
                 Keys.onPressed: (e) => ed.key(e)
+                // (As in the pane's editor: a tap of right Shift is a new line.)
+                Keys.onReleased: (e) => {
+                    if (e.key === Qt.Key_Shift && ed.shiftRight && Date.now() - ed.shiftAt < 450) { ed.newline(); e.accepted = true }
+                    if (e.key === Qt.Key_Shift) ed.shiftRight = false
+                }
                 Text { topPadding: 0.001;
                     visible: edit.text === ""
-                    text: cells.get(ed.cellIndex) && cells.get(ed.cellIndex).type === "markdown" ? "Markdown — Shift+Enter shows it"
-                        : nb.shellKernel ? "A command — Shift+Enter runs it in this pane's shell" : "Code — Shift+Enter runs it"
+                    text: cells.get(ed.cellIndex) && cells.get(ed.cellIndex).type === "markdown" ? "Markdown — Enter shows it, right Shift for a new line"
+                        : nb.shellKernel ? "A command — Enter runs it in this pane's shell, right Shift for a new line" : "Code — Enter runs it, right Shift for a new line"
                     color: Theme.textDim
                     font: edit.font
                 }
@@ -1332,7 +1343,23 @@ FocusScope {
                 if (i + 1 >= cells.count) nb.insertCell(cells.count, "code", true)
                 else nb.focusCell(i + 1, cells.get(i + 1).editing)
             }
+            property bool shiftRight: false
+            property double shiftAt: 0
+            // A new line, indented like this one (more after a ":").
+            function newline() {
+                const before = edit.text.slice(0, edit.cursorPosition)
+                const line = before.slice(before.lastIndexOf("\n") + 1)
+                let ind = indentOf(line)
+                if (lang === "python" && /:\s*$/.test(line)) ind += "    "
+                edit.remove(edit.selectionStart, edit.selectionEnd)
+                edit.insert(edit.cursorPosition, "\n" + ind)
+            }
             function key(e) {
+                // (X11/Wayland keycode 62, Windows 54, macOS 60: right Shift.)
+                if (e.key === Qt.Key_Shift && !e.isAutoRepeat) {
+                    shiftRight = e.nativeScanCode === 62 || e.nativeScanCode === 54 || e.nativeVirtualKey === 60 || e.nativeVirtualKey === 0xffe2
+                    shiftAt = Date.now()
+                } else shiftRight = false
                 const ctrl = e.modifiers & Qt.ControlModifier, shift = e.modifiers & Qt.ShiftModifier, alt = e.modifiers & Qt.AltModifier
                 const enter = e.key === Qt.Key_Return || e.key === Qt.Key_Enter
                 if (comp.visible) {
@@ -1341,19 +1368,12 @@ FocusScope {
                     if (enter || e.key === Qt.Key_Tab) { comp.accept(); e.accepted = true; return }
                     if (e.key === Qt.Key_Escape) { comp.visible = false; e.accepted = true; return }
                 }
-                if (enter && shift) { runAndAdvance(); e.accepted = true }
+                // As in the pane's editor: Enter runs, Shift+Enter (or a tap of
+                // right Shift) is a new line.
+                if (enter && shift) { newline(); e.accepted = true }
                 else if (enter && ctrl) { nb.run(cellIndex); list.forceActiveFocus(); e.accepted = true }
                 else if (enter && alt) { nb.run(cellIndex); nb.insertCell(cellIndex + 1, "code"); e.accepted = true }
-                else if (enter) {
-                    // A new line, indented like this one (more after a ":").
-                    const before = edit.text.slice(0, edit.cursorPosition)
-                    const line = before.slice(before.lastIndexOf("\n") + 1)
-                    let ind = indentOf(line)
-                    if (lang === "python" && /:\s*$/.test(line)) ind += "    "
-                    edit.remove(edit.selectionStart, edit.selectionEnd)
-                    edit.insert(edit.cursorPosition, "\n" + ind)
-                    e.accepted = true
-                } else if (e.key === Qt.Key_Escape) { nb.current = cellIndex; nb.stopEditing(cellIndex); e.accepted = true }
+                else if (enter) { runAndAdvance(); e.accepted = true } else if (e.key === Qt.Key_Escape) { nb.current = cellIndex; nb.stopEditing(cellIndex); e.accepted = true }
                 else if (e.key === Qt.Key_Tab && !ctrl) {
                     const before = edit.text.slice(0, edit.cursorPosition)
                     if (edit.selectedText === "" && /[\w.\]\)'"]$/.test(before) && !nb.shellKernel && nb.kernelUp) comp.ask()
@@ -1471,7 +1491,7 @@ FocusScope {
                 id: tt
                 y: 4
                 textFormat: TextEdit.RichText
-                text: { tf.src.tick; return nb.view ? nb.palette(nb.view.cellOutput(tf.src.tid, "html")) : "" }
+                text: { tf.src.tick; return nb.view ? nb.tight(nb.palette(nb.view.cellOutput(tf.src.tid, "html"))) : "" }
             }
         }
     }
@@ -1710,7 +1730,8 @@ FocusScope {
                 y: 4
                 width: pf.width - 12
                 wrapMode: TextEdit.Wrap
-                text: { pf.src.tick; return nb.view ? nb.view.cellOutput(pf.src.tid, "text") : "" }
+                textFormat: TextEdit.RichText
+                text: { pf.src.tick; return nb.view ? nb.tightText(nb.view.cellOutput(pf.src.tid, "text")) : "" }
             }
         }
     }

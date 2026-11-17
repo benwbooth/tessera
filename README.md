@@ -82,7 +82,7 @@ iTerm2's Cmd shortcuts become Ctrl+Shift.
 | Terminal / notebook view | Ctrl+Shift+J |
 | Editor ⇄ terminal (at a prompt) | Shift+Tab |
 | Open a Jupyter notebook | Ctrl+O (New Jupyter Notebook in the Shell menu) |
-| Notebook cell: run and go on / run / run and add below | Shift+Enter / Ctrl+Enter / Alt+Enter |
+| Notebook cell: run and go on / new line / run / run and add below | Enter / right Shift tap or Shift+Enter / Ctrl+Enter / Alt+Enter |
 | Notebook, between cells | ↑/↓ or j/k move, Enter edits, Esc leaves a cell, A/B add above/below, D D deletes (Z undoes), M/Y Markdown/code, O hides output, Ctrl+S saves |
 | Block (column) selection | Ctrl+Alt+drag in the terminal, Alt+drag in notebook output |
 | Copy / paste | Ctrl+Shift+C / Ctrl+Shift+V (selecting also copies; Shift+Insert or middle click pastes the selection) |
