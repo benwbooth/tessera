@@ -55,3 +55,9 @@ A multi-line editor under the terminal while the shell waits at its prompt
   starship.toml, every module) when it's installed, else built-in segments
   (folder, git, venv, nix-shell, exit status, duration, Kubernetes, AWS,
   gcloud, host, time) chosen and ordered in Preferences › General.
+
+## 6. Notebooks — done
+
+- Terminal as a notebook (Ctrl+Shift+J): a cell per command, resizable and expandable outputs, Markdown rich or as text, cells kept on disk per session.
+- Jupyter `.ipynb`: open, edit, run and save in a pane (`src/jupyter.rs`: kernelspecs, ZMTP 3.0 and signed messages, no Python needed in Tessera itself; `qml/JupyterView.qml`). Kernels: installed ones, Python from Nix, or the pane's shell. Terminal cells export as a Bash notebook.
+- Later: ipywidgets, a variables view, the stdin channel (`input()`), notebook diffs.
