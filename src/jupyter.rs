@@ -401,7 +401,7 @@ const FETCHED: &[Fetched] = &[
     Fetched { name: "tessera-bash", display: "Bash (bash_kernel, Nix)", language: "bash", how: How::PyNix { packages: &["bash-kernel"], runtime: &["bashInteractive"], args: &["-m", "bash_kernel", "-f", CF] }, interrupt_message: false },
     Fetched { name: "tessera-zsh", display: "Zsh (zsh-jupyter-kernel, uv)", language: "zsh", how: How::Uv { pip: &["zsh-jupyter-kernel"], runtime: &["zsh"], args: &["-m", "zsh_jupyter_kernel", "-f", CF] }, interrupt_message: false },
     Fetched { name: "tessera-powershell", display: "PowerShell (powershell_kernel, uv)", language: "powershell", how: How::Uv { pip: &["powershell_kernel", "ipykernel"], runtime: &["powershell"], args: &["-m", "powershell_kernel", "-f", CF] }, interrupt_message: false },
-    Fetched { name: "tessera-xonsh", display: "xonsh (uv)", language: "xonsh", how: How::Uv { pip: &["xonsh[full]", "xontrib-jupyter"], runtime: &[], args: &["-m", "xontrib.jupyter_kernel", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-xonsh", display: "xonsh (uv)", language: "xonsh", how: How::Uv { pip: &["xonsh", "xontrib-jupyter"], runtime: &[], args: &["-m", "xonsh_jupyter.kernel", "-f", CF] }, interrupt_message: false },
     Fetched { name: "tessera-c", display: "C23 (xeus-cpp, Nix)", language: "c", how: How::KernelJson { attr: "xeus-cpp", kernel: "xc23" }, interrupt_message: false },
     Fetched { name: "tessera-cpp", display: "C++23 (xeus-cpp, Nix)", language: "cpp", how: How::KernelJson { attr: "xeus-cpp", kernel: "xcpp23" }, interrupt_message: false },
     Fetched { name: "tessera-r", display: "R (IRkernel, Nix)", language: "r", how: How::R, interrupt_message: false },
