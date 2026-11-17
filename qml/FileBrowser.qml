@@ -154,6 +154,30 @@ Item {
         if (e.dir) go(e.path)
         else act("open", e.path)
     }
+    // ---- drag and drop -----------------------------------------------------
+    // Files dropped here (from this browser, another, or a file manager):
+    // into `into`. From inside Tessera they move, from elsewhere they're
+    // copied; Shift moves, Ctrl copies (the drop's proposed action).
+    function pathOf(u) { let p = u.toString().replace(/^file:\/\/[^/]*/, ""); try { p = decodeURIComponent(p) } catch (e) {} return p }
+    function dropInto(into, drop) {
+        if (!drop.hasUrls) return
+        const internal = drop.source !== null && drop.source !== undefined
+        const move = drop.proposedAction === Qt.MoveAction || (internal && drop.proposedAction !== Qt.CopyAction)
+        let done = 0
+        for (const u of drop.urls) {
+            const p = pathOf(u)
+            if (p === "" || p === into || p.replace(/\/[^/]+$/, "") === into) continue
+            if (act(move ? "move" : "copy", p, into)) done++
+        }
+        drop.accept(move ? Qt.MoveAction : Qt.CopyAction)
+        if (done) refresh++
+    }
+    property string dropOn: ""          // the folder a drag is over
+    DropArea {
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onDropped: (drop) => fb.dropInto(fb.dir, drop)
+    }
     function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
 
     // ---- the path bar (once away from where it started) -----------------
@@ -240,6 +264,23 @@ Item {
                 radius: 3
                 color: sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : eh.hovered ? Theme.mix(Theme.bg, Theme.fg, 0.07) : "transparent"
                 HoverHandler { id: eh; cursorShape: ent.e.dir ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                // (Dragged out: as a file, to a file manager, an editor, the desktop.)
+                Drag.dragType: Drag.Automatic
+                Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
+                Drag.mimeData: ({ "text/uri-list": "file://" + encodeURI(ent.e.path) + "\r\n", "text/plain": ent.e.path })
+                Drag.active: entDrag.active
+                DragHandler { id: entDrag; target: null }
+                // (A folder takes what's dropped on it.)
+                DropArea {
+                    anchors.fill: parent
+                    enabled: ent.e.dir
+                    keys: ["text/uri-list"]
+                    onEntered: fb.dropOn = ent.e.path
+                    onExited: if (fb.dropOn === ent.e.path) fb.dropOn = ""
+                    onDropped: (drop) => { fb.dropOn = ""; fb.dropInto(ent.e.path, drop) }
+                }
+                border.color: fb.dropOn === ent.e.path ? Theme.accent : "transparent"
+                border.width: 1
                 TapHandler {
                     onTapped: { fb.selected = ent.e.path; if (ent.e.dir) fb.go(ent.e.path) }
                     onDoubleTapped: if (!ent.e.dir) fb.act("open", ent.e.path)
@@ -390,10 +431,10 @@ Item {
     property var held: null             // {op: "copy"|"move", path}: for Paste
     SlimMenu {
         id: itemMenu
-        readonly property var e: fb.menuEntry || ({ dir: false, path: "", name: "" })
+        readonly property var e: fb.menuEntry || ({ dir: false, exec: false, path: "", name: "" })
         SlimMenuItem { text: itemMenu.e.dir ? "Open" : "Open"; onTriggered: fb.openEntry(itemMenu.e) }
         SlimMenuItem { text: "Open with the desktop"; visible: itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.act("open", itemMenu.e.path) }
-        SlimMenuItem { text: itemMenu.e.dir ? "Go here in the shell (cd)" : "Run it"; visible: itemMenu.e.dir || itemMenu.e.exec; height: visible ? implicitHeight : 0
+        SlimMenuItem { text: itemMenu.e.dir ? "Go here in the shell (cd)" : "Run it"; visible: !!(itemMenu.e.dir || itemMenu.e.exec); height: visible ? implicitHeight : 0
             onTriggered: fb.commandRequested(itemMenu.e.dir ? "cd " + fb.shq(itemMenu.e.path) : fb.shq(itemMenu.e.path)) }
         SlimMenuItem { text: "Insert the path in the editor"; onTriggered: fb.insertRequested(fb.shq(itemMenu.e.path) + " ") }
         SlimMenuItem { text: "Copy the path"; onTriggered: fb.copyText(itemMenu.e.path) }

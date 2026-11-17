@@ -340,6 +340,22 @@ Item {
         onInsertRequested: (t) => { compose.focusEditor(); compose.insert(t) }
         onVisibleChanged: if (visible && !(pane.editorOn && pane.preferEditor) && pane.focused) Qt.callLater(forceActiveFocus)
     }
+    // Files dropped on the pane: their paths, quoted, into the editor (or
+    // typed into the terminal when the editor isn't up). The notebook's
+    // file browsers take drops themselves.
+    DropArea {
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        z: -1
+        onDropped: (drop) => {
+            if (!drop.hasUrls) return
+            const q = (s) => /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'"
+            const paths = drop.urls.map(u => { let p = u.toString().replace(/^file:\/\/[^/]*/, ""); try { p = decodeURIComponent(p) } catch (e) {} return q(p) }).join(" ") + " "
+            drop.accept(Qt.CopyAction)
+            if (pane.editorOn) { compose.focusEditor(); compose.insert(paths) }
+            else term.sendText(paths)
+        }
+    }
     // The last output's rich view, over the terminal.
     function openRich() {
         let o = {}

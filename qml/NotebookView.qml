@@ -236,6 +236,8 @@ FocusScope {
     // A new card from a command: the view goes to the end and stays there as
     // the card is laid out and its output grows, until it's scrolled up.
     property bool sticking: false
+    property bool wasAtEnd: true        // (shown again: back to the end, if it was there)
+    onVisibleChanged: if (visible && wasAtEnd) follow()
     property bool pinning: false
     function follow() { sticking = true; Qt.callLater(pin) }
     function pin() {
@@ -647,7 +649,9 @@ FocusScope {
         current = 0
         loaded = true
         syncTerm()
-        Qt.callLater(path === "" ? list.positionViewAtEnd : list.positionViewAtBeginning)
+        // (A pane's notebook opens at its end, and stays there while its
+        // cards lay out; a document at its top.)
+        if (path === "") follow(); else Qt.callLater(list.positionViewAtBeginning)
     }
     // ---- the pane's own notebook, kept with its session ----
     property bool storeFound: false
@@ -1005,6 +1009,7 @@ FocusScope {
         onHeightChanged: if (nb.sticking) Qt.callLater(nb.pin)
         onContentYChanged: {
             if (!nb.pinning && contentY < lastY - 2) nb.sticking = false
+            if (nb.visible && height > 0) nb.wasAtEnd = atYEnd || nb.sticking
             lastY = contentY
         }
         Keys.onPressed: (e) => {
