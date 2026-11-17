@@ -437,7 +437,7 @@ const FETCHED: &[Fetched] = &[
     Fetched { name: "tessera-go", display: "Go (gophernotes, Nix)", language: "go", how: How::Shell { attrs: &["gophernotes", "go"], argv: &["gophernotes", CF] }, interrupt_message: false },
     Fetched { name: "tessera-deno", display: "TypeScript/JavaScript (Deno, Nix)", language: "typescript", how: How::Shell { attrs: &["deno"], argv: &["deno", "jupyter", "--kernel", "--conn", CF] }, interrupt_message: false },
     Fetched { name: "tessera-julia", display: "Julia (IJulia, Nix)", language: "julia", how: How::Shell { attrs: &["julia"], argv: &["julia", "-e", "import Pkg; Base.find_package(\"IJulia\") === nothing && Pkg.add(\"IJulia\"); import IJulia; IJulia.run_kernel()", CF] }, interrupt_message: false },
-    Fetched { name: "tessera-lua", display: "Lua (ilua, Nix)", language: "lua", how: How::PyNix { packages: &["ilua"], runtime: &["lua"], args: &["-m", "ilua.app", "-c", CF] }, interrupt_message: true },
+    Fetched { name: "tessera-lua", display: "Lua (ilua, uv)", language: "lua", how: How::Uv { pip: &["ilua", "setuptools"], runtime: &["lua"], args: &["-m", "ilua.app", "-c", CF] }, interrupt_message: true },
     Fetched { name: "tessera-nix", display: "Nix (nix-kernel, Nix)", language: "nix", how: How::PyNix { packages: &["nix-kernel"], runtime: &[], args: &["-m", "nix-kernel", "-f", CF] }, interrupt_message: false },
     Fetched { name: "tessera-octave", display: "Octave (octave_kernel, uv)", language: "octave", how: How::Uv { pip: &["octave_kernel"], runtime: &["octave"], args: &["-m", "octave_kernel", "-f", CF] }, interrupt_message: false },
     Fetched { name: "tessera-kotlin", display: "Kotlin (kotlin-jupyter-kernel, uv)", language: "kotlin", how: How::Uv { pip: &["kotlin-jupyter-kernel"], runtime: &["jdk"], args: &["-m", "run_kotlin_kernel", CF] }, interrupt_message: false },
@@ -833,6 +833,10 @@ impl Kernel {
                 match ty.as_str() {
                     "kernel_info_reply" => {
                         if !k.ready.swap(true, Ordering::SeqCst) {
+                            // (ilua answers before its Lua is connected: give it a moment.)
+                            if k.spec.name == "tessera-lua" {
+                                std::thread::sleep(Duration::from_secs(2));
+                            }
                             let li = &c["language_info"];
                             sink(json!({"type": "info", "language": li["name"], "version": li["version"],
                                         "extension": li["file_extension"], "banner": c["banner"], "implementation": c["implementation"]}));
