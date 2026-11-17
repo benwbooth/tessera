@@ -148,6 +148,12 @@ Item {
         promptSegments: pane.promptSegments
         onSubmitted: (t) => {
             if (forNotebook) { notebook.submit(t); return }
+            // (Code in another language than the shell's: run by its interpreter.)
+            const L = compose.runLang
+            if (pane.replLang === "" && L !== "" && L !== "bash" && controller) {
+                const cmd = controller.snippetCommand(L, t, compose.cwd, compose.shellName)
+                if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
+            }
             if (t.indexOf("\n") < 0) term.sendText(t + "\r")
             else { term.pasteText(t); term.sendText("\r") }
             term.scrollToBottom()

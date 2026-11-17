@@ -18,7 +18,38 @@ Rectangle {
     property string langOverride: ""
     // (Pasted code in another language is recognised when it's clear.)
     property string contentLang: ""
-    readonly property string lang: langOverride !== "" ? langOverride : contentLang !== "" ? contentLang : autoLang
+    // (A line that isn't a shell command: the AI says what it looks like, with
+    // the languages used lately ranked up. It runs with that language's
+    // interpreter; see TerminalPane's onSubmitted.)
+    property string aiLang: ""
+    readonly property string lang: langOverride !== "" ? langOverride : contentLang !== "" ? contentLang : aiLang !== "" ? aiLang : autoLang
+    property string runLang: ""        // the language of what was just run
+    property var langRecent: {
+        if (!controller) return []
+        try { return JSON.parse(JSON.parse(controller.readTextFile(controller.stateFolder() + "/languages.json")).text || "[]") } catch (e) { return [] }
+    }
+    function useLanguage(l) {
+        if (!controller || l === "" || l === "bash") return
+        const r = [l].concat(langRecent.filter(x => x !== l)).slice(0, 8)
+        langRecent = r
+        controller.writeTextFile(controller.stateFolder() + "/languages.json", JSON.stringify(r))
+    }
+    property string langAsked: ""
+    Timer {
+        id: langTimer
+        interval: 450
+        onTriggered: {
+            const t = edit.text
+            if (box.autoLang !== "bash" || box.langOverride !== "" || box.contentLang !== "" || t.trim() === "" || t.startsWith("#")) { box.aiLang = ""; return }
+            if (!box.controller.shellDoubt(t, box.view ? box.view.aliases : "{}")) { box.aiLang = ""; box.langAsked = ""; return }
+            if (t === box.langAsked) return
+            // (The plainest marks at once; the AI's answer, when it comes, decides.)
+            box.aiLang = box.controller.detectLanguage(t)
+            if (!box.inlineReady) return
+            box.langAsked = t
+            box.controller.aiRun(box.aiKey + "-lang", "language", JSON.stringify([{ role: "user", content: t }]), box.aiContext())
+        }
+    }
     readonly property var languages: { try { return JSON.parse(controller.syntaxLanguages()) } catch (e) { return [["bash", "Shell"]] } }
     property string keys: "emacs"      // "emacs", "vi", "vscode"
     property var history: []           // oldest first (shared by the window)
@@ -81,6 +112,8 @@ Rectangle {
         }
         histIndex = -1
         draft = ""
+        runLang = lang
+        useLanguage(runLang)
         edit.text = ""
         viNormal = false
         box.submitted(t)
@@ -583,6 +616,8 @@ Rectangle {
                 seen = text
                 idle.restart()
                 box.contentLang = box.controller && (text.indexOf("\n") >= 0 || /^\s*[{\[]|^#!/.test(text)) ? box.controller.detectLanguage(text) : ""
+                if (text.trim() === "") { box.aiLang = ""; box.langAsked = "" }
+                langTimer.restart()
                 box.analyze(false)
                 compAuto.restart()
                 // A suggestion stays while what's typed still leads into it.
@@ -918,7 +953,7 @@ Rectangle {
         interval: 220
         onTriggered: {
             const t = edit.text
-            if (!box.aiInline || !box.inlineReady || t.trim().length < 2 || t.startsWith("#") || box.historyMode
+            if (!box.aiInline || !box.inlineReady || box.lang !== box.autoLang || t.trim().length < 2 || t.startsWith("#") || box.historyMode
                     || edit.cursorPosition !== t.length || t.indexOf("\n") >= 0) return
             box.ghostAsked = t
             box.controller.aiRun(box.aiKey + "-inline", "inline", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(8) + "\n\nComplete this command line: " + t }]), box.aiContext())
@@ -931,7 +966,7 @@ Rectangle {
             const t = edit.text.trim()
             // (Not while it's still being written: a suggestion says so, and so
             // does a syntax error.)
-            if (!box.aiCheck || !box.checkReady || t.length < 4 || t.startsWith("#") || t === box.checkedText
+            if (!box.aiCheck || !box.checkReady || box.lang !== box.autoLang || t.length < 4 || t.startsWith("#") || t === box.checkedText
                     || box.ghost !== "" || box.problem !== "") return
             box.checkedText = t
             box.controller.aiRun(box.aiKey + "-check", "check", JSON.stringify([{ role: "user", content: t }]), box.aiContext())
@@ -949,6 +984,10 @@ Rectangle {
                 box.lastGhostBase = t
                 // (Still being written, then: a check's complaint doesn't apply.)
                 if (box.ghost !== "") { box.aiNote = ""; box.checkedText = "" }
+            } else if (key === box.aiKey + "-lang") {
+                if (edit.text !== box.langAsked) return
+                const best = error ? "" : box.controller.rankLanguages(reply, JSON.stringify(box.langRecent))
+                if (best !== "" || (!error && /bash|shell/i.test(reply))) box.aiLang = best
             } else if (key === box.aiKey + "-check") {
                 const r = reply.trim()
                 if (box.ghost !== "" || edit.text.trim() !== box.checkedText) return

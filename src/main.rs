@@ -24,6 +24,7 @@ mod shell_integration;
 mod snapshot;
 mod syntax;
 mod session;
+mod snippets;
 mod tmux;
 
 use cxx_qt_lib::{QQmlApplicationEngine, QString, QUrl};

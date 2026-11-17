@@ -321,6 +321,15 @@ pub mod ffi {
         /// What a text is clearly written in ("" when it's just a command).
         #[qinvokable]
         fn detect_language(self: &Controller, text: &QString) -> QString;
+        /// Typed text that doesn't look like a shell command (src/snippets.rs).
+        #[qinvokable]
+        fn shell_doubt(self: &Controller, text: &QString, aliases: &QString) -> bool;
+        /// The language from the AI's guesses, weighted by recent use ("" for the shell's).
+        #[qinvokable]
+        fn rank_languages(self: &Controller, reply: &QString, recent: &QString) -> QString;
+        /// The shell command that runs code in a language ("" if it can't).
+        #[qinvokable]
+        fn snippet_command(self: &Controller, lang: &QString, code: &QString, cwd: &QString, shell: &QString) -> QString;
         /// Download Helix's grammars (~250 languages) for the editor;
         /// progress in help_status. (Used after the next start.)
         #[qinvokable]
@@ -823,7 +832,7 @@ impl ffi::Controller {
         let ctx: serde_json::Value = serde_json::from_str(&ctx_json.to_string()).unwrap_or_default();
         let s = crate::settings::load();
         let model_ref = match task.as_str() {
-            "inline" | "classify" => s.ai.inline_model.clone(),
+            "inline" | "classify" | "language" => s.ai.inline_model.clone(),
             "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
             _ => s.ai.chat_model.clone(),
         };
@@ -840,6 +849,7 @@ impl ffi::Controller {
         let opts = match task.as_str() {
             "inline" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(8) },
             "classify" => crate::ai::Options { max_tokens: 8, temperature: 0.0, timeout: std::time::Duration::from_secs(10) },
+            "language" => crate::ai::Options { max_tokens: 60, temperature: 0.0, timeout: std::time::Duration::from_secs(8) },
             "check" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(15) },
             "command" | "fix" => crate::ai::Options { max_tokens: 300, temperature: 0.2, timeout: std::time::Duration::from_secs(60) },
             _ => crate::ai::Options { max_tokens: 4096, temperature: 0.4, timeout: std::time::Duration::from_secs(600) },
@@ -921,7 +931,7 @@ impl ffi::Controller {
     fn ai_ready(&self, task: &ffi::QString) -> bool {
         let s = crate::settings::load();
         let r = match task.to_string().as_str() {
-            "inline" | "classify" => s.ai.inline_model.clone(),
+            "inline" | "classify" | "language" => s.ai.inline_model.clone(),
             "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
             _ => s.ai.chat_model.clone(),
         };
@@ -1092,6 +1102,18 @@ impl ffi::Controller {
 
     fn detect_language(&self, text: &ffi::QString) -> ffi::QString {
         qs(crate::syntax::detect_language(&text.to_string()))
+    }
+
+    fn shell_doubt(&self, text: &ffi::QString, aliases: &ffi::QString) -> bool {
+        crate::snippets::shell_doubt(&text.to_string(), &aliases.to_string())
+    }
+
+    fn rank_languages(&self, reply: &ffi::QString, recent: &ffi::QString) -> ffi::QString {
+        qs(&crate::snippets::rank(&reply.to_string(), &recent.to_string()))
+    }
+
+    fn snippet_command(&self, lang: &ffi::QString, code: &ffi::QString, cwd: &ffi::QString, shell: &ffi::QString) -> ffi::QString {
+        qs(&crate::snippets::command(&lang.to_string(), &code.to_string(), &local_path(cwd), &shell.to_string()))
     }
 
     fn language_for(&self, program: &ffi::QString) -> ffi::QString {

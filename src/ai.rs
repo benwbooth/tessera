@@ -313,6 +313,12 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
             "{base} Say what kind of text the user shows you (a command's output). Reply with exactly one word from: \
              json, csv, tsv, html, markdown, svg, yaml, xml, diff, log, code, text."
         ),
+        "language" => format!(
+            "{base} The user typed this into their terminal's input line. Say which language it is written in: their shell ({shell}, \
+             call it bash) or a programming language. Reply with ONLY a JSON list of up to 3 guesses, most likely first, each \
+             [name, probability] with lowercase names (bash, python, javascript, typescript, ruby, perl, lua, php, r, julia, go, rust, c, cpp, \
+             java, kotlin, haskell, sql, ...). A command that runs a program is bash."
+        ),
         "fix" => format!(
             "{base} The user's last command failed. From the command, its exit status and output, reply with ONLY a corrected command, \
              no explanation, no code fence."

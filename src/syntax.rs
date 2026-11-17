@@ -131,6 +131,23 @@ pub fn detect_language(text: &str) -> &'static str {
         return "json";
     }
     if lines.len() < 2 {
+        // (One line: only the plainest marks.)
+        let l = t.trim();
+        for (marks, lang) in [
+            (&["print(", "import ", "from ", "def ", "lambda "][..], "python"),
+            (&["console.log(", "const ", "let ", "function "][..], "javascript"),
+            (&["println!(", "let mut ", "fn main"][..], "rust"),
+            (&["fmt.Print"][..], "go"),
+            (&["puts ", "p "][..], "ruby"),
+            (&["System.out.print"][..], "java"),
+            (&["printf(\""][..], "c"),
+            (&["std::cout"][..], "cpp"),
+            (&["SELECT ", "select "][..], "sql"),
+        ] {
+            if marks.iter().any(|m| l.starts_with(m)) {
+                return lang;
+            }
+        }
         return "";
     }
     let has = |pats: &[&str]| lines.iter().filter(|l| pats.iter().any(|p| l.trim_start().starts_with(p))).count();
@@ -272,4 +289,14 @@ mod tests {
             assert!(lang(n).is_some(), "{n} loads");
         }
     }
+}
+
+/// Does `text` fail to parse as `lang_name`?
+pub fn has_errors(lang_name: &str, text: &str) -> bool {
+    let Some(l) = lang(lang_name) else { return false };
+    let mut p = Parser::new();
+    if p.set_language(&l.language).is_err() {
+        return false;
+    }
+    p.parse(text, None).is_some_and(|t| t.root_node().has_error())
 }
