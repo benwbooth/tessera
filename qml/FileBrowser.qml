@@ -266,8 +266,9 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 0.001
                     textFormat: Text.StyledText
-                    text: "<span style='color:" + Theme.textDim + "'>" + ent.e.mode + " " + fb.esc(fb.pad(ent.e.user, fb.longW.user)) + " " + fb.esc(fb.pad(ent.e.group, fb.longW.group))
-                          + " " + fb.pad(fb.sizeText(ent.e), fb.longW.size, true) + " " + fb.when(ent.e.mtime) + "</span> "
+                    // (Spaces kept: rich text would fold the columns' padding.)
+                    text: "<span style='color:" + Theme.textDim + "'>" + (ent.e.mode + " " + fb.esc(fb.pad(ent.e.user, fb.longW.user)) + " " + fb.esc(fb.pad(ent.e.group, fb.longW.group))
+                          + " " + fb.pad(fb.sizeText(ent.e), fb.longW.size, true) + " " + fb.when(ent.e.mtime)).replace(/ /g, "&nbsp;") + "</span> "
                           + "<span style='color:" + fb.tint(ent.e) + "'>" + (ent.e.dir || ent.e.exec ? "<b>" : "") + fb.label(ent.e) + (ent.e.dir || ent.e.exec ? "</b>" : "") + "</span>"
                           + (ent.e.link ? "<span style='color:" + Theme.textDim + "'> ⇒ " + fb.esc(ent.e.target) + "</span>" : "")
                     color: Theme.text
@@ -485,6 +486,19 @@ Item {
                     Text { width: 250; text: modelData[1]; wrapMode: Text.WrapAnywhere; color: Theme.text; font.family: fb.fontFamily; font.pixelSize: 11 }
                 }
             }
+        }
+    }
+    // (Test hook: TESSERA_TEST_FB=go:<name> | menu:<name> | folder | tiles | details | bar.)
+    Timer {
+        interval: 2500
+        running: fb.controller !== null && fb.controller.testEnv("FB") !== ""
+        onTriggered: {
+            const t = fb.controller.testEnv("FB"), arg = t.substring(t.indexOf(":") + 1)
+            const e = fb.entries.find(x => x.name === arg)
+            if (t.startsWith("go:") && e) fb.openEntry(e)
+            else if (t.startsWith("menu:") && e) { fb.selected = e.path; fb.menuEntry = e; itemMenu.popup(fb, 40, 30) }
+            else if (t === "folder") folderMenu.popup(fb, 40, 30)
+            else if (t === "tiles" || t === "details" || t === "list") fb.viewOver = t
         }
     }
 }
