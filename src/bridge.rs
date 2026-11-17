@@ -303,6 +303,11 @@ pub mod ffi {
         /// [{name, path, dir, link, exec, hidden, size, mtime}] (folders first).
         #[qinvokable]
         fn list_dir(self: &Controller, path: &QString, all: bool) -> QString;
+        /// A file browser's action on a path (src/files.rs): "open", "reveal",
+        /// "trash", "rename" (arg: new name), "mkdir"/"touch" (arg: name),
+        /// "duplicate", "copy"/"move" (arg: to folder). "" or the error.
+        #[qinvokable]
+        fn file_action(self: &Controller, op: &QString, path: &QString, arg: &QString) -> QString;
         /// Open a window holding this tab (JSON layout with session ids): a
         /// tab torn off by dragging it out of the tab bar.
         #[qinvokable]
@@ -692,30 +697,11 @@ impl ffi::Controller {
     }
 
     fn list_dir(&self, path: &ffi::QString, all: bool) -> ffi::QString {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = local_path(path);
-        let mut out: Vec<serde_json::Value> = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for e in rd.flatten() {
-                let name = e.file_name().to_string_lossy().to_string();
-                let hidden = name.starts_with('.');
-                if hidden && !all {
-                    continue;
-                }
-                let p = e.path();
-                let link = e.file_type().map(|t| t.is_symlink()).unwrap_or(false);
-                let md = std::fs::metadata(&p).ok();
-                let is_dir = md.as_ref().is_some_and(|m| m.is_dir());
-                let exec = md.as_ref().is_some_and(|m| !m.is_dir() && m.permissions().mode() & 0o111 != 0);
-                let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
-                let mtime = md.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-                out.push(serde_json::json!({"name": name, "path": p.to_string_lossy(), "dir": is_dir, "link": link, "exec": exec, "hidden": hidden, "size": size, "mtime": mtime}));
-            }
-        }
-        out.sort_by(|a, b| {
-            b["dir"].as_bool().cmp(&a["dir"].as_bool()).then_with(|| a["name"].as_str().unwrap_or("").to_lowercase().cmp(&b["name"].as_str().unwrap_or("").to_lowercase()))
-        });
-        qs(&serde_json::Value::Array(out).to_string())
+        qs(&crate::files::list(&local_path(path), all))
+    }
+
+    fn file_action(&self, op: &ffi::QString, path: &ffi::QString, arg: &ffi::QString) -> ffi::QString {
+        qs(&crate::files::action(&op.to_string(), &local_path(path), &arg.to_string()))
     }
 
     fn home_dir(&self) -> ffi::QString {

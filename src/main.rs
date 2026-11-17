@@ -6,6 +6,7 @@ mod client;
 mod complete;
 mod contrast;
 mod daemon;
+mod files;
 mod find;
 mod kde;
 mod grammars;
