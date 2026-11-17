@@ -1020,6 +1020,9 @@ Rectangle {
     readonly property string lspServer: controller ? controller.lspAvailable(box.lang) : ""
     property var lspDiags: []          // [[start, length, message, severity]] for lspText
     property string lspText: ""
+    // (Diagnostics are for a language: bash's shellcheck says nothing about C++.)
+    property string lspLang: ""
+    property string lspAskedLang: ""
     property string lspNote: ""        // the first warning, for the corner
     function analyze(withErrors) {
         if (!controller) return
@@ -1027,15 +1030,17 @@ Rectangle {
         if (!withErrors) r.errors = []
         problem = r.errors.length > 0 ? r.errors[0][2] : ""
         lspNote = ""
-        if (withErrors && box.lspText === edit.text && box.lspDiags.length > 0) {
+        if (withErrors && box.lspText === edit.text && box.lspLang === box.lang && box.lspDiags.length > 0) {
             r.errors = r.errors.concat(box.lspDiags)
             const err = box.lspDiags.find(d => d[3] <= 1), warn = box.lspDiags.find(d => d[3] >= 2)
             if (problem === "" && err) problem = err[2]
             if (warn) lspNote = warn[2]
         }
         hl.analysis = JSON.stringify(r)
-        if (withErrors && box.lspServer !== "" && box.lspText !== edit.text && edit.text.trim() !== "")
+        if (withErrors && box.lspServer !== "" && (box.lspText !== edit.text || box.lspLang !== box.lang) && edit.text.trim() !== "") {
+            box.lspAskedLang = box.lang
             controller.lspAsk(aiKey + "-diag", box.lang, box.cwd, edit.text, "diagnostics", 0)
+        }
     }
     property string hoverDoc: ""
     property rect hoverAt
@@ -1050,6 +1055,7 @@ Rectangle {
             if (key === box.aiKey + "-diag") {
                 try { box.lspDiags = JSON.parse(json || "[]") } catch (e) { box.lspDiags = [] }
                 box.lspText = edit.text
+                box.lspLang = box.lspAskedLang
                 box.analyze(true)
             } else if (key === box.aiKey + "-hover") {
                 box.hoverDoc = (json || "").trim()
@@ -1097,6 +1103,9 @@ Rectangle {
     // A language that isn't here yet is fetched (once) in the background.
     property string fetchingLang: ""
     onLangChanged: {
+        // (Another language: the last one's diagnostics go, and it's checked again.)
+        lspDiags = []; lspText = ""; lspNote = ""
+        idle.restart()
         analyze(false)
         if (controller && !controller.languageInstalled(lang)) {
             fetchingLang = lang

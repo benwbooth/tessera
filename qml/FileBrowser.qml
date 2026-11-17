@@ -317,10 +317,11 @@ Item {
                     anchors.verticalCenterOffset: 0.001
                     textFormat: Text.StyledText
                     // (Spaces kept: rich text would fold the columns' padding.)
-                    text: "<span style='color:" + Theme.textDim + "'>" + (ent.e.mode + " " + fb.esc(fb.pad(ent.e.user, fb.longW.user)) + " " + fb.esc(fb.pad(ent.e.group, fb.longW.group))
-                          + " " + fb.pad(fb.sizeText(ent.e), fb.longW.size, true) + " " + fb.when(ent.e.mtime)).replace(/ /g, "&nbsp;") + "</span> "
-                          + "<span style='color:" + fb.tint(ent.e) + "'>" + (ent.e.dir || ent.e.exec ? "<b>" : "") + fb.label(ent.e) + (ent.e.dir || ent.e.exec ? "</b>" : "") + "</span>"
-                          + (ent.e.link ? "<span style='color:" + Theme.textDim + "'> ⇒ " + fb.esc(ent.e.target) + "</span>" : "")
+                    // (StyledText colors by <font color>, not a span's style.)
+                    text: "<font color='" + Theme.textDim + "'>" + (ent.e.mode + " " + fb.esc(fb.pad(ent.e.user, fb.longW.user)) + " " + fb.esc(fb.pad(ent.e.group, fb.longW.group))
+                          + " " + fb.pad(fb.sizeText(ent.e), fb.longW.size, true) + " " + fb.when(ent.e.mtime)).replace(/ /g, "&nbsp;") + "</font> "
+                          + "<font color='" + fb.tint(ent.e) + "'>" + (ent.e.dir || ent.e.exec ? "<b>" : "") + fb.label(ent.e) + (ent.e.dir || ent.e.exec ? "</b>" : "") + "</font>"
+                          + (ent.e.link ? "<font color='" + Theme.textDim + "'> ⇒ " + fb.esc(ent.e.target) + "</font>" : "")
                     color: Theme.text
                     font.family: fb.fontFamily
                     font.pointSize: fb.pointSize

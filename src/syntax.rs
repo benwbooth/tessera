@@ -141,14 +141,18 @@ pub fn detect_language(text: &str) -> &'static str {
             (&["puts ", "p "][..], "ruby"),
             (&["System.out.print"][..], "java"),
             (&["printf(\""][..], "c"),
-            (&["std::cout"][..], "cpp"),
+            (&["std::cout", "#include", "using namespace std", "import std;", "std::print", "std::vector", "std::string", "auto main("][..], "cpp"),
             (&["SELECT ", "select "][..], "sql"),
         ] {
             if marks.iter().any(|m| l.starts_with(m)) {
                 return lang;
             }
         }
-        // (name = value, with spaces: never a shell assignment; most often Python.)
+        // (std:: with a call and no macro bang: C++; Rust's would be println!.)
+        if l.contains("std::") && l.contains('(') && !l.contains("!(") && !l.starts_with("use ") && !l.starts_with("let ") {
+            return "cpp";
+        }
+                // (name = value, with spaces: never a shell assignment; most often Python.)
         if let Some((name, rest)) = l.split_once(" = ") {
             if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') && !name.starts_with(|c: char| c.is_ascii_digit()) && !rest.trim().is_empty() {
                 return "python";
