@@ -776,7 +776,7 @@ FocusScope {
             anchors.rightMargin: 8
             spacing: 6
             clip: true
-            Text {
+            Text { topPadding: 0.001;
                 visible: !nb.tiny
                 text: nb.path !== "" ? nb.fileName + (nb.dirty ? " •" : "") : "Notebook"
                 color: Theme.text
@@ -847,7 +847,7 @@ FocusScope {
         height: visible ? bannerText.implicitHeight + 14 : 0
         z: 2
         color: nb.kernelState === "dead" || nb.loadError !== "" || nb.saveError !== "" ? Theme.mix(Theme.panel, nb.ansi(1, "#e06c75"), 0.18) : Theme.mix(Theme.panel, Theme.accent, 0.12)
-        Text {
+        Text { topPadding: 0.001;
             id: bannerText
             x: 12
             width: parent.width - 24 - (bannerActions.visible ? bannerActions.width + 8 : 0)
@@ -977,7 +977,7 @@ FocusScope {
                 height: 26
                 spacing: 6
                 // Status; a click runs it (or stops it).
-                Text {
+                Text { topPadding: 0.001;
                     text: cell.running ? "◌" : cell.ended > 0 || cell.fromTerm ? (cell.failed ? "✘" : "✓") : cell.code ? "▶" : "M↓"
                     color: cell.running ? Theme.accent : cell.ended > 0 || cell.fromTerm ? (cell.failed ? nb.ansi(1, "#e06c75") : nb.ansi(2, "#98c379"))
                          : statusHover.hovered ? Theme.accent : Theme.textDim
@@ -992,14 +992,14 @@ FocusScope {
                     ToolTip.delay: 500
                     ToolTip.text: cell.running ? "Interrupt" : cell.code ? "Run (Ctrl+Enter)" : "Show it (Ctrl+Enter)"
                 }
-                Text {
+                Text { topPadding: 0.001;
                     visible: cell.count >= 0 && cell.code
                     text: "[" + cell.count + "]"
                     color: Theme.textDim
                     font.family: nb.fontFamily
                     font.pixelSize: 10
                 }
-                Text {
+                Text { topPadding: 0.001;
                     Layout.fillWidth: true
                     text: cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.trim().replace(/\s*\n\s*/g, "  ⏎  ") : "(empty)"
                     maximumLineCount: 1
@@ -1013,8 +1013,8 @@ FocusScope {
                     HoverHandler { cursorShape: Qt.IBeamCursor }
                     TapHandler { onTapped: nb.focusCell(cell.index, true) }
                 }
-                Text { visible: cell.cwd !== "" && !nb.narrow; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
-                Text {
+                Text { topPadding: 0.001; visible: cell.cwd !== "" && !nb.narrow; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
+                Text { topPadding: 0.001;
                     visible: cell.started > 1
                     text: (cell.ended > 0 ? nb.seconds(cell.ended - cell.started) + "  ·  " : "") + Qt.formatTime(new Date(cell.started), "hh:mm")
                           + (cell.ended > 0 && cell.fromTerm && cell.status !== 0 ? "  ·  exit " + cell.status : "")
@@ -1136,7 +1136,7 @@ FocusScope {
             }
 
             // ---- the output, in its own scrolling pane ----
-            Text {
+            Text { topPadding: 0.001;
                 visible: cell.hasOutput && cell.hideOutput
                 anchors.top: editorBox.visible ? editorBox.bottom : header.bottom
                 x: 12
@@ -1225,7 +1225,7 @@ FocusScope {
             width: parent.width - 60
             spacing: 12
             visible: cells.count === 0
-            Text {
+            Text { topPadding: 0.001;
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
@@ -1292,7 +1292,7 @@ FocusScope {
                 }
                 onActiveFocusChanged: if (activeFocus) nb.current = ed.cellIndex
                 Keys.onPressed: (e) => ed.key(e)
-                Text {
+                Text { topPadding: 0.001;
                     visible: edit.text === ""
                     text: cells.get(ed.cellIndex) && cells.get(ed.cellIndex).type === "markdown" ? "Markdown — Shift+Enter shows it"
                         : nb.shellKernel ? "A command — Shift+Enter runs it in this pane's shell" : "Code — Shift+Enter runs it"
@@ -1425,7 +1425,7 @@ FocusScope {
                         height: 22
                         radius: 4
                         color: index === comp.pick ? Theme.mix(Theme.panel, Theme.accent, 0.35) : "transparent"
-                        Text {
+                        Text { topPadding: 0.001;
                             x: 6
                             anchors.verticalCenter: parent.verticalCenter
                             text: modelData
@@ -1571,9 +1571,9 @@ FocusScope {
                         anchors.verticalCenter: parent.verticalCenter
                         x: 6
                         spacing: 14
-                        Text { width: 76; horizontalAlignment: Text.AlignRight; text: modelData.dir ? "" : nb.humanSize(modelData.size); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
-                        Text { width: 130; text: Qt.formatDateTime(new Date(modelData.mtime * 1000), "yyyy-MM-dd hh:mm"); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
-                        Text {
+                        Text { topPadding: 0.001; width: 76; horizontalAlignment: Text.AlignRight; text: modelData.dir ? "" : nb.humanSize(modelData.size); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
+                        Text { topPadding: 0.001; width: 130; text: Qt.formatDateTime(new Date(modelData.mtime * 1000), "yyyy-MM-dd hh:mm"); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
+                        Text { topPadding: 0.001;
                             textFormat: Text.StyledText
                             text: "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + fv.icon(modelData) + "</span>&nbsp;" + modelData.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + (modelData.dir ? "/" : "")
                             color: fv.tint(modelData)
@@ -1585,7 +1585,7 @@ FocusScope {
                     }
                 }
             }
-            Text {
+            Text { topPadding: 0.001;
                 visible: fv.entries.length === 0
                 y: 4
                 text: "(empty)"
@@ -1652,7 +1652,7 @@ FocusScope {
                     required property var modelData
                     width: ev.width
                     spacing: 8
-                    Text {
+                    Text { topPadding: 0.001;
                         width: Math.min(240, ev.width * 0.3)
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.k
@@ -1678,7 +1678,7 @@ FocusScope {
                         // (Enter: export it with the new value.)
                         onAccepted: if (text !== modelData.v) nb.commandRequested("export " + modelData.k + "=" + nb.shq(text))
                     }
-                    Text {
+                    Text { topPadding: 0.001;
                         anchors.verticalCenter: parent.verticalCenter
                         text: "×"
                         color: xh.hovered ? nb.ansi(1, "#e06c75") : Theme.textDim
@@ -1904,7 +1904,7 @@ FocusScope {
                         }
                     }
                 }
-                Text {
+                Text { topPadding: 0.001;
                     visible: jf.src.outs.length === 0
                     text: jf.src.running ? "" : "(no output)"
                     color: Theme.textDim

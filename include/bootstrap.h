@@ -1,3 +1,4 @@
+#include <QElapsedTimer>
 // Process-wide Qt setup: the application object and QML registration.
 #pragma once
 
@@ -111,6 +112,10 @@ inline void tessera_test_mouse(int kind, double x, double y, int button, int mod
         const Qt::MouseButton which = kind == 1 ? Qt::NoButton : b;
         const Qt::MouseButtons held = kind == 2 ? Qt::MouseButtons() : Qt::MouseButtons(b);
         QMouseEvent e(t, p, p, w->mapToGlobal(p), which, held, Qt::KeyboardModifiers(mods));
+        // (A real timestamp: taps are timed from the press.)
+        static QElapsedTimer clock;
+        if (!clock.isValid()) clock.start();
+        e.setTimestamp(quint64(clock.elapsed()) + 1);
         QGuiApplication::sendEvent(w, &e);
         return;
     }

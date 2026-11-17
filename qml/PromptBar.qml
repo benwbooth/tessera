@@ -229,6 +229,82 @@ Item {
         return null
     }
 
+    // ---- the path's folders, each a click away -----------------------------
+    // The folders of a path shown in `t` (Tessera's or Starship's directory:
+    // "~/src/tessera", "/usr/bin", "…/a/b"), matched against the shell's
+    // folder: [{start, end, path, last}] (character positions in t), or [].
+    function pathParts(t) {
+        if (!controller) return []
+        let cwd = bar.cwd.replace(/^file:\/\/[^/]*/, "")
+        try { cwd = decodeURIComponent(cwd) } catch (e) {}
+        if (cwd === "") return []
+        const home = controller.homeDir()
+        const re = /\S+/g
+        let m
+        while ((m = re.exec(t)) !== null) {
+            const tok = m[0]
+            if (tok.indexOf("/") < 0 && tok !== "~" && tok !== cwd.replace(/.*\//, "")) continue
+            const comps = tok.split("/")
+            // The shell's folder and its parents, from the end.
+            let dir = cwd.replace(/\/+$/, "") || "/"
+            const parts = []
+            let pos = m.index + tok.length
+            let ok = true
+            for (let j = comps.length - 1; j >= 0; j--) {
+                const c = comps[j]
+                const start = pos - c.length
+                if (c === "" && j === 0 && dir === "/") { parts.unshift({ start: m.index, end: m.index + 1, path: "/" }); break }
+                if (c === "~") { if (dir !== home) ok = false; else parts.unshift({ start: start, end: pos, path: home }); break }
+                if (c === "…" || c === "...") break
+                if (c !== dir.replace(/.*\//, "")) { ok = false; break }
+                if (c !== "") parts.unshift({ start: start, end: pos, path: dir })
+                dir = dir.substring(0, dir.lastIndexOf("/")) || "/"
+                pos = start - 1
+            }
+            if (!ok || parts.length === 0) continue
+            parts[parts.length - 1].last = true
+            return parts
+        }
+        return []
+    }
+    property string hoverPath: ""       // the parent folder of the path under the pointer
+    // Over a path's text: a click area per folder (a parent: cd there).
+    component PathHits: Item {
+        id: ph
+        property string t: ""
+        property var font
+        property color ink
+        readonly property var parts: { bar.cwd; return bar.pathParts(t) }
+        Repeater {
+            model: ph.parts
+            delegate: Item {
+                required property var modelData
+                Text { topPadding: 0.001; id: m0; visible: false; text: bar.glyphs(ph.t.substring(0, modelData.start)); textFormat: Text.RichText; font: ph.font }
+                Text { topPadding: 0.001; id: m1; visible: false; text: bar.glyphs(ph.t.substring(0, modelData.end)); textFormat: Text.RichText; font: ph.font }
+                x: m0.implicitWidth
+                width: m1.implicitWidth - m0.implicitWidth
+                height: ph.height
+                Rectangle {
+                    visible: hh.hovered && !modelData.last
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 1
+                    width: parent.width
+                    height: 1
+                    color: ph.ink
+                }
+                // (A click on the widget goes there while the pointer is over it.)
+                HoverHandler {
+                    id: hh
+                    cursorShape: modelData.last ? Qt.ArrowCursor : Qt.PointingHandCursor
+                    onHoveredChanged: if (!modelData.last) bar.hoverPath = hovered ? modelData.path : (bar.hoverPath === modelData.path ? "" : bar.hoverPath)
+                }
+                ToolTip.visible: hh.hovered && !modelData.last
+                ToolTip.delay: 600
+                ToolTip.text: "cd " + modelData.path
+            }
+        }
+    }
+
     component Seg: Item {
         id: seg
         property var s
@@ -274,6 +350,7 @@ Item {
             font.pointSize: Math.max(8, bar.fontSize - 1)
             font.weight: seg.s.bold !== undefined ? (seg.s.bold ? Font.Bold : Font.Normal) : seg.s.bg !== "" ? Font.DemiBold : Font.Normal
             renderType: Text.NativeRendering
+            PathHits { anchors.fill: parent; t: seg.s.text; font: label.font; ink: label.color }
         }
     }
 
@@ -301,6 +378,7 @@ Item {
             font.pointSize: Math.max(8, bar.fontSize - 1)
             font.bold: run.r.b
             renderType: Text.NativeRendering
+            PathHits { anchors.fill: parent; t: run.cap === "" ? run.r.t : ""; font: rt.font; ink: rt.color }
         }
         Canvas {
             visible: run.cap !== ""
@@ -463,7 +541,12 @@ Item {
         HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
         TapHandler {
             acceptedButtons: Qt.LeftButton
-            onTapped: bar.openChoices(w.wd.name, w)
+            // (On a parent folder of its path: cd there.)
+            onTapped: {
+                const p = bar.hoverPath
+                if (p !== "") bar.runRequested("cd " + (/^[A-Za-z0-9_\/.~+:@-]+$/.test(p) ? p : "'" + p.replace(/'/g, "'\\''") + "'"))
+                else bar.openChoices(w.wd.name, w)
+            }
         }
         TapHandler {
             acceptedButtons: Qt.RightButton
@@ -485,7 +568,7 @@ Item {
                 bar.dropAt = bar.dropTarget()
             }
         }
-        ToolTip.visible: hover.hovered && bar.dragFrom < 0 && !choicesPop.opened && !widgetMenu.opened
+        ToolTip.visible: hover.hovered && bar.hoverPath === "" && bar.dragFrom < 0 && !choicesPop.opened && !widgetMenu.opened
         ToolTip.delay: 900
         ToolTip.text: bar.title(w.wd.name) + " — click for choices, drag to move, right-click to style"
     }
@@ -560,7 +643,7 @@ Item {
             font.weight: Font.DemiBold
             renderType: Text.NativeRendering
         }
-        Text {
+        Text { topPadding: 0.001;
             visible: bar.dragOff
             anchors.top: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
@@ -634,6 +717,7 @@ Item {
                 clip: true
                 model: addPop.options
                 ScrollBar.vertical: ScrollBar {}
+                MomentumWheel { flick: addList }
                 delegate: Rectangle {
                     required property var modelData
                     readonly property bool on: !modelData.head && bar.layout.indexOf(modelData.name) >= 0
@@ -646,14 +730,14 @@ Item {
                         anchors.left: parent.left
                         anchors.leftMargin: 8
                         anchors.right: parent.right
-                        Text {
+                        Text { topPadding: 0.001;
                             text: modelData.head ? modelData.head : (parent.parent.on ? "✓ " : "") + modelData.label
                             color: modelData.head ? Theme.textDim : Theme.text
                             font.pixelSize: modelData.head ? 10 : 12
                             font.weight: modelData.head ? Font.DemiBold : Font.Normal
                             renderType: Text.NativeRendering
                         }
-                        Text {
+                        Text { topPadding: 0.001;
                             visible: !!modelData.note
                             width: parent.width
                             text: modelData.note || ""
@@ -694,6 +778,7 @@ Item {
             clip: true
             model: bar.choices
             ScrollBar.vertical: ScrollBar {}
+            MomentumWheel { flick: choiceList }
             delegate: Rectangle {
                 required property var modelData
                 width: choiceList.width
@@ -777,7 +862,7 @@ Item {
                     color: modelData === "" || modelData === "none" ? "transparent" : bar.color(modelData, "transparent")
                     border.color: picked ? Theme.text : Theme.divider
                     border.width: picked ? 2 : 1
-                    Text {
+                    Text { topPadding: 0.001;
                         anchors.centerIn: parent
                         visible: modelData === "" || modelData === "none"
                         text: modelData === "" ? "A" : "∅"
@@ -792,10 +877,10 @@ Item {
         }
         contentItem: Column {
             spacing: 6
-            Text { text: bar.title(stylePop.name); color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; renderType: Text.NativeRendering }
-            Text { text: "Text color"; color: Theme.textDim; font.pixelSize: 10; renderType: Text.NativeRendering }
+            Text { topPadding: 0.001; text: bar.title(stylePop.name); color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; renderType: Text.NativeRendering }
+            Text { topPadding: 0.001; text: "Text color"; color: Theme.textDim; font.pixelSize: 10; renderType: Text.NativeRendering }
             Swatches { key: "fg" }
-            Text { text: "Background (∅ plain, A its own)"; color: Theme.textDim; font.pixelSize: 10; renderType: Text.NativeRendering }
+            Text { topPadding: 0.001; text: "Background (∅ plain, A its own)"; color: Theme.textDim; font.pixelSize: 10; renderType: Text.NativeRendering }
             Swatches { key: "bg" }
             Row {
                 spacing: 6
@@ -838,7 +923,7 @@ Item {
                 Toggle { label: "Bold"; on: !!bar.styleDraft.bold; onClicked: bar.setStyle("bold", on ? undefined : true) }
                 Toggle { label: "Default look"; onClicked: { bar.styleDraft = {}; bar.saveStyle(stylePop.name, null) } }
             }
-            Text {
+            Text { topPadding: 0.001;
                 width: parent.width
                 visible: stylePop.name.startsWith("star") 
                 text: "Starship draws this one: colors here go over its own. Its format is in your starship.toml (or Preferences › Prompt)."
