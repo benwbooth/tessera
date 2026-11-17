@@ -148,6 +148,12 @@ pub fn detect_language(text: &str) -> &'static str {
                 return lang;
             }
         }
+        // (name = value, with spaces: never a shell assignment; most often Python.)
+        if let Some((name, rest)) = l.split_once(" = ") {
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') && !name.starts_with(|c: char| c.is_ascii_digit()) && !rest.trim().is_empty() {
+                return "python";
+            }
+        }
         return "";
     }
     let has = |pats: &[&str]| lines.iter().filter(|l| pats.iter().any(|p| l.trim_start().starts_with(p))).count();
