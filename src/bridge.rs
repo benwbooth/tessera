@@ -364,6 +364,21 @@ pub mod ffi {
         fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32);
         #[qsignal]
         fn starship_ready(self: Pin<&mut Controller>, key: QString, json: QString);
+        /// The prompt bar's widgets (src/prompt_widgets.rs): every Starship
+        /// module (JSON list; [] until Starship is there), the modules the
+        /// prompt's format shows, and what clicking a widget offers.
+        #[qinvokable]
+        fn prompt_star_modules(self: &Controller) -> QString;
+        #[qinvokable]
+        fn prompt_format_modules(self: &Controller) -> QString;
+        #[qinvokable]
+        fn prompt_choices(self: &Controller, widget: &QString, cwd: &QString, pid: i32) -> QString;
+        /// Draw Starship modules one by one, in the background:
+        /// prompt_modules_ready(key, {name: runs}).
+        #[qinvokable]
+        fn request_prompt_modules(self: Pin<&mut Controller>, key: &QString, names: &QString, cwd: &QString, status: i32, duration_ms: f64, pid: i32);
+        #[qsignal]
+        fn prompt_modules_ready(self: Pin<&mut Controller>, key: QString, json: QString);
         /// The prompt builder (Preferences › Prompt): Starship's presets,
         /// Tessera's own config, the user's, module switches, previews.
         #[qinvokable]
@@ -1046,6 +1061,28 @@ impl ffi::Controller {
         std::thread::spawn(move || {
             let json = crate::prompt::starship(&cwd, status, duration_ms.max(0.0) as u64, width.max(20) as u32, pid.max(0) as u32);
             let _ = qt.queue(move |c| c.starship_ready(qs(&key), qs(&json)));
+        });
+    }
+
+    fn prompt_star_modules(&self) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::prompt_widgets::module_list()).unwrap_or_default())
+    }
+
+    fn prompt_format_modules(&self) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::prompt_widgets::format_modules()).unwrap_or_default())
+    }
+
+    fn prompt_choices(&self, widget: &ffi::QString, cwd: &ffi::QString, pid: i32) -> ffi::QString {
+        qs(&crate::prompt_widgets::choices(&widget.to_string(), &local_path(cwd), pid.max(0) as u32))
+    }
+
+    fn request_prompt_modules(self: Pin<&mut Self>, key: &ffi::QString, names: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, pid: i32) {
+        let (key, cwd) = (key.to_string(), local_path(cwd));
+        let names: Vec<String> = serde_json::from_str(&names.to_string()).unwrap_or_default();
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let json = crate::prompt_widgets::modules(&names, &cwd, status, duration_ms.max(0.0) as u64, pid.max(0) as u32).to_string();
+            let _ = qt.queue(move |c| c.prompt_modules_ready(qs(&key), qs(&json)));
         });
     }
 

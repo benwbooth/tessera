@@ -108,7 +108,7 @@ pub fn has_starship() -> bool {
 
 /// The shell's environment (Linux: /proc/<pid>/environ), so Starship sees
 /// what the shell started with (nix-shell, a virtualenv, AWS_PROFILE, ...).
-fn shell_env(pid: u32) -> Option<Vec<(String, String)>> {
+pub fn shell_env(pid: u32) -> Option<Vec<(String, String)>> {
     if pid == 0 || !cfg!(target_os = "linux") {
         return None;
     }

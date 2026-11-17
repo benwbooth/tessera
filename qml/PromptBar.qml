@@ -1,10 +1,16 @@
 import QtQuick
+import QtQuick.Controls
 import Tessera
 
-// The prompt, drawn by Tessera above the input editor (like Starship, built
-// in): segments for the folder, git, the last command's status and time, the
-// user and host, and the clock. Which segments show, and in what order,
-// comes from `segments` (Preferences); colors from the terminal's theme.
+// The prompt, drawn by Tessera above the input editor: a row of widgets
+// (Tessera's own: the folder, git, the last command's status and time, the
+// user and host, the clock, cloud contexts; any Starship module; or
+// Starship's whole prompt), left and right of a divider.
+//
+// It's arranged on the bar itself: drag a widget along it (past the middle
+// for the right side, off the bar to remove it), + adds one, a right click
+// restyles it. A click acts on it (folders to go to, branches to switch to,
+// contexts and profiles): commands, run as if typed (runRequested).
 Item {
     id: bar
     property var view: null
@@ -26,8 +32,77 @@ Item {
     property int shellPid: 0
     property string engine: "auto"     // "auto", "starship", "builtin"
     readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && controller.hasStarship()))
+    signal runRequested(string command)
+    signal fixRequested()
 
-    implicitHeight: useStarship ? Math.max(1, starLines.length) * (Math.ceil(sfm.height) + 4) + 4 : 24
+    // ---- the arrangement (settings: prompt_layout, prompt_styles) -----------
+    readonly property var settings: { if (!controller) return {}; controller.revision; try { return JSON.parse(controller.settings()) } catch (e) { return {} } }
+    readonly property var layout: {
+        const l = settings.prompt_layout || []
+        if (l.length > 0) return l
+        return useStarship ? ["starship", "|", "starship_right"] : segments
+    }
+    readonly property var styles: settings.prompt_styles || ({})
+    function saveLayout(l) { if (controller) controller.setSetting("prompt_layout", JSON.stringify(l)) }
+    function saveStyle(name, st) {
+        const all = JSON.parse(JSON.stringify(styles))
+        if (st === null) delete all[name]; else all[name] = st
+        if (controller) controller.setSetting("prompt_styles", JSON.stringify(all))
+    }
+    function withDivider(l) { return l.indexOf("|") >= 0 ? l.slice() : l.concat(["|"]) }
+    function addWidget(name) {
+        const l = withDivider(layout)
+        if (name === "|") return
+        const at = l.indexOf("|")
+        l.splice(at, 0, name)
+        saveLayout(l)
+    }
+    function removeWidget(i) { const l = layout.slice(); l.splice(i, 1); saveLayout(l) }
+    function moveWidget(from, to) {
+        const l = layout.slice()
+        const x = l.splice(from, 1)[0]
+        l.splice(to > from ? to - 1 : to, 0, x)
+        saveLayout(l)
+    }
+    function otherSide(i) {
+        const l = withDivider(layout)
+        const d = l.indexOf("|")
+        const x = l.splice(i, 1)[0]
+        const nd = l.indexOf("|")
+        if (i < d) l.push(x); else l.splice(nd, 0, x)
+        saveLayout(l)
+    }
+    // Starship's whole prompt, split into its modules (from its format).
+    function splitStarship() {
+        let mods = []
+        try { mods = JSON.parse(controller.promptFormatModules()) } catch (e) {}
+        if (mods.length === 0) return
+        const l = []
+        for (const w of layout) {
+            if (w === "starship") { for (const m of mods) { if (m === "|") break; l.push(m) } }
+            else if (w === "starship_right") { const i = mods.indexOf("|"); if (i >= 0) for (const m of mods.slice(i + 1)) l.push(m) }
+            else l.push(w)
+        }
+        saveLayout(l)
+    }
+    readonly property var builtins: [
+        ["dir", "Folder", "The current folder; click for folders to go to"],
+        ["git", "Git", "Branch and changes; click to switch branches"],
+        ["status", "Exit status", "The last command's, when it failed; click to fix"],
+        ["duration", "Command time", "How long the last command took (over 2 s)"],
+        ["venv", "Python virtualenv", ""], ["nix", "Nix shell", ""],
+        ["kube", "Kubernetes context", "Click to switch"], ["aws", "AWS profile", "Click to switch"],
+        ["gcloud", "gcloud account", "Click to switch configuration"],
+        ["host", "user@host (over SSH)", ""], ["user", "User", ""], ["time", "Clock", ""],
+        ["starship", "Starship's whole prompt", "As your starship.toml draws it"],
+        ["starship_right", "Starship's right prompt", ""]]
+    function title(name) {
+        if (name.startsWith("star:")) return name.substring(5).replace(/_/g, " ")
+        const b = builtins.find(x => x[0] === name)
+        return b ? b[1] : name
+    }
+
+    implicitHeight: Math.max(24, Math.max(leftRow.implicitHeight, rightRow.implicitHeight) + 6)
     FontMetrics { id: sfm; font.family: bar.fontFamily; font.pointSize: Math.max(8, bar.fontSize - 1) }
 
     function ansi(i, fallback) {
@@ -41,24 +116,32 @@ Item {
     property var starLines: []
     property var starRight: []
     readonly property string key: "prompt-" + Math.random().toString(36).slice(2)
+    property var starMods: ({})        // Starship modules drawn one by one: {name: runs}
     function refresh() {
         if (!controller || !visible) return
-        if (useStarship) {
-            const cols = Math.max(20, Math.floor((bar.width - 16) / Math.max(1, sfm.averageCharacterWidth)))
-            controller.requestStarship(key, bar.cwd, bar.view ? bar.view.lastStatus : 0,
-                                       bar.view ? bar.view.lastDuration : 0, cols, bar.shellPid)
-            return
+        const st = bar.view ? bar.view.lastStatus : 0, du = bar.view ? bar.view.lastDuration : 0
+        if (layout.indexOf("starship") >= 0 || layout.indexOf("starship_right") >= 0) {
+            // (Starship's $fill pads to this: the room left of the + and the right side.)
+            const cols = Math.max(20, Math.floor((bar.width - 16 - addButton.width - 12 - (rightRow.width > 0 ? rightRow.width + 10 : 0)) / Math.max(1, sfm.averageCharacterWidth)))
+            controller.requestStarship(key, bar.cwd, st, du, cols, bar.shellPid)
         }
+        const mods = layout.filter(w => w.startsWith("star:")).map(w => w.substring(5))
+        if (mods.length > 0) controller.requestPromptModules(key, JSON.stringify(mods), bar.cwd, st, du, bar.shellPid)
         try { info = JSON.parse(controller.promptInfo(bar.cwd, bar.shellPid)) } catch (e) { info = {} }
     }
+    onLayoutChanged: refresh()
     Connections {
         target: bar.controller
         function onStarshipReady(k, json) {
             if (k !== bar.key) return
             try { const r = JSON.parse(json); bar.starLines = r.lines; bar.starRight = r.right } catch (e) {}
         }
+        function onPromptModulesReady(k, json) {
+            if (k !== bar.key) return
+            try { bar.starMods = JSON.parse(json) } catch (e) {}
+        }
     }
-    onWidthChanged: if (useStarship) resizeRefresh.restart()
+    onWidthChanged: if (layout.indexOf("starship") >= 0) resizeRefresh.restart()
     Timer { id: resizeRefresh; interval: 200; onTriggered: bar.refresh() }
     onShellPidChanged: refresh()
     // (The prompt's config changed in Preferences.)
@@ -146,9 +229,6 @@ Item {
         return null
     }
 
-    readonly property var leftSegs: { bar.info; bar.now; const r = []; for (const s of segments) { if (s === "|") break; const x = segment(s); if (x) r.push(x) } return r }
-    readonly property var rightSegs: { bar.info; bar.now; const i = segments.indexOf("|"); const r = []; if (i < 0) return r; for (const s of segments.slice(i + 1)) { const x = segment(s); if (x) r.push(x) } return r }
-
     component Seg: Item {
         id: seg
         property var s
@@ -192,19 +272,11 @@ Item {
             color: seg.s.fg
             font.family: bar.fontFamily
             font.pointSize: Math.max(8, bar.fontSize - 1)
-            font.weight: seg.s.bg !== "" ? Font.DemiBold : Font.Normal
+            font.weight: seg.s.bold !== undefined ? (seg.s.bold ? Font.Bold : Font.Normal) : seg.s.bg !== "" ? Font.DemiBold : Font.Normal
             renderType: Text.NativeRendering
         }
     }
 
-    Row {
-        visible: !bar.useStarship
-        anchors.left: parent.left
-        anchors.leftMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 8
-        Repeater { model: bar.leftSegs; delegate: Seg { s: modelData } }
-    }
     // Starship's own prompt, run for run.
     // A Powerline / Nerd Font cap (a pill's rounded or pointed end) is drawn
     // as a shape the height of the run: the font's glyph doesn't line up with
@@ -264,33 +336,536 @@ Item {
             }
         }
     }
-    Column {
-        visible: bar.useStarship
-        anchors.left: parent.left
-        anchors.leftMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-        Repeater {
-            model: bar.starLines
-            delegate: Row {
-                required property var modelData
-                Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData } }
+
+    // A widget's look, with its style (prompt_styles) laid over.
+    function styled(name, x) {
+        const st = styles[name]
+        if (!x || !st) return x
+        const y = Object.assign({}, x)
+        if (st.fg) y.fg = color(st.fg, y.fg)
+        if (st.bg === "none") y.bg = ""
+        else if (st.bg) y.bg = color(st.bg, y.bg)
+        if (st.prefix) y.text = st.prefix + y.text
+        if (st.suffix) y.text = y.text + st.suffix
+        if (st.bold !== undefined) y.bold = st.bold
+        return y
+    }
+    function styledRuns(name, runs) {
+        const st = styles[name]
+        if (!st) return runs
+        let r = runs.map(x => {
+            const y = Object.assign({}, x)
+            if (st.fg) y.fg = st.fg
+            if (st.bg === "none") y.bg = ""
+            else if (st.bg) y.bg = st.bg
+            if (st.bold !== undefined) y.b = st.bold
+            return y
+        })
+        const edge = r.length ? r[0] : {}
+        if (st.prefix) r = [{ t: st.prefix, fg: st.fg || edge.fg || "", bg: st.bg && st.bg !== "none" ? st.bg : "", b: !!st.bold }].concat(r)
+        if (st.suffix) r = r.concat([{ t: st.suffix, fg: st.fg || edge.fg || "", bg: st.bg && st.bg !== "none" ? st.bg : "", b: !!st.bold }])
+        return r
+    }
+    // The widgets, by side: [{name, i (in layout), kind, seg | runs | lines}].
+    function widgets(right) {
+        bar.info; bar.now; bar.starMods; bar.starLines; bar.starRight; bar.styles
+        const out = []
+        const d = layout.indexOf("|")
+        layout.forEach((w, i) => {
+            if (w === "|" || (right ? (d < 0 || i < d) : (d >= 0 && i > d))) return
+            if (w === "starship") { if (bar.starLines.length) out.push({ name: w, i: i, kind: "lines", lines: bar.starLines.map(l => styledRuns(w, l)) }) }
+            else if (w === "starship_right") { if (bar.starRight.length) out.push({ name: w, i: i, kind: "runs", runs: styledRuns(w, bar.starRight) }) }
+            else if (w.startsWith("star:")) { const r = bar.starMods[w.substring(5)]; if (r && r.length) out.push({ name: w, i: i, kind: "runs", runs: styledRuns(w, r) }) }
+            else { const x = styled(w, segment(w)); if (x) out.push({ name: w, i: i, kind: "seg", seg: x }) }
+        })
+        return out
+    }
+    readonly property var leftWidgets: widgets(false)
+    readonly property var rightWidgets: widgets(true)
+
+    // ---- dragging -----------------------------------------------------------
+    property int dragFrom: -1           // the layout index being dragged
+    property real dragX: 0
+    property real dragY: 0
+    readonly property bool dragOff: dragFrom >= 0 && Math.abs(dragY - height / 2) > height / 2 + 26
+    property var dropAt: -1             // the layout index it would go before
+    property real dropX: 0
+    function dropTarget() {
+        // Each shown widget's middle, and the divider between the sides.
+        const marks = []
+        for (const row of [leftRow, rightRow]) {
+            for (let k = 0; k < row.children.length; k++) {
+                const c = row.children[k]
+                if (c.wi === undefined || !c.visible) continue
+                const p = c.mapToItem(bar, 0, 0)
+                marks.push({ i: c.wi, x: p.x + c.width / 2, left: p.x - 4, right: p.x + c.width + 4 })
+            }
+        }
+        const d = layout.indexOf("|")
+        const divX = (leftRow.x + leftRow.width + rightRow.x) / 2
+        marks.push({ i: d >= 0 ? d : layout.length, x: divX, left: divX, right: divX, divider: true })
+        marks.sort((a, b) => a.x - b.x)
+        for (const m of marks) {
+            if (bar.dragX < m.x) {
+                bar.dropX = m.divider ? m.x : m.left
+                // (Before the divider: the end of the left side; past it, the right's start.)
+                return m.divider ? (d >= 0 ? d : layout.length) : m.i
+            }
+        }
+        const last = marks[marks.length - 1]
+        bar.dropX = last.divider ? last.x : last.right
+        return layout.length
+    }
+    function finishDrag() {
+        if (dragFrom < 0) return
+        const from = dragFrom
+        dragFrom = -1
+        if (dragOff) { removeWidget(from); return }
+        if (layout.indexOf("|") < 0) {
+            // (No right side yet: a drop past the middle starts one.)
+            const l = layout.concat(["|"])
+            const x = l.splice(from, 1)[0]
+            const at = Math.min(dropAt, l.length)
+            l.splice(at >= l.indexOf("|") && dragX > width / 2 ? l.length : (at > from ? at - 1 : at), 0, x)
+            saveLayout(l)
+            return
+        }
+        if (dropAt !== from && dropAt !== from + 1) moveWidget(from, dropAt)
+    }
+
+    // ---- a widget on the bar -------------------------------------------------
+    component Widget: Item {
+        id: w
+        required property var modelData
+        readonly property var wd: modelData
+        readonly property int wi: wd.i
+        implicitWidth: body.implicitWidth
+        implicitHeight: body.implicitHeight
+        width: implicitWidth
+        height: implicitHeight
+        anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+        opacity: bar.dragFrom === wi ? 0.35 : 1
+        Loader {
+            id: body
+            sourceComponent: w.wd.kind === "seg" ? segBody : w.wd.kind === "lines" ? linesBody : runsBody
+            property var wd: w.wd
+        }
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -2
+            radius: 6
+            color: "transparent"
+            border.color: Theme.accent
+            border.width: 1
+            opacity: hover.hovered && bar.dragFrom < 0 && (w.choicesFor !== "") ? 0.6 : 0
+        }
+        readonly property string choicesFor: w.wd.name === "status" ? "fix" : w.wd.name
+        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: bar.openChoices(w.wd.name, w)
+        }
+        TapHandler {
+            acceptedButtons: Qt.RightButton
+            onTapped: (pt) => bar.openWidgetMenu(w.wi, w.wd.name, w)
+        }
+        DragHandler {
+            id: drag
+            target: null
+            dragThreshold: 6
+            onActiveChanged: {
+                if (active) { bar.dragFrom = w.wi; ghost.text = bar.title(w.wd.name) }
+                else bar.finishDrag()
+            }
+            onCentroidChanged: {
+                if (!active) return
+                const p = w.mapToItem(bar, centroid.position.x, centroid.position.y)
+                bar.dragX = p.x
+                bar.dragY = p.y
+                bar.dropAt = bar.dropTarget()
+            }
+        }
+        ToolTip.visible: hover.hovered && bar.dragFrom < 0 && !choicesPop.opened && !widgetMenu.opened
+        ToolTip.delay: 900
+        ToolTip.text: bar.title(w.wd.name) + " — click for choices, drag to move, right-click to style"
+    }
+    Component { id: segBody; Seg { s: parent.wd.seg } }
+    Component {
+        id: runsBody
+        Row {
+            id: rr
+            readonly property var wd: parent ? parent.wd : null
+            Repeater { model: rr.wd ? rr.wd.runs : []; delegate: Run { required property var modelData; r: modelData } }
+        }
+    }
+    Component {
+        id: linesBody
+        Column {
+            id: lc
+            readonly property var wd: parent ? parent.wd : null
+            spacing: 2
+            Repeater {
+                model: lc.wd ? lc.wd.lines : []
+                delegate: Row {
+                    required property var modelData
+                    Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData } }
+                }
             }
         }
     }
+
     Row {
-        visible: bar.useStarship
-        anchors.right: parent.right
-        anchors.rightMargin: 8
+        id: leftRow
+        anchors.left: parent.left
+        anchors.leftMargin: 8
         anchors.verticalCenter: parent.verticalCenter
-        Repeater { model: bar.starRight; delegate: Run { required property var modelData; r: modelData } }
+        spacing: 8
+        Repeater { model: bar.leftWidgets; delegate: Widget {} }
     }
     Row {
-        visible: !bar.useStarship
-        anchors.right: parent.right
-        anchors.rightMargin: 10
+        id: rightRow
+        anchors.right: addButton.left
+        anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
-        Repeater { model: bar.rightSegs; delegate: Seg { s: modelData } }
+        Repeater { model: bar.rightWidgets; delegate: Widget {} }
+    }
+    // Where a dragged widget would land, and its name under the pointer.
+    Rectangle {
+        visible: bar.dragFrom >= 0 && !bar.dragOff
+        x: bar.dropX - 1
+        width: 2
+        height: bar.height - 4
+        y: 2
+        radius: 1
+        color: Theme.accent
+    }
+    Rectangle {
+        visible: bar.dragFrom >= 0
+        x: bar.dragX - width / 2
+        y: bar.dragY - height / 2
+        z: 10
+        width: ghost.implicitWidth + 16
+        height: 20
+        radius: 10
+        color: bar.dragOff ? ansi(1, "#e06c75") : Theme.accent
+        opacity: 0.9
+        Text {
+            id: ghost
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: 0.001
+            text: ""
+            color: Theme.bg
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+            renderType: Text.NativeRendering
+        }
+        Text {
+            visible: bar.dragOff
+            anchors.top: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "Let go to remove"
+            color: ansi(1, "#e06c75")
+            font.pixelSize: 10
+            renderType: Text.NativeRendering
+        }
+    }
+
+    // ---- + -------------------------------------------------------------------
+    HoverHandler { id: barHover }
+    Rectangle {
+        id: addButton
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        width: 18
+        height: 18
+        radius: 9
+        color: addHover.hovered ? Theme.mix(Theme.bg, Theme.accent, 0.35) : Theme.mix(Theme.bg, Theme.fg, 0.08)
+        opacity: barHover.hovered || addPop.opened || bar.layout.length === 0 ? 1 : 0.35
+        Text {
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: 0.001
+            text: "+"
+            color: Theme.text
+            font.pixelSize: 13
+            renderType: Text.NativeRendering
+        }
+        HoverHandler { id: addHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: { addPop.x = Math.max(0, bar.width - addPop.width - 4); addPop.open() } }
+        ToolTip.visible: addHover.hovered && !addPop.opened
+        ToolTip.delay: 500
+        ToolTip.text: "Add a widget to the prompt"
+    }
+    Popup {
+        id: addPop
+        y: -height - 4
+        width: 300
+        height: Math.min(420, addList.contentHeight + addFilter.height + 22)
+        padding: 6
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        property var star: []
+        onOpened: { addFilter.text = ""; addFilter.forceActiveFocus(); try { star = JSON.parse(bar.controller.promptStarModules()) } catch (e) { star = [] } }
+        readonly property var options: {
+            const o = [{ head: "Tessera" }]
+            for (const b of bar.builtins) o.push({ name: b[0], label: b[1], note: b[2] })
+            o.push({ head: "Starship modules" + (star.length ? " (" + star.length + ")" : "") })
+            if (star.length === 0) o.push({ name: "", label: "Getting Starship from nixpkgs…", note: "Open this again in a moment" })
+            for (const m of star) o.push({ name: "star:" + m, label: m.replace(/_/g, " "), note: "" })
+            const f = addFilter.text.toLowerCase()
+            return f === "" ? o : o.filter(x => !x.head && (x.label + " " + x.name + " " + x.note).toLowerCase().indexOf(f) >= 0)
+        }
+        contentItem: Column {
+            spacing: 4
+            TextField {
+                id: addFilter
+                width: parent.width
+                placeholderText: "Search widgets"
+                color: Theme.text
+                font.pixelSize: 12
+                background: Rectangle { radius: 6; color: Theme.bg; border.color: addFilter.activeFocus ? Theme.accent : Theme.divider }
+                Keys.onReturnPressed: { const x = addPop.options.find(o => !o.head && o.name); if (x) { bar.addWidget(x.name); addPop.close() } }
+                Keys.onEscapePressed: addPop.close()
+            }
+            ListView {
+                id: addList
+                width: parent.width
+                height: Math.min(370, contentHeight)
+                clip: true
+                model: addPop.options
+                ScrollBar.vertical: ScrollBar {}
+                delegate: Rectangle {
+                    required property var modelData
+                    readonly property bool on: !modelData.head && bar.layout.indexOf(modelData.name) >= 0
+                    width: addList.width
+                    height: modelData.head ? 22 : (modelData.note ? 34 : 24)
+                    radius: 4
+                    color: !modelData.head && ah.hovered ? Theme.tabHover : "transparent"
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        anchors.right: parent.right
+                        Text {
+                            text: modelData.head ? modelData.head : (parent.parent.on ? "✓ " : "") + modelData.label
+                            color: modelData.head ? Theme.textDim : Theme.text
+                            font.pixelSize: modelData.head ? 10 : 12
+                            font.weight: modelData.head ? Font.DemiBold : Font.Normal
+                            renderType: Text.NativeRendering
+                        }
+                        Text {
+                            visible: !!modelData.note
+                            width: parent.width
+                            text: modelData.note || ""
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                            elide: Text.ElideRight
+                            renderType: Text.NativeRendering
+                        }
+                    }
+                    HoverHandler { id: ah }
+                    TapHandler { enabled: !modelData.head && modelData.name !== ""; onTapped: { bar.addWidget(modelData.name); addPop.close() } }
+                }
+            }
+        }
+    }
+
+    // ---- a click: what the widget offers ---------------------------------------
+    property var choices: []
+    function openChoices(name, item) {
+        if (name === "status") { bar.fixRequested(); return }
+        let c = []
+        try { c = JSON.parse(controller.promptChoices(name, bar.cwd, bar.shellPid)) } catch (e) {}
+        if (c.length === 0) { openWidgetMenu(layout.indexOf(name), name, item); return }
+        choices = c
+        const p = item.mapToItem(bar, 0, 0)
+        choicesPop.x = Math.min(Math.max(0, p.x), bar.width - choicesPop.width)
+        choicesPop.open()
+    }
+    Popup {
+        id: choicesPop
+        y: -height - 4
+        width: 280
+        height: Math.min(380, choiceList.contentHeight + 12)
+        padding: 6
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        contentItem: ListView {
+            id: choiceList
+            clip: true
+            model: bar.choices
+            ScrollBar.vertical: ScrollBar {}
+            delegate: Rectangle {
+                required property var modelData
+                width: choiceList.width
+                height: modelData.section ? 22 : 24
+                radius: 4
+                color: !modelData.section && ch.hovered ? Theme.tabHover : "transparent"
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0.001
+                    x: 8
+                    width: parent.width - 16
+                    text: (modelData.current ? "✓ " : "") + modelData.label
+                    color: modelData.section ? Theme.textDim : Theme.text
+                    font.pixelSize: modelData.section ? 10 : 12
+                    font.weight: modelData.section || modelData.current ? Font.DemiBold : Font.Normal
+                    font.family: modelData.section ? Qt.application.font.family : bar.fontFamily
+                    elide: Text.ElideMiddle
+                    renderType: Text.NativeRendering
+                }
+                HoverHandler { id: ch; cursorShape: modelData.section ? Qt.ArrowCursor : Qt.PointingHandCursor }
+                TapHandler { enabled: !modelData.section; onTapped: { choicesPop.close(); bar.runRequested(modelData.cmd) } }
+            }
+        }
+    }
+
+    // ---- a right click: the widget's own menu, and its style ----------------
+    property int menuFor: -1
+    property string menuName: ""
+    function openWidgetMenu(i, name, item) {
+        menuFor = i
+        menuName = name
+        const p = item.mapToItem(bar, 0, 0)
+        widgetMenu.x = Math.min(Math.max(0, p.x), bar.width - widgetMenu.width)
+        widgetMenu.open()
+    }
+    SlimMenu {
+        id: widgetMenu
+        y: -height - 4
+        SlimMenuItem { text: "Style…"; onTriggered: bar.openStyle(bar.menuName) }
+        SlimMenuItem {
+            text: bar.layout.indexOf("|") >= 0 && bar.menuFor > bar.layout.indexOf("|") ? "Move to the left" : "Move to the right"
+            onTriggered: bar.otherSide(bar.menuFor)
+        }
+        SlimMenuItem { text: "Split into Starship modules"; visible: bar.menuName === "starship"; height: visible ? implicitHeight : 0; onTriggered: bar.splitStarship() }
+        SlimMenuItem { text: "Add a widget…"; onTriggered: { addPop.x = Math.max(0, bar.width - addPop.width - 4); addPop.open() } }
+        SlimMenuItem { text: "Remove"; onTriggered: bar.removeWidget(bar.menuFor) }
+        SlimMenuItem { text: "Reset the prompt"; onTriggered: { bar.saveLayout([]); if (bar.controller) bar.controller.setSetting("prompt_styles", "{}") } }
+    }
+    property var styleDraft: ({})
+    function openStyle(name) {
+        styleDraft = Object.assign({}, styles[name] || {})
+        stylePop.name = name
+        stylePop.x = Math.max(0, Math.min(bar.width - stylePop.width, 40))
+        stylePop.open()
+    }
+    function setStyle(k, v) {
+        const d = Object.assign({}, styleDraft)
+        if (v === undefined || v === "") delete d[k]; else d[k] = v
+        styleDraft = d
+        saveStyle(stylePop.name, Object.keys(d).length ? d : null)
+    }
+    Popup {
+        id: stylePop
+        y: -height - 4
+        property string name: ""
+        width: 300
+        padding: 10
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        component Swatches: Flow {
+            id: sw
+            property string key
+            width: parent.width
+            spacing: 4
+            Repeater {
+                model: ["", "none"].concat([1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 0, 8].map(n => "p" + n))
+                delegate: Rectangle {
+                    required property var modelData
+                    readonly property bool picked: (bar.styleDraft[sw.key] || "") === modelData
+                    visible: modelData !== "none" || sw.key === "bg"
+                    width: 18; height: 18; radius: 9
+                    color: modelData === "" || modelData === "none" ? "transparent" : bar.color(modelData, "transparent")
+                    border.color: picked ? Theme.text : Theme.divider
+                    border.width: picked ? 2 : 1
+                    Text {
+                        anchors.centerIn: parent
+                        visible: modelData === "" || modelData === "none"
+                        text: modelData === "" ? "A" : "∅"
+                        color: Theme.textDim
+                        font.pixelSize: 9
+                        renderType: Text.NativeRendering
+                    }
+                    TapHandler { onTapped: bar.setStyle(sw.key, modelData) }
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                }
+            }
+        }
+        contentItem: Column {
+            spacing: 6
+            Text { text: bar.title(stylePop.name); color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; renderType: Text.NativeRendering }
+            Text { text: "Text color"; color: Theme.textDim; font.pixelSize: 10; renderType: Text.NativeRendering }
+            Swatches { key: "fg" }
+            Text { text: "Background (∅ plain, A its own)"; color: Theme.textDim; font.pixelSize: 10; renderType: Text.NativeRendering }
+            Swatches { key: "bg" }
+            Row {
+                spacing: 6
+                width: parent.width
+                TextField {
+                    width: (parent.width - 6) / 2
+                    placeholderText: "Before (icon, text)"
+                    text: bar.styleDraft.prefix || ""
+                    color: Theme.text
+                    font.pixelSize: 11
+                    background: Rectangle { radius: 5; color: Theme.bg; border.color: parent.activeFocus ? Theme.accent : Theme.divider }
+                    onEditingFinished: bar.setStyle("prefix", text)
+                }
+                TextField {
+                    width: (parent.width - 6) / 2
+                    placeholderText: "After"
+                    text: bar.styleDraft.suffix || ""
+                    color: Theme.text
+                    font.pixelSize: 11
+                    background: Rectangle { radius: 5; color: Theme.bg; border.color: parent.activeFocus ? Theme.accent : Theme.divider }
+                    onEditingFinished: bar.setStyle("suffix", text)
+                }
+            }
+            Row {
+                spacing: 12
+                component Toggle: Rectangle {
+                    id: tg
+                    property string label
+                    property bool on: false
+                    signal clicked()
+                    width: tl.implicitWidth + 16
+                    height: 22
+                    radius: 11
+                    color: on ? Theme.mix(Theme.bg, Theme.accent, 0.45) : th.hovered ? Theme.tabHover : Theme.mix(Theme.bg, Theme.fg, 0.06)
+                    border.color: Theme.divider
+                    Text { id: tl; anchors.centerIn: parent; anchors.verticalCenterOffset: 0.001; text: tg.label; color: Theme.text; font.pixelSize: 11; renderType: Text.NativeRendering }
+                    HoverHandler { id: th; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: tg.clicked() }
+                }
+                Toggle { label: "Bold"; on: !!bar.styleDraft.bold; onClicked: bar.setStyle("bold", on ? undefined : true) }
+                Toggle { label: "Default look"; onClicked: { bar.styleDraft = {}; bar.saveStyle(stylePop.name, null) } }
+            }
+            Text {
+                width: parent.width
+                visible: stylePop.name.startsWith("star") 
+                text: "Starship draws this one: colors here go over its own. Its format is in your starship.toml (or Preferences › Prompt)."
+                wrapMode: Text.Wrap
+                color: Theme.textDim
+                font.pixelSize: 10
+                renderType: Text.NativeRendering
+            }
+        }
+    }
+    Timer { id: t2; property string cmd; interval: 2500; onTriggered: { for (let k = 0; k < leftRow.children.length; k++) { const c = leftRow.children[k]; if (c.wd && c.wd.name === cmd.substring(cmd.indexOf(":") + 1)) { if (cmd.startsWith("choices:")) bar.openChoices(c.wd.name, c); else bar.openStyle(c.wd.name) } } } }
+    // (Test hook: TESSERA_TEST_PROMPT=add | choices:<widget> | style:<widget> | split[,choices:… | ,style:…] | run:<a folder choice's command>.)
+    Timer {
+        interval: 5000
+        running: bar.controller !== null && bar.visible && bar.controller.testEnv("PROMPT") !== ""
+        onTriggered: {
+            const t = bar.controller.testEnv("PROMPT")
+            if (t === "add") { addPop.x = Math.max(0, bar.width - addPop.width - 4); addPop.open() }
+            else if (t === "split") bar.splitStarship()
+            else if (t.startsWith("run:")) { let c = []; try { c = JSON.parse(controller.promptChoices("dir", "/usr", 0)) } catch (e) {} const x = c.find(o => o.cmd === t.substring(4)); if (x) bar.runRequested(x.cmd) }
+            else if (t.startsWith("split,")) { bar.splitStarship(); t2.cmd = t.substring(6); t2.start() }
+            else for (const row of [leftRow, rightRow]) for (let k = 0; k < row.children.length; k++) {
+                const c = row.children[k]
+                if (c.wd === undefined || c.wd.name !== t.substring(t.indexOf(":") + 1)) continue
+                if (t.startsWith("choices:")) bar.openChoices(c.wd.name, c)
+                else if (t.startsWith("style:")) bar.openStyle(c.wd.name)
+            }
+        }
     }
 }

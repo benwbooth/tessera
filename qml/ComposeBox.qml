@@ -541,6 +541,9 @@ Rectangle {
         engine: box.promptEngine
         fontFamily: edit.font.family
         fontSize: edit.font.pointSize
+        // (A widget's choice runs as if typed: a card, history.)
+        onRunRequested: (c) => { box.runLang = "bash"; box.submitted(c); edit.forceActiveFocus() }
+        onFixRequested: box.askFix()
     }
 
     Flickable {

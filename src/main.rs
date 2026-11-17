@@ -18,6 +18,7 @@ mod procinfo;
 mod launchers;
 mod lsp;
 mod prompt;
+mod prompt_widgets;
 mod proto;
 mod settings;
 mod shell_integration;

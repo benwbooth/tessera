@@ -70,6 +70,13 @@ pub struct Settings {
     // -- AI (src/ai.rs): providers and which model does what.
     pub ai: AiSettings,
     pub prompt_segments: Vec<String>,
+    // -- The prompt bar as arranged on it (dragged, added with +): widget
+    // names, "star:<module>" for a Starship module, "starship" /
+    // "starship_right" for Starship's whole prompt, "|" for the right side.
+    // Empty: from prompt_engine and prompt_segments.
+    pub prompt_layout: Vec<String>,
+    // -- Each widget's look: {name: {fg, bg, pill, prefix, suffix, bold}}.
+    pub prompt_styles: serde_json::Value,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
     // -- Snippets (Edit > Snippets): text sent as if typed.
@@ -115,6 +122,8 @@ impl Default for Settings {
             prompt_config: "own".into(),
             ai: AiSettings::default(),
             prompt_segments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"].map(String::from).to_vec(),
+            prompt_layout: Vec::new(),
+            prompt_styles: serde_json::json!({}),
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),
