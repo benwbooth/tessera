@@ -716,6 +716,11 @@ impl Kernel {
                 *k.stdin.lock().unwrap() = Some(stdin);
                 k.spawn_readers(iopub, shell_reader, sink.clone());
                 k.spawn_stdin_reader(stdin_reader, sink.clone());
+                // (ilua crashes on a request that comes before its Lua is
+                // connected, kernel_info too: give it time first.)
+                if k.spec.name == "tessera-lua" {
+                    std::thread::sleep(Duration::from_secs(3));
+                }
                 // (Repeated until it answers: the SUB socket may miss the first replies.)
                 for _ in 0..40 {
                     if k.ready.load(Ordering::SeqCst) || k.gone.load(Ordering::SeqCst) {
@@ -845,10 +850,6 @@ impl Kernel {
                 match ty.as_str() {
                     "kernel_info_reply" => {
                         if !k.ready.swap(true, Ordering::SeqCst) {
-                            // (ilua answers before its Lua is connected: give it a moment.)
-                            if k.spec.name == "tessera-lua" {
-                                std::thread::sleep(Duration::from_secs(2));
-                            }
                             let li = &c["language_info"];
                             sink(json!({"type": "info", "language": li["name"], "version": li["version"],
                                         "extension": li["file_extension"], "banner": c["banner"], "implementation": c["implementation"]}));
