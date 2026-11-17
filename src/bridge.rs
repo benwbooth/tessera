@@ -1078,6 +1078,7 @@ impl ffi::Controller {
 
     fn kill_session(&self, id: &ffi::QString) {
         crate::client::kill_session(&id.to_string());
+        crate::cells::Cells::forget(&id.to_string());
     }
 
     fn notify(&self, title: &ffi::QString, body: &ffi::QString) {

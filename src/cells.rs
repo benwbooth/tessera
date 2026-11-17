@@ -112,6 +112,104 @@ impl Cells {
     }
 }
 
+// ---- kept on disk: a session's cells survive a restart of the app ----------
+// One JSON line per finished cell (output base64), appended as each ends.
+
+fn store_path(session: &str) -> std::path::PathBuf {
+    crate::settings::state_dir().join("cells").join(format!("{session}.jsonl"))
+}
+
+fn cell_line(c: &Cell) -> String {
+    use base64::Engine;
+    let b = base64::engine::general_purpose::STANDARD;
+    json!({"id": c.id, "command": c.command, "cwd": c.cwd, "started": c.started, "duration": c.duration_ms,
+           "status": c.status, "kind": c.kind, "truncated": c.truncated, "raw": b.encode(&c.raw),
+           "image": c.image.as_ref().map(|i| b.encode(i))})
+    .to_string()
+}
+
+fn line_cell(l: &str) -> Option<Cell> {
+    use base64::Engine;
+    let b = base64::engine::general_purpose::STANDARD;
+    let v: serde_json::Value = serde_json::from_str(l).ok()?;
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    Some(Cell {
+        id: v["id"].as_u64()?,
+        command: s("command"),
+        cwd: s("cwd"),
+        started: v["started"].as_u64().unwrap_or(0),
+        duration_ms: v["duration"].as_u64().unwrap_or(0),
+        status: v["status"].as_i64().unwrap_or(0),
+        done: true,
+        raw: b.decode(v["raw"].as_str().unwrap_or("")).unwrap_or_default(),
+        kind: s("kind"),
+        image: v["image"].as_str().and_then(|i| b.decode(i).ok()),
+        truncated: v["truncated"].as_bool().unwrap_or(false),
+    })
+}
+
+impl Cells {
+    /// Keep the finished cell `id` (appended to the session's file).
+    pub fn persist(&self, session: &str, id: u64) {
+        use std::io::Write;
+        let Some(c) = self.get(id) else { return };
+        let path = store_path(session);
+        if let Some(d) = path.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(f, "{}", cell_line(c));
+        }
+    }
+
+    /// Bring back a session's kept cells (`from`: the session they were
+    /// kept under, when a new shell takes over an old one's screen).
+    pub fn restore(&mut self, from: &str, session: &str) -> bool {
+        let src = store_path(from);
+        let Ok(text) = std::fs::read_to_string(&src) else { return false };
+        let mut list: VecDeque<Cell> = text.lines().filter_map(line_cell).collect();
+        let total_lines = list.len();
+        while list.len() > MAX_CELLS {
+            list.pop_front();
+        }
+        let mut total: usize = list.iter().map(|c| c.raw.len()).sum();
+        for c in list.iter_mut() {
+            if total <= MAX_TOTAL_BYTES {
+                break;
+            }
+            total -= c.raw.len();
+            c.raw = Vec::new();
+            c.truncated = true;
+        }
+        if list.is_empty() {
+            return false;
+        }
+        self.next = self.next.max(list.iter().map(|c| c.id).max().unwrap_or(0));
+        // (Restored cells come before any this session has made already.)
+        let mine = std::mem::take(&mut self.list);
+        self.list = list;
+        for mut c in mine {
+            self.next += 1;
+            c.id = self.next;
+            self.list.push_back(c);
+        }
+        let dst = store_path(session);
+        // Rewritten when it has grown past what's kept, or moved to the new id.
+        if from != session || total_lines > self.list.len() {
+            let body: String = self.list.iter().filter(|c| c.done).map(|c| cell_line(c) + "\n").collect();
+            if std::fs::write(&dst, body).is_ok() && from != session {
+                let _ = std::fs::remove_file(&src);
+            }
+        }
+        true
+    }
+
+    /// The session ended for good: its kept cells go.
+    pub fn forget(session: &str) {
+        let _ = std::fs::remove_file(store_path(session));
+    }
+}
+
 /// A cell's output as HTML with its colors and styles (the bytes replayed in
 /// a scratch terminal `cols` wide, then formatted).
 pub fn to_html(raw: &[u8], cols: u16) -> String {
@@ -227,6 +325,26 @@ mod tests {
     fn bat_frame_with_an_error() {
         let t = "[bat error]: 'cat': No such file or directory (os error 2)\n\u{2500}\u{2500}\u{2500}\u{2500}\u{252c}\u{2500}\u{2500}\n    \u{2502} File: README.md\n\u{2500}\u{2500}\u{2500}\u{2500}\u{253c}\u{2500}\u{2500}\n   1 \u{2502} # Kog\n   2 \u{2502} \n   3 \u{2502} Some text\n\u{2500}\u{2500}\u{2500}\u{2500}\u{2534}\u{2500}\u{2500}\n";
         assert_eq!(strip_frame(t), "# Kog\n\nSome text\n");
+    }
+
+    #[test]
+    fn cells_kept_on_disk() {
+        let dir = std::env::temp_dir().join(format!("tessera-cells-{}", std::process::id()));
+        std::env::set_var("XDG_STATE_HOME", &dir);
+        let mut c = Cells::default();
+        let id = c.start("echo hi".into(), "/tmp".into());
+        c.output(b"hi\r\n");
+        c.finish(0, "");
+        c.persist("old", id);
+        let mut n = Cells::default();
+        assert!(n.restore("old", "new"));
+        assert_eq!(n.list.len(), 1);
+        assert_eq!(n.list[0].raw, b"hi\r\n");
+        assert!(!store_path("old").exists() && store_path("new").exists());
+        let id2 = n.start("ls".into(), "/".into());
+        assert_eq!(id2, id + 1);
+        Cells::forget("new");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

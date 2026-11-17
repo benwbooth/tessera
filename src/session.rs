@@ -113,6 +113,8 @@ pub struct Session {
     /// Notebook cells (one per command), the next command's line (from the
     /// shell integration), and the picture the running command printed.
     cells: crate::cells::Cells,
+    /// The session whose kept cells a restored screen brings back.
+    cells_from: Option<String>,
     pending_command: String,
     command_buf: Option<Vec<u8>>,
     cell_image: Option<Vec<u8>>,
@@ -333,6 +335,7 @@ pub fn session_open(
         cmd_out: None,
         last_rich: (String::new(), String::new()),
         cells: Default::default(),
+        cells_from: None,
         pending_command: String::new(),
         command_buf: None,
         cell_image: None,
@@ -456,6 +459,12 @@ impl Session {
                             {
                                 *id = new_id;
                                 self.events.push(json!({"type": "attached", "id": id.clone()}));
+                                // The notebook's cells from before (a restart, or a reboot).
+                                let id = id.clone();
+                                let from = self.cells_from.take().unwrap_or_else(|| id.clone());
+                                if self.cells.restore(&from, &id) {
+                                    self.events.push(json!({"type": "cell", "id": 0, "done": true}));
+                                }
                             }
                         }
                         T_OUTPUT => {
@@ -772,6 +781,11 @@ impl Session {
                         if let Some(id) = self.cells.finish(status, kind) {
                             if let Some(c) = self.cells.list.back_mut() {
                                 c.image = image;
+                            }
+                            if let Backend::Daemon { id: sid, .. } = &self.backend {
+                                if !sid.is_empty() {
+                                    self.cells.persist(sid, id);
+                                }
                             }
                             self.events.push(json!({"type": "cell", "id": id, "done": true}));
                         }
@@ -1230,6 +1244,8 @@ impl Session {
     pub fn preload(&mut self, path: &str) -> bool {
         let Ok(data) = std::fs::read(path) else { return false };
         self.term.vt_write(&data);
+        // (Its notebook cells come back too, once the new shell has an id.)
+        self.cells_from = std::path::Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned());
         // Continue below the last line with anything on it.
         let rows = self.term.rows().unwrap_or(1) as usize;
         let top = self.total_rows().saturating_sub(rows);
@@ -1336,7 +1352,10 @@ impl Session {
 
     pub fn kill(&mut self) {
         match &mut self.backend {
-            Backend::Daemon { stream, .. } => write_blocking(stream, T_KILL, b""),
+            Backend::Daemon { stream, id, .. } => {
+                crate::cells::Cells::forget(id);
+                write_blocking(stream, T_KILL, b"")
+            }
             Backend::Tmux { gw, pane, .. } => gw.borrow_mut().user_command(&format!("kill-pane -t %{pane}")),
         }
     }
