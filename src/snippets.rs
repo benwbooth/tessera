@@ -180,6 +180,54 @@ fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+/// Tessera's C++ runner (a script in the cache folder, written when it
+/// changes): clang-repl from nixpkgs' latest LLVM, with libc++ and its std
+/// module (built once per compiler), the code as its argument.
+const CXX_RUNNER: &str = r#"#!/bin/sh
+# Tessera's C++ runner: clang-repl (LLVM's C++ interpreter, from nixpkgs)
+# with libc++'s std module, so `import std;` works. Usage: tessera-cxx CODE
+set -e
+dir="${XDG_CACHE_HOME:-$HOME/.cache}/tessera/cxx"
+mkdir -p "$dir"
+# (GC roots, so Nix keeps them; fetched once.)
+for x in clang:llvmPackages_latest.clang-unwrapped^out libcxx:llvmPackages_latest.libcxx^out libcxxdev:llvmPackages_latest.libcxx^dev glibcdev:glibc^dev; do
+  name=${x%%:*}; attr=${x#*:}
+  # (A ^dev output's link gets -dev on its name.)
+  if [ ! -e "$dir/$name" ] && [ ! -e "$dir/$name-dev" ]; then
+    echo "tessera: getting $attr from nixpkgs (once)..." >&2
+    nix build --quiet "nixpkgs#$attr" --out-link "$dir/$name" >&2
+  fi
+done
+at() { if [ -e "$dir/$1" ]; then readlink -f "$dir/$1"; else readlink -f "$dir/$1-dev"; fi; }
+C=$(at clang); L=$(at libcxx); D=$(at libcxxdev); G=$(at glibcdev)
+flags="-std=c++23 -nostdinc++ -isystem $D/include/c++/v1 -isystem $G/include"
+pcm="$dir/pcm-$(basename "$C")"
+if [ ! -f "$pcm/std.pcm" ]; then
+  echo "tessera: building C++'s std module (once)..." >&2
+  mkdir -p "$pcm"
+  "$C/bin/clang++" $flags -Wno-reserved-module-identifier --precompile -o "$pcm/std.pcm.tmp" "$L/share/libc++/v1/std.cppm" >&2
+  mv "$pcm/std.pcm.tmp" "$pcm/std.pcm"
+fi
+xcc=""
+for f in $flags -fprebuilt-module-path=$pcm -Wno-main; do xcc="$xcc --Xcc=$f"; done
+LD_PRELOAD="$L/lib/libc++.so.1 $L/lib/libc++abi.so.1${LD_PRELOAD:+ $LD_PRELOAD}" exec "$C/bin/clang-repl" $xcc "$@"
+"#;
+
+fn cxx_runner() -> Option<String> {
+    let base = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+    let path = base.join("tessera").join("tessera-cxx");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(CXX_RUNNER) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        std::fs::write(&path, CXX_RUNNER).ok()?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).ok()?;
+    }
+    // (Shown as ~/..., as typed.)
+    let home = std::env::var("HOME").unwrap_or_default();
+    let p = path.to_string_lossy().to_string();
+    Some(if !home.is_empty() && p.starts_with(&home) { format!("~{}", &p[home.len()..]) } else { p })
+}
+
 /// The installed g++'s major version.
 fn gcc_major() -> Option<u32> {
     if !on_path("g++") {
@@ -282,6 +330,23 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
             };
             let deps: String = crates.iter().map(|c| format!(" -d {c}")).collect();
             return format!("{rs}{deps} -e {}", quote(&rust_expr(code_t)));
+        }
+    }
+    // (C++: clang-repl, LLVM's interpreter, with libc++'s std module, so
+    // `import std;` works and nothing is compiled first. Nix brings it; see
+    // CXX_RUNNER. Without Nix: cling, or GCC below.)
+    if lang == "cpp" && on_path("nix") && !code_t.lines().any(|l| { let t = l.trim_start(); t.starts_with("export module") || t.starts_with("module ") }) {
+        if let Some(runner) = cxx_runner() {
+            let mut c = code_t.to_string();
+            if !c.contains("#include") && !c.lines().any(|l| l.trim_start().starts_with("import ")) {
+                c = format!("import std;\n{c}");
+            }
+            if c.contains("main(") {
+                c.push_str("\nmain();");
+            }
+            // (~ unquoted, so the shell expands it.)
+            let r = if runner.chars().all(|ch| ch.is_ascii_alphanumeric() || "~/._-".contains(ch)) { runner } else { quote(&runner) };
+            return format!("{r} {}", quote(&c));
         }
     }
     // (C++ with modules, import std; and the like: GCC 15 or later builds
@@ -669,6 +734,7 @@ mod tests {
         assert!(missing_python_modules("import os\nimport surely_not_a_module_xyz").contains(&"surely_not_a_module_xyz".to_string()));
     }
 }
+
 
 
 
