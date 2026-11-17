@@ -872,7 +872,9 @@ FocusScope {
         anchors.right: parent.right
         anchors.leftMargin: 10
         anchors.rightMargin: 10
-        topMargin: 10
+        // (A pane's notebook fills up from the bottom, by the input editor,
+        // like a terminal; a document starts at the top.)
+        topMargin: nb.path === "" ? Math.max(10, height - contentHeight - bottomMargin) : 10
         bottomMargin: 10
         spacing: 12
         model: cells
