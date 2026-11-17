@@ -356,8 +356,132 @@ pub fn specs() -> Vec<Spec> {
             interrupt_message: false,
         });
     }
+    if on_path("nix") {
+        for f in FETCHED {
+            if !out.iter().any(|s| s.name == f.name) {
+                out.push(f.spec());
+            }
+        }
+    }
     *CACHE.lock().unwrap() = Some((Instant::now(), out.clone()));
     out
+}
+
+// ---- kernels Tessera fetches (Nix, uv) ----------------------------------------
+
+/// How a fetched kernel starts.
+enum How {
+    /// A nixpkgs package's own kernelspec (share/jupyter/kernels/<name>),
+    /// read when it starts (the package built then).
+    KernelJson { attr: &'static str, kernel: &'static str },
+    /// A command in a `nix shell` of these packages.
+    Shell { attrs: &'static [&'static str], argv: &'static [&'static str] },
+    /// Python from nixpkgs with these packages, `python3 <args>`, in a
+    /// `nix shell` with the runtime packages too.
+    PyNix { packages: &'static [&'static str], runtime: &'static [&'static str], args: &'static [&'static str] },
+    /// A kernel from PyPI through uv (`uv run --with`), the runtime from nixpkgs.
+    Uv { pip: &'static [&'static str], runtime: &'static [&'static str], args: &'static [&'static str] },
+    /// R with IRkernel.
+    R,
+}
+
+struct Fetched {
+    name: &'static str,
+    display: &'static str,
+    language: &'static str,
+    how: How,
+    interrupt_message: bool,
+}
+
+const CF: &str = "{connection_file}";
+
+/// One kernel per language, where nixpkgs or PyPI has one (each fetched
+/// the first time it starts).
+const FETCHED: &[Fetched] = &[
+    Fetched { name: "tessera-bash", display: "Bash (bash_kernel, Nix)", language: "bash", how: How::PyNix { packages: &["bash-kernel"], runtime: &["bashInteractive"], args: &["-m", "bash_kernel", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-zsh", display: "Zsh (zsh-jupyter-kernel, uv)", language: "zsh", how: How::Uv { pip: &["zsh-jupyter-kernel"], runtime: &["zsh"], args: &["-m", "zsh_jupyter_kernel", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-powershell", display: "PowerShell (powershell_kernel, uv)", language: "powershell", how: How::Uv { pip: &["powershell_kernel", "ipykernel"], runtime: &["powershell"], args: &["-m", "powershell_kernel", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-xonsh", display: "xonsh (uv)", language: "xonsh", how: How::Uv { pip: &["xonsh[full]", "xontrib-jupyter"], runtime: &[], args: &["-m", "xontrib.jupyter_kernel", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-c", display: "C23 (xeus-cpp, Nix)", language: "c", how: How::KernelJson { attr: "xeus-cpp", kernel: "xc23" }, interrupt_message: false },
+    Fetched { name: "tessera-cpp", display: "C++23 (xeus-cpp, Nix)", language: "cpp", how: How::KernelJson { attr: "xeus-cpp", kernel: "xcpp23" }, interrupt_message: false },
+    Fetched { name: "tessera-r", display: "R (IRkernel, Nix)", language: "r", how: How::R, interrupt_message: false },
+    Fetched { name: "tessera-ruby", display: "Ruby (IRuby, Nix)", language: "ruby", how: How::Shell { attrs: &["iruby"], argv: &["iruby", "kernel", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-haskell", display: "Haskell (IHaskell, Nix)", language: "haskell", how: How::Shell { attrs: &["ihaskell"], argv: &["ihaskell", "kernel", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-rust", display: "Rust (evcxr, Nix)", language: "rust", how: How::Shell { attrs: &["evcxr", "cargo", "rustc"], argv: &["evcxr_jupyter", "--control_file", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-go", display: "Go (gophernotes, Nix)", language: "go", how: How::Shell { attrs: &["gophernotes", "go"], argv: &["gophernotes", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-deno", display: "TypeScript/JavaScript (Deno, Nix)", language: "typescript", how: How::Shell { attrs: &["deno"], argv: &["deno", "jupyter", "--kernel", "--conn", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-julia", display: "Julia (IJulia, Nix)", language: "julia", how: How::Shell { attrs: &["julia"], argv: &["julia", "-e", "import Pkg; Base.find_package(\"IJulia\") === nothing && Pkg.add(\"IJulia\"); import IJulia; IJulia.run_kernel()", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-lua", display: "Lua (ilua, Nix)", language: "lua", how: How::PyNix { packages: &["ilua"], runtime: &["lua"], args: &["-m", "ilua.app", "-c", CF] }, interrupt_message: true },
+    Fetched { name: "tessera-nix", display: "Nix (nix-kernel, Nix)", language: "nix", how: How::PyNix { packages: &["nix-kernel"], runtime: &[], args: &["-m", "nix-kernel", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-octave", display: "Octave (octave_kernel, uv)", language: "octave", how: How::Uv { pip: &["octave_kernel"], runtime: &["octave"], args: &["-m", "octave_kernel", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-kotlin", display: "Kotlin (kotlin-jupyter-kernel, uv)", language: "kotlin", how: How::Uv { pip: &["kotlin-jupyter-kernel"], runtime: &["jdk"], args: &["-m", "run_kotlin_kernel", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-scala", display: "Scala (almond, Nix)", language: "scala", how: How::Shell { attrs: &["coursier", "jdk"], argv: &["cs", "launch", "--fork", "almond", "--", "--connection-file", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-scheme", display: "Scheme (calysto_scheme, uv)", language: "scheme", how: How::Uv { pip: &["calysto_scheme"], runtime: &[], args: &["-m", "calysto_scheme", "-f", CF] }, interrupt_message: false },
+    Fetched { name: "tessera-gnuplot", display: "gnuplot (gnuplot_kernel, uv)", language: "gnuplot", how: How::Uv { pip: &["gnuplot_kernel"], runtime: &["gnuplot"], args: &["-m", "gnuplot_kernel", "-f", CF] }, interrupt_message: false },
+];
+
+fn nix_shell(attrs: &[&str]) -> Vec<String> {
+    let mut v = vec!["nix".to_string(), "shell".into(), "--quiet".into()];
+    v.extend(attrs.iter().map(|a| format!("nixpkgs#{a}")));
+    v.push("-c".into());
+    v
+}
+
+impl Fetched {
+    fn spec(&self) -> Spec {
+        let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let argv = match &self.how {
+            // (Resolved when it starts: see resolve_argv.)
+            How::KernelJson { attr, kernel } => vec!["@kernel-json".to_string(), attr.to_string(), kernel.to_string()],
+            How::Shell { attrs, argv } => [nix_shell(attrs), s(argv)].concat(),
+            How::PyNix { packages, runtime, args } => {
+                // (One environment: --expr can't be mixed with nixpkgs#... in nix shell.)
+                let expr = format!(
+                    "with (builtins.getFlake \"nixpkgs\").legacyPackages.${{builtins.currentSystem}}; buildEnv {{ name = \"tessera-kernel\"; paths = [ (python3.withPackages (p: with p; [ {} ])) {} ]; }}",
+                    packages.join(" "),
+                    runtime.join(" ")
+                );
+                let mut v = vec!["nix".to_string(), "shell".into(), "--quiet".into(), "--impure".into(), "--expr".into(), expr];
+                v.push("-c".into());
+                v.push("python3".into());
+                [v, s(args)].concat()
+            }
+            How::Uv { pip, runtime, args } => {
+                let mut v = nix_shell(&[&["uv"][..], runtime].concat());
+                // (3.12: some kernels' packages don't build on newer Pythons yet.)
+                v.extend(["uv", "run", "--quiet", "--no-project", "--python", "3.12"].map(String::from));
+                for p in pip.iter() {
+                    v.push("--with".into());
+                    v.push(p.to_string());
+                }
+                v.push("python".into());
+                [v, s(args)].concat()
+            }
+            How::R => {
+                let expr = "with (builtins.getFlake \"nixpkgs\").legacyPackages.${builtins.currentSystem}; rWrapper.override { packages = [ rPackages.IRkernel ]; }".to_string();
+                let mut v = vec!["nix".to_string(), "shell".into(), "--quiet".into(), "--impure".into(), "--expr".into(), expr, "-c".into()];
+                v.extend(s(&["R", "--slave", "-e", "IRkernel::main()", "--args", CF]));
+                v
+            }
+        };
+        Spec { name: self.name.into(), display: self.display.into(), language: self.language.into(), argv, env: HashMap::new(), interrupt_message: self.interrupt_message }
+    }
+}
+
+/// A kernelspec inside a nixpkgs package: built now (the first time), its
+/// kernel.json read. (argv, env)
+fn resolve_kernel_json(attr: &str, kernel: &str) -> Result<(Vec<String>, HashMap<String, String>), String> {
+    let out = Command::new("nix").args(["build", "--quiet", "--no-link", "--print-out-paths", &format!("nixpkgs#{attr}")]).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("Couldn't get {attr} from nixpkgs: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("")));
+    }
+    for dir in String::from_utf8_lossy(&out.stdout).lines() {
+        let p = Path::new(dir).join("share/jupyter/kernels").join(kernel);
+        if let Some(spec) = read_spec(kernel, &p) {
+            return Ok((spec.argv, spec.env));
+        }
+    }
+    Err(format!("{attr} has no kernel named {kernel}"))
 }
 
 pub fn specs_json() -> String {
@@ -389,6 +513,8 @@ pub struct Kernel {
     gone: Arc<AtomicBool>,
     /// It has answered kernel_info: it runs code now.
     ready: AtomicBool,
+    /// The environment and folder it has (as started, then as synced).
+    synced: Mutex<(HashMap<String, String>, String)>,
 }
 
 fn free_port() -> std::io::Result<u16> {
@@ -409,7 +535,7 @@ fn as_output(msg_type: &str, c: &Value) -> Option<Value> {
 }
 
 impl Kernel {
-    pub fn start(spec_name: &str, cwd: &str, sink: Sink) -> Result<Arc<Kernel>, String> {
+    pub fn start(spec_name: &str, cwd: &str, shell_env: Option<Vec<(String, String)>>, sink: Sink) -> Result<Arc<Kernel>, String> {
         let spec = specs().into_iter().find(|s| s.name == spec_name).ok_or_else(|| format!("No kernel named {spec_name}"))?;
         sink(json!({"type": "status", "state": "starting", "message": format!("Starting {}…", spec.display)}));
         let ports: Vec<u16> = (0..5).map(|_| free_port()).collect::<Result<_, _>>().map_err(|e| e.to_string())?;
@@ -428,9 +554,21 @@ impl Kernel {
             let mut f = opts.open(&conn_file).map_err(|e| e.to_string())?;
             f.write_all(conn.to_string().as_bytes()).map_err(|e| e.to_string())?;
         }
-        let argv: Vec<String> = spec.argv.iter().map(|a| a.replace("{connection_file}", &conn_file.to_string_lossy())).collect();
+        let (spec_argv, spec_env) = if spec.argv.first().map(String::as_str) == Some("@kernel-json") {
+            sink(json!({"type": "status", "state": "starting", "message": format!("Getting {} (the first time takes a while)…", spec.display)}));
+            let (a, mut e) = resolve_kernel_json(&spec.argv[1], &spec.argv[2])?;
+            e.extend(spec.env.clone());
+            (a, e)
+        } else {
+            (spec.argv.clone(), spec.env.clone())
+        };
+        let argv: Vec<String> = spec_argv.iter().map(|a| a.replace("{connection_file}", &conn_file.to_string_lossy())).collect();
         let mut cmd = Command::new(&argv[0]);
-        cmd.args(&argv[1..]).envs(&spec.env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        // (The shell's environment, when the pane gave one: see start.)
+        if let Some(env) = &shell_env {
+            cmd.env_clear().envs(env.iter().cloned());
+        }
+        cmd.args(&argv[1..]).envs(&spec_env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
         if !cwd.is_empty() && Path::new(cwd).is_dir() {
             cmd.current_dir(cwd);
         }
@@ -472,12 +610,14 @@ impl Kernel {
             conn_file,
             gone: Arc::default(),
             ready: AtomicBool::new(false),
+            synced: Mutex::new((shell_env.clone().map(|e| e.into_iter().collect()).unwrap_or_else(|| std::env::vars().collect()), cwd.to_string())),
         });
         // Connect (Nix may take minutes to fetch Python the first time), then
         // ask who it is; its reply means it's ready.
         let k = kernel.clone();
         std::thread::spawn(move || {
-            let wait = Duration::from_secs(if k.spec.name == "tessera-nix-python" { 900 } else { 120 });
+            // (Fetched ones download and install the first time.)
+            let wait = Duration::from_secs(if k.spec.name.starts_with("tessera-") { 1800 } else { 120 });
             let start = Instant::now();
             let connect = |port: u16, ty: &str| -> Result<Zmtp, String> {
                 loop {
@@ -618,6 +758,27 @@ impl Kernel {
         )
     }
 
+    /// Code run quietly (no output, no count): the sync below.
+    pub fn execute_quiet(&self, code: &str) -> bool {
+        self.send_shell("execute_request", json!({"code": code, "silent": true, "store_history": false, "user_expressions": {}, "allow_stdin": false, "stop_on_error": false}), "")
+    }
+
+    /// The shell's environment and folder (now) into the kernel, as its
+    /// own: what changed since it last had them, set in its language.
+    pub fn sync(&self, env: &HashMap<String, String>, cwd: &str) -> bool {
+        let mut had = self.synced.lock().unwrap();
+        let set: Vec<(&String, &String)> = env.iter().filter(|(k, v)| had.0.get(*k) != Some(v) && !SKIP_ENV.contains(&k.as_str())).collect();
+        let unset: Vec<&String> = had.0.keys().filter(|k| !env.contains_key(*k) && !SKIP_ENV.contains(&k.as_str())).collect();
+        let cd = (!cwd.is_empty() && cwd != had.1 && Path::new(cwd).is_dir()).then_some(cwd);
+        if set.is_empty() && unset.is_empty() && cd.is_none() {
+            return false;
+        }
+        let Some(code) = sync_code(&self.spec.language, &set, &unset, cd) else { return false };
+        *had = (env.clone(), cwd.to_string());
+        drop(had);
+        self.execute_quiet(&code)
+    }
+
     pub fn complete(&self, request: &str, code: &str, pos: usize) -> bool {
         self.send_shell("complete_request", json!({"code": code, "cursor_pos": pos}), request)
     }
@@ -673,14 +834,209 @@ impl Drop for Kernel {
     }
 }
 
+/// Variables a kernel keeps its own (the shell's would confuse it).
+const SKIP_ENV: &[&str] = &["PS1", "PS2", "PROMPT", "RPROMPT", "SHLVL", "_", "OLDPWD", "PWD", "COLUMNS", "LINES", "TERM", "JPY_PARENT_PID", "TESSERA_SHELL_INTEGRATION"];
+
+fn c_str(s: &str) -> String {
+    let mut o = String::from("\"");
+    for b in s.bytes() {
+        match b {
+            b'"' => o.push_str("\\\""),
+            b'\\' => o.push_str("\\\\"),
+            0x20..=0x7e => o.push(b as char),
+            _ => o.push_str(&format!("\\{b:03o}")),
+        }
+    }
+    o.push('"');
+    o
+}
+
+fn hs_str(s: &str) -> String {
+    let mut o = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => o.push_str(&format!("\\{}\\&", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+fn sq(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Setting variables, clearing them and changing folder, in `language`
+/// (None: it can't, so it keeps what it started with).
+fn sync_code(language: &str, set: &[(&String, &String)], unset: &[&String], cd: Option<&str>) -> Option<String> {
+    let js = |s: &str| serde_json::to_string(s).unwrap_or_default();
+    let mut out: Vec<String> = Vec::new();
+    match language.to_ascii_lowercase().as_str() {
+        "python" | "xonsh" => {
+            out.push("import os as _tessera_os".into());
+            if !set.is_empty() {
+                let m: serde_json::Map<String, Value> = set.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+                out.push(format!("_tessera_os.environ.update({})", Value::Object(m)));
+            }
+            for k in unset {
+                out.push(format!("_tessera_os.environ.pop({}, None)", js(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("_tessera_os.chdir({})", js(d)));
+            }
+            out.push("del _tessera_os".into());
+        }
+        "r" => {
+            for (k, v) in set {
+                out.push(format!("Sys.setenv({} = {})", js(k), js(v)));
+            }
+            if !unset.is_empty() {
+                out.push(format!("Sys.unsetenv(c({}))", unset.iter().map(|k| js(k)).collect::<Vec<_>>().join(", ")));
+            }
+            if let Some(d) = cd {
+                out.push(format!("setwd({})", js(d)));
+            }
+            out.push("invisible(NULL)".into());
+        }
+        "julia" => {
+            let jl = |s: &str| js(s).replace('$', "\\$");
+            for (k, v) in set {
+                out.push(format!("ENV[{}] = {}", jl(k), jl(v)));
+            }
+            for k in unset {
+                out.push(format!("delete!(ENV, {})", jl(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("cd({})", jl(d)));
+            }
+            out.push("nothing".into());
+        }
+        "ruby" => {
+            let rb = |s: &str| js(s).replace('#', "\\#");
+            for (k, v) in set {
+                out.push(format!("ENV[{}] = {}", rb(k), rb(v)));
+            }
+            for k in unset {
+                out.push(format!("ENV.delete({})", rb(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("Dir.chdir({})", rb(d)));
+            }
+            out.push("nil".into());
+        }
+        "bash" | "zsh" | "sh" => {
+            for (k, v) in set {
+                out.push(format!("export {k}={}", sq(v)));
+            }
+            for k in unset {
+                out.push(format!("unset {k}"));
+            }
+            if let Some(d) = cd {
+                out.push(format!("cd {}", sq(d)));
+            }
+        }
+        "powershell" => {
+            let ps = |s: &str| format!("'{}'", s.replace('\'', "''"));
+            for (k, v) in set {
+                out.push(format!("${{env:{k}}} = {}", ps(v)));
+            }
+            for k in unset {
+                out.push(format!("Remove-Item -ErrorAction SilentlyContinue Env:{k}"));
+            }
+            if let Some(d) = cd {
+                out.push(format!("Set-Location -LiteralPath {}", ps(d)));
+            }
+        }
+        "typescript" | "javascript" => {
+            for (k, v) in set {
+                out.push(format!("Deno.env.set({}, {});", js(k), js(v)));
+            }
+            for k in unset {
+                out.push(format!("Deno.env.delete({});", js(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("Deno.chdir({});", js(d)));
+            }
+        }
+        "rust" => {
+            for (k, v) in set {
+                out.push(format!("std::env::set_var({k:?}, {v:?});"));
+            }
+            for k in unset {
+                out.push(format!("std::env::remove_var({k:?});"));
+            }
+            if let Some(d) = cd {
+                out.push(format!("std::env::set_current_dir({d:?}).ok();"));
+            }
+        }
+        "go" => {
+            out.push("import \"os\"".into());
+            for (k, v) in set {
+                out.push(format!("os.Setenv({}, {})", js(k), js(v)));
+            }
+            for k in unset {
+                out.push(format!("os.Unsetenv({})", js(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("os.Chdir({})", js(d)));
+            }
+        }
+        "haskell" => {
+            out.push("import qualified System.Environment as TesseraEnv".into());
+            out.push("import qualified System.Directory as TesseraDir".into());
+            for (k, v) in set {
+                out.push(format!("TesseraEnv.setEnv {} {}", hs_str(k), hs_str(v)));
+            }
+            for k in unset {
+                out.push(format!("TesseraEnv.unsetEnv {}", hs_str(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("TesseraDir.setCurrentDirectory {}", hs_str(d)));
+            }
+        }
+        "c" | "c++" | "cpp" => {
+            out.push("#include <stdlib.h>".into());
+            out.push("#include <unistd.h>".into());
+            for (k, v) in set {
+                out.push(format!("setenv({}, {}, 1);", c_str(k), c_str(v)));
+            }
+            for k in unset {
+                out.push(format!("unsetenv({});", c_str(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("(void)chdir({});", c_str(d)));
+            }
+        }
+        "octave" | "matlab" => {
+            let m = |s: &str| format!("'{}'", s.replace('\'', "''"));
+            for (k, v) in set {
+                out.push(format!("setenv({}, {});", m(k), m(v)));
+            }
+            for k in unset {
+                out.push(format!("unsetenv({});", m(k)));
+            }
+            if let Some(d) = cd {
+                out.push(format!("cd({});", m(d)));
+            }
+        }
+        _ => return None,
+    }
+    Some(out.join("\n"))
+}
+
 // ---- the running kernels, by the notebook's key ----------------------------
 
 static KERNELS: Mutex<Option<HashMap<String, Arc<Kernel>>>> = Mutex::new(None);
 
-pub fn start(key: &str, spec: &str, cwd: &str, sink: Sink) {
+/// Start a kernel for `key` in `cwd`, with a shell's environment (its pid;
+/// 0: Tessera's own).
+pub fn start(key: &str, spec: &str, cwd: &str, pid: u32, sink: Sink) {
     stop(key);
     let (key, spec, cwd) = (key.to_string(), spec.to_string(), cwd.to_string());
-    std::thread::spawn(move || match Kernel::start(&spec, &cwd, sink.clone()) {
+    std::thread::spawn(move || match Kernel::start(&spec, &cwd, crate::prompt::shell_env(pid), sink.clone()) {
         Ok(k) => {
             KERNELS.lock().unwrap().get_or_insert_with(HashMap::new).insert(key, k);
         }
@@ -694,6 +1050,13 @@ fn get(key: &str) -> Option<Arc<Kernel>> {
 
 pub fn execute(key: &str, cell: &str, code: &str) -> bool {
     get(key).is_some_and(|k| k.execute(cell, code))
+}
+
+/// Bring a kernel up to the shell's environment and folder (before a run).
+pub fn sync(key: &str, pid: u32, cwd: &str) -> bool {
+    let Some(k) = get(key) else { return false };
+    let Some(env) = crate::prompt::shell_env(pid) else { return false };
+    k.sync(&env.into_iter().collect(), cwd)
 }
 
 pub fn complete(key: &str, request: &str, code: &str, pos: usize) -> bool {
@@ -943,7 +1306,7 @@ mod tests {
         let sink: Sink = Arc::new(move |v| {
             let _ = tx.lock().unwrap().send(v);
         });
-        let k = Kernel::start("tessera-nix-python", "/tmp", sink).unwrap();
+        let k = Kernel::start("tessera-nix-python", "/tmp", None, sink).unwrap();
         let next = |want: &str| loop {
             let v = rx.recv_timeout(Duration::from_secs(120)).expect("kernel event");
             eprintln!("{v}");
@@ -974,5 +1337,109 @@ mod tests {
             }
         }
         k.stop();
+    }
+
+    /// Every fetched kernel (Nix, uv): started, a line run, its output
+    /// shown. Slow the first time (downloads). TESSERA_KERNELS=a,b picks.
+    #[test]
+    #[ignore]
+    fn fetched_kernels_run() {
+        let code = |lang: &str| -> &str {
+            match lang {
+                "bash" => "echo hi-bash",
+                "zsh" => "print hi-zsh",
+                "powershell" => "Write-Output hi-ps",
+                "xonsh" => "echo hi-xonsh",
+                "c" => "#include <stdio.h>\nprintf(\"hi-c\\n\"); fflush(stdout);",
+                "cpp" => "#include <iostream>\nstd::cout << \"hi-cpp\" << std::endl;",
+                "r" => "cat(\"hi-r\\n\")",
+                "ruby" => "puts \"hi-ruby\"",
+                "haskell" => "putStrLn \"hi-haskell\"",
+                "rust" => "println!(\"hi-rust\");",
+                "go" => "import \"fmt\"\nfmt.Println(\"hi-go\")",
+                "typescript" => "console.log(\"hi-ts\")",
+                "julia" => "println(\"hi-julia\")",
+                "lua" => "print(\"hi-lua\")",
+                "nix" => "\"hi\" + \"-nix\"",
+                "octave" => "disp('hi-octave')",
+                "kotlin" => "println(\"hi-kotlin\")",
+                "scala" => "println(\"hi-scala\")",
+                "scheme" => "(display \"hi-scheme\")",
+                "gnuplot" => "print \"hi-gnuplot\"",
+                _ => "",
+            }
+        };
+        let only: Vec<String> = std::env::var("TESSERA_KERNELS").map(|v| v.split(',').map(String::from).collect()).unwrap_or_default();
+        let handles: Vec<_> = FETCHED
+            .iter()
+            .filter(|f| only.is_empty() || only.iter().any(|o| o == f.name || o == f.language))
+            .map(|f| {
+                let (name, lang) = (f.name.to_string(), f.language.to_string());
+                let c = code(&lang).to_string();
+                std::thread::spawn(move || {
+                    let (tx, rx) = std::sync::mpsc::channel::<Value>();
+                    let tx = Mutex::new(tx);
+                    let sink: Sink = Arc::new(move |v| {
+                        let _ = tx.lock().unwrap().send(v);
+                    });
+                    let t0 = Instant::now();
+                    let k = match Kernel::start(&name, "/tmp", None, sink) {
+                        Ok(k) => k,
+                        Err(e) => return format!("{name}: FAILED to start: {e}"),
+                    };
+                    // Up: its info, or idle.
+                    let mut up = false;
+                    let mut last = String::new();
+                    while let Ok(v) = rx.recv_timeout(Duration::from_secs(1200)) {
+                        if v["state"] == "dead" {
+                            k.stop();
+                            return format!("{name}: DIED: {}", v["message"]);
+                        }
+                        if v["type"] == "info" || v["state"] == "idle" {
+                            up = true;
+                            break;
+                        }
+                        last = v.to_string();
+                    }
+                    if !up {
+                        k.stop();
+                        return format!("{name}: never came up ({last})");
+                    }
+                    k.execute("c1", &c);
+                    let mut text = String::new();
+                    let mut status = String::from("timeout");
+                    while let Ok(v) = rx.recv_timeout(Duration::from_secs(600)) {
+                        if v["type"] == "output" {
+                            let o = &v["output"];
+                            text.push_str(o["text"].as_str().unwrap_or(""));
+                            text.push_str(o["data"]["text/plain"].as_str().unwrap_or(""));
+                            if o["output_type"] == "error" {
+                                text.push_str(&format!("[{}: {}]", o["ename"], o["evalue"]));
+                            }
+                        }
+                        if v["type"] == "done" {
+                            status = v["status"].as_str().unwrap_or("").to_string();
+                            // (Output can come just after.)
+                            while let Ok(v) = rx.recv_timeout(Duration::from_millis(1500)) {
+                                if v["type"] == "output" {
+                                    text.push_str(v["output"]["text"].as_str().unwrap_or(""));
+                                    text.push_str(v["output"]["data"]["text/plain"].as_str().unwrap_or(""));
+                                }
+                            }
+                            break;
+                        }
+                        if v["state"] == "dead" {
+                            status = format!("dead {}", v["message"]);
+                            break;
+                        }
+                    }
+                    k.stop();
+                    format!("{name}: {status} in {:.0}s: {:?}", t0.elapsed().as_secs_f64(), text.trim())
+                })
+            })
+            .collect();
+        for h in handles {
+            eprintln!("{}", h.join().unwrap_or_else(|_| "panicked".into()));
+        }
     }
 }

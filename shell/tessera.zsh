@@ -34,3 +34,11 @@ __tessera_aliases() {
     printf '\e]1337;TesseraAliases=%s\a' "$(print -rn -- "$a" | base64 | tr -d '\n')"
 }
 add-zsh-hook precmd __tessera_aliases
+# The exported environment, at each prompt, for Tessera's kernels and
+# prompt (a file by the shell's pid: /proc only has what it started with).
+__tessera_env() {
+    local d="${XDG_RUNTIME_DIR:-/tmp}/tessera-env"
+    [[ -d $d ]] || mkdir -p -m 700 "$d" 2>/dev/null
+    command env -0 >| "$d/$$" 2>/dev/null
+}
+add-zsh-hook precmd __tessera_env

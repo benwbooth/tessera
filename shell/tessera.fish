@@ -26,3 +26,10 @@ function __tessera_aliases --on-event fish_prompt
     set -g __tessera_alias_seen $a
     printf '\e]1337;TesseraAliases=%s\a' (printf '%s' "$a" | base64 | string join '')
 end
+# The exported environment, at each prompt, for Tessera's kernels and
+# prompt (a file by the shell's pid: /proc only has what it started with).
+function __tessera_env --on-event fish_prompt
+    set -l d (set -q XDG_RUNTIME_DIR; and echo $XDG_RUNTIME_DIR; or echo /tmp)/tessera-env
+    test -d $d; or mkdir -p -m 700 $d 2>/dev/null
+    command env -0 > $d/$fish_pid 2>/dev/null
+end

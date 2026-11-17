@@ -42,6 +42,7 @@ FocusScope {
     readonly property string fileName: path.replace(/^.*\//, "")
     readonly property string folder: path.indexOf("/") >= 0 ? path.replace(/\/[^/]*$/, "") : (view ? view.pwd : "")
     property bool dirty: false
+    property int shellPid: 0            // the pane's shell (kernels start with its environment)
     property string loadError: ""
     property string saveError: ""
     property var metadata: ({})
@@ -87,7 +88,7 @@ FocusScope {
         if (!controller || kernelName === "" || shellKernel) return
         kernelState = "starting"
         kernelMessage = ""
-        controller.jupyterStart(key, kernelName, folder)
+        controller.jupyterStart(key, kernelName, folder, shellPid)
     }
     function stopRunning() {
         for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).tid <= 0) cells.setProperty(i, "running", false)
@@ -112,6 +113,12 @@ FocusScope {
     Connections {
         target: nb.controller
         function onJupyterEvent(key, json) {
+            if (key.startsWith(nb.key + "~")) {
+                let le
+                try { le = JSON.parse(json) } catch (x) { return }
+                nb.langEvent(key.substring(nb.key.length + 1), le)
+                return
+            }
             if (key !== nb.key) return
             let e
             try { e = JSON.parse(json) } catch (x) { return }
@@ -178,7 +185,7 @@ FocusScope {
         return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
                  type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
                  started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
-                 editing: false, meta: "{}", clearPending: false, hideOutput: false }
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "" }
     }
     function insertCell(at, type, edit) {
         at = Math.max(0, Math.min(cells.count, at))
@@ -274,6 +281,8 @@ FocusScope {
         cells.setProperty(i, "mine", true)
         cells.setProperty(i, "editing", false)
         touch()
+        // (A cell in another language: that language's kernel.)
+        if (c.lang !== "" && c.lang !== codeLang) { runLang(c.cid, c.lang); return }
         if (shellKernel) { shellRun(c.cid, c.source); return }
         if (kernelUp) execute(c.cid)
         else {
@@ -281,9 +290,12 @@ FocusScope {
             if (kernelState === "" || kernelState === "dead") startKernel()
         }
     }
+    // The shell's folder now (kernels follow it, and its environment).
+    readonly property string shellDir: { const p = view ? view.pwd : ""; let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x !== "" ? x : folder }
     function execute(cid) {
         const i = indexOf(cid)
         if (i < 0) return
+        if (path === "") controller.jupyterSync(key, shellPid, shellDir)
         if (!controller.jupyterExecute(key, cid, cells.get(i).source)) {
             cells.setProperty(i, "running", false)
             addOutput(i, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The kernel isn't reachable: restart it."] })
@@ -306,6 +318,79 @@ FocusScope {
             cells.setProperty(i, "ended", 0)
         }
         touch()
+    }
+    // ---- a kernel per language (cells in another language than the notebook's) ----
+    property var langKernels: ({})      // lang -> {name, display, state, message, queue: [cid]}
+    function langKey(l) { return key + "~" + l }
+    // (Names the editor and kernels give a language.)
+    function sameLang(a, b) {
+        const n = (x) => { x = (x || "").toLowerCase(); return ({ "c++": "cpp", "cxx": "cpp", "js": "javascript", "ts": "typescript", "sh": "bash", "shell": "bash", "pwsh": "powershell", "r": "r" })[x] || x }
+        const x = n(a), y = n(b)
+        return x === y || (x === "javascript" && y === "typescript") || (x === "typescript" && y === "javascript")
+    }
+    // The kernel for a language: one installed, else one Tessera fetches.
+    function langSpec(l) {
+        const ks = kernels.filter(k => k.name !== "tessera-shell" && sameLang(k.language, l))
+        return ks.find(k => !k.name.startsWith("tessera-")) || ks.find(k => k.name === "tessera-" + l) || ks[0] || null
+    }
+    function hasKernelFor(l) { if (kernels.length === 0) listKernels(); return l !== "" && langSpec(l) !== null }
+    function setLang(l, patch) { const m = Object.assign({}, langKernels); m[l] = Object.assign({}, m[l] || {}, patch); langKernels = m }
+    function runLang(cid, l) {
+        if (kernels.length === 0) listKernels()
+        const e = langKernels[l]
+        if (e && (e.state === "idle" || e.state === "busy")) { execLang(cid, l); return }
+        setLang(l, { queue: ((e && e.queue) || []).concat([cid]) })
+        if (e && e.state === "starting") return
+        const spec = langSpec(l)
+        if (!spec) {
+            const i = indexOf(cid)
+            cells.setProperty(i, "running", false)
+            addOutput(i, { output_type: "error", ename: "No kernel", evalue: "No Jupyter kernel for " + l, traceback: ["No Jupyter kernel for " + l + " (installed or from Nix)."] })
+            setLang(l, { queue: [] })
+            return
+        }
+        setLang(l, { name: spec.name, display: spec.display, state: "starting", message: "" })
+        controller.jupyterStart(langKey(l), spec.name, shellDir, shellPid)
+    }
+    function execLang(cid, l) {
+        const i = indexOf(cid)
+        if (i < 0) return
+        controller.jupyterSync(langKey(l), shellPid, shellDir)
+        if (!controller.jupyterExecute(langKey(l), cid, cells.get(i).source)) {
+            cells.setProperty(i, "running", false)
+            addOutput(i, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The " + l + " kernel isn't reachable: run it again to restart it."] })
+            setLang(l, { state: "dead" })
+        }
+    }
+    function langEvent(l, e) {
+        if (e.type === "status") {
+            const patch = { state: e.state }
+            if (e.message !== undefined) patch.message = e.message
+            setLang(l, patch)
+            const q = (langKernels[l] && langKernels[l].queue) || []
+            if (e.state === "idle" && q.length > 0) { setLang(l, { queue: [] }); for (const c of q) execLang(c, l) }
+            if (e.state === "dead") {
+                for (const c of q.concat()) {
+                    const i = indexOf(c)
+                    if (i < 0) continue
+                    cells.setProperty(i, "running", false)
+                    addOutput(i, { output_type: "error", ename: "Kernel stopped", evalue: e.message || "", traceback: ["The " + l + " kernel stopped" + (e.message ? ": " + e.message : ".")] })
+                }
+                for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).lang === l && cells.get(i).tid <= 0) cells.setProperty(i, "running", false)
+                setLang(l, { queue: [] })
+            }
+        } else if (e.type !== "info" && e.type !== "complete") kernelEvent(e)
+    }
+    function stopLangKernels() { for (const l in langKernels) controller.jupyterStop(langKey(l)); langKernels = ({}) }
+    // Code in another language from the pane's editor: a cell in that
+    // language at the end, run in its kernel.
+    function submitLang(code, l) {
+        const c = newCell("code", code)
+        c.lang = sameLang(l, codeLang) ? "" : l
+        cells.append(c)
+        current = cells.count - 1
+        run(cells.count - 1)
+        follow()
     }
     // Code from the pane's editor, for a kernel that isn't the shell: a new
     // cell at the end, run.
@@ -500,6 +585,7 @@ FocusScope {
             x.meta = JSON.stringify(m)
             if (keepTids && tm.tid > 0) { x.tid = tm.tid; x.mine = !!tm.mine; if (tm.cid) x.cid = tm.cid }
             if (tm.cwd) x.cwd = tm.cwd
+            if (tm.lang) x.lang = tm.lang
             if (x.type === "code") {
                 x.outputs = JSON.stringify((c.outputs || []).map(normalOutput))
                 x.count = c.execution_count === null || c.execution_count === undefined ? -1 : c.execution_count
@@ -619,6 +705,7 @@ FocusScope {
                     meta.tessera = { cwd: c.cwd, status: c.status, duration_ms: Math.max(0, c.ended - c.started), started: c.started }
                     if (kept) Object.assign(meta.tessera, { tid: c.tid, mine: c.mine, cid: c.cid })
                 } else try { outs = JSON.parse(c.outputs) } catch (e) {}
+                if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
                 cell.execution_count = c.count >= 0 ? c.count : (c.tid > 0 && !kept ? ++n : null)
                 if (c.hideOutput) meta.jupyter = Object.assign({}, meta.jupyter || {}, { outputs_hidden: true })
                 cell.outputs = outs.map(o => {
@@ -672,7 +759,7 @@ FocusScope {
     }
     Component.onCompleted: if (controller) load()
     onControllerChanged: if (controller && !loaded) load()
-    Component.onDestruction: { if (controller) { if (path === "" && dirty) keep(); controller.jupyterStop(key) } }
+    Component.onDestruction: { if (controller) { if (path === "" && dirty) keep(); controller.jupyterStop(key); stopLangKernels() } }
     FileDialog {
         id: saveDialog
         title: "Save as Jupyter Notebook"
@@ -955,6 +1042,8 @@ FocusScope {
             required property string tkind
             required property bool editing
             required property bool hideOutput
+            required property string lang
+            readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
             readonly property bool code: type !== "markdown"
             readonly property bool fromTerm: tid > 0
@@ -997,6 +1086,16 @@ FocusScope {
                     ToolTip.visible: statusHover.hovered
                     ToolTip.delay: 500
                     ToolTip.text: cell.running ? "Interrupt" : cell.code ? "Run (Ctrl+Enter)" : "Show it (Ctrl+Enter)"
+                }
+                // (A cell in another language: its language, and its kernel coming up.)
+                Text { topPadding: 0.001;
+                    visible: cell.lang !== ""
+                    text: cell.lang + (cell.running && cell.langKernel && cell.langKernel.state === "starting" ? " \u00b7 " + (cell.langKernel.message || ("starting " + (cell.langKernel.display || "its kernel") + "\u2026")) : "")
+                    color: nb.ansi(5, "#c678dd")
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: 360
                 }
                 Text { topPadding: 0.001;
                     visible: cell.count >= 0 && cell.code
@@ -1108,7 +1207,7 @@ FocusScope {
                     width: parent.width - 2
                     x: 1; y: 1
                     sourceComponent: cellEditor
-                    onLoaded: { item.cellIndex = Qt.binding(() => cell.index); item.lang = Qt.binding(() => cell.type === "markdown" ? "markdown" : cell.type === "raw" ? "" : nb.codeLang) }
+                    onLoaded: { item.cellIndex = Qt.binding(() => cell.index); item.lang = Qt.binding(() => cell.type === "markdown" ? "markdown" : cell.type === "raw" ? "" : cell.lang !== "" ? cell.lang : nb.codeLang) }
                 }
             }
 

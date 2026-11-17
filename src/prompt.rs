@@ -106,13 +106,21 @@ pub fn has_starship() -> bool {
     })
 }
 
-/// The shell's environment (Linux: /proc/<pid>/environ), so Starship sees
-/// what the shell started with (nix-shell, a virtualenv, AWS_PROFILE, ...).
+/// The shell's environment: as its integration last wrote it (at the
+/// prompt), else /proc/<pid>/environ, so Starship and kernels see what the
+/// shell has (nix-shell, a virtualenv, AWS_PROFILE, exports, ...).
 pub fn shell_env(pid: u32) -> Option<Vec<(String, String)>> {
-    if pid == 0 || !cfg!(target_os = "linux") {
+    if pid == 0 {
         return None;
     }
-    let raw = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    // The shell integration writes its exported variables at each prompt
+    // (exports since it started included); else what it started with.
+    let live = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| "/tmp".into()).join("tessera-env").join(pid.to_string());
+    let raw = match std::fs::read(&live) {
+        Ok(r) if !r.is_empty() => r,
+        _ if cfg!(target_os = "linux") => std::fs::read(format!("/proc/{pid}/environ")).ok()?,
+        _ => return None,
+    };
     Some(
         raw.split(|&b| b == 0)
             .filter_map(|kv| {

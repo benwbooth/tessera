@@ -148,8 +148,15 @@ Item {
         promptSegments: pane.promptSegments
         onSubmitted: (t) => {
             if (forNotebook) { notebook.submit(t); return }
-            // (Code in another language than the shell's: run by its interpreter.)
+            // (Code in another language than the shell's: its Jupyter kernel,
+            // kept alive in the pane's notebook, if there's one; else run by
+            // its interpreter, once.)
             const L = compose.runLang
+            if (pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
+                pane.viewMode = "notebook"
+                notebook.submitLang(t, L)
+                return
+            }
             if (pane.replLang === "" && L !== "" && L !== "bash" && controller) {
                 const cmd = controller.snippetCommand(L, t, compose.cwd, compose.shellName)
                 if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
@@ -322,6 +329,7 @@ Item {
         controller: pane.controller
         path: pane.docPath
         storeKey: term.sessionId
+        shellPid: pane.shellPid
         fontFamily: term.fontFamily
         markdownStyle: pane.markdownStyle
         onMarkdownStylePicked: (m) => pane.markdownStylePicked(m)

@@ -451,7 +451,10 @@ pub mod ffi {
         /// Start kernel `spec` for notebook `key` (one per key); it reports
         /// with jupyter_event(key, json).
         #[qinvokable]
-        fn jupyter_start(self: Pin<&mut Controller>, key: &QString, spec: &QString, cwd: &QString);
+        fn jupyter_start(self: Pin<&mut Controller>, key: &QString, spec: &QString, cwd: &QString, pid: i32);
+        /// Bring a kernel up to a shell's environment and folder (src/jupyter.rs sync).
+        #[qinvokable]
+        fn jupyter_sync(self: &Controller, key: &QString, pid: i32, cwd: &QString) -> bool;
         #[qinvokable]
         fn jupyter_execute(self: &Controller, key: &QString, cell: &QString, code: &QString) -> bool;
         #[qinvokable]
@@ -797,14 +800,18 @@ impl ffi::Controller {
         qs(&crate::jupyter::specs_json())
     }
 
-    fn jupyter_start(self: Pin<&mut Self>, key: &ffi::QString, spec: &ffi::QString, cwd: &ffi::QString) {
+    fn jupyter_start(self: Pin<&mut Self>, key: &ffi::QString, spec: &ffi::QString, cwd: &ffi::QString, pid: i32) {
         let qt = self.qt_thread();
         let k = key.to_string();
         let sink: crate::jupyter::Sink = std::sync::Arc::new(move |v: serde_json::Value| {
             let (k, j) = (k.clone(), v.to_string());
             let _ = qt.queue(move |c| c.jupyter_event(qs(&k), qs(&j)));
         });
-        crate::jupyter::start(&key.to_string(), &spec.to_string(), &local_path(cwd), sink);
+        crate::jupyter::start(&key.to_string(), &spec.to_string(), &local_path(cwd), pid.max(0) as u32, sink);
+    }
+
+    fn jupyter_sync(&self, key: &ffi::QString, pid: i32, cwd: &ffi::QString) -> bool {
+        crate::jupyter::sync(&key.to_string(), pid.max(0) as u32, &local_path(cwd))
     }
 
     fn jupyter_execute(&self, key: &ffi::QString, cell: &ffi::QString, code: &ffi::QString) -> bool {
