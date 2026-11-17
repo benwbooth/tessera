@@ -696,14 +696,23 @@ impl Kernel {
                 }
             };
             let result = (|| -> Result<(), String> {
+                let dbg = std::env::var_os("TESSERA_KERNEL_DEBUG").is_some();
                 let iopub = connect(ports[1], "SUB")?;
+                if dbg {
+                    eprintln!("{}: iopub connected", k.spec.name);
+                }
                 let shell = connect(ports[0], "DEALER")?;
-                let control = connect(ports[3], "DEALER")?;
                 let stdin = connect(ports[2], "DEALER")?;
+                // (Control is optional: IRuby has none. A few seconds once
+                // the rest are up; interrupt falls back to a signal.)
+                let control = Zmtp::connect_as(ports[3], "DEALER", Duration::from_secs(3), &identity).ok();
+                if dbg {
+                    eprintln!("{}: all connected", k.spec.name);
+                }
                 let shell_reader = shell.try_clone().map_err(|e| e.to_string())?;
                 let stdin_reader = stdin.try_clone().map_err(|e| e.to_string())?;
                 *k.shell.lock().unwrap() = Some(shell);
-                *k.control.lock().unwrap() = Some(control);
+                *k.control.lock().unwrap() = control;
                 *k.stdin.lock().unwrap() = Some(stdin);
                 k.spawn_readers(iopub, shell_reader, sink.clone());
                 k.spawn_stdin_reader(stdin_reader, sink.clone());
@@ -817,6 +826,9 @@ impl Kernel {
         let k = self.clone();
         std::thread::spawn(move || {
             while let Ok(parts) = shell.recv() {
+                if std::env::var_os("TESSERA_KERNEL_DEBUG").is_some() {
+                    eprintln!("shell {} parts: {:?}", parts.len(), parts.iter().map(|p| String::from_utf8_lossy(&p[..p.len().min(100)]).to_string()).collect::<Vec<_>>());
+                }
                 let Some((ty, parent, c)) = k.signer.parse(&parts) else { continue };
                 // (Kept a while after the reply: some kernels, Deno's, send
                 // output after it.)
@@ -903,8 +915,8 @@ impl Kernel {
             let (_, parts) = self.signer.message("interrupt_request", json!({}));
             if let Some(c) = self.control.lock().unwrap().as_mut() {
                 let _ = c.send(&parts);
+                return;
             }
-            return;
         }
         #[cfg(unix)]
         if let Some(c) = self.child.lock().unwrap().as_ref() {
@@ -1510,7 +1522,8 @@ mod tests {
                     // Up: its info, or idle.
                     let mut up = false;
                     let mut last = String::new();
-                    while let Ok(v) = rx.recv_timeout(Duration::from_secs(1200)) {
+                    let up_wait = std::env::var("TESSERA_KERNEL_WAIT").ok().and_then(|s| s.parse().ok()).unwrap_or(1200);
+                    while let Ok(v) = rx.recv_timeout(Duration::from_secs(up_wait)) {
                         if v["state"] == "dead" {
                             k.stop();
                             return format!("{name}: DIED: {}", v["message"]);
