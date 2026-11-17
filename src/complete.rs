@@ -793,6 +793,21 @@ fn alias_target(aliases: &serde_json::Value, cmd: &str) -> Option<String> {
 /// Completions at `cursor` (a UTF-16 offset) in `text`, for a shell in `cwd`.
 /// {"start": u16, "end": u16, "items": [...], "pending": bool}: replace
 /// start..end with an item's `insert`. `pending`: help is still being read.
+thread_local! {
+    static SHELL_ENV: std::cell::RefCell<Option<Vec<(String, String)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The shell's environment for the next completions (variables).
+pub fn set_shell_env(env: Option<Vec<(String, String)>>) {
+    SHELL_ENV.with(|e| *e.borrow_mut() = env);
+}
+
+fn shell_vars() -> Vec<(String, String)> {
+    let mut v = SHELL_ENV.with(|e| e.borrow().clone()).unwrap_or_else(|| std::env::vars().collect());
+    v.sort();
+    v
+}
+
 pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::Value) -> String {
     // UTF-16 cursor -> byte offset.
     let mut byte = text.len();
@@ -866,9 +881,26 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
         // The subcommand, if one was given (the first argument that isn't an option).
         let sub = args.iter().find(|a| !a.starts_with('-')).map(|s| s.to_string());
         let sub_known = sub.as_ref().is_some_and(|s| h.subcommands.iter().any(|(n, _)| n == s));
-        if let Some(var) = typed.strip_prefix('$') {
+        if (cmd == "export" || cmd == "unset") && !typed.contains('=') {
+            // (Variables to set or clear: the shell's, with their values.)
+            let set = cmd == "export";
             items = rank(
-                std::env::vars().map(|(k, v)| Item { label: format!("${k}"), insert: format!("${k}"), detail: v.chars().take(80).collect(), kind: "variable", doc: String::new() }).collect(),
+                shell_vars()
+                    .into_iter()
+                    .map(|(k, v)| Item {
+                        label: k.clone(),
+                        insert: if set { format!("{k}=") } else { k.clone() },
+                        detail: v.chars().take(80).collect(),
+                        kind: "variable",
+                        doc: String::new(),
+                    })
+                    .collect(),
+                &typed,
+                |i| i.label.clone(),
+            );
+        } else if let Some(var) = typed.strip_prefix('$') {
+            items = rank(
+                shell_vars().into_iter().map(|(k, v)| Item { label: format!("${k}"), insert: format!("${k}"), detail: v.chars().take(80).collect(), kind: "variable", doc: String::new() }).collect(),
                 var,
                 |i| i.label[1..].to_string(),
             );

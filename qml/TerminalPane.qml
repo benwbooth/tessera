@@ -328,6 +328,8 @@ Item {
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onPathPicked: (p) => pane.docPath = p
         onTerminalRequested: { pane.viewMode = "terminal"; term.forceActiveFocus() }
+        onCommandRequested: (c) => compose.runCommand(c)
+        onInsertRequested: (t) => { compose.focusEditor(); compose.insert(t) }
         onVisibleChanged: if (visible && !(pane.editorOn && pane.preferEditor) && pane.focused) Qt.callLater(forceActiveFocus)
     }
     // The last output's rich view, over the terminal.

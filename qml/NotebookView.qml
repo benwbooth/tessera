@@ -34,6 +34,8 @@ FocusScope {
     signal markdownStylePicked(string style)
     signal pathPicked(string path)      // saved as a file
     signal terminalRequested()          // "show me the terminal"
+    signal commandRequested(string command)   // run in the pane's shell, as if typed
+    signal insertRequested(string text)       // into the pane's editor
 
     readonly property string key: "nb-" + Math.random().toString(36).slice(2)
     readonly property string fileName: path.replace(/^.*\//, "")
@@ -435,10 +437,25 @@ FocusScope {
         }
     }
     readonly property var viewNames: [["auto", "Auto"], ["terminal", "Terminal"], ["text", "Plain text"], ["json", "JSON"], ["csv", "Table (CSV)"], ["tsv", "Table (TSV)"],
-                                      ["html", "HTML"], ["markdown", "Markdown (rich)"], ["mdtext", "Markdown (text)"], ["svg", "SVG"], ["diff", "Diff"], ["image", "Image"]]
-    function shownKind(cid, tkind) {
+                                      ["html", "HTML"], ["markdown", "Markdown (rich)"], ["mdtext", "Markdown (text)"], ["svg", "SVG"], ["diff", "Diff"], ["image", "Image"],
+                                      ["files", "Files"], ["env", "Variables"]]
+    // ls (lsd, eza, ...) and env: Tessera's own views, to click and edit.
+    function builtinKind(command) {
+        const c = (command || "").trim()
+        if (c === "" || /[|;&<>`$(]/.test(c)) return ""
+        const w = c.split(/\s+/)
+        let first = w[0]
+        try { const al = JSON.parse(view ? view.aliases : "{}"); if (al[first]) first = al[first].trim().split(/\s+/)[0] } catch (e) {}
+        if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && w.slice(1).filter(a => !a.startsWith("-")).length <= 1) return "files"
+        if ((first === "env" || first === "printenv") && w.length === 1) return "env"
+        if (c === "export" || c === "export -p" || c === "declare -x" || c === "typeset -x") return "env"
+        return ""
+    }
+    function shownKind(cid, tkind, command) {
         const chosen = kinds[cid]
         if (chosen && chosen !== "auto") return chosen
+        const b = builtinKind(command)
+        if (b !== "") return b
         const k = tkind !== "" ? tkind : aiKinds[cid] || "terminal"
         return k === "markdown" && markdownStyle === "text" ? "mdtext" : k
     }
@@ -936,7 +953,7 @@ FocusScope {
             readonly property bool code: type !== "markdown"
             readonly property bool fromTerm: tid > 0
             readonly property var outs: { try { return JSON.parse(outputs) } catch (e) { return [] } }
-            readonly property string kind: fromTerm ? nb.shownKind(cid, tkind) : ""
+            readonly property string kind: fromTerm ? nb.shownKind(cid, tkind, source) : ""
             readonly property bool hasOutput: code && (fromTerm || outs.length > 0)
             readonly property bool expanded: nb.expandedId === cid
             readonly property bool plainMd: !code && !editing
@@ -1160,6 +1177,8 @@ FocusScope {
                                    : cell.kind === "image" ? imageView
                                    : ["json", "csv", "tsv", "svg"].indexOf(cell.kind) >= 0 ? richView
                                    : cell.kind === "diff" ? diffView
+                                   : cell.kind === "files" ? filesView
+                                   : cell.kind === "env" ? envView
                                    : cell.kind === "text" ? plainView : termView
                 }
             }
@@ -1453,6 +1472,224 @@ FocusScope {
                 y: 4
                 textFormat: TextEdit.RichText
                 text: { tf.src.tick; return nb.view ? nb.palette(nb.view.cellOutput(tf.src.tid, "html")) : "" }
+            }
+        }
+    }
+    // ---- ls: the folder's entries, to click (live: the folder as it is now) ----
+    function localPath(p) { let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x }
+    function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
+    function humanSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " K" : n < 1073741824 ? (n / 1048576).toFixed(1) + " M" : (n / 1073741824).toFixed(1) + " G" }
+    property var fileMenuFor: null
+    SlimMenu {
+        id: fileMenu
+        SlimMenuItem { text: nb.fileMenuFor && nb.fileMenuFor.dir ? "Go to this folder" : "Open"; onTriggered: nb.openEntry(nb.fileMenuFor) }
+        SlimMenuItem { text: "List it"; visible: !!nb.fileMenuFor && nb.fileMenuFor.dir; height: visible ? implicitHeight : 0; onTriggered: nb.commandRequested("ls " + nb.shq(nb.fileMenuFor.path)) }
+        SlimMenuItem { text: "Insert the path in the editor"; onTriggered: nb.insertRequested(nb.shq(nb.fileMenuFor.path) + " ") }
+        SlimMenuItem { text: "Copy the path"; onTriggered: { clipHelper.text = nb.fileMenuFor.path; clipHelper.selectAll(); clipHelper.copy() } }
+        SlimMenuItem { text: "Open with the desktop"; onTriggered: nb.commandRequested("xdg-open " + nb.shq(nb.fileMenuFor.path)) }
+        SlimMenuItem { text: "Move to the trash"; onTriggered: nb.commandRequested("gio trash " + nb.shq(nb.fileMenuFor.path)) }
+    }
+    TextEdit { id: clipHelper; visible: false }
+    function openEntry(e) {
+        if (!e) return
+        if (e.dir) commandRequested("cd " + shq(e.path))
+        else if (e.exec) insertRequested(shq(e.path) + " ")
+        else commandRequested("xdg-open " + shq(e.path))
+    }
+    Component {
+        id: filesView
+        Item {
+            id: fv
+            readonly property var src: parent
+            readonly property var args: (src.command || "").trim().split(/\s+/).slice(1)
+            readonly property bool all: args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all")
+            readonly property bool longList: args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test((src.command || "").trim().split(/\s+/)[0])
+            readonly property string dir: {
+                const base = nb.localPath(src.cwd)
+                const a = args.find(x => !x.startsWith("-"))
+                if (!a) return base
+                const p = a.replace(/^~(?=\/|$)/, nb.controller ? nb.controller.homeDir() : "~")
+                return p.startsWith("/") ? p : base + "/" + p
+            }
+            readonly property var entries: { src.tick; try { return JSON.parse(nb.controller.listDir(dir, all)) } catch (e) { return [] } }
+            implicitHeight: Math.max(24, (longList ? table.contentHeight : grid.contentHeight) + 8)
+            function icon(e) { return e.dir ? "" : e.exec ? "" : e.link ? "" : "" }
+            function tint(e) { return e.dir ? nb.ansi(4, "#61afef") : e.exec ? nb.ansi(2, "#98c379") : e.link ? nb.ansi(6, "#56b6c2") : e.hidden ? Theme.textDim : Theme.text }
+            component Entry: Rectangle {
+                id: en
+                required property var modelData
+                radius: 4
+                color: eh.hovered ? Theme.tabHover : "transparent"
+                HoverHandler { id: eh; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: nb.openEntry(en.modelData) }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: { nb.fileMenuFor = en.modelData; fileMenu.popup() } }
+                ToolTip.visible: eh.hovered
+                ToolTip.delay: 700
+                ToolTip.text: modelData.path + (modelData.dir ? "" : "\n" + nb.humanSize(modelData.size)) + "\n" + new Date(modelData.mtime * 1000).toLocaleString()
+            }
+            GridView {
+                id: grid
+                visible: !fv.longList
+                anchors.fill: parent
+                anchors.topMargin: 4
+                interactive: false
+                clip: true
+                cellWidth: Math.max(140, Math.min(260, width / Math.max(1, Math.floor(width / 200))))
+                cellHeight: 22
+                model: fv.longList ? [] : fv.entries
+                delegate: Entry {
+                    width: grid.cellWidth - 4
+                    height: 20
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: 0.001
+                        x: 6
+                        width: parent.width - 10
+                        elide: Text.ElideMiddle
+                        textFormat: Text.StyledText
+                        text: "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + fv.icon(modelData) + "</span>&nbsp;" + modelData.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + (modelData.dir ? "/" : "")
+                        color: fv.tint(modelData)
+                        font.family: nb.fontFamily
+                        font.pixelSize: 12
+                        font.weight: modelData.dir ? Font.DemiBold : Font.Normal
+                        renderType: Text.NativeRendering
+                    }
+                }
+            }
+            ListView {
+                id: table
+                visible: fv.longList
+                anchors.fill: parent
+                anchors.topMargin: 4
+                interactive: false
+                clip: true
+                model: fv.longList ? fv.entries : []
+                delegate: Entry {
+                    width: table.width
+                    height: 20
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 6
+                        spacing: 14
+                        Text { width: 76; horizontalAlignment: Text.AlignRight; text: modelData.dir ? "" : nb.humanSize(modelData.size); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
+                        Text { width: 130; text: Qt.formatDateTime(new Date(modelData.mtime * 1000), "yyyy-MM-dd hh:mm"); color: Theme.textDim; font.family: nb.fontFamily; font.pixelSize: 12; renderType: Text.NativeRendering }
+                        Text {
+                            textFormat: Text.StyledText
+                            text: "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + fv.icon(modelData) + "</span>&nbsp;" + modelData.name.replace(/&/g, "&amp;").replace(/</g, "&lt;") + (modelData.dir ? "/" : "")
+                            color: fv.tint(modelData)
+                            font.family: nb.fontFamily
+                            font.pixelSize: 12
+                            font.weight: modelData.dir ? Font.DemiBold : Font.Normal
+                            renderType: Text.NativeRendering
+                        }
+                    }
+                }
+            }
+            Text {
+                visible: fv.entries.length === 0
+                y: 4
+                text: "(empty)"
+                color: Theme.textDim
+                font.pixelSize: 12
+                renderType: Text.NativeRendering
+            }
+        }
+    }
+
+    // ---- env: the variables, to edit (each change runs export/unset) ----
+    Component {
+        id: envView
+        Column {
+            id: ev
+            readonly property var src: parent
+            property string filter: ""
+            readonly property var vars: {
+                src.tick
+                const out = []
+                const text = nb.view ? nb.view.cellOutput(src.tid, "text") : ""
+                for (let l of text.split("\n")) {
+                    l = l.replace(/^(declare -x|typeset -x|export)\s+/, "")
+                    const i = l.indexOf("=")
+                    if (i <= 0 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(l.substring(0, i))) continue
+                    let v = l.substring(i + 1)
+                    if (/^".*"$/.test(v) || /^'.*'$/.test(v)) v = v.slice(1, -1)
+                    out.push({ k: l.substring(0, i), v: v })
+                }
+                out.sort((a, b) => a.k.localeCompare(b.k))
+                const f = filter.toLowerCase()
+                return f === "" ? out : out.filter(x => (x.k + "=" + x.v).toLowerCase().indexOf(f) >= 0)
+            }
+            spacing: 4
+            topPadding: 4
+            Row {
+                spacing: 6
+                width: parent.width
+                TextField {
+                    width: Math.min(260, parent.width / 3)
+                    placeholderText: "Filter"
+                    color: Theme.text
+                    font.pixelSize: 12
+                    background: Rectangle { radius: 5; color: Theme.bg; border.color: parent.activeFocus ? Theme.accent : Theme.divider }
+                    onTextChanged: ev.filter = text
+                }
+                TextField {
+                    id: newVar
+                    width: Math.min(360, parent.width / 2)
+                    placeholderText: "NEW_NAME=value, Enter to set"
+                    color: Theme.text
+                    font.family: nb.fontFamily
+                    font.pixelSize: 12
+                    background: Rectangle { radius: 5; color: Theme.bg; border.color: parent.activeFocus ? Theme.accent : Theme.divider }
+                    onAccepted: {
+                        const i = text.indexOf("=")
+                        if (i > 0) { nb.commandRequested("export " + text.substring(0, i) + "=" + nb.shq(text.substring(i + 1))); text = "" }
+                    }
+                }
+            }
+            Repeater {
+                model: ev.vars
+                delegate: Row {
+                    required property var modelData
+                    width: ev.width
+                    spacing: 8
+                    Text {
+                        width: Math.min(240, ev.width * 0.3)
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.k
+                        elide: Text.ElideRight
+                        color: nb.ansi(4, "#61afef")
+                        font.family: nb.fontFamily
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        renderType: Text.NativeRendering
+                    }
+                    TextField {
+                        id: vf
+                        width: ev.width - Math.min(240, ev.width * 0.3) - 40
+                        height: 22
+                        text: modelData.v
+                        color: Theme.text
+                        font.family: nb.fontFamily
+                        font.pixelSize: 12
+                        padding: 3
+                        background: Rectangle { radius: 4; color: vf.activeFocus ? Theme.bg : "transparent"; border.color: vf.activeFocus ? Theme.accent : "transparent" }
+                        Component.onCompleted: cursorPosition = 0
+                        onActiveFocusChanged: if (!activeFocus) cursorPosition = 0
+                        // (Enter: export it with the new value.)
+                        onAccepted: if (text !== modelData.v) nb.commandRequested("export " + modelData.k + "=" + nb.shq(text))
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "×"
+                        color: xh.hovered ? nb.ansi(1, "#e06c75") : Theme.textDim
+                        font.pixelSize: 14
+                        renderType: Text.NativeRendering
+                        HoverHandler { id: xh; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: nb.commandRequested("unset " + modelData.k) }
+                        ToolTip.visible: xh.hovered
+                        ToolTip.text: "unset " + modelData.k
+                    }
+                }
             }
         }
     }

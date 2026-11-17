@@ -118,6 +118,9 @@ Rectangle {
         viNormal = false
         box.submitted(t)
     }
+    // A command from Tessera itself (a prompt widget's choice, a file or
+    // variable clicked in the notebook): run as if typed, in the shell.
+    function runCommand(c) { runLang = "bash"; box.submitted(c) }
     function historyStep(d) {
         const h = box.history
         if (h.length === 0) return
@@ -290,7 +293,7 @@ Rectangle {
         if (!historyMode && box.lspServer !== "")
             controller.lspAsk(aiKey + "-comp", box.lang, box.cwd, edit.text, "complete", edit.cursorPosition)
         const r = JSON.parse(historyMode ? controller.historySearch(historyQuery)
-                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}"))
+                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid))
         comp = r
         if (compIndex >= r.items.length) compIndex = 0
         if (r.items.length === 0 && !r.pending) closeComp()
@@ -321,6 +324,10 @@ Rectangle {
             const p = edit.cursorPosition, t = edit.text
             const prev = t[p - 1] || " ", next = t[p] || " "
             const inWord = !/\s/.test(prev) && /\s/.test(next)
+            // (Right after "cd ", "ls ", "export ", "unset ": the folders or
+            // variables at once, to click through.)
+            const builtinArg = p === t.length && /^\s*(cd|pushd|ls|ll|la|export|unset)\s+$/.test(t)
+            if (builtinArg && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete(); return }
             if (box.compOpen && box.historyMode) return
             else if (box.compOpen) { if (inWord || prev === "/") box.requestComplete(); else box.closeComp() }
             else if (inWord && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete() }
@@ -542,7 +549,7 @@ Rectangle {
         fontFamily: edit.font.family
         fontSize: edit.font.pointSize
         // (A widget's choice runs as if typed: a card, history.)
-        onRunRequested: (c) => { box.runLang = "bash"; box.submitted(c); edit.forceActiveFocus() }
+        onRunRequested: (c) => { box.runCommand(c); edit.forceActiveFocus() }
         onFixRequested: box.askFix()
     }
 

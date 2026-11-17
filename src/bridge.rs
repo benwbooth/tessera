@@ -299,6 +299,10 @@ pub mod ffi {
         fn session_info(self: &Controller, id: &QString) -> QString;
         #[qinvokable]
         fn home_dir(self: &Controller) -> QString;
+        /// A folder's entries for the notebook's file view: JSON
+        /// [{name, path, dir, link, exec, hidden, size, mtime}] (folders first).
+        #[qinvokable]
+        fn list_dir(self: &Controller, path: &QString, all: bool) -> QString;
         /// Open a window holding this tab (JSON layout with session ids): a
         /// tab torn off by dragging it out of the tab bar.
         #[qinvokable]
@@ -346,7 +350,7 @@ pub mod ffi {
         fn language_ready(self: Pin<&mut Controller>, name: QString, error: QString);
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
-        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString) -> QString;
+        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString, pid: i32) -> QString;
         /// Download fish's completion files (more commands and subcommands
         /// get help text); progress in help_status.
         #[qinvokable]
@@ -684,6 +688,33 @@ impl ffi::Controller {
         qs(&serde_json::to_string(&info).unwrap_or_default())
     }
 
+    fn list_dir(&self, path: &ffi::QString, all: bool) -> ffi::QString {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = local_path(path);
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                let hidden = name.starts_with('.');
+                if hidden && !all {
+                    continue;
+                }
+                let p = e.path();
+                let link = e.file_type().map(|t| t.is_symlink()).unwrap_or(false);
+                let md = std::fs::metadata(&p).ok();
+                let is_dir = md.as_ref().is_some_and(|m| m.is_dir());
+                let exec = md.as_ref().is_some_and(|m| !m.is_dir() && m.permissions().mode() & 0o111 != 0);
+                let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+                let mtime = md.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+                out.push(serde_json::json!({"name": name, "path": p.to_string_lossy(), "dir": is_dir, "link": link, "exec": exec, "hidden": hidden, "size": size, "mtime": mtime}));
+            }
+        }
+        out.sort_by(|a, b| {
+            b["dir"].as_bool().cmp(&a["dir"].as_bool()).then_with(|| a["name"].as_str().unwrap_or("").to_lowercase().cmp(&b["name"].as_str().unwrap_or("").to_lowercase()))
+        });
+        qs(&serde_json::Value::Array(out).to_string())
+    }
+
     fn home_dir(&self) -> ffi::QString {
         qs(&std::env::var("HOME").unwrap_or_default())
     }
@@ -712,7 +743,8 @@ impl ffi::Controller {
         qs(&crate::syntax::analyze(&lang.to_string(), &text.to_string()))
     }
 
-    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString) -> ffi::QString {
+    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString, pid: i32) -> ffi::QString {
+        crate::complete::set_shell_env(crate::prompt::shell_env(pid.max(0) as u32));
         let aliases: serde_json::Value = serde_json::from_str(&aliases.to_string()).unwrap_or_default();
         let cwd = cwd.to_string();
         // An OSC 7 URL (file://host/path) or a plain path.
