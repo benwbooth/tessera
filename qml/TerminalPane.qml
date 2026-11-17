@@ -36,9 +36,10 @@ Item {
     property int zoomPercent: 100
     // The input editor (ComposeBox) and what it needs from the window.
     // Has the keys (the terminal or its editor).
-    readonly property bool focused: term.activeFocus || compose.editing
+    readonly property bool focused: term.activeFocus || compose.editing || jupyter.activeFocus
     signal editorKeysPicked(string keys)
     signal markdownStylePicked(string style)
+    signal openNotebookRequested(string path)
     property string markdownStyle: "rich"  // Markdown cells: "rich" or "text"
     property bool preferEditor: true   // the keys go to the editor (not the terminal) when the pane gets them
     property bool inputEditor: false
@@ -60,7 +61,7 @@ Item {
         if (editorOn && term.activeFocus && preferEditor) compose.focusEditor()
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
-    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || replLang !== "")      // the window's text zoom, shown with the size
+    readonly property bool editorOn: docPath === "" && inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || replLang !== "")      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW
     SplitView.preferredHeight: prefH
@@ -104,7 +105,11 @@ Item {
         // Type in the terminal (click it) or in the editor under it (click
         // there): the pane remembers which, and goes back to it when it gets
         // the keys again (switching tabs or panes).
-        onActiveFocusChanged: if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
+        onActiveFocusChanged: {
+            // (A notebook in the pane takes the keys.)
+            if (activeFocus && pane.docPath !== "") Qt.callLater(() => jupyter.forceActiveFocus())
+            else if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
+        }
         PointHandler { onActiveChanged: if (active) pane.preferEditor = false }
         // Shift+Tab at a prompt: back to the editor (elsewhere it goes to the program).
         Keys.onPressed: (e) => {
@@ -278,6 +283,24 @@ Item {
 
     property alias findBar: findBar
     property alias compose: compose
+    // A Jupyter notebook (.ipynb) shown in the pane, over its shell (which
+    // starts in the notebook's folder and can be its kernel).
+    property string docPath: ""
+    readonly property bool docDirty: jupyter.dirty
+    function saveDoc() { jupyter.save() }
+    JupyterView {
+        id: jupyter
+        z: 30
+        anchors.fill: parent
+        visible: pane.docPath !== ""
+        enabled: visible
+        path: pane.docPath
+        controller: visible ? pane.controller : null
+        term: term
+        fontFamily: term.fontFamily
+        themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
+        onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
+    }
     // Terminal or notebook (each command a cell); the notebook steps aside for
     // a full-screen program, or a command that runs for more than a moment.
     property string viewMode: "terminal"
@@ -302,6 +325,7 @@ Item {
         onMarkdownStylePicked: (m) => pane.markdownStylePicked(m)
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onRerun: (cmd) => { compose.setText(cmd); compose.focusEditor() }
+        onOpenNotebook: (p) => pane.openNotebookRequested(p)
     }
     // The last output's rich view, over the terminal.
     function openRich() {

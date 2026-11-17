@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtWebEngine
+import QtQuick.Dialogs
 import Tessera
 
 // The pane as a notebook (like Jupyter): each command a cell, its output in
@@ -16,6 +17,7 @@ Rectangle {
     property var themeData: ({})
     property string fontFamily: "monospace"
     signal rerun(string command)
+    signal openNotebook(string path)
     property string markdownStyle: "rich"  // Markdown cells by default: "rich" or "text"
     signal markdownStylePicked(string style)
 
@@ -95,9 +97,11 @@ Rectangle {
         id: list
         anchors.fill: parent
         anchors.margins: 10
+        anchors.topMargin: nb.cells.length > 0 ? 34 : 10
         spacing: 12
         model: nb.cells
         clip: true
+        interactive: false   // (a drag selects text; the wheel, touchpad and bar scroll)
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
         MomentumWheel { flick: list }
@@ -221,6 +225,7 @@ Rectangle {
                     id: termView
                     Flickable {
                         id: tf
+                        interactive: false   // (a drag selects text; the wheel and bar scroll)
                         implicitHeight: Math.max(20, tt.implicitHeight + 8)
                         contentWidth: Math.max(width, tt.implicitWidth)
                         contentHeight: tt.implicitHeight + 8
@@ -229,10 +234,14 @@ Rectangle {
                         ScrollBar.vertical: ScrollBar { policy: tf.contentHeight > tf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
                         ScrollBar.horizontal: ScrollBar {}
                         MomentumWheel { flick: tf }
-                        Text {
+                        TextEdit {
                             id: tt
                             y: 4
-                            textFormat: Text.RichText
+                            readOnly: true
+                            selectByMouse: true
+                            selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)
+                            selectedTextColor: Theme.text
+                            textFormat: TextEdit.RichText
                             text: { loader.tick; return nb.view ? nb.palette(nb.view.cellOutput(cell.c.id, "html")) : "" }
                             color: Theme.text
                             font.family: nb.fontFamily
@@ -245,6 +254,7 @@ Rectangle {
                     id: plainView
                     Flickable {
                         id: pf
+                        interactive: false   // (a drag selects text; the wheel and bar scroll)
                         implicitHeight: Math.max(20, pt.implicitHeight + 8)
                         contentHeight: pt.implicitHeight + 8
                         clip: true
@@ -269,18 +279,23 @@ Rectangle {
                     id: diffView
                     Flickable {
                         id: df
+                        interactive: false   // (a drag selects text; the wheel and bar scroll)
                         implicitHeight: Math.max(20, dt.implicitHeight + 8)
                         contentHeight: dt.implicitHeight + 8
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar { policy: df.contentHeight > df.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
                         MomentumWheel { flick: df }
-                        Text {
+                        TextEdit {
                             id: dt
                             y: 4
                             width: df.width - 12
-                            textFormat: Text.StyledText
-                            wrapMode: Text.WrapAnywhere
+                            readOnly: true
+                            selectByMouse: true
+                            selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)
+                            selectedTextColor: Theme.text
+                            textFormat: TextEdit.RichText
+                            wrapMode: TextEdit.WrapAnywhere
                             font.family: nb.fontFamily
                             font.pointSize: 10
                             color: Theme.text
@@ -458,4 +473,53 @@ Rectangle {
         }
     }
     TextEdit { id: clip; visible: false }
+
+    // ---- as a Jupyter notebook: each command a code cell (Bash), its output kept --
+    function exportIpynb(path) {
+        const lines = (s) => { const o = []; let at = 0; while (at < s.length) { const n = s.indexOf("\n", at); if (n < 0) { o.push(s.slice(at)); break } o.push(s.slice(at, n + 1)); at = n + 1 } return o }
+        const out = []
+        let n = 0
+        for (const c of cells) {
+            if (!c.done || c.command.trim() === "") continue
+            const outs = []
+            const text = view.cellOutput(c.id, "text")
+            if (text.trim() !== "") outs.push({ name: "stdout", output_type: "stream", text: lines(text.endsWith("\n") ? text : text + "\n") })
+            const img = c.kind === "image" ? view.cellOutput(c.id, "image") : ""
+            if (img !== "") outs.push({ data: { "image/png": img }, metadata: {}, output_type: "display_data" })
+            out.push({ cell_type: "code", execution_count: ++n, id: "cell-" + c.id, metadata: { tessera: { cwd: c.cwd, status: c.status, duration_ms: c.duration } },
+                       outputs: outs, source: lines(c.command) })
+        }
+        const nb = { cells: out, metadata: { kernelspec: { display_name: "Bash", language: "bash", name: "bash" }, language_info: { name: "bash" } }, nbformat: 4, nbformat_minor: 5 }
+        const err = controller.writeTextFile(path, JSON.stringify(nb, null, 1) + "\n")
+        if (err === "") openNotebook(path)
+        else exportError = err
+    }
+    property string exportError: ""
+    // (Test hook: TESSERA_TEST_NB_EXPORT=<path> saves the cells there and opens it.)
+    Timer { interval: 3000; running: nb.visible && nb.controller !== null && nb.controller.testEnv("NB_EXPORT") !== ""; onTriggered: nb.exportIpynb(nb.controller.testEnv("NB_EXPORT")) }
+    Row {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 6
+        anchors.rightMargin: 16
+        z: 5
+        spacing: 6
+        visible: nb.cells.length > 0
+        Text { visible: nb.exportError !== ""; text: nb.exportError; color: Theme.textDim; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+        Chip {
+            base: Theme.bg
+            label: "Save as Jupyter Notebook\u2026"
+            tip: "These commands and their outputs as a .ipynb, opened to run again or share"
+            onClicked: exportDialog.open()
+        }
+    }
+    FileDialog {
+        id: exportDialog
+        title: "Save as Jupyter Notebook"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "ipynb"
+        nameFilters: ["Jupyter notebooks (*.ipynb)"]
+        currentFolder: nb.cells.length ? "file://" + nb.cells[nb.cells.length - 1].cwd : ""
+        onAccepted: nb.exportIpynb(decodeURIComponent(String(selectedFile).replace(/^file:\/\//, "")))
+    }
 }

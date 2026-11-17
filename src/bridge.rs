@@ -253,6 +253,9 @@ pub mod ffi {
         /// For tests: the value of TESSERA_TEST_<name> (empty if unset).
         #[qinvokable]
         fn test_env(self: &Controller, name: &QString) -> QString;
+        /// A notebook named on the command line (tessera x.ipynb), or "".
+        #[qinvokable]
+        fn open_doc(self: &Controller) -> QString;
 
         /// Preferences as JSON (settings::Settings).
         #[qinvokable]
@@ -408,6 +411,37 @@ pub mod ffi {
         fn ai_presets(self: &Controller) -> QString;
         #[qinvokable]
         fn ai_set_key(self: &Controller, provider: &QString, key: &QString) -> QString;
+
+        // ---- Jupyter notebooks (src/jupyter.rs) ----
+        /// The kernels there are: [{name, display, language}].
+        #[qinvokable]
+        fn jupyter_kernels(self: &Controller) -> QString;
+        /// Start kernel `spec` for notebook `key` (one per key); it reports
+        /// with jupyter_event(key, json).
+        #[qinvokable]
+        fn jupyter_start(self: Pin<&mut Controller>, key: &QString, spec: &QString, cwd: &QString);
+        #[qinvokable]
+        fn jupyter_execute(self: &Controller, key: &QString, cell: &QString, code: &QString) -> bool;
+        #[qinvokable]
+        fn jupyter_complete(self: &Controller, key: &QString, request: &QString, code: &QString, pos: i32) -> bool;
+        #[qinvokable]
+        fn jupyter_interrupt(self: &Controller, key: &QString);
+        #[qinvokable]
+        fn jupyter_stop(self: &Controller, key: &QString);
+        #[qsignal]
+        fn jupyter_event(self: Pin<&mut Controller>, key: QString, json: QString);
+        /// A text file: {"text": ...} or {"error": ...}.
+        #[qinvokable]
+        fn read_text_file(self: &Controller, path: &QString) -> QString;
+        /// Write a text file (atomically); "" or what went wrong.
+        #[qinvokable]
+        fn write_text_file(self: &Controller, path: &QString, text: &QString) -> QString;
+        /// Text with ANSI colors as HTML (colors as var(--vt-palette-N)).
+        #[qinvokable]
+        fn ansi_html(self: &Controller, text: &QString) -> QString;
+        /// Markdown as HTML.
+        #[qinvokable]
+        fn markdown_html(self: &Controller, text: &QString) -> QString;
         #[qinvokable]
         fn ai_has_key(self: &Controller, provider: &QString) -> bool;
         /// A provider's models, in the background: ai_models_ready(provider, json list or "error: ...").
@@ -697,6 +731,71 @@ impl ffi::Controller {
             None => cwd,
         };
         crate::history::add(&cmd.to_string(), &cwd);
+    }
+
+    fn jupyter_kernels(&self) -> ffi::QString {
+        qs(&crate::jupyter::specs_json())
+    }
+
+    fn jupyter_start(self: Pin<&mut Self>, key: &ffi::QString, spec: &ffi::QString, cwd: &ffi::QString) {
+        let qt = self.qt_thread();
+        let k = key.to_string();
+        let sink: crate::jupyter::Sink = std::sync::Arc::new(move |v: serde_json::Value| {
+            let (k, j) = (k.clone(), v.to_string());
+            let _ = qt.queue(move |c| c.jupyter_event(qs(&k), qs(&j)));
+        });
+        crate::jupyter::start(&key.to_string(), &spec.to_string(), &local_path(cwd), sink);
+    }
+
+    fn jupyter_execute(&self, key: &ffi::QString, cell: &ffi::QString, code: &ffi::QString) -> bool {
+        crate::jupyter::execute(&key.to_string(), &cell.to_string(), &code.to_string())
+    }
+
+    fn jupyter_complete(&self, key: &ffi::QString, request: &ffi::QString, code: &ffi::QString, pos: i32) -> bool {
+        // (The editor counts UTF-16 units; the kernel, code points.)
+        let code = code.to_string();
+        let mut units = 0usize;
+        let mut chars = 0usize;
+        for ch in code.chars() {
+            if units >= pos.max(0) as usize {
+                break;
+            }
+            units += ch.len_utf16();
+            chars += 1;
+        }
+        crate::jupyter::complete(&key.to_string(), &request.to_string(), &code, chars)
+    }
+
+    fn jupyter_interrupt(&self, key: &ffi::QString) {
+        crate::jupyter::interrupt(&key.to_string());
+    }
+
+    fn jupyter_stop(&self, key: &ffi::QString) {
+        crate::jupyter::stop(&key.to_string());
+    }
+
+    fn read_text_file(&self, path: &ffi::QString) -> ffi::QString {
+        let v = match std::fs::read_to_string(local_path(path)) {
+            Ok(t) => serde_json::json!({"text": t}),
+            Err(e) => serde_json::json!({"error": e.to_string()}),
+        };
+        qs(&v.to_string())
+    }
+
+    fn write_text_file(&self, path: &ffi::QString, text: &ffi::QString) -> ffi::QString {
+        let p = std::path::PathBuf::from(local_path(path));
+        let mut tmp = p.clone().into_os_string();
+        tmp.push(".tmp");
+        let r = std::fs::write(&tmp, text.to_string()).and_then(|_| std::fs::rename(&tmp, &p));
+        qs(&r.err().map(|e| e.to_string()).unwrap_or_default())
+    }
+
+    fn ansi_html(&self, text: &ffi::QString) -> ffi::QString {
+        qs(&crate::jupyter::ansi_to_html(&text.to_string()))
+    }
+
+    fn markdown_html(&self, text: &ffi::QString) -> ffi::QString {
+        qs(&crate::cells::markdown_html(&text.to_string()))
     }
 
     fn history_search(&self, query: &ffi::QString) -> ffi::QString {
@@ -1172,6 +1271,10 @@ impl ffi::Controller {
 
     fn test_env(&self, name: &ffi::QString) -> ffi::QString {
         ffi::QString::from(&std::env::var(format!("TESSERA_TEST_{name}")).unwrap_or_default())
+    }
+
+    fn open_doc(&self) -> ffi::QString {
+        ffi::QString::from(&std::env::var("TESSERA_OPEN_DOC").unwrap_or_default())
     }
 
     fn startup_command(&self) -> ffi::QString {

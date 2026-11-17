@@ -11,6 +11,7 @@ mod kde;
 mod grammars;
 mod history;
 mod images;
+mod jupyter;
 mod keymap;
 mod net;
 mod procinfo;
@@ -100,6 +101,11 @@ fn main() {
                 }
                 i += 1;
             }
+            // A notebook to open (tessera notes.ipynb).
+            a if a.to_ascii_lowercase().ends_with(".ipynb") => {
+                let abs = std::env::current_dir().unwrap_or_default().join(a);
+                std::env::set_var("TESSERA_OPEN_DOC", abs);
+            }
             _ => {}
         }
         i += 1;
@@ -135,6 +141,7 @@ fn main() {
     }
     bridge::ffi::tessera_show_windows();
     let code = bridge::ffi::tessera_exec();
+    jupyter::stop_all();
     if wayland {
         // Qt reads "-session id_key", so an id with "_" in it can't be passed back.
         let id = bridge::ffi::tessera_session_id().to_string();

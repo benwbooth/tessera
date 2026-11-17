@@ -122,6 +122,7 @@ ApplicationWindow {
             onEditorKeysPicked: (k) => win.setSetting("editor_keys", k)
             markdownStyle: win.settings.markdown_style || "rich"
             onMarkdownStylePicked: (m) => win.setSetting("markdown_style", m)
+            onOpenNotebookRequested: (p) => win.openNotebook(p)
             dimInactive: win.settings.dim_inactive
             dimAmount: win.settings.dim_amount
             showTitle: win.settings.pane_titles
@@ -184,6 +185,7 @@ ApplicationWindow {
                 : prof.tab_title !== "" ? prof.tab_title
                 // What's running in it (vim, htop, ssh...); at a prompt, the
                 // shell's own title or the folder.
+                : lastPane && lastPane.docPath !== "" ? lastPane.docPath.replace(/^.*\//, "") + (lastPane.docDirty ? " \u2022" : "")
                 : lastPane && lastPane.job !== "" ? lastPane.job
                 : (win.settings.tab_titles_per_tab && titleView && titleView.title ? titleView.title
                    : launchTitle !== "" ? launchTitle
@@ -356,6 +358,7 @@ ApplicationWindow {
                 retire({ title: "", color: "", profile: p.profileName, root: serializeNode(p, true) })
             else p.view.killSession()
         }
+        if (p.docPath !== "" && p.docDirty) p.saveDoc()
         const h = p.host
         const idx = indexIn(h, p)
         if (idx >= 0) h.takeItem(idx)
@@ -499,6 +502,7 @@ ApplicationWindow {
             if (opts.command) props.commandOverride = opts.command
             if (opts.title) t.launchTitle = opts.title
             if (opts.attachId) props.attachId = opts.attachId
+            if (opts.doc) props.docPath = opts.doc
             const cwd = opts.cwd !== undefined ? opts.cwd : cwdFor(prof, active)
             if (cwd) props.cwd = cwd
             const p = makePane(t.root, props)
@@ -705,6 +709,7 @@ ApplicationWindow {
     }
 
     function finishClose() {
+        for (const p of allPanes()) if (p.docPath !== "" && p.docDirty) p.saveDoc()
         // Closed sessions waiting for Undo end now.
         for (const e of closedStack) { if (e.timer) e.timer.stop(); for (const id of e.ids) controller.killSession(id) }
         closedStack = []
@@ -722,7 +727,7 @@ ApplicationWindow {
     function serializeNode(n, withIds) {
         if (n.view !== undefined)
             return { t: "pane", profile: n.profileName, cwd: n.view.pwd || n.view.cwd, cmd: n.commandOverride,
-                     mode: n.viewMode, id: withIds ? n.view.sessionId : "", w: n.width, h: n.height }
+                     mode: n.viewMode, doc: n.docPath, id: withIds ? n.view.sessionId : "", w: n.width, h: n.height }
         const c = []
         for (let i = 0; i < n.count; ++i) c.push(serializeNode(n.itemAt(i), withIds))
         return { t: n.orientation === Qt.Horizontal ? "h" : "v", c: c, w: n.width, h: n.height }
@@ -745,7 +750,7 @@ ApplicationWindow {
     function buildSavedTree(t, node, alive, recreate) {
         function build(n, host) {
             if (n.t === "pane") {
-                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal" }
+                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "" }
                 if (alive) {
                     if (n.id && alive[n.id]) {
                         props.attachId = n.id
@@ -825,6 +830,30 @@ ApplicationWindow {
         nameFilters: ["Text files (*.txt)", "All files (*)"]
         onAccepted: controller.writeFile(selectedFile.toString(), pendingText)
     }
+    // ---- Jupyter notebooks: each in a tab of its own -----------------------------
+    function openNotebook(path) {
+        if (!path) return
+        // (Already open: go to it.)
+        for (let i = 0; i < tabs.length; ++i)
+            for (const p of panesIn(tabs[i].root, [])) if (p.docPath === path) { currentTab = i; focusPane(p); return }
+        newTab({ doc: path, cwd: path.replace(/\/[^/]*$/, "") || undefined })
+    }
+    function newNotebook() {
+        const dir = (activeView && activeView.pwd) || controller.homeDir()
+        let n = 1, path = dir + "/Untitled.ipynb"
+        const taken = (p) => JSON.parse(controller.readTextFile(p)).error === undefined || allPanes().some(x => x.docPath === p)
+        while (taken(path)) path = dir + "/Untitled-" + (++n) + ".ipynb"
+        openNotebook(path)
+    }
+    function localPath(u) { return decodeURIComponent(String(u).replace(/^file:\/\//, "")) }
+    FileDialog {
+        id: notebookDialog
+        title: "Open Jupyter Notebook"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Jupyter notebooks (*.ipynb)", "All files (*)"]
+        onAccepted: win.openNotebook(win.localPath(selectedFile))
+    }
+    Shortcut { sequence: "Ctrl+O"; autoRepeat: false; onActivated: notebookDialog.open() }
     FileDialog {
         id: logDialog
         title: "Log Session Output to File"
@@ -1115,6 +1144,8 @@ ApplicationWindow {
             title: "Shell"
             icon.name: "utilities-terminal"
             P.MenuItem { icon.name: "tab-new"; text: "New Tab\tCtrl+Shift+T"; onTriggered: newTab({}) }
+            P.MenuItem { icon.name: "document-new"; text: "New Jupyter Notebook"; onTriggered: newNotebook() }
+            P.MenuItem { icon.name: "document-open"; text: "Open Jupyter Notebook\u2026\tCtrl+O"; onTriggered: notebookDialog.open() }
             P.MenuItem { icon.name: "tab-new"; text: "New Tab with Current Profile"; onTriggered: newTab({ profile: activeProfile.name }) }
             P.MenuItem { icon.name: "window-new"; text: "New Window\tCtrl+Shift+N"; onTriggered: controller.newWindow() }
             P.MenuItem { icon.name: "security-high"; text: "New Administrator Window"; visible: Qt.platform.os === "windows" && !controller.isAdmin(); onTriggered: controller.newAdminWindow() }
@@ -2162,6 +2193,7 @@ ApplicationWindow {
         if (controller.testEnv("ASSISTANT") !== "") assistantTestTimer.start()
         if (controller.testEnv("RICH") !== "") richTestTimer.start()
         if (controller.testEnv("NOTEBOOK") !== "") notebookTestTimer.start()
+        if (controller.openDoc() !== "") Qt.callLater(openNotebook, controller.openDoc())
         if (controller.testEnv("KEYS") !== "") keysTestTimer.start()
         if (controller.daemonState() === "outdated") daemonTimer.start()
         controller.aiAutodetect()

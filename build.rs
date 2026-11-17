@@ -60,6 +60,7 @@ fn main() {
         QmlFile::from("qml/AssistantPanel.qml"),
         QmlFile::from("qml/RichViewer.qml"),
         QmlFile::from("qml/NotebookView.qml"),
+        QmlFile::from("qml/JupyterView.qml"),
         QmlFile::from("qml/Chip.qml"),
         QmlFile::from("qml/SlimCombo.qml"),
         QmlFile::from("qml/SlimMenu.qml"),
