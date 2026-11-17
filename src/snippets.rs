@@ -719,7 +719,8 @@ mod tests {
         assert!(complete_program("go", "fmt.Println(1)").contains("import (\"fmt\")"));
         assert_eq!(command("markdown", "# hi", "/", "zsh"), "");
         let m = command("cpp", "import std;\nstd::println(\"{}\", 1);", "/", "zsh");
-        assert!(m.is_empty() || (m.contains("-fmodules") && m.contains("int main()")), "{m}");
+        // (clang-repl with Nix; else GCC's modules.)
+        assert!(m.is_empty() || m.contains("tessera-cxx") || (m.contains("-fmodules") && m.contains("int main()")), "{m}");
         let h = command("haskell", "main = putStrLn \"hi\"", "/", "zsh");
         assert!(h.is_empty() || (h.contains("runghc") && h.contains("<<'TESSERA_END'")), "{h}");
         let h = command("haskell", "print (sum [1..10])", "/", "zsh");
