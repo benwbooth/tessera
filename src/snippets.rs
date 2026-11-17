@@ -50,12 +50,12 @@ fn runners(lang: &str) -> &'static [Runner] {
         "r" => &[r!("Rscript", "Rscript -e", Inline, "R")],
         "julia" => &[r!("julia", "julia -e", Inline, "julia")],
         "elixir" => &[r!("elixir", "elixir -e", Inline, "elixir")],
-        "erlang" => &[r!("escript", "escript {f}", File("erl"), "erlang")],
+        "erlang" => &[r!("erl", "erl -noshell -eval {c} -s init stop", Inline, "erlang"), r!("escript", "escript {f}", File("erl"), "erlang")],
         "groovy" => &[r!("groovy", "groovy -e", Inline, "groovy")],
         "powershell" => &[r!("pwsh", "pwsh -c", Inline, "powershell")],
         "fish" => &[r!("fish", "fish -c", Inline, "fish")],
         "nu" => &[r!("nu", "nu -c", Inline, "nushell")],
-        "tcl" => &[r!("tclsh", "tclsh {f}", File("tcl"), "tcl")],
+        "tcl" => &[r!("tclsh", "tclsh", Stdin, "tcl")],
         "awk" => &[r!("awk", "awk", Inline, "gawk")],
         "jq" => &[r!("jq", "jq -n", Inline, "jq")],
         "nix" => &[r!("nix", "nix eval --impure --expr", Inline, "")],
@@ -66,26 +66,29 @@ fn runners(lang: &str) -> &'static [Runner] {
             r!("rust-script", "rust-script -e", Inline, "rust-script nixpkgs#cargo nixpkgs#rustc"),
             r!("rustc", "rustc -o {b} {f} && {b}", File("rs"), "rustc"),
         ],
-        "go" => &[r!("go", "go run {f}", File("go"), "go")],
-        "c" => &[r!("tcc", "tcc -run {f}", File("c"), "tinycc"), r!("cc", "cc -o {b} {f} && {b}", File("c"), "gcc")],
-        "cpp" => &[r!("c++", "c++ -std=c++20 -o {b} {f} && {b}", File("cpp"), "gcc")],
+        // (yaegi: Go's interpreter, a program's main run at the end by itself.)
+        "go" => &[r!("yaegi", "yaegi", Stdin, "yaegi"), r!("go", "go run {f}", File("go"), "go")],
+        "c" => &[r!("tcc", "tcc -run -", Stdin, "tinycc"), r!("cc", "cc -o {b} {f} && {b}", File("c"), "gcc")],
+        // (cling: C++'s interpreter, statements as they come.)
+        "cpp" => &[r!("cling", "cling -w --nologo", Stdin, "cling"), r!("c++", "c++ -std=c++20 -o {b} {f} && {b}", File("cpp"), "gcc")],
         // (Statements: jbang --code, or JShell; a class: see command.)
         "java" => &[r!("jbang", "jbang --code", Inline, "jbang"), r!("jshell", "jshell --feedback silent -", Stdin, "jdk")],
         "kotlin" => &[r!("kotlin", "kotlin -e", Inline, "kotlin")],
         "scala" => &[r!("scala-cli", "scala-cli run -e", Inline, "scala-cli")],
         "clojure" => &[r!("bb", "bb -e", Inline, "babashka"), r!("clojure", "clojure -M -e", Inline, "clojure")],
-        "haskell" => &[r!("runghc", "runghc {f}", File("hs"), "ghc")],
-        "ocaml" => &[r!("ocaml", "ocaml {f}", File("ml"), "ocaml")],
+        // (A program, with a main: runghc from its input. Else GHCi runs the lines.)
+        "haskell" => &[r!("ghci", "ghci -v0", Stdin, "ghc")],
+        "ocaml" => &[r!("ocaml", "ocaml -stdin", Stdin, "ocaml")],
         "racket" => &[r!("racket", "racket -e", Inline, "racket")],
         "scheme" => &[r!("guile", "guile -c", Inline, "guile")],
-        "common-lisp" | "lisp" => &[r!("sbcl", "sbcl --script {f}", File("lisp"), "sbcl")],
-        "dart" => &[r!("dart", "dart run {f}", File("dart"), "dart")],
+        "common-lisp" | "lisp" => &[r!("sbcl", "sbcl --script", Stdin, "sbcl")],
+        "dart" => &[r!("dart", "dart run /dev/stdin", Stdin, "dart")],
         "swift" => &[r!("swift", "swift {f}", File("swift"), "swift")],
         "zig" => &[r!("zig", "zig run {f}", File("zig"), "zig")],
-        "nim" => &[r!("nim", "nim r --hints:off {f}", File("nim"), "nim")],
+        "nim" => &[r!("nim", "nim --hints:off --eval:{c}", Inline, "nim"), r!("nim", "nim r --hints:off {f}", File("nim"), "nim")],
         "crystal" => &[r!("crystal", "crystal eval", Inline, "crystal")],
         "d" => &[r!("rdmd", "rdmd {f}", File("d"), "dmd")],
-        "v" => &[r!("v", "v run {f}", File("v"), "vlang")],
+        "v" => &[r!("v", "v -e", Inline, "vlang")],
         "fsharp" => &[r!("dotnet", "dotnet fsi {f}", File("fsx"), "dotnet-sdk")],
         "c-sharp" => &[r!("dotnet-script", "dotnet-script {f}", File("csx"), "dotnet-script")],
         "prolog" => &[r!("swipl", "swipl {f}", File("pl"), "swi-prolog")],
@@ -177,6 +180,19 @@ fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+/// Go for yaegi: the standard packages it uses imported (unless it says).
+fn go_imports(code: &str) -> String {
+    if code.contains("import") {
+        return code.to_string();
+    }
+    let used: String = ["fmt", "os", "strings", "math", "time", "sort", "strconv"]
+        .into_iter()
+        .filter(|p| code.contains(&format!("{p}.")))
+        .map(|p| format!("import \"{p}\"\n"))
+        .collect();
+    format!("{used}{code}")
+}
+
 /// Rust for rust-script -e (a block): statements as they are, a program's
 /// main called at the end.
 fn rust_expr(code: &str) -> String {
@@ -202,6 +218,7 @@ fn complete_program(lang: &str, code: &str) -> String {
         "c" if !code.contains("main(") => format!("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nint main(void) {{\n{code}\nreturn 0;\n}}\n"),
         "cpp" if !code.contains("main(") => format!("#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {{\n{code}\nreturn 0;\n}}\n"),
         "rust" if !code.contains("fn main") => format!("fn main() {{\n{code}\n}}\n"),
+        "dart" if !code.contains("main(") => format!("void main() {{\n{code}\n}}\n"),
         "racket" if !code.trim_start().starts_with("#lang") => format!("#lang racket\n{code}\n"),
         "php" => code.trim_start().trim_start_matches("<?php").to_string(),
         _ => code.to_string(),
@@ -258,6 +275,20 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
             return format!("{rs}{deps} -e {}", quote(&rust_expr(code_t)));
         }
     }
+    // (An Erlang module: escript runs it.)
+    if lang == "erlang" && code_t.contains("-module(") {
+        let n = if on_path("escript") { "" } else { "erlang" };
+        return file_command(code_t, How::File("erl"), "escript {f}", n, shell);
+    }
+    // (A Haskell program, main and all: runghc reads it from its input.)
+    if lang == "haskell" && code_t.lines().any(|l| l.starts_with("main ") || l.starts_with("main=")) {
+        if on_path("runghc") {
+            return file_command(code_t, How::Stdin, "runghc", "", shell);
+        }
+        if on_path("nix") {
+            return file_command(code_t, How::Stdin, "runghc", "ghc", shell);
+        }
+    }
     // (A Java class: JBang from its input, or java's own source launcher.)
     if lang == "java" && code_t.contains("class ") {
         if on_path("jbang") || (!on_path("java") && on_path("nix")) {
@@ -286,6 +317,14 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
     let code = match run.program {
         "evcxr" => code.trim_end().to_string(),
         "rust-script" => rust_expr(code.trim_end()),
+        // (yaegi: the standard packages it uses imported; cling: a main called.)
+        "yaegi" => go_imports(code.trim_end()),
+        "cling" => {
+            let c = code.trim_end();
+            let c = if c.contains("#include") { c.to_string() } else { format!("#include <iostream>\n#include <string>\n#include <vector>\n#include <map>\n#include <algorithm>\n{c}") };
+            if c.contains("main(") { format!("{c}\nmain();") } else { c }
+        }
+        "erl" => { let c = code.trim_end(); if c.ends_with('.') { c.to_string() } else { format!("{c}.") } }
         _ => complete_program(lang, code.trim_end()),
     };
     // (Go that imports modules: a module of its own, tidied, fetches them.)
@@ -294,10 +333,18 @@ pub fn command(lang: &str, code: &str, cwd: &str, shell: &str) -> String {
             let t = l.trim().trim_start_matches("import").trim().trim_start_matches('(').trim().trim_matches('"');
             t.contains('/') && t.split('/').next().is_some_and(|h| h.contains('.'))
         });
+    // (Modules to fetch: go itself, from nixpkgs if need be; yaegi can't.)
     if go_mods {
-        return file_command(&code, How::File("go"), "go -C {d} mod init snippet >/dev/null 2>&1; go -C {d} mod tidy && go -C {d} run .", nix, shell);
+        let gnix = if on_path("go") { "" } else { "go" };
+        let prog = complete_program("go", code.trim_end());
+        return file_command(&prog, How::File("go"), "go -C {d} mod init snippet >/dev/null 2>&1; go -C {d} mod tidy && go -C {d} run .", gnix, shell);
     }
     match run.how {
+        // ({c} in the command: where the code goes, if not at the end.)
+        How::Inline if run.cmd.contains("{c}") => {
+            let c = if nix.is_empty() { run.cmd.to_string() } else { from_nix(nix, run.cmd) };
+            c.replace("{c}", &quote(&code))
+        }
         How::Inline if nix.is_empty() => format!("{} {}", run.cmd, quote(&code)),
         How::Inline => format!("{} {}", from_nix(nix, run.cmd), quote(&code)),
         how => file_command(&code, how, run.cmd, nix, shell),
@@ -589,6 +636,10 @@ mod tests {
         }
         assert!(complete_program("go", "fmt.Println(1)").contains("import (\"fmt\")"));
         assert_eq!(command("markdown", "# hi", "/", "zsh"), "");
+        let h = command("haskell", "main = putStrLn \"hi\"", "/", "zsh");
+        assert!(h.is_empty() || (h.contains("runghc") && h.contains("<<'TESSERA_END'")), "{h}");
+        let h = command("haskell", "print (sum [1..10])", "/", "zsh");
+        assert!(h.is_empty() || h.contains("ghci -v0"), "{h}");
         assert_eq!(python_imports("import os, numpy as np\nfrom PIL.Image import open\nx = 1"), ["os", "numpy", "PIL"]);
         assert_eq!(js_packages("import _ from 'lodash'\nconst fs = require('fs')\nimport x from './x'"), ["lodash"]);
         assert_eq!(rust_crates("use std::io;\nuse serde_json::json;\nprintln!(\"{}\", json!(1));"), ["serde_json"]);
@@ -599,5 +650,6 @@ mod tests {
         assert!(missing_python_modules("import os\nimport surely_not_a_module_xyz").contains(&"surely_not_a_module_xyz".to_string()));
     }
 }
+
 
 
