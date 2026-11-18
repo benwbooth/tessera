@@ -35,8 +35,9 @@ permissions:
   actions: write
 
 env:
-  # The newest Qt 6 release (Windows takes the newest one aqt can install).
-  QT_VERSION: '6.*'
+  # Qt 6.11 (newest patch): 6.12's packages have no Qt WebEngine for aqt yet
+  # (Windows takes the newest 6.11 aqt can install).
+  QT_VERSION: '6.11.*'
   # Qt WebEngine: HTML output in notebook cells.
   QT_MODULES: 'qtwebengine qtwebchannel qtpositioning'
   AQT_VERSION: '==3.3.*'
@@ -99,7 +100,7 @@ jobs:
           pip install -q "aqtinstall$AQT_VERSION"
           # The newest Qt 6 that aqt can read for Windows (it may lag the
           # newest release by a version).
-          for v in $(python -m aqt list-qt windows desktop | tr ' ' '\n' | grep '^6\.' | sort -Vr); do
+          for v in $(python -m aqt list-qt windows desktop | tr ' ' '\n' | grep "^${QT_VERSION%\*}" | sort -Vr); do
             archs=$(python -m aqt list-qt windows desktop --arch "$v" 2>/dev/null) || continue
             arch=$(tr ' ' '\n' <<<"$archs" | grep -E '^win64_msvc[0-9]+_64$' | sort -V | tail -1)
             [ -n "$arch" ] && break

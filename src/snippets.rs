@@ -217,10 +217,13 @@ fn cxx_runner() -> Option<String> {
     let base = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
     let path = base.join("tessera").join("tessera-cxx");
     if std::fs::read_to_string(&path).ok().as_deref() != Some(CXX_RUNNER) {
-        use std::os::unix::fs::PermissionsExt;
         std::fs::create_dir_all(path.parent()?).ok()?;
         std::fs::write(&path, CXX_RUNNER).ok()?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).ok()?;
+        }
     }
     // (Shown as ~/..., as typed.)
     let home = std::env::var("HOME").unwrap_or_default();

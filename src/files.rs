@@ -5,7 +5,25 @@
 
 use serde_json::json;
 use std::collections::HashMap;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+// (Unix's mode bits and owners; elsewhere, what can be told.)
+#[cfg(unix)]
+fn mode_of(m: &std::fs::Metadata) -> u32 {
+    std::os::unix::fs::MetadataExt::mode(m)
+}
+#[cfg(not(unix))]
+fn mode_of(m: &std::fs::Metadata) -> u32 {
+    let base = if m.permissions().readonly() { 0o444 } else { 0o644 };
+    if m.is_dir() { base | 0o111 } else { base }
+}
+#[cfg(unix)]
+fn owner_of(m: &std::fs::Metadata) -> (u32, u32) {
+    (std::os::unix::fs::MetadataExt::uid(m), std::os::unix::fs::MetadataExt::gid(m))
+}
+#[cfg(not(unix))]
+fn owner_of(_: &std::fs::Metadata) -> (u32, u32) {
+    (0, 0)
+}
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -83,7 +101,7 @@ pub fn list(dir: &str, all: bool) -> String {
             let md = std::fs::metadata(&p).ok().or(lmd.clone());
             let Some(md) = md else { continue };
             let is_dir = md.is_dir();
-            let mode = md.permissions().mode();
+            let mode = mode_of(&md);
             let exec = !is_dir && mode & 0o111 != 0;
             let items = if is_dir { std::fs::read_dir(&p).map(|r| r.count() as i64).unwrap_or(-1) } else { -1 };
             let target = if link { std::fs::read_link(&p).map(|t| t.to_string_lossy().to_string()).unwrap_or_default() } else { String::new() };
@@ -91,9 +109,9 @@ pub fn list(dir: &str, all: bool) -> String {
             out.push(json!({
                 "name": name, "path": p.to_string_lossy(), "dir": is_dir, "link": link, "target": target, "exec": exec,
                 "hidden": hidden, "size": md.len(), "items": items, "mtime": mtime,
-                "mode": mode_string(lmd.map(|m| m.mode()).unwrap_or(mode), is_dir, link),
-                "user": names("/etc/passwd").get(&md.uid()).cloned().unwrap_or_else(|| md.uid().to_string()),
-                "group": names("/etc/group").get(&md.gid()).cloned().unwrap_or_else(|| md.gid().to_string()),
+                "mode": mode_string(lmd.as_ref().map(mode_of).unwrap_or(mode), is_dir, link),
+                "user": names("/etc/passwd").get(&owner_of(&md).0).cloned().unwrap_or_else(|| owner_of(&md).0.to_string()),
+                "group": names("/etc/group").get(&owner_of(&md).1).cloned().unwrap_or_else(|| owner_of(&md).1.to_string()),
                 "kind": kind_of(&name, is_dir, exec),
             }));
         }

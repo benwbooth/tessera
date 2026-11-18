@@ -11,6 +11,38 @@ zig version
 
 export QMAKE="$(command -v qmake6 || command -v qmake)"
 echo "Qt $("$QMAKE" -query QT_VERSION)"
+
+# Qt WebEngine comes from the BaseApp (in /app), the rest of Qt from the
+# runtime (in /usr), but the runtime's qmake only knows /usr. A qmake that
+# answers with both, merged: the libraries (and their .prl files) and the
+# headers.
+QLIBS="$("$QMAKE" -query QT_INSTALL_LIBS)"
+QHDRS="$("$QMAKE" -query QT_INSTALL_HEADERS)"
+WE_PRL="$(find /app -name 'libQt6WebEngineQuick.prl' 2>/dev/null | head -1)"
+if [ -n "$WE_PRL" ] && [ ! -e "$QLIBS/libQt6WebEngineQuick.prl" ]; then
+    M="$PWD/qt-merged"
+    rm -rf "$M"
+    mkdir -p "$M/lib" "$M/include"
+    for f in "$QLIBS"/libQt6* "$(dirname "$WE_PRL")"/libQt6*; do ln -sf "$f" "$M/lib/"; done
+    for d in "$QHDRS"/*; do ln -sfn "$d" "$M/include/"; done
+    WE_H="$(find /app -type d -name QtWebEngineQuick -path '*include*' 2>/dev/null | head -1)"
+    if [ -n "$WE_H" ]; then
+        for d in "$(dirname "$WE_H")"/*; do ln -sfn "$d" "$M/include/"; done
+    fi
+    cat > "$M/qmake" <<EOF
+#!/bin/sh
+if [ "\$1" = -query ]; then
+    case "\$2" in
+        QT_INSTALL_LIBS) echo "$M/lib"; exit 0 ;;
+        QT_INSTALL_HEADERS) echo "$M/include"; exit 0 ;;
+    esac
+fi
+exec "$QMAKE" "\$@"
+EOF
+    chmod +x "$M/qmake"
+    export QMAKE="$M/qmake"
+    echo "Qt WebEngine from $(dirname "$WE_PRL"), merged in $M"
+fi
 cargo build --release --locked
 
 install -Dm755 target/release/tessera /app/bin/tessera
