@@ -490,7 +490,12 @@ impl Fetched {
                 v
             }
         };
-        Spec { name: self.name.into(), display: self.display.into(), language: self.language.into(), argv, env: HashMap::new(), interrupt_message: self.interrupt_message }
+        // (A shell kernel's history isn't yours: it mustn't go in ~/.bash_history.)
+        let mut env = HashMap::new();
+        if matches!(self.language, "bash" | "zsh" | "xonsh" | "powershell") {
+            env.insert("HISTFILE".to_string(), "/dev/null".to_string());
+        }
+        Spec { name: self.name.into(), display: self.display.into(), language: self.language.into(), argv, env, interrupt_message: self.interrupt_message }
     }
 }
 

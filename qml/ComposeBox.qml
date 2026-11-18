@@ -135,7 +135,12 @@ Rectangle {
             histIndex = Math.max(0, histIndex)
         }
         setText(h[histIndex])
+        // (A line from history: the completion list stays shut, or it would
+        // take the next Up/Down.)
+        fromHistory = true
+        closeComp()
     }
+    property bool fromHistory: false
 
     // Positions within the text.
     function lineStart(p) { return edit.text.lastIndexOf("\n", p - 1) + 1 }
@@ -330,6 +335,7 @@ Rectangle {
             const builtinArg = p === t.length && /^\s*(cd|pushd|ls|ll|la|export|unset)\s+$/.test(t)
             if (builtinArg && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete(); return }
             if (box.compOpen && box.historyMode) return
+            if (box.fromHistory) return
             else if (box.compOpen) { if (inWord || prev === "/") box.requestComplete(); else box.closeComp() }
             else if (inWord && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete() }
         }
@@ -668,6 +674,7 @@ Rectangle {
                 if (e.key === Qt.Key_Shift) shiftSide = 0
             }
             Keys.onPressed: (e) => {
+                if (e.key !== Qt.Key_Up && e.key !== Qt.Key_Down) box.fromHistory = false
                 if (e.key === Qt.Key_Shift && !e.isAutoRepeat) { shiftSide = shiftSideOf(e); shiftAt = Date.now() }
                 else shiftSide = 0
                 let done = false

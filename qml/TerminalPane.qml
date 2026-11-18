@@ -125,6 +125,9 @@ Item {
 
     ComposeBox {
         id: compose
+        // (Over the notebook and the views on the terminal: its dropdowns,
+        // history and completions, open upward over them.)
+        z: 22
         visible: pane.editorOn
         anchors.left: parent.left
         anchors.right: parent.right
