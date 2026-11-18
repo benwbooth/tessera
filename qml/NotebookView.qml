@@ -337,6 +337,89 @@ FocusScope {
         }
         touch()
     }
+    // ---- the kernels running, every notebook's (the bar's Kernels list) ----
+    property var runningKernels: []
+    function refreshKernels() { if (controller) try { runningKernels = JSON.parse(controller.jupyterRunning()) } catch (e) { runningKernels = [] } }
+    Timer { interval: kernelsPop.opened ? 1500 : 4000; running: nb.visible && nb.controller !== null; repeat: true; triggeredOnStart: true; onTriggered: nb.refreshKernels() }
+    // (Test hook: TESSERA_TEST_NB_KERNELS=<ms>: the list opened after that long.)
+    Timer { interval: nb.controller ? parseInt(nb.controller.testEnv("NB_KERNELS") || "0") : 0; running: interval > 0 && nb.visible; onTriggered: { nb.refreshKernels(); kernelsPop.open() } }
+    function stopKernel(k) {
+        controller.jupyterStop(k.key)
+        // (This notebook's own: forgotten, so the next run starts it again.)
+        if (k.key === key) { kernelState = ""; stopRunning() }
+        else if (k.key.startsWith(key + "~")) { const m = Object.assign({}, langKernels); delete m[k.key.substring(key.length + 1)]; langKernels = m }
+        Qt.callLater(refreshKernels)
+    }
+    function restartKernelOf(k) {
+        if (k.key === key) { restartKernel(); return }
+        if (k.key.startsWith(key + "~")) {
+            const l = k.key.substring(key.length + 1)
+            stopKernel(k)
+            setLang(l, { name: k.name, display: k.display, state: "starting", message: "", queue: [] })
+            controller.jupyterStart(langKey(l), k.name, shellDir, shellPid)
+            return
+        }
+        stopKernel(k)   // (another notebook's: it starts again when that one runs)
+    }
+    Popup {
+        id: kernelsPop
+        parent: nb
+        x: Math.max(8, nb.width - width - 8)
+        y: 36
+        width: Math.min(nb.width - 16, 560)
+        padding: 8
+        topPadding: 8.001   // (off the half pixel: 130% scale smears native text there)
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        contentItem: Column {
+            spacing: 4
+            Row {
+                width: parent.width
+                Text { text: "Kernels running"; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; width: parent.width - stopAll.width }
+                Chip { id: stopAll; base: Theme.panel; label: "Stop all"; onClicked: { for (const k of nb.runningKernels) nb.stopKernel(k) } }
+            }
+            Text { visible: nb.runningKernels.length === 0; text: "None."; color: Theme.textDim; font.pixelSize: 12 }
+            Repeater {
+                model: nb.runningKernels
+                delegate: Rectangle {
+                    required property var modelData
+                    readonly property bool mine: modelData.key === nb.key || modelData.key.startsWith(nb.key + "~")
+                    width: parent.width
+                    height: 30
+                    radius: 5
+                    color: kh.hovered ? Theme.tabHover : "transparent"
+                    HoverHandler { id: kh }
+                    Rectangle {
+                        x: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 8; height: 8; radius: 4
+                        color: modelData.state === "busy" ? nb.ansi(3, "#e5c07b") : modelData.state === "starting" ? nb.ansi(4, "#61afef") : nb.ansi(2, "#98c379")
+                    }
+                    Column {
+                        x: 22
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - x - kbtns.width - 8
+                        Text { width: parent.width; elide: Text.ElideRight; text: modelData.display + (parent.parent.mine ? "" : "  (another notebook)"); color: Theme.text; font.pixelSize: 12 }
+                        Text {
+                            text: modelData.state + " \u00b7 " + (modelData.rss_kb > 0 ? (modelData.rss_kb / 1024).toFixed(0) + " MB" : "") + " \u00b7 "
+                                  + (modelData.seconds < 3600 ? Math.round(modelData.seconds / 60) + " min" : (modelData.seconds / 3600).toFixed(1) + " h")
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                        }
+                    }
+                    Row {
+                        id: kbtns
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 4
+                        Chip { base: Theme.panel; label: "Restart"; tip: "Its variables are lost"; onClicked: nb.restartKernelOf(modelData) }
+                        Chip { base: Theme.panel; label: "Stop"; tip: "It starts again when that language runs"; onClicked: nb.stopKernel(modelData) }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- a kernel per language (cells in another language than the notebook's) ----
     property var langKernels: ({})      // lang -> {name, display, state, message, queue: [cid]}
     function langKey(l) { return key + "~" + l }
@@ -915,6 +998,13 @@ FocusScope {
             Tool { label: "■"; tip: "Interrupt"; onClicked: nb.interrupt() }
             Tool { visible: !nb.shellKernel; label: nb.narrow ? "↻" : "↻ Restart"; tip: "Restart the kernel (its variables are lost)"; onClicked: nb.restartKernel() }
             Tool { label: nb.narrow ? "⌫" : "Clear"; tip: "Clear every cell's output"; onClicked: nb.clearOutputs() }
+            Tool {
+                id: kernelsTool
+                visible: nb.runningKernels.length > 0
+                label: (nb.narrow ? "\u2699 " : "Kernels ") + nb.runningKernels.length
+                tip: "The kernels running (every notebook's): see, restart or stop them"
+                onClicked: { nb.refreshKernels(); kernelsPop.open() }
+            }
             Rectangle { width: 1; height: 14; color: Theme.divider }
             Tool { label: nb.narrow ? "+" : "+ Code"; tip: "Add a code cell below (B)"; onClicked: nb.insertCell(nb.current + 1, "code") }
             Tool { label: nb.narrow ? "+M↓" : "+ Markdown"; tip: "Add a Markdown cell below"; onClicked: nb.insertCell(nb.current + 1, "markdown") }

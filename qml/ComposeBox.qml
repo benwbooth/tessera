@@ -38,7 +38,10 @@ Rectangle {
     Timer {
         id: langTimer
         interval: 450
-        onTriggered: {
+        onTriggered: box.detectLang()
+    }
+    function detectLang() {
+        {
             const t = edit.text
             if (box.autoLang !== "bash" || box.langOverride !== "" || box.contentLang !== "" || t.trim() === "" || t.startsWith("#")) { box.aiLang = ""; return }
             if (!box.controller.shellDoubt(t, box.view ? box.view.aliases : "{}")) { box.aiLang = ""; box.langAsked = ""; return }
@@ -113,6 +116,9 @@ Rectangle {
         }
         histIndex = -1
         draft = ""
+        // (Enter before the pause that detects the language: detect it now,
+        // the quick local way, so code doesn't go to the shell.)
+        if (langTimer.running) { langTimer.stop(); detectLang() }
         runLang = lang
         useLanguage(runLang)
         edit.text = ""
