@@ -195,7 +195,9 @@ ApplicationWindow {
                 // shell's own title or the folder.
                 : lastPane && lastPane.docPath !== "" ? lastPane.docPath.replace(/^.*\//, "") + (lastPane.docDirty ? " \u2022" : "")
                 : lastPane && lastPane.job !== "" ? lastPane.job
-                : (win.settings.tab_titles_per_tab && titleView && titleView.title ? titleView.title
+                // (At a prompt, the folder, the same whichever shell: shells'
+                // own titles differ, fish's shortens the path.)
+                : (win.settings.tab_titles_per_tab && titleView && titleView.title && !(lastPane && lastPane.editorOn) ? titleView.title
                    : launchTitle !== "" ? launchTitle
                    : win.folderName(titleView && titleView.pwd ? titleView.pwd : (lastPane ? lastPane.procCwd : ""))
                      || (lastPane && lastPane.shellName) || prof.name)
@@ -306,8 +308,10 @@ ApplicationWindow {
         path = (path || "").replace(/^file:\/\/[^/]*/, "")
         if (path === "") return ""
         const home = controller.homeDir ? controller.homeDir() : ""
-        if (home !== "" && path.replace(/\/$/, "") === home) return "~"
-        return path.split("/").filter(x => x).pop() || "/"
+        // (The whole path, ~ for home: never shortened.)
+        path = path.replace(/(.)\/$/, "$1")
+        if (home !== "" && (path === home || path.startsWith(home + "/"))) return "~" + path.substring(home.length)
+        return path
     }
 
     function paneOf(view) {
