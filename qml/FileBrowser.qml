@@ -24,6 +24,7 @@ Item {
     property int refresh: 0             // bump to read the folder again
     signal commandRequested(string command)
     signal insertRequested(string text)
+    signal viewRequested(string path)   // show it in Tessera (FilePreview)
 
     // ---- this card's view: its own (the notebook keeps it, by card), first
     // taken from the last one chosen (settings: file_browser). A change is
@@ -446,7 +447,8 @@ Item {
     SlimMenu {
         id: itemMenu
         readonly property var e: fb.menuEntry || ({ dir: false, exec: false, path: "", name: "" })
-        SlimMenuItem { text: itemMenu.e.dir ? "Open" : "Open"; onTriggered: fb.openEntry(itemMenu.e) }
+        SlimMenuItem { text: "View"; visible: !itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.viewRequested(itemMenu.e.path) }
+        SlimMenuItem { text: itemMenu.e.dir ? "Open" : "Open with its app"; onTriggered: fb.openEntry(itemMenu.e) }
         SlimMenuItem { text: "Open with the desktop"; visible: itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.act("open", itemMenu.e.path) }
         SlimMenuItem { text: itemMenu.e.dir ? "Go here in the shell (cd)" : "Run it"; visible: !!(itemMenu.e.dir || itemMenu.e.exec); height: visible ? implicitHeight : 0
             onTriggered: fb.commandRequested(itemMenu.e.dir ? "cd " + fb.shq(itemMenu.e.path) : fb.shq(itemMenu.e.path)) }
@@ -543,7 +545,7 @@ Item {
             }
         }
     }
-    // (Test hook: TESSERA_TEST_FB=go:<name> | menu:<name> | folder | tiles | details | bar.)
+    // (Test hook: TESSERA_TEST_FB=go:<name> | menu:<name> | view:<name> | folder | tiles | details | bar.)
     // (…@<folder> only for the card of that folder; …#<ms> after that long.)
     Timer {
         readonly property string spec: fb.controller ? fb.controller.testEnv("FB") : ""
@@ -554,6 +556,7 @@ Item {
             const e = fb.entries.find(x => x.name === arg)
             if (t.startsWith("go:") && e) fb.openEntry(e)
             else if (t.startsWith("menu:") && e) { fb.selected = e.path; fb.menuEntry = e; itemMenu.popup(fb, 40, 30) }
+            else if (t.startsWith("view:") && e) fb.viewRequested(e.path)
             else if (t === "folder") folderMenu.popup(fb, 40, 30)
             else if (t === "tiles" || t === "details" || t === "list") fb.setView(t)
         }

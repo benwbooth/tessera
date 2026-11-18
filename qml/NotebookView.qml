@@ -37,6 +37,7 @@ FocusScope {
     signal terminalRequested()          // "show me the terminal"
     signal commandRequested(string command)   // run in the pane's shell, as if typed
     signal insertRequested(string text)       // into the pane's editor
+    signal viewRequested(string path)         // a file, shown over the pane
 
     readonly property string key: "nb-" + Math.random().toString(36).slice(2)
     readonly property string fileName: path.replace(/^.*\//, "")
@@ -1693,6 +1694,7 @@ FocusScope {
             onKeptChanged2: (c) => { const m = Object.assign({}, nb.fileViews); m[src.cid] = c; nb.fileViews = m; nb.touch() }
             onCommandRequested: (c) => nb.commandRequested(c)
             onInsertRequested: (t) => nb.insertRequested(t)
+            onViewRequested: (p) => nb.viewRequested(p)
         }
     }
 

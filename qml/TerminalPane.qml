@@ -339,6 +339,7 @@ Item {
         onTerminalRequested: { pane.viewMode = "terminal"; term.forceActiveFocus() }
         onCommandRequested: (c) => compose.runCommand(c)
         onInsertRequested: (t) => { compose.focusEditor(); compose.insert(t) }
+        onViewRequested: (p) => { preview.path = ""; preview.path = p; preview.visible = true; preview.forceActiveFocus() }
         onVisibleChanged: if (visible && !(pane.editorOn && pane.preferEditor) && pane.focused) Qt.callLater(forceActiveFocus)
     }
     // Files dropped on the pane: their paths, quoted, into the editor (or
@@ -375,6 +376,19 @@ Item {
         fontFamily: term.fontFamily
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onClosed: { visible = false; if (pane.editorOn) compose.focusEditor(); else term.forceActiveFocus() }
+    }
+    // A file, shown (View, from a file listing).
+    FilePreview {
+        id: preview
+        visible: false
+        z: 21
+        anchors.fill: term
+        controller: pane.controller
+        fontFamily: term.fontFamily
+        pointSize: term.fontPointSize
+        themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
+        onClosed: { visible = false; path = ""; if (pane.editorOn) compose.focusEditor(); else notebook.forceActiveFocus() }
+        onInsertRequested: (t) => { visible = false; compose.focusEditor(); compose.insert(t) }
     }
     FindBar {
         id: findBar
