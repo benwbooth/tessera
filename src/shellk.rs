@@ -446,7 +446,8 @@ impl Kernel {
         if self.runs.lock().unwrap().is_empty() {
             *self.busy.lock().unwrap() = "idle".into();
         }
-        (self.sink)(json!({"type": "done", "cell": run.cell, "status": if status == 0 { "ok" } else { "error" }, "exit": status, "count": n}));
+        // (cwd: the folder it ran in.)
+        (self.sink)(json!({"type": "done", "cell": run.cell, "status": if status == 0 { "ok" } else { "error" }, "exit": status, "count": n, "cwd": was_pwd}));
         if self.runs.lock().unwrap().is_empty() {
             (self.sink)(json!({"type": "status", "state": "idle"}));
         }

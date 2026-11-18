@@ -169,6 +169,7 @@ FocusScope {
                 if (e.count !== null && e.count !== undefined) cells.setProperty(i, "count", e.count)
                 cells.setProperty(i, "ended", Date.now())
                 cells.setProperty(i, "failed", e.status !== "ok")
+                if (e.cwd) cells.setProperty(i, "cwd", e.cwd)
                 // (A shell's kernel: its folder and exports go back to the
                 // pane's shell, so the next shell carries on from there.)
                 const L = cells.get(i).lang
@@ -307,6 +308,8 @@ FocusScope {
         cells.setProperty(i, "ended", 0)
         cells.setProperty(i, "mine", true)
         cells.setProperty(i, "editing", false)
+        // (Where it runs: the pane's folder, which the kernel is brought to.)
+        if (c.tid <= 0) cells.setProperty(i, "cwd", shellDir)
         // (What runs it, kept with it: the shell or kernel then, not now.)
         cells.setProperty(i, "ranIn", c.lang !== "" && !sameLang(c.lang, runsIn) ? ((langKernels[c.lang] && langKernels[c.lang].display) || (langSpec(c.lang) || {}).display || c.lang)
                                      : shellKernel ? (shellName || "shell") : (kernel ? kernel.display : kernelName))
@@ -435,6 +438,8 @@ FocusScope {
     // ---- a kernel per language (cells in another language than the notebook's) ----
     property var langKernels: ({})      // lang -> {name, display, state, message, queue: [cid]}
     property string shellName: ""       // the pane's shell (zsh, bash, fish, ...)
+    // (Cards made before the shell's name was known get it now.)
+    onShellNameChanged: if (shellName !== "") for (let i = 0; i < cells.count; ++i) if (cells.get(i).tid > 0 && cells.get(i).ranIn === "") cells.setProperty(i, "ranIn", shellName)
     // What a cell's exit status means: the shell's codes or the command's man
     // page, else (asked when hovered) the AI's reading of it.
     property var exitNotes: ({})        // cid -> the AI's meaning ("…" while asked)
@@ -650,7 +655,7 @@ FocusScope {
                 added = true
             }
             cells.setProperty(at, "tid", t.id)
-            if (cells.get(at).ranIn === "") cells.setProperty(at, "ranIn", shellName || "shell")
+            if (cells.get(at).ranIn === "" && shellName !== "") cells.setProperty(at, "ranIn", shellName)
             link(t.id, cells.get(at).cid)
             fromTerm(at, t)
             touch()
@@ -1355,7 +1360,8 @@ FocusScope {
                     HoverHandler { id: srcHover; cursorShape: Qt.IBeamCursor }
                     TapHandler { onTapped: nb.focusCell(cell.index, true) }
                 }
-                Text { topPadding: 0.001; visible: cell.cwd !== "" && !nb.narrow; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: 200 }
+                // (The folder it ran in, always, whole unless there's no room.)
+                Text { topPadding: 0.001; visible: cell.cwd !== ""; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: Math.max(120, header.width * 0.4) }
                 Text { topPadding: 0.001;
                     visible: cell.started > 1
                     text: (cell.ended > 0 ? nb.seconds(cell.ended - cell.started) + "  ·  " : "") + Qt.formatTime(new Date(cell.started), "hh:mm")
