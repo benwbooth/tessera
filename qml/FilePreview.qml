@@ -42,7 +42,9 @@ Rectangle {
     function load() {
         text = ""
         problem = ""
-        if (!controller || path === "" || isImage) return
+        // (Text and code: the viewer streams it itself; only the formatted
+        // kinds are read whole.)
+        if (!controller || path === "" || isImage || richKind === "") return
         let r = {}
         try { r = JSON.parse(controller.readTextFile(path)) } catch (e) {}
         if (r.error) { problem = r.error; return }
@@ -130,7 +132,7 @@ Rectangle {
 
     // ---- code and text: highlighted, line numbers, read-only -------------
     FileView {
-        visible: !pv.isImage && pv.richKind === "" && pv.text !== ""
+        visible: !pv.isImage && pv.richKind === ""
         anchors.fill: parent
         anchors.topMargin: head.height
         maxHeight: 100000
@@ -143,7 +145,7 @@ Rectangle {
 
     // ---- nothing to show ------------------------------------------------------
     Column {
-        visible: !pv.isImage && pv.text === "" && pv.path !== ""
+        visible: !pv.isImage && pv.richKind !== "" && pv.text === "" && pv.path !== ""
         anchors.centerIn: parent
         spacing: 10
         Text { anchors.horizontalCenter: parent.horizontalCenter; text: pv.problem !== "" ? pv.problem : "(empty)"; color: Theme.textDim; font.pixelSize: 13 }

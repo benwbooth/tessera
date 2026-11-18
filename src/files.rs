@@ -84,6 +84,126 @@ fn kind_of(name: &str, is_dir: bool, exec: bool) -> &'static str {
     }
 }
 
+// ---- big files, read a part at a time (the viewer streams) ----------------
+
+struct LineIndex {
+    size: u64,
+    mtime: Option<std::time::SystemTime>,
+    /// Where each line starts (the first is 0).
+    starts: Vec<u64>,
+    done: bool,
+    error: String,
+}
+
+fn indexes() -> &'static std::sync::Mutex<HashMap<String, std::sync::Arc<std::sync::Mutex<LineIndex>>>> {
+    static I: OnceLock<std::sync::Mutex<HashMap<String, std::sync::Arc<std::sync::Mutex<LineIndex>>>>> = OnceLock::new();
+    I.get_or_init(Default::default)
+}
+
+/// A file's lines, counted in the background (started on the first ask, and
+/// again when the file changes): {"lines", "done", "size"} — lines so far
+/// while it's still counting.
+pub fn line_index(path: &str) -> String {
+    let md = std::fs::metadata(path);
+    let (size, mtime) = match &md {
+        Ok(m) => (m.len(), m.modified().ok()),
+        Err(e) => return json!({"lines": 0, "done": true, "size": 0, "error": e.to_string()}).to_string(),
+    };
+    let ix = {
+        let mut all = indexes().lock().unwrap();
+        let fresh = all.get(path).is_some_and(|i| {
+            let i = i.lock().unwrap();
+            i.size == size && i.mtime == mtime
+        });
+        if !fresh {
+            let ix = std::sync::Arc::new(std::sync::Mutex::new(LineIndex { size, mtime, starts: vec![0], done: false, error: String::new() }));
+            all.insert(path.to_string(), ix.clone());
+            let (p, i2) = (path.to_string(), ix.clone());
+            std::thread::spawn(move || {
+                use std::io::Read;
+                let mut f = match std::fs::File::open(&p) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        let mut i = i2.lock().unwrap();
+                        i.error = e.to_string();
+                        i.done = true;
+                        return;
+                    }
+                };
+                let mut buf = vec![0u8; 4 << 20];
+                let mut at: u64 = 0;
+                loop {
+                    let n = match f.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    let mut found = Vec::new();
+                    for (k, &b) in buf[..n].iter().enumerate() {
+                        if b == b'\n' {
+                            found.push(at + k as u64 + 1);
+                        }
+                    }
+                    at += n as u64;
+                    i2.lock().unwrap().starts.extend(found);
+                }
+                let mut i = i2.lock().unwrap();
+                // (A file ending in a newline has no line after it.)
+                if i.starts.len() > 1 && *i.starts.last().unwrap() >= at {
+                    i.starts.pop();
+                }
+                i.size = at.max(i.size);
+                i.done = true;
+            });
+        }
+        all.get(path).cloned().unwrap()
+    };
+    let i = ix.lock().unwrap();
+    // (Still counting: the lines known to be whole.)
+    let lines = if i.done { if i.size == 0 { 0 } else { i.starts.len() } } else { i.starts.len().saturating_sub(1) };
+    json!({"lines": lines, "done": i.done, "size": i.size, "error": i.error}).to_string()
+}
+
+/// Lines start .. start+count of a file (counted by line_index), as text.
+/// (A very long line is cut, so a part never gets huge.)
+pub fn read_lines(path: &str, start: usize, count: usize) -> String {
+    let Some(ix) = indexes().lock().unwrap().get(path).cloned() else { return String::new() };
+    let (from, to) = {
+        let i = ix.lock().unwrap();
+        if start >= i.starts.len() {
+            return String::new();
+        }
+        let end = start + count;
+        let to = if end < i.starts.len() { i.starts[end] } else if i.done { i.size } else { *i.starts.last().unwrap() };
+        (i.starts[start], to)
+    };
+    if to <= from {
+        return String::new();
+    }
+    use std::io::{Read, Seek};
+    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    if f.seek(std::io::SeekFrom::Start(from)).is_err() {
+        return String::new();
+    }
+    let want = (to - from).min(8 << 20) as usize;
+    let mut buf = vec![0u8; want];
+    let n = f.read(&mut buf).unwrap_or(0);
+    buf.truncate(n);
+    let text = String::from_utf8_lossy(&buf);
+    let mut out = String::with_capacity(text.len());
+    for (k, line) in text.split_terminator('\n').enumerate() {
+        if k > 0 {
+            out.push('\n');
+        }
+        if line.chars().count() > 4000 {
+            out.extend(line.chars().take(4000));
+            out.push_str(" …");
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
 /// Whether a file reads as text: by its kind, else (no telling kind) its
 /// first bytes: no NULs, and UTF-8.
 fn is_text(p: &Path, kind: &str, size: u64) -> bool {
@@ -293,4 +413,24 @@ mod tests {
         assert_eq!(l.len(), 2);
         let _ = std::fs::remove_dir_all(&d);
     }
+
+    #[test]
+    fn streams_lines() {
+        let d = std::env::temp_dir().join(format!("tessera-lines-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("big.txt");
+        let body: String = (1..=20000).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(&f, body).unwrap();
+        let p = f.to_string_lossy().to_string();
+        let mut v: serde_json::Value = serde_json::from_str(&super::line_index(&p)).unwrap();
+        while !v["done"].as_bool().unwrap() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            v = serde_json::from_str(&super::line_index(&p)).unwrap();
+        }
+        assert_eq!(v["lines"], 20000);
+        assert_eq!(super::read_lines(&p, 0, 2), "line 1\nline 2");
+        assert_eq!(super::read_lines(&p, 19998, 5), "line 19999\nline 20000");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
 }

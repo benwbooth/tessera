@@ -1697,6 +1697,7 @@ FocusScope {
         const c = cells.get(i)
         if (!c) return ""
         if (c.tid > 0) return view ? view.cellOutput(c.tid, "text") : ""
+        // (A file card: its text, the first 3 MB at most of a big one.)
         if (c.viewPath !== "") { try { return JSON.parse(controller.readTextFile(c.viewPath)).text || "" } catch (e) { return "" } }
         let outs = []
         try { outs = JSON.parse(c.outputs) } catch (e) {}

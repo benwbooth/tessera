@@ -523,6 +523,12 @@ pub mod ffi {
         /// A text file: {"text": ...} or {"error": ...}.
         #[qinvokable]
         fn read_text_file(self: &Controller, path: &QString) -> QString;
+        /// A big file read a part at a time: its lines counted in the
+        /// background ({"lines", "done", "size"}), and a range of them.
+        #[qinvokable]
+        fn file_line_index(self: &Controller, path: &QString) -> QString;
+        #[qinvokable]
+        fn file_lines(self: &Controller, path: &QString, start: i32, count: i32) -> QString;
         /// Write a text file (atomically); "" or what went wrong.
         #[qinvokable]
         fn write_text_file(self: &Controller, path: &QString, text: &QString) -> QString;
@@ -949,9 +955,26 @@ impl ffi::Controller {
         let _ = crate::client::rpc(&host, "kernel.stop", serde_json::json!({"key": k}));
     }
 
+    fn file_line_index(&self, path: &ffi::QString) -> ffi::QString {
+        qs(&crate::files::line_index(&local_path(path)))
+    }
+
+    fn file_lines(&self, path: &ffi::QString, start: i32, count: i32) -> ffi::QString {
+        qs(&crate::files::read_lines(&local_path(path), start.max(0) as usize, count.max(0) as usize))
+    }
+
     fn read_text_file(&self, path: &ffi::QString) -> ffi::QString {
-        let v = match std::fs::read_to_string(local_path(path)) {
-            Ok(t) => serde_json::json!({"text": t}),
+        // (The first 3 MB of a big one, said so: the viewer streams the rest.)
+        use std::io::Read;
+        const MAX: u64 = 3_000_000;
+        let v = match std::fs::File::open(local_path(path)) {
+            Ok(f) => {
+                let mut buf = Vec::new();
+                let _ = f.take(MAX + 1).read_to_end(&mut buf);
+                let cut = buf.len() as u64 > MAX;
+                buf.truncate(MAX as usize);
+                serde_json::json!({"text": String::from_utf8_lossy(&buf), "truncated": cut})
+            }
             Err(e) => serde_json::json!({"error": e.to_string()}),
         };
         qs(&v.to_string())
