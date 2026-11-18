@@ -642,7 +642,7 @@ Rectangle {
                 readonly property string under: {
                     const c = edit.text[edit.cursorPosition]
                     // (At the end, the suggestion's first letter is under it.)
-                    if (c === undefined && box.ghost !== "" && edit.activeFocus) return box.ghost[0]
+                    if ((c === undefined || box.closers !== "") && box.ghost !== "" && edit.activeFocus) return box.ghost[0]
                     return c === undefined || c === "\n" || c === "\u2029" ? "" : c
                 }
                 width: Math.max(2, fm.advanceWidth(under !== "" ? under : " "))
@@ -698,18 +698,8 @@ Rectangle {
                     return
                 }
                 box.nlCommand = ""
-                // A suggestion stays while what's typed still leads into it.
-                const full = box.lastGhostBase + box.ghost
-                if (box.ghost !== "" && text.length > box.lastGhostBase.length && full.startsWith(text) && full.length > text.length) {
-                    box.ghost = full.substring(text.length)
-                    box.lastGhostBase = text
-                } else {
-                    // What was run before comes up at once (like fish); the AI
-                    // is asked when history has nothing.
-                    box.ghost = box.historyGhost(text)
-                    box.lastGhostBase = text
-                    if (box.ghost === "") ghostTimer.restart()
-                }
+                // (Once the cursor has moved too: a pair typed puts it between.)
+                Qt.callLater(box.refreshGhost)
                 if (text.trim() !== box.checkedText) box.aiNote = ""
                 checkTimer.restart()
             }
@@ -744,7 +734,7 @@ Rectangle {
                     box.closeComp(); box.ghost = ""; box.handBack(); e.accepted = true; return
                 }
                 const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
-                if (box.ghost !== "" && cursorPosition === length && plain
+                if (box.ghost !== "" && box.atSuggestEnd && plain
                         && (e.key === Qt.Key_Right || e.key === Qt.Key_End))
                     done = box.acceptGhost()
                 if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
@@ -775,16 +765,42 @@ Rectangle {
     }
 
     // The AI's suggestion: the rest of the command, greyed, after the cursor.
-    Text {
+    // (Before closers: its first letter in the cursor, the rest drawn over
+    // the closers, which follow it when it doesn't close them itself.)
+    readonly property real ghostSkip: closers !== "" && ghost !== "" ? fm.advanceWidth(ghost[0]) : 0
+    Rectangle {
         parent: flick.contentItem
-        readonly property rect at: edit.positionToRectangle(edit.length)
-        visible: box.ghost !== "" && edit.activeFocus && edit.cursorPosition === edit.length
-        x: at.x
+        readonly property rect at: edit.positionToRectangle(edit.cursorPosition)
+        visible: ghostText.visible && box.closers !== ""
+        z: 1
+        x: at.x + box.ghostSkip
         y: at.y
-        text: box.ghost
-        font: edit.font
-        color: Theme.mix(Theme.text, Theme.bg, 0.45)
-        renderType: Text.NativeRendering
+        width: ghostRow.width
+        height: at.height
+        color: box.color
+    }
+    Row {
+        id: ghostRow
+        parent: flick.contentItem
+        z: 2
+        readonly property rect at: edit.positionToRectangle(box.closers !== "" ? edit.cursorPosition : edit.length)
+        x: at.x + box.ghostSkip
+        y: at.y
+        Text {
+            id: ghostText
+            visible: box.ghost !== "" && edit.activeFocus && box.atSuggestEnd
+            text: box.closers !== "" ? box.ghost.substring(1) : box.ghost
+            font: edit.font
+            color: Theme.mix(Theme.text, Theme.bg, 0.45)
+            renderType: Text.NativeRendering
+        }
+        Text {
+            visible: ghostText.visible && box.closers !== "" && !box.ghostTakesClosers()
+            text: box.closers
+            font: edit.font
+            color: Theme.text
+            renderType: Text.NativeRendering
+        }
     }
 
     Text {
@@ -1010,8 +1026,17 @@ Rectangle {
         return JSON.stringify({ cwd: cwd, shell: box.shellName || "bash", aliases: used })
     }
     // The newest command run before that starts with what's typed: the rest of it.
+    // Suggestions work at the end of the line, or before closers only (the
+    // quote or bracket typed in pairs): `closers` is what follows the cursor
+    // then, and the suggestion is for what's before it.
+    readonly property string closers: { const t = edit.text.substring(edit.cursorPosition); return t !== "" && /^[)\]}"'`]+$/.test(t) ? t : "" }
+    readonly property bool atSuggestEnd: edit.cursorPosition === edit.length || closers !== ""
+    function suggestBase() { return closers !== "" ? edit.text.substring(0, edit.cursorPosition) : edit.text }
+    // (What a suggestion adds: when it closes what the closers close, it
+    // takes their place; else they follow it.)
+    function ghostTakesClosers() { return closers !== "" && ghost.indexOf(closers) >= 0 }
     function historyGhost(t) {
-        if (t.trim().length < 2 || t.indexOf("\n") >= 0 || edit.cursorPosition !== t.length) return ""
+        if (t.trim().length < 2 || t.indexOf("\n") >= 0 || !atSuggestEnd) return ""
         for (let i = box.history.length - 1; i >= 0; i--) {
             const h = box.history[i]
             if (h.length > t.length && h.startsWith(t) && h.indexOf("\n") < 0) return h.substring(t.length)
@@ -1057,6 +1082,22 @@ Rectangle {
             box.controller.aiRun(box.aiKey + "-nl", "command", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(10) + "\n\nWhat I want: " + t.replace(/^#\s*/, "") }]), box.aiContext())
         }
     }
+    // A suggestion stays while what's typed still leads into it; else what
+    // was run before comes up at once (like fish), and the AI is asked when
+    // history has nothing.
+    function refreshGhost() {
+        if (/^#\s*\S/.test(edit.text)) return
+        const t = suggestBase()
+        const full = lastGhostBase + ghost
+        if (ghost !== "" && t.length > lastGhostBase.length && full.startsWith(t) && full.length > t.length) {
+            ghost = full.substring(t.length)
+            lastGhostBase = t
+        } else {
+            ghost = historyGhost(t)
+            lastGhostBase = t
+            if (ghost === "") ghostTimer.restart()
+        }
+    }
     function askGhostNow() { ghostTimer.stop(); ghostTimer.triggered() }
     function acceptGhost() {
         // (A "# request"'s suggestion: the command, in place of the line.)
@@ -1067,8 +1108,15 @@ Rectangle {
             return true
         }
         if (ghost === "") return false
-        edit.insert(edit.length, ghost)
-        edit.cursorPosition = edit.length
+        if (closers !== "") {
+            const at = edit.cursorPosition
+            if (ghostTakesClosers()) edit.remove(at, at + closers.length)
+            edit.insert(at, ghost)
+            edit.cursorPosition = edit.length
+        } else {
+            edit.insert(edit.length, ghost)
+            edit.cursorPosition = edit.length
+        }
         ghost = ""
         return true
     }
@@ -1076,9 +1124,9 @@ Rectangle {
         id: ghostTimer
         interval: 220
         onTriggered: {
-            const t = edit.text
+            const t = box.suggestBase()
             if (!box.aiInline || !box.inlineReady || box.lang !== box.autoLang || t.trim().length < 2 || t.startsWith("#") || box.historyMode
-                    || edit.cursorPosition !== t.length || t.indexOf("\n") >= 0) return
+                    || !box.atSuggestEnd || t.indexOf("\n") >= 0) return
             box.ghostAsked = t
             box.controller.aiRun(box.aiKey + "-inline", "inline", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(8) + "\n\nComplete this command line: " + t }]), box.aiContext())
         }
@@ -1100,10 +1148,10 @@ Rectangle {
         target: box.controller
         function onAiDone(key, reply, error) {
             if (key === box.aiKey + "-inline") {
-                const t = edit.text
+                const t = box.suggestBase()
                 // (Only for what it was asked about, or that typed on further:
                 // a late reply after the line was run or cleared is dropped.)
-                const fits = box.ghostAsked !== "" && t.trim().length >= 2 && t.startsWith(box.ghostAsked) && edit.cursorPosition === t.length
+                const fits = box.ghostAsked !== "" && t.trim().length >= 2 && t.startsWith(box.ghostAsked) && box.atSuggestEnd
                 box.ghost = fits && !error && reply.startsWith(t) && reply.length > t.length ? reply.substring(t.length).split("\n")[0] : ""
                 box.lastGhostBase = t
                 // (Still being written, then: a check's complaint doesn't apply.)
