@@ -73,12 +73,24 @@ Item {
         repeat: true
         running: !term.atPrompt && !pane.idleShell && term.sessionId !== "" && !term.fullScreen && !term.exited
         property int tries: 0
+        // (And the other way: a program in front of the shell that the pane
+        // didn't see start (it was reattached) is shown, not hidden behind
+        // the notebook.)
+        property bool sawJob: false
         onTriggered: {
-            if (pane.controller && pane.controller.sessionJob(term.sessionId) === "" && !pane.runningLong && ++tries >= 2) { pane.idleShell = true; tries = 0 }
-            else if (pane.controller && pane.controller.sessionJob(term.sessionId) !== "") tries = 0
+            if (!pane.controller) return
+            const job = pane.controller.sessionJob(term.sessionId)
+            if (job !== "") {
+                tries = 0
+                if (!pane.runningLong) { pane.runningLong = true; sawJob = true }
+            } else if (++tries >= 2) {
+                if (sawJob) { pane.runningLong = false; sawJob = false }
+                pane.idleShell = true
+                tries = 0
+            }
         }
     }
-    Connections { target: term; function onPromptChanged() { pane.idleShell = false; idleCheck.tries = 0 } }      // the window's text zoom, shown with the size
+    Connections { target: term; function onPromptChanged() { pane.idleShell = false; idleCheck.tries = 0; if (idleCheck.sawJob) { pane.runningLong = false; idleCheck.sawJob = false } } }      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW
     SplitView.preferredHeight: prefH
