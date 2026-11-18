@@ -15,6 +15,7 @@ mod images;
 mod jupyter;
 mod keymap;
 mod net;
+mod nixcmds;
 mod procinfo;
 mod launchers;
 mod lsp;

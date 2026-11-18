@@ -1038,6 +1038,23 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
             cands.retain(|i| seen.insert(i.label.clone()));
             items = rank(cands, &typed, |i| i.label.clone());
             items.truncate(60);
+            // Commands you don't have, from nixpkgs (nix-index's database):
+            // one entry per package that has it, run with nix run / nix shell.
+            if typed.len() >= 2 {
+                let mine: HashSet<String> = path_commands().iter().cloned().collect();
+                for (cmd, attr) in crate::nixcmds::lookup(&typed, 25) {
+                    if mine.contains(&cmd) {
+                        continue;
+                    }
+                    items.push(Item {
+                        insert: crate::nixcmds::run_line(&cmd, &attr),
+                        label: cmd,
+                        detail: format!("from nixpkgs#{attr} (not installed)"),
+                        kind: "nixpkgs",
+                        doc: String::new(),
+                    });
+                }
+            }
             let names: Vec<String> = items.iter().filter(|i| i.detail.is_empty()).take(30).map(|i| i.label.clone()).collect();
             let descs = describe_commands(&names);
             for (n, i) in items.iter_mut().enumerate() {
