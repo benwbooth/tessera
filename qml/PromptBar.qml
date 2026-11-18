@@ -199,10 +199,8 @@ Item {
         try { p = decodeURIComponent(p) } catch (e) {}
         const home = controller ? controller.homeDir() : ""
         if (home !== "" && (p === home || p.startsWith(home + "/"))) p = "~" + p.substring(home.length)
-        const parts = p.split("/")
-        // Long paths keep their last three folders.
-        return parts.length > 4 && p.startsWith("~") === false ? "…/" + parts.slice(-3).join("/")
-             : parts.length > 4 ? "~/…/" + parts.slice(-3).join("/") : p
+        // (Always the whole path: a shortened one reads like a relative path.)
+        return p
     }
     function seconds(ms) {
         if (ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + "s"
