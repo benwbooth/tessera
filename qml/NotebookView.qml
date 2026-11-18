@@ -214,7 +214,7 @@ FocusScope {
         return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
                  type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
                  started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
-                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "" }
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "", viewLang: "" }
     }
     function insertCell(at, type, edit) {
         at = Math.max(0, Math.min(cells.count, at))
@@ -801,6 +801,7 @@ FocusScope {
             if (tm.lang) x.lang = tm.lang
             if (tm.ran_in) x.ranIn = tm.ran_in
             if (tm.view) x.viewPath = tm.view
+            if (tm.view_lang) x.viewLang = tm.view_lang
             if (x.type === "code") {
                 x.outputs = JSON.stringify((c.outputs || []).map(normalOutput))
                 x.count = c.execution_count === null || c.execution_count === undefined ? -1 : c.execution_count
@@ -972,7 +973,7 @@ FocusScope {
                 }
                 if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
                 if (c.ranIn !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { ran_in: c.ranIn })
-                if (c.viewPath !== "") { meta.tessera = Object.assign({}, meta.tessera || {}, { view: c.viewPath }); outs = [] }
+                if (c.viewPath !== "") { meta.tessera = Object.assign({}, meta.tessera || {}, c.viewLang !== "" ? { view: c.viewPath, view_lang: c.viewLang } : { view: c.viewPath }); outs = [] }
                 cell.execution_count = c.count >= 0 ? c.count : (c.tid > 0 && !kept ? ++n : null)
                 if (c.hideOutput) meta.jupyter = Object.assign({}, meta.jupyter || {}, { outputs_hidden: true })
                 cell.outputs = outs.map(o => {
@@ -1331,6 +1332,7 @@ FocusScope {
             required property string lang
             required property string ranIn     // what ran it, as it was then (a shell's name, a kernel's)
             required property string viewPath  // a file card: the file it shows
+            required property string viewLang  // and the language picked for it ("": by its name, "-": none)
             readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
@@ -1430,6 +1432,16 @@ FocusScope {
                           + (cell.ended > 0 && cell.fromTerm && cell.status !== 0 ? "  ·  exit " + cell.status : "")
                     color: Theme.textDim
                     font.pixelSize: 10
+                }
+                // (A file card: the language it's highlighted as, to change.)
+                Chip {
+                    id: typeChip
+                    visible: cell.viewPath !== ""
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: (cell.viewLang === "-" ? "Plain text" : loader.item && loader.item.lang ? loader.item.lang : "Plain text") + (cell.viewLang === "" ? " · auto" : "") + " ▾"
+                    tip: "Highlight it as…"
+                    onClicked: nb.pickFileType(cell.index, typeChip)
                 }
                 Chip {
                     id: kindChip
@@ -1584,6 +1596,7 @@ FocusScope {
                     property string cid: cell.cid
                     property bool running: cell.running
                     property string viewPath: cell.viewPath
+                    property string viewLang: cell.viewLang
                     readonly property string kind: cell.kind
                     sourceComponent: cell.viewPath !== "" ? fileCardView
                                    : !cell.fromTerm ? jupyterOutputs
@@ -1978,6 +1991,69 @@ FocusScope {
         }
     }
 
+    // A file card's language: a searchable list (Helix's hundreds), with
+    // Automatic (by its name) and Plain text first.
+    readonly property var syntaxLanguages: { try { return JSON.parse(controller.syntaxLanguages()) } catch (e) { return [] } }
+    property int typeFor: -1
+    function pickFileType(i, chip) {
+        typeFor = i
+        const p = chip.mapToItem(nb, 0, chip.height + 2)
+        typePop.x = Math.max(4, Math.min(p.x, nb.width - typePop.width - 4))
+        typePop.y = Math.min(p.y, nb.height - typePop.height - 4)
+        typePop.open()
+    }
+    // (Test hook: TESSERA_TEST_VIEWLANG=<lang>: the last card's picked at 12 s.)
+    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("VIEWLANG") !== ""; onTriggered: { nb.typeFor = cells.count - 1; typePop.pick(nb.controller.testEnv("VIEWLANG")) } }
+    Popup {
+        id: typePop
+        width: 260
+        height: Math.min(380, typeList.contentHeight + typeFilter.height + 24)
+        padding: 6
+        topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        onOpened: { typeFilter.text = ""; typeFilter.forceActiveFocus() }
+        readonly property var options: [["", "Automatic (by its name)"], ["-", "Plain text"]].concat(nb.syntaxLanguages.filter(l => l[0] !== ""))
+        readonly property var shown: options.filter(o => typeFilter.text === "" || (o[1] + " " + o[0]).toLowerCase().indexOf(typeFilter.text.toLowerCase()) >= 0)
+        function pick(id) {
+            if (nb.typeFor >= 0 && nb.typeFor < cells.count) { cells.setProperty(nb.typeFor, "viewLang", id); nb.touch() }
+            typePop.close()
+        }
+        contentItem: Column {
+            spacing: 4
+            TextField {
+                id: typeFilter
+                width: parent.width
+                placeholderText: "Search " + nb.syntaxLanguages.length + " languages"
+                color: Theme.text
+                font.pixelSize: 12
+                background: Rectangle { radius: 6; color: Theme.bg; border.color: typeFilter.activeFocus ? Theme.accent : Theme.divider }
+                Keys.onReturnPressed: if (typePop.shown.length > 0) typePop.pick(typePop.shown[0][0])
+                Keys.onEscapePressed: typePop.close()
+            }
+            ListView {
+                id: typeList
+                width: parent.width
+                height: Math.min(320, contentHeight)
+                clip: true
+                model: typePop.shown
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
+                MomentumWheel { flick: typeList }
+                delegate: Rectangle {
+                    required property var modelData
+                    width: typeList.width
+                    height: 24
+                    radius: 5
+                    readonly property bool picked: nb.typeFor >= 0 && nb.typeFor < cells.count && cells.get(nb.typeFor).viewLang === modelData[0]
+                    color: th.hovered ? Theme.tabHover : picked ? Theme.mix(Theme.bg, Theme.accent, 0.25) : "transparent"
+                    Text { x: 8; anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: 0.001; text: modelData[1]; color: Theme.text; font.pixelSize: 12; renderType: Text.NativeRendering }
+                    HoverHandler { id: th; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: typePop.pick(modelData[0]) }
+                }
+            }
+        }
+    }
+
     // ---- a file card: the file in Tessera's viewer ----
     Component {
         id: fileCardView
@@ -1986,6 +2062,7 @@ FocusScope {
             anchors.fill: parent
             controller: nb.controller
             path: src.viewPath
+            langOverride: src.viewLang
             fontFamily: nb.fontFamily
             pointSize: nb.outputPointSize
             themeData: nb.themeData

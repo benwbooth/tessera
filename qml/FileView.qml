@@ -26,8 +26,12 @@ Item {
     function ansi(n, d) { const a = themeData.ansi || []; return a[n] || d }
     readonly property string name: path.replace(/^.*\//, "")
     readonly property string ext: name.indexOf(".") > 0 ? name.replace(/^.*\./, "").toLowerCase() : ""
-    // The language a file's name says (tree-sitter's names).
-    readonly property string lang: ({
+    // The language to highlight it as: picked (langOverride; "-": none), else
+    // the one its name says (tree-sitter's names).
+    property string langOverride: ""
+    readonly property string lang: langOverride === "-" ? "" : langOverride !== "" ? langOverride : detectedLang
+    onLangChanged: { if (controller && lang !== "" && !controller.languageInstalled(lang)) controller.ensureLanguage(lang); rev++ }
+    readonly property string detectedLang: ({
         rs: "rust", py: "python", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript", ts: "typescript", tsx: "tsx",
         c: "c", h: "c", cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp", go: "go", java: "java", kt: "kotlin", rb: "ruby", lua: "lua",
         sh: "bash", bash: "bash", zsh: "bash", fish: "fish", json: "json", yaml: "yaml", yml: "yaml", toml: "toml", html: "html", css: "css",
