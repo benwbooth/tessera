@@ -853,6 +853,10 @@ impl Kernel {
                             let li = &c["language_info"];
                             sink(json!({"type": "info", "language": li["name"], "version": li["version"],
                                         "extension": li["file_extension"], "banner": c["banner"], "implementation": c["implementation"]}));
+                            // (C and C++: the standard library there from the start.)
+                            if let Some(p) = preamble(&k.spec.language) {
+                                k.execute_quiet(p);
+                            }
                             sink(json!({"type": "status", "state": "idle"}));
                         }
                     }
@@ -879,6 +883,15 @@ impl Kernel {
 
     pub fn execute(&self, cell: &str, code: &str) -> bool {
         *self.running.lock().unwrap() = cell.to_string();
+        // (import std; in C++: the library's all there already (the
+        // preamble); an interpreter can't import modules.)
+        let cleaned;
+        let code = if is_cpp(&self.spec.language) && code.lines().any(|l| l.trim_start().starts_with("import std")) {
+            cleaned = code.lines().map(|l| if l.trim_start().starts_with("import std") { "" } else { l }).collect::<Vec<_>>().join("\n");
+            cleaned.as_str()
+        } else {
+            code
+        };
         self.send_shell(
             "execute_request",
             json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": true, "stop_on_error": true}),
@@ -888,7 +901,8 @@ impl Kernel {
 
     /// Code run quietly (no output, no count): the sync below.
     pub fn execute_quiet(&self, code: &str) -> bool {
-        self.send_shell("execute_request", json!({"code": code, "silent": true, "store_history": false, "user_expressions": {}, "allow_stdin": false, "stop_on_error": false}), "")
+        // (Not "silent": xeus-cpp dies on that. Output for no cell is dropped.)
+        self.send_shell("execute_request", json!({"code": code, "silent": false, "store_history": false, "user_expressions": {}, "allow_stdin": false, "stop_on_error": false}), "")
     }
 
     /// The shell's environment and folder (now) into the kernel, as its
@@ -960,6 +974,22 @@ impl Drop for Kernel {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+fn is_cpp(language: &str) -> bool {
+    matches!(language.to_ascii_lowercase().as_str(), "c++" | "cpp" | "cxx")
+}
+
+/// What a kernel runs (quietly) as it comes up: for C++ the whole standard
+/// library (as import std; would give), for C its usual headers.
+fn preamble(language: &str) -> Option<&'static str> {
+    if is_cpp(language) {
+        return Some("#if __has_include(<bits/stdc++.h>)\n#include <bits/stdc++.h>\n#else\n#include <algorithm>\n#include <chrono>\n#include <cmath>\n#include <cstdio>\n#include <cstdlib>\n#include <format>\n#include <fstream>\n#include <functional>\n#include <iostream>\n#include <map>\n#include <memory>\n#include <numeric>\n#include <optional>\n#include <print>\n#include <ranges>\n#include <set>\n#include <sstream>\n#include <string>\n#include <string_view>\n#include <unordered_map>\n#include <unordered_set>\n#include <utility>\n#include <vector>\n#endif");
+    }
+    if language.eq_ignore_ascii_case("c") {
+        return Some("#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <math.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <ctype.h>\n#include <time.h>");
+    }
+    None
 }
 
 /// Variables a kernel keeps its own (the shell's would confuse it).
@@ -1483,8 +1513,8 @@ mod tests {
                 "zsh" => "print hi-zsh",
                 "powershell" => "Write-Output hi-ps",
                 "xonsh" => "echo hi-xonsh",
-                "c" => "#include <stdio.h>\nprintf(\"hi-c\\n\"); fflush(stdout);\n6*7",
-                "cpp" => "#include <iostream>\nstd::cout << \"hi-cpp\" << std::endl;",
+                "c" => "printf(\"hi-c\\n\"); fflush(stdout);",
+                "cpp" => "import std;\nstd::println(\"hi-cpp {}\", 6 * 7);",
                 "r" => "cat(\"hi-r\\n\")",
                 "ruby" => "puts \"hi-ruby\"",
                 "haskell" => "putStrLn \"hi-haskell\"",
