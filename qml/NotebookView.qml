@@ -1048,6 +1048,8 @@ FocusScope {
     Timer { interval: 1500; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_RUN_ALL") !== ""; onTriggered: nb.runAll() }
     Timer { interval: 20000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SAVE") !== ""; onTriggered: nb.save() }
     Timer { interval: 16000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_END") !== ""; onTriggered: list.positionViewAtEnd() }
+    // (Test hook: TESSERA_TEST_NB_SCROLL_TOP=<ms>: to the top then.)
+    Timer { interval: Number(nb.controller ? nb.controller.testEnv("NB_SCROLL_TOP") || 0 : 0); running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_TOP") !== ""; onTriggered: { nb.sticking = false; list.positionViewAtBeginning() } }
     Timer { interval: 3000; running: nb.visible && nb.controller !== null && nb.controller.testEnv("NB_EXPORT") !== ""; onTriggered: nb.writeTo(nb.controller.testEnv("NB_EXPORT")) }
 
     // ---- colors -----------------------------------------------------------------------
@@ -1439,7 +1441,7 @@ FocusScope {
                     visible: cell.viewPath !== ""
                     base: cell.color
                     Layout.minimumWidth: implicitWidth
-                    label: (cell.viewLang === "-" ? "Plain text" : loader.item && loader.item.lang ? loader.item.lang : "Plain text") + (cell.viewLang === "" ? " · auto" : "") + " ▾"
+                    label: (nb.isTableFile(cell.viewPath) && cell.viewLang === "" ? "Table" : cell.viewLang === "-" ? "Plain text" : loader.item && loader.item.lang ? loader.item.lang : "Plain text") + (cell.viewLang === "" ? " · auto" : "") + " ▾"
                     tip: "Highlight it as…"
                     onClicked: nb.pickFileType(cell.index, typeChip)
                 }
@@ -1598,7 +1600,7 @@ FocusScope {
                     property string viewPath: cell.viewPath
                     property string viewLang: cell.viewLang
                     readonly property string kind: cell.kind
-                    sourceComponent: cell.viewPath !== "" ? fileCardView
+                    sourceComponent: cell.viewPath !== "" ? (nb.isTableFile(cell.viewPath) && cell.viewLang === "" ? tableCardView : fileCardView)
                                    : !cell.fromTerm ? jupyterOutputs
                                    : cell.kind === "html" ? htmlView
                                    : cell.kind === "markdown" || cell.kind === "mdtext" ? markdownView
@@ -2012,7 +2014,7 @@ FocusScope {
         topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         onOpened: { typeFilter.text = ""; typeFilter.forceActiveFocus() }
-        readonly property var options: [["", "Automatic (by its name)"], ["-", "Plain text"]].concat(nb.syntaxLanguages.filter(l => l[0] !== ""))
+        readonly property var options: [["", nb.typeFor >= 0 && nb.typeFor < cells.count && nb.isTableFile(cells.get(nb.typeFor).viewPath) ? "Table (CSV/TSV)" : "Automatic (by its name)"], ["-", "Plain text"]].concat(nb.syntaxLanguages.filter(l => l[0] !== ""))
         readonly property var shown: options.filter(o => typeFilter.text === "" || (o[1] + " " + o[0]).toLowerCase().indexOf(typeFilter.text.toLowerCase()) >= 0)
         function pick(id) {
             if (nb.typeFor >= 0 && nb.typeFor < cells.count) { cells.setProperty(nb.typeFor, "viewLang", id); nb.touch() }
@@ -2051,6 +2053,21 @@ FocusScope {
                     TapHandler { onTapped: typePop.pick(modelData[0]) }
                 }
             }
+        }
+    }
+
+    function isTableFile(p) { return /\.(csv|tsv|tab)$/i.test(p) }
+    // ---- a CSV or TSV file card: a table ----
+    Component {
+        id: tableCardView
+        CsvTable {
+            readonly property var src: parent
+            anchors.fill: parent
+            controller: nb.controller
+            path: src.viewPath
+            fontFamily: nb.fontFamily
+            pointSize: nb.outputPointSize
+            themeData: nb.themeData
         }
     }
 

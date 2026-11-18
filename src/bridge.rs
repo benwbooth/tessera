@@ -529,6 +529,15 @@ pub mod ffi {
         fn file_line_index(self: &Controller, path: &QString) -> QString;
         #[qinvokable]
         fn file_lines(self: &Controller, path: &QString, start: i32, count: i32) -> QString;
+        /// A CSV/TSV file as a table (tables.rs): read in the background
+        /// ({"columns", "numeric", "rows", "done"}), a page of it by a spec,
+        /// and let go.
+        #[qinvokable]
+        fn table_open(self: &Controller, path: &QString) -> QString;
+        #[qinvokable]
+        fn table_query(self: &Controller, path: &QString, spec: &QString) -> QString;
+        #[qinvokable]
+        fn table_close(self: &Controller, path: &QString);
         /// Write a text file (atomically); "" or what went wrong.
         #[qinvokable]
         fn write_text_file(self: &Controller, path: &QString, text: &QString) -> QString;
@@ -953,6 +962,18 @@ impl ffi::Controller {
         crate::client::release_kernel(&key);
         let (host, k) = crate::client::split_key(&key);
         let _ = crate::client::rpc(&host, "kernel.stop", serde_json::json!({"key": k}));
+    }
+
+    fn table_open(&self, path: &ffi::QString) -> ffi::QString {
+        qs(&crate::tables::open(&local_path(path)))
+    }
+
+    fn table_query(&self, path: &ffi::QString, spec: &ffi::QString) -> ffi::QString {
+        qs(&crate::tables::query(&local_path(path), &spec.to_string()))
+    }
+
+    fn table_close(&self, path: &ffi::QString) {
+        crate::tables::close(&local_path(path))
     }
 
     fn file_line_index(&self, path: &ffi::QString) -> ffi::QString {

@@ -31,6 +31,7 @@ mod shell_integration;
 mod shellk;
 mod snapshot;
 mod syntax;
+mod tables;
 mod session;
 mod snippets;
 mod tmux;

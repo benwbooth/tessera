@@ -76,6 +76,7 @@ fn main() {
         QmlFile::from("qml/FileBrowser.qml"),
         QmlFile::from("qml/FilePreview.qml"),
         QmlFile::from("qml/FileView.qml"),
+        QmlFile::from("qml/CsvTable.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");
