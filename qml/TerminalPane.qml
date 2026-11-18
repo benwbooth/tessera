@@ -72,6 +72,8 @@ Item {
     // leaves the ones above (exit), what they changed handed down; to a new
     // one starts it on top.
     property var shellStack: []
+    property int shellCmdPending: 0     // shell starts and exits sent, their cells still to come
+    property var shellCmds: []          // those cells' ids
     function switchShell(sh) {
         if (!controller || term.exited || !(term.atPrompt || idleShell)) return
         const cur = pane.shellName !== "" ? pane.shellName : "bash"
@@ -80,7 +82,7 @@ Item {
         if (below >= 0) {
             const top = st[st.length - 1]
             controller.shellHandBack(top.pid || pane.shellPid, st[below].pid)
-            for (let k = st.length - 1; k > below; --k) term.sendText(" exit\r")
+            for (let k = st.length - 1; k > below; --k) { shellCmdPending++; term.sendText(" exit\r") }
             shellStack = st.slice(0, below + 1)
             return
         }
@@ -88,6 +90,7 @@ Item {
         if (line === "") return
         st.push({ name: sh, pid: 0 })
         shellStack = st
+        shellCmdPending++
         term.sendText(line + "\r")
     }
     // (Its pid once it's the shell in front; and a shell left by hand (exit)
@@ -398,6 +401,14 @@ Item {
     Connections {
         target: term
         function onCellsChanged(id, done) {
+            // (Starting a shell switched to, or leaving it: no card, and not
+            // a long-running command (the notebook stays).)
+            if (!done && pane.shellCmdPending > 0) {
+                pane.shellCmdPending--
+                pane.shellCmds = pane.shellCmds.concat([id])
+                notebook.hideTerm(id)
+            }
+            if (pane.shellCmds.indexOf(id) >= 0) { longTimer.stop(); pane.runningLong = false; return }
             if (done) { longTimer.stop(); pane.runningLong = false }
             else longTimer.restart()
         }

@@ -69,8 +69,10 @@ impl Cells {
         self.next
     }
 
+    /// The command running now: the latest that isn't done (one started
+    /// under another is done first).
     pub fn running(&mut self) -> Option<&mut Cell> {
-        self.list.back_mut().filter(|c| !c.done)
+        self.list.iter_mut().rev().find(|c| !c.done)
     }
 
     pub fn output(&mut self, data: &[u8]) {

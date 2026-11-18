@@ -109,6 +109,9 @@ pub struct Session {
     /// The running command's output (for a rich view), and the last
     /// finished one's: (kind, text).
     cmd_out: Option<Vec<u8>>,
+    /// Outputs of commands still running under a nested one (a shell started
+    /// in the shell: its commands are cells of their own).
+    cmd_outer: Vec<Vec<u8>>,
     last_rich: (String, String),
     /// Notebook cells (one per command), the next command's line (from the
     /// shell integration), and the picture the running command printed.
@@ -337,6 +340,7 @@ pub fn session_open(
         raw_image: None,
         output_starts: false,
         cmd_out: None,
+        cmd_outer: Vec::new(),
         last_rich: (String::new(), String::new()),
         cells: Default::default(),
         cells_from: None,
@@ -769,6 +773,20 @@ impl Session {
                     }
                 }
             }
+            // (A command starting inside the running one: a nested shell's.
+            // The running one waits, and goes on when that one's done.)
+            if self.cmd_out.is_some() {
+                let e = find(rest, END);
+                let n = [find(rest, CMD), find(rest, START)].into_iter().flatten().min();
+                if let Some(n) = n.filter(|&n| e.is_none_or(|e| n < e)) {
+                    let mut buf = self.cmd_out.take().unwrap();
+                    buf.extend_from_slice(&rest[..n]);
+                    self.cells.output(&rest[..n]);
+                    self.cmd_outer.push(buf);
+                    rest = &rest[n..];
+                    continue;
+                }
+            }
             if let Some(buf) = self.cmd_out.as_mut() {
                 match find(rest, END) {
                     Some(i) => {
@@ -782,7 +800,7 @@ impl Session {
                         };
                         let text = crate::cells::strip_frame(&strip_zsh_marker(crate::images::plain_text(&raw)));
                         // (The file's name says best what cat showed; else the text itself.)
-                        let named = self.cells.list.back().filter(|c| !c.done).map(|c| crate::images::kind_from_command(&c.command)).unwrap_or("");
+                        let named = self.cells.list.iter().rev().find(|c| !c.done).map(|c| crate::images::kind_from_command(&c.command)).unwrap_or("");
                         let kind = if named.is_empty() { crate::images::detect_text(&text) } else { named };
 
                         if !kind.is_empty() {
@@ -791,7 +809,7 @@ impl Session {
                         self.last_rich = (kind.to_string(), text);
                         let image = self.cell_image.take();
                         if let Some(id) = self.cells.finish(status, kind) {
-                            if let Some(c) = self.cells.list.back_mut() {
+                            if let Some(c) = self.cells.list.iter_mut().find(|c| c.id == id) {
                                 c.image = image;
                             }
                             if let Backend::Daemon { id: sid, .. } = &self.backend {
@@ -802,6 +820,10 @@ impl Session {
                             self.events.push(json!({"type": "cell", "id": id, "done": true}));
                         }
                         rest = &rest[i + END.len()..];
+                        // (Back to the command it ran under, if any.)
+                        if let Some(outer) = self.cmd_outer.pop() {
+                            self.cmd_out = Some(outer);
+                        }
                     }
                     None => {
                         self.cells.output(rest);

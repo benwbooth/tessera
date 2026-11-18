@@ -208,7 +208,7 @@ FocusScope {
         return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
                  type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
                  started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
-                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "" }
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "" }
     }
     function insertCell(at, type, edit) {
         at = Math.max(0, Math.min(cells.count, at))
@@ -307,6 +307,9 @@ FocusScope {
         cells.setProperty(i, "ended", 0)
         cells.setProperty(i, "mine", true)
         cells.setProperty(i, "editing", false)
+        // (What runs it, kept with it: the shell or kernel then, not now.)
+        cells.setProperty(i, "ranIn", c.lang !== "" && !sameLang(c.lang, runsIn) ? ((langKernels[c.lang] && langKernels[c.lang].display) || (langSpec(c.lang) || {}).display || c.lang)
+                                     : shellKernel ? (shellName || "shell") : (kernel ? kernel.display : kernelName))
         touch()
         // (A cell in another language: that language's kernel.)
         if (c.lang !== "" && !sameLang(c.lang, runsIn)) { runLang(c.cid, c.lang); return }
@@ -465,6 +468,7 @@ FocusScope {
     // What ran a cell: the pane's shell, its language's kernel, or the
     // notebook's kernel.
     function ranBy(c) {
+        if (c.ranIn !== "") return c.ranIn
         if (c.lang !== "") return (c.langKernel && c.langKernel.display) || c.lang
         if (c.fromTerm || shellKernel) return shellName !== "" ? shellName : "shell"
         return kernel ? kernel.display : kernelName
@@ -576,6 +580,18 @@ FocusScope {
     property var retired: []            // terminal cells not shown (deleted, run again)
     property int fileStart: 0            // a file's notebook: the terminal's cells before it opened aren't its
     function link(tid, cid) { const m = Object.assign({}, linked); m[tid] = cid; linked = m }
+    // A terminal command that's no card: starting or leaving a shell switched
+    // to from the editor.
+    function hideTerm(tid) {
+        retire(tid)
+        for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).tid === tid && cells.get(i).cid !== undefined) { cells.remove(i); touch() }
+    }
+    // (No command and nothing to read in its output: a shell starting up.)
+    function blankTerm(t) {
+        if (!t.done || (t.command || "").trim() !== "") return false
+        if (!(t.size > 0)) return true
+        return view.cellOutput(t.id, "text").replace(/[\s\u23ce%]/g, "") === ""
+    }
     function retire(tid) {
         if (retired.indexOf(tid) < 0) retired = retired.concat([tid])
         const m = Object.assign({}, linked); delete m[tid]; linked = m
@@ -611,12 +627,16 @@ FocusScope {
         for (let i = cells.count - 1; i >= 0; --i) {
             const c = cells.get(i)
             if (c.tid <= 0) continue
-            if (byId[c.tid]) fromTerm(i, byId[c.tid])
+            const bt = byId[c.tid]
+            if (bt && nb.blankTerm(bt)) { cells.remove(i); retire(c.tid); continue }
+            if (bt) fromTerm(i, bt)
             else if (path === "" && oldest > 0 && c.tid < oldest) cells.remove(i)
         }
         let added = false
         for (const t of ts) {
             if (linked[t.id] !== undefined || retired.indexOf(t.id) >= 0 || t.id <= fileStart) continue
+            // (Nothing typed and nothing shown: a shell starting up, no card.)
+            if (nb.blankTerm(t)) { retire(t.id); continue }
             let at = -1
             if (shellWaiting.length > 0) {
                 at = indexOf(shellWaiting[0])
@@ -629,6 +649,7 @@ FocusScope {
                 added = true
             }
             cells.setProperty(at, "tid", t.id)
+            if (cells.get(at).ranIn === "") cells.setProperty(at, "ranIn", shellName || "shell")
             link(t.id, cells.get(at).cid)
             fromTerm(at, t)
             touch()
@@ -747,6 +768,7 @@ FocusScope {
             if (keepTids && tm.tid > 0) { x.tid = tm.tid; x.mine = !!tm.mine; if (tm.cid) x.cid = tm.cid }
             if (tm.cwd) x.cwd = tm.cwd
             if (tm.lang) x.lang = tm.lang
+            if (tm.ran_in) x.ranIn = tm.ran_in
             if (x.type === "code") {
                 x.outputs = JSON.stringify((c.outputs || []).map(normalOutput))
                 x.count = c.execution_count === null || c.execution_count === undefined ? -1 : c.execution_count
@@ -822,7 +844,24 @@ FocusScope {
         try { fill(JSON.parse(r.text), true); storeFound = true } catch (e) {}
         dirty = false
     }
-    onStoreKeyChanged: if (loaded && path === "" && !storeFound) { loadStore(); syncTerm() }
+    // (The pane's shell started again (exit, restart): a new session, and the
+    // notebook carries on in it, its cards as they were.)
+    property string prevStoreKey: ""
+    onStoreKeyChanged: {
+        const was = prevStoreKey
+        prevStoreKey = storeKey
+        if (loaded && path === "" && was !== "" && storeKey !== "" && cells.count > 0) {
+            const doc = JSON.parse(serialize(false))
+            fill(doc, false)
+            retired = []
+            linked = ({})
+            fileStart = 0
+            storeFound = true
+            touch()
+            return
+        }
+        if (loaded && path === "" && !storeFound) { loadStore(); syncTerm() }
+    }
     function touch() {
         dirty = true
         if (path === "" && loaded) storeTimer.restart()
@@ -870,6 +909,7 @@ FocusScope {
                     if (kept) Object.assign(meta.tessera, { tid: c.tid, mine: c.mine, cid: c.cid })
                 } else try { outs = JSON.parse(c.outputs) } catch (e) {}
                 if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
+                if (c.ranIn !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { ran_in: c.ranIn })
                 cell.execution_count = c.count >= 0 ? c.count : (c.tid > 0 && !kept ? ++n : null)
                 if (c.hideOutput) meta.jupyter = Object.assign({}, meta.jupyter || {}, { outputs_hidden: true })
                 cell.outputs = outs.map(o => {
@@ -1223,6 +1263,7 @@ FocusScope {
             required property bool editing
             required property bool hideOutput
             required property string lang
+            required property string ranIn     // what ran it, as it was then (a shell's name, a kernel's)
             readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index

@@ -40,7 +40,8 @@ Rectangle {
         if (id.startsWith("shell:")) {
             const sh = id.substring(6)
             runShell = ""
-            langOverride = ""
+            // (Chosen, not guessed: the shell's code, named by the shell.)
+            langOverride = "bash"
             if (sh !== (shellName || "bash")) shellSwitchRequested(sh)
         } else {
             runShell = ""
