@@ -1663,8 +1663,10 @@ ApplicationWindow {
         interval: 9000
         property int step: 0
         onTriggered: {
-            if (step === 0) { win.flickTag = "new"; win.flickFrames = 0; newTab({}) ; interval = 3000; step = 1; start() }
-            else if (step === 1) { win.flickTag = "back"; win.flickFrames = 0; currentTab = 0; interval = 3000; step = 2; start() }
+            // (With TESSERA_TEST_NOTEBOOK set, both tabs in notebook view.)
+            const nbk = controller.testEnv("NOTEBOOK") !== ""
+            if (step === 0) { if (nbk && activePane) activePane.viewMode = "notebook"; win.flickTag = "new"; win.flickFrames = 0; newTab({}) ; interval = 3000; step = 1; start() }
+            else if (step === 1) { if (nbk && activePane) activePane.viewMode = "notebook"; win.flickTag = "back"; win.flickFrames = 0; currentTab = 0; interval = 3000; step = 2; start() }
             else if (step === 2) { win.flickTag = "fwd"; win.flickFrames = 0; currentTab = 1 }
         }
     }

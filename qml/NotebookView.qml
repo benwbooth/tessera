@@ -253,7 +253,9 @@ FocusScope {
     // the card is laid out and its output grows, until it's scrolled up.
     property bool sticking: false
     property bool wasAtEnd: true        // (shown again: back to the end, if it was there)
-    onVisibleChanged: if (visible && wasAtEnd) follow()
+    // (At once, before the frame is drawn, so a tab switched to shows its
+    // end straight away; and again once it's laid out.)
+    onVisibleChanged: if (visible && wasAtEnd) { sticking = true; pin(); Qt.callLater(pin) }
     property bool pinning: false
     function follow() { sticking = true; Qt.callLater(pin) }
     function pin() {
@@ -749,9 +751,9 @@ FocusScope {
         current = 0
         loaded = true
         syncTerm()
-        // (A pane's notebook opens at its end, and stays there while its
-        // cards lay out; a document at its top.)
-        if (path === "") follow(); else Qt.callLater(list.positionViewAtBeginning)
+        // (A notebook opens at its end, the latest cells, and stays there
+        // while its cards lay out.)
+        follow()
     }
     // ---- the pane's own notebook, kept with its session ----
     property bool storeFound: false
@@ -1113,10 +1115,13 @@ FocusScope {
         ScrollBar.vertical: ScrollBar {}
         MomentumWheel { flick: list }
         property real lastY: 0
-        onContentHeightChanged: if (nb.sticking) Qt.callLater(nb.pin)
-        onHeightChanged: if (nb.sticking) Qt.callLater(nb.pin)
+        property real lastH: 0
+        onContentHeightChanged: if (nb.sticking) { nb.pin(); Qt.callLater(nb.pin) }
+        onHeightChanged: if (nb.sticking) { nb.pin(); Qt.callLater(nb.pin) }
         onContentYChanged: {
-            if (!nb.pinning && contentY < lastY - 2) nb.sticking = false
+            // (Scrolled up by hand lets go; cards being laid out don't.)
+            if (!nb.pinning && contentY < lastY - 2 && contentHeight === lastH) nb.sticking = false
+            lastH = contentHeight
             if (nb.visible && height > 0) nb.wasAtEnd = atYEnd || nb.sticking
             lastY = contentY
         }
