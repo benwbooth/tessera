@@ -93,7 +93,8 @@ fn build_index(idx: &std::path::Path) {
         c.args(["shell", "--quiet", "nixpkgs#nix-index", "-c", "nix-locate"]);
         c
     };
-    cmd.args(["--at-root", "--type", "x", "--type", "s", "--regex", "^/bin/[^/]+$"]).env("NIX_INDEX_DATABASE", db_dir());
+    // (nix-locate's regex takes no $: deeper paths are left out below.)
+    cmd.args(["--at-root", "--type", "x", "--type", "s", "--regex", "/bin/[^/]+"]).env("NIX_INDEX_DATABASE", db_dir());
     let Ok(out) = cmd.stderr(std::process::Stdio::null()).output() else { return };
     let text = String::from_utf8_lossy(&out.stdout);
     let mut by_cmd: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
@@ -101,8 +102,15 @@ fn build_index(idx: &std::path::Path) {
         let mut f = line.split_whitespace();
         let (Some(attr), Some(path)) = (f.next(), f.last()) else { continue };
         let attr = attr.strip_suffix(".out").or_else(|| attr.strip_suffix(".bin")).unwrap_or(attr);
-        // (Wrapped programs' .foo-wrapped and the like aren't commands.)
-        let Some(name) = path.rsplit('/').next().filter(|n| !n.starts_with('.') && !n.is_empty()) else { continue };
+        // (Only <store path>/bin/<name>; wrapped programs' .foo-wrapped aren't commands.)
+        let parts: Vec<&str> = path.split('/').collect();
+        if parts.len() != 6 || parts[4] != "bin" {
+            continue;
+        }
+        let name = parts[5];
+        if name.starts_with('.') || name.is_empty() {
+            continue;
+        }
         let v = by_cmd.entry(name.to_string()).or_default();
         if !v.iter().any(|a| a == attr) {
             v.push(attr.to_string());
@@ -111,7 +119,7 @@ fn build_index(idx: &std::path::Path) {
     let mut lines = String::new();
     for (name, mut attrs) in by_cmd {
         // The likeliest first: named for the command, then plain names, then short ones.
-        attrs.sort_by_key(|a| (a != &name, a.contains('.'), a.len()));
+        attrs.sort_by_key(|a| (a != &name, !a.starts_with(name.as_str()), a.contains('.'), a.len()));
         attrs.truncate(8);
         lines.push_str(&format!("{name}\t{}\n", attrs.join(" ")));
     }

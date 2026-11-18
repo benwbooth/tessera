@@ -551,6 +551,11 @@ pub struct Kernel {
     running: Arc<Mutex<String>>,
     /// The header of the input request being answered.
     asking: Mutex<Option<Vec<u8>>>,
+    /// Where its events go (to say it was stopped).
+    sink: Sink,
+    /// busy / idle, as it last said; when it started.
+    state: Mutex<String>,
+    started: Instant,
     /// The environment and folder it has (as started, then as synced).
     synced: Mutex<(HashMap<String, String>, String)>,
 }
@@ -645,6 +650,9 @@ impl Kernel {
             control: Mutex::new(None),
             stdin: Mutex::new(None),
             answered: Mutex::default(),
+            sink: sink.clone(),
+            state: Mutex::new("starting".into()),
+            started: Instant::now(),
             asking: Mutex::new(None),
             running,
             child: Mutex::new(Some(child)),
@@ -796,6 +804,7 @@ impl Kernel {
                     "status" => {
                         let st = c["execution_state"].as_str().unwrap_or("");
                         if st == "idle" || st == "busy" {
+                            *k.state.lock().unwrap() = st.to_string();
                             if k.ready.load(Ordering::SeqCst) {
                                 s2(json!({"type": "status", "state": st}));
                             }
@@ -1226,8 +1235,45 @@ pub fn interrupt(key: &str) {
 pub fn stop(key: &str) {
     let k = KERNELS.lock().unwrap().as_mut().and_then(|m| m.remove(key));
     if let Some(k) = k {
+        // (Its notebook hears it's gone: the next run starts another.)
+        (k.sink)(json!({"type": "status", "state": "dead", "message": "Stopped."}));
         std::thread::spawn(move || k.stop());
     }
+}
+
+/// The kernels running now, every notebook's: JSON [{key, name, display,
+/// language, state, pid, rss_kb, seconds}] (memory from /proc).
+pub fn running() -> String {
+    let m = KERNELS.lock().unwrap();
+    let mut out: Vec<Value> = Vec::new();
+    if let Some(m) = m.as_ref() {
+        for (key, k) in m.iter() {
+            let pid = k.child.lock().unwrap().as_ref().map(|c| c.id()).unwrap_or(0);
+            // (Its memory: the process and what it started, nix shell's child among them.)
+            let rss = |p: u32| -> u64 {
+                std::fs::read_to_string(format!("/proc/{p}/status"))
+                    .ok()
+                    .and_then(|s| s.lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1)?.parse().ok()))
+                    .unwrap_or(0)
+            };
+            let kids = |p: u32| -> Vec<u32> {
+                std::fs::read_to_string(format!("/proc/{p}/task/{p}/children")).unwrap_or_default().split_whitespace().filter_map(|x| x.parse().ok()).collect()
+            };
+            let mut total = 0;
+            let mut stack = vec![pid];
+            while let Some(p) = stack.pop() {
+                if p == 0 {
+                    continue;
+                }
+                total += rss(p);
+                stack.extend(kids(p));
+            }
+            out.push(json!({"key": key, "name": k.spec.name, "display": k.spec.display, "language": k.spec.language,
+                            "state": *k.state.lock().unwrap(), "pid": pid, "rss_kb": total, "seconds": k.started.elapsed().as_secs()}));
+        }
+    }
+    out.sort_by(|a, b| a["display"].as_str().cmp(&b["display"].as_str()));
+    Value::Array(out).to_string()
 }
 
 /// Every kernel ends with the app.

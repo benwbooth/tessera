@@ -457,6 +457,9 @@ pub mod ffi {
         /// The kernels there are: [{name, display, language}].
         #[qinvokable]
         fn jupyter_kernels(self: &Controller) -> QString;
+        /// The kernels running now (every notebook's), JSON (jupyter::running).
+        #[qinvokable]
+        fn jupyter_running(self: &Controller) -> QString;
         /// Start kernel `spec` for notebook `key` (one per key); it reports
         /// with jupyter_event(key, json).
         #[qinvokable]
@@ -787,6 +790,10 @@ impl ffi::Controller {
             None => cwd,
         };
         crate::history::add(&cmd.to_string(), &cwd);
+    }
+
+    fn jupyter_running(&self) -> ffi::QString {
+        qs(&crate::jupyter::running())
     }
 
     fn jupyter_kernels(&self) -> ffi::QString {
