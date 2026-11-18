@@ -5,6 +5,7 @@ set -q TESSERA_SHELL_INTEGRATION; and exit
 set -g TESSERA_SHELL_INTEGRATION 1
 function __tessera_prompt --on-event fish_prompt
     set -l st $status
+    __tessera_apply
     if set -q __tessera_running
         printf '\e]133;D;%s\a' $st
         set -e __tessera_running
@@ -12,7 +13,16 @@ function __tessera_prompt --on-event fish_prompt
     printf '\e]7;file://%s%s\a' (hostname) "$PWD"
     printf '\e]133;A;redraw=1\a'
 end
+# What a kernel in another shell changed (its folder, exports), handed over
+# by Tessera: applied before the next command and prompt.
+function __tessera_apply
+    set -l d (set -q XDG_RUNTIME_DIR; and echo $XDG_RUNTIME_DIR; or echo /tmp)/tessera-env
+    test -f $d/$fish_pid.apply; or return 0
+    source $d/$fish_pid.apply
+    command rm -f $d/$fish_pid.apply $d/$fish_pid.cwd
+end
 function __tessera_preexec --on-event fish_preexec
+    __tessera_apply
     set -g __tessera_running 1
     # The command line first (OSC 1337 TesseraCommand, base64), then the mark.
     printf '\e]1337;TesseraCommand=%s\a' (printf '%s' "$argv[1]" | base64 | string join '')

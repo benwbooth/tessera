@@ -558,6 +558,11 @@ pub struct Kernel {
     started: Instant,
     /// The environment and folder it has (as started, then as synced).
     synced: Mutex<(HashMap<String, String>, String)>,
+    /// A shell kernel's own environment and folder, as last looked at (just
+    /// before a cell: what the cell changes is told from it), and whether a
+    /// look is under way.
+    seen: Arc<Mutex<Option<(HashMap<String, String>, String)>>>,
+    looking: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn free_port() -> std::io::Result<u16> {
@@ -661,6 +666,8 @@ impl Kernel {
             conn_file,
             gone: Arc::default(),
             ready: AtomicBool::new(false),
+            seen: Arc::new(Mutex::new(None)),
+            looking: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             synced: Mutex::new((shell_env.clone().map(|e| e.into_iter().collect()).unwrap_or_else(|| std::env::vars().collect()), cwd.to_string())),
         });
         // Connect (Nix may take minutes to fetch Python the first time), then
@@ -1216,10 +1223,153 @@ pub fn input(key: &str, value: &str) -> bool {
 }
 
 /// Bring a kernel up to the shell's environment and folder (before a run).
+/// (A folder handed to the shell by another kernel, not applied there yet,
+/// counts as the shell's.) A shell's kernel is then looked at, so what the
+/// cell changes can go back (export_to_shell).
 pub fn sync(key: &str, pid: u32, cwd: &str) -> bool {
     let Some(k) = get(key) else { return false };
     let Some(env) = crate::prompt::shell_env(pid) else { return false };
-    k.sync(&env.into_iter().collect(), cwd)
+    let pending = std::fs::read_to_string(env_dir().join(format!("{pid}.cwd"))).ok().filter(|d| !d.is_empty());
+    let sent = k.sync(&env.into_iter().collect(), pending.as_deref().unwrap_or(cwd));
+    if let Some(look) = look_at(&k, "before") {
+        let (seen, looking) = (k.seen.clone(), k.looking.clone());
+        looking.store(true, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            if let Some(now) = look() {
+                *seen.lock().unwrap() = Some(now);
+            }
+            looking.store(false, Ordering::SeqCst);
+        });
+    }
+    sent
+}
+
+fn env_dir() -> std::path::PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| "/tmp".into()).join("tessera-env")
+}
+
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Ask a shell's kernel for its exported environment and folder (queued
+/// after whatever it's running); the returned closure waits for the answer.
+fn look_at(k: &Arc<Kernel>, what: &str) -> Option<Box<dyn FnOnce() -> Option<(HashMap<String, String>, String)> + Send>> {
+    let dir = env_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::SeqCst);
+    let (envf, pwdf) = (dir.join(format!("kernel-{}-{n}-{what}.env", std::process::id())), dir.join(format!("kernel-{}-{n}-{what}.pwd", std::process::id())));
+    let (e, w) = (envf.to_string_lossy().to_string(), pwdf.to_string_lossy().to_string());
+    let code = match k.spec.language.to_ascii_lowercase().as_str() {
+        "bash" | "zsh" | "sh" => format!("command env -0 > {} 2>/dev/null; printf '%s' \"$PWD\" > {}", sh_quote(&e), sh_quote(&w)),
+        "xonsh" => format!("import os as _t\nopen({e:?}, 'w').write(''.join(f'{{a}}={{b}}\\0' for a, b in _t.environ.items()))\nopen({w:?}, 'w').write(_t.getcwd())\ndel _t"),
+        "powershell" => format!(
+            "[IO.File]::WriteAllText({e:?}, ((Get-ChildItem env: | ForEach-Object {{ \"$($_.Name)=$($_.Value)`0\" }}) -join ''))\n[IO.File]::WriteAllText({w:?}, (Get-Location).Path)"
+        ),
+        _ => return None,
+    };
+    if !k.execute_quiet(&code) {
+        return None;
+    }
+    Some(Box::new(move || {
+        let start = std::time::Instant::now();
+        while !pwdf.exists() && start.elapsed() < Duration::from_secs(20) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        let got = (std::fs::read(&envf), std::fs::read_to_string(&pwdf));
+        let _ = std::fs::remove_file(&envf);
+        let _ = std::fs::remove_file(&pwdf);
+        let (Ok(raw), Ok(pwd)) = got else { return None };
+        let env = raw
+            .split(|&b| b == 0)
+            .filter_map(|kv| {
+                let s = String::from_utf8_lossy(kv);
+                let (a, b) = s.split_once('=')?;
+                Some((a.to_string(), b.to_string()))
+            })
+            .collect();
+        Some((env, pwd))
+    }))
+}
+
+/// After a run in a shell's kernel (bash, zsh, xonsh, PowerShell): what the
+/// cell changed (its folder, exports set or unset) goes back to the pane's
+/// shell (pid), which applies it before its next command (shell/tessera.*),
+/// and so to the other kernels: switching shells keeps the folder and
+/// variables.
+pub fn export_to_shell(key: &str, pid: u32) {
+    let Some(k) = get(key) else { return };
+    if pid == 0 {
+        return;
+    }
+    let Some(look) = look_at(&k, "after") else { return };
+    std::thread::spawn(move || {
+        // (The look from before the cell first.)
+        let start = std::time::Instant::now();
+        while k.looking.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(20) {
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        let Some((now, pwd)) = look() else { return };
+        let Some((was, was_pwd)) = k.seen.lock().unwrap().replace((now.clone(), pwd.clone())) else { return };
+        let skip = |n: &str| SKIP_ENV.contains(&n);
+        let set: Vec<(String, String)> = now.iter().filter(|(a, b)| !skip(a) && was.get(*a) != Some(b)).map(|(a, b)| (a.clone(), b.clone())).collect();
+        let unset: Vec<String> = was.keys().filter(|a| !skip(a) && !now.contains_key(*a)).cloned().collect();
+        let cd = (!pwd.is_empty() && pwd != was_pwd).then(|| pwd.clone());
+        if set.is_empty() && unset.is_empty() && cd.is_none() {
+            return;
+        }
+        // (The kernel has these now: no need to send them back to it.)
+        {
+            let mut had = k.synced.lock().unwrap();
+            for (a, b) in &set {
+                had.0.insert(a.clone(), b.clone());
+            }
+            for a in &unset {
+                had.0.remove(a);
+            }
+            if let Some(d) = &cd {
+                had.1 = d.clone();
+            }
+        }
+        let dir = env_dir();
+        // In the pane's shell's own words.
+        let shell = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default().trim().to_string();
+        let fish = shell == "fish";
+        let name_ok = |a: &str| !a.is_empty() && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let mut lines = Vec::new();
+        for (a, b) in set.iter().filter(|(a, _)| name_ok(a)) {
+            lines.push(if fish { format!("set -gx {a} {}", sh_quote(b)) } else { format!("export {a}={}", sh_quote(b)) });
+        }
+        for a in unset.iter().filter(|a| name_ok(a)) {
+            lines.push(if fish { format!("set -e {a}") } else { format!("unset {a}") });
+        }
+        if let Some(d) = &cd {
+            lines.push(if fish { format!("builtin cd {}", sh_quote(d)) } else { format!("builtin cd -- {}", sh_quote(d)) });
+            let _ = std::fs::write(dir.join(format!("{pid}.cwd")), d);
+        }
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(format!("{pid}.apply"))) {
+            let _ = writeln!(f, "{}", lines.join("\n"));
+        }
+        // (The shell's exported environment as the other kernels will see
+        // it, until its next prompt writes it again.)
+        if let Some(mut env) = crate::prompt::shell_env(pid).map(|e| e.into_iter().collect::<HashMap<String, String>>()) {
+            for (a, b) in set {
+                env.insert(a, b);
+            }
+            for a in unset {
+                env.remove(&a);
+            }
+            let mut out = Vec::new();
+            for (a, b) in env {
+                out.extend_from_slice(format!("{a}={b}").as_bytes());
+                out.push(0);
+            }
+            let _ = std::fs::write(dir.join(pid.to_string()), out);
+        }
+    });
 }
 
 pub fn complete(key: &str, request: &str, code: &str, pos: usize) -> bool {
@@ -1686,4 +1836,59 @@ mod tests {
         k.stop();
         assert!(text.contains("hi Ben"), "{text:?}");
     }
+
+    /// A shell kernel's cd and export handed back to the pane's shell (bash
+    /// from Nix): run with --ignored.
+    #[test]
+    #[ignore]
+    fn hands_back_folder_and_exports() {
+        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        let tx = Mutex::new(tx);
+        let sink: Sink = Arc::new(move |v| {
+            let _ = tx.lock().unwrap().send(v);
+        });
+        let k = Kernel::start("tessera-bash", "/", None, sink).unwrap();
+        loop {
+            if rx.recv_timeout(Duration::from_secs(900)).expect("up")["type"] == "info" {
+                break;
+            }
+        }
+        KERNELS.lock().unwrap().get_or_insert_with(HashMap::new).insert("test-hand".into(), k.clone());
+        assert!(k.execute("c0", "export TESSERA_T0=x"));
+        loop {
+            if rx.recv_timeout(Duration::from_secs(60)).expect("event")["type"] == "done" {
+                break;
+            }
+        }
+        // (As the notebook does: synced (and looked at) before the cell.)
+        let pid = std::process::id();
+        let env: Vec<u8> = std::env::vars().flat_map(|(a, b)| format!("{a}={b}\0").into_bytes()).collect();
+        let _ = std::fs::write(super::env_dir().join(pid.to_string()), env);
+        super::sync("test-hand", pid, "/");
+        assert!(k.execute("c1", "cd /tmp && export TESSERA_T1='a b' && unset TESSERA_T0"));
+        loop {
+            if rx.recv_timeout(Duration::from_secs(60)).expect("event")["type"] == "done" {
+                break;
+            }
+        }
+        let apply = super::env_dir().join(format!("{pid}.apply"));
+        let _ = std::fs::remove_file(&apply);
+        super::export_to_shell("test-hand", pid);
+        let start = std::time::Instant::now();
+        while !apply.exists() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        let text = std::fs::read_to_string(&apply).unwrap_or_default();
+        let _ = std::fs::remove_file(&apply);
+        let _ = std::fs::remove_file(super::env_dir().join(format!("{pid}.cwd")));
+        let _ = std::fs::remove_file(super::env_dir().join(pid.to_string()));
+        k.stop();
+        eprintln!("{text}");
+        assert!(text.contains("export TESSERA_T1='a b'"), "{text}");
+        assert!(text.contains("unset TESSERA_T0"), "{text}");
+        assert!(text.contains("builtin cd -- '/tmp'"), "{text}");
+        assert!(!text.contains("PATH="), "only what the cell changed: {text}");
+    }
+
 }

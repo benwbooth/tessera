@@ -9,12 +9,22 @@ __tessera_prompt() {
     local status=$?
     if [[ -n "${__tessera_running-}" ]]; then printf '\e]133;D;%s\a' "$status"; fi
     __tessera_running=
+    __tessera_apply
     __tessera_cwd
     printf '\e]133;A;redraw=last\a'
+}
+# What a kernel in another shell changed (its folder, exports), handed over
+# by Tessera: applied before the next command and prompt.
+__tessera_apply() {
+    local d="${XDG_RUNTIME_DIR:-/tmp}/tessera-env"
+    [[ -f "$d/$$.apply" ]] || return 0
+    source "$d/$$.apply"
+    command rm -f "$d/$$.apply" "$d/$$.cwd"
 }
 __tessera_preexec() {
     [[ -n "${COMP_LINE-}" || "$BASH_COMMAND" == __tessera_* ]] && return
     if [[ -z "${__tessera_running-}" ]]; then
+        __tessera_apply
         __tessera_running=1
         # The command line (OSC 1337 TesseraCommand, base64), then the mark.
         local line; line="$(HISTTIMEFORMAT= history 1 | sed 's/^ *[0-9]* *//')"

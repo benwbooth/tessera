@@ -166,6 +166,10 @@ FocusScope {
                 if (e.count !== null && e.count !== undefined) cells.setProperty(i, "count", e.count)
                 cells.setProperty(i, "ended", Date.now())
                 cells.setProperty(i, "failed", e.status !== "ok")
+                // (A shell's kernel: its folder and exports go back to the
+                // pane's shell, so the next shell carries on from there.)
+                const L = cells.get(i).lang
+                if (L !== "" && ["bash", "zsh", "xonsh", "powershell", "sh"].indexOf(L) >= 0) controller.jupyterExport(langKey(L), shellPid)
                 // (Stopped at an error: the cells waiting after it don't run.)
                 if (e.status === "error") for (let j = 0; j < cells.count; ++j) if (cells.get(j).running && cells.get(j).tid <= 0 && cells.get(j).started > cells.get(i).started) cells.setProperty(j, "running", false)
                 touch()
@@ -424,6 +428,14 @@ FocusScope {
 
     // ---- a kernel per language (cells in another language than the notebook's) ----
     property var langKernels: ({})      // lang -> {name, display, state, message, queue: [cid]}
+    property string shellName: ""       // the pane's shell (zsh, bash, fish, ...)
+    // What ran a cell: the pane's shell, its language's kernel, or the
+    // notebook's kernel.
+    function ranBy(c) {
+        if (c.lang !== "") return (c.langKernel && c.langKernel.display) || c.lang
+        if (c.fromTerm || shellKernel) return shellName !== "" ? shellName : "shell"
+        return kernel ? kernel.display : kernelName
+    }
     function langKey(l) { return key + "~" + l }
     // (Names the editor and kernels give a language.)
     function sameLang(a, b) {
@@ -1212,10 +1224,11 @@ FocusScope {
                     ToolTip.delay: 500
                     ToolTip.text: cell.running ? "Interrupt" : cell.code ? "Run (Ctrl+Enter)" : "Show it (Ctrl+Enter)"
                 }
-                // (A cell in another language: its language, and its kernel coming up.)
+                // (What runs it: the shell, a language's kernel (and it coming
+                // up), the notebook's kernel.)
                 Text { topPadding: 0.001;
-                    visible: cell.lang !== ""
-                    text: cell.lang + (cell.running && cell.langKernel && cell.langKernel.state === "starting" ? " \u00b7 " + (cell.langKernel.message || ("starting " + (cell.langKernel.display || "its kernel") + "\u2026")) : "")
+                    visible: cell.code && text !== ""
+                    text: nb.ranBy(cell) + (cell.running && cell.langKernel && cell.langKernel.state === "starting" ? " \u00b7 " + (cell.langKernel.message || ("starting " + (cell.langKernel.display || "its kernel") + "\u2026")) : "")
                     color: nb.ansi(5, "#c678dd")
                     font.pixelSize: 10
                     font.weight: Font.DemiBold

@@ -471,6 +471,10 @@ pub mod ffi {
         /// Bring a kernel up to a shell's environment and folder (src/jupyter.rs sync).
         #[qinvokable]
         fn jupyter_sync(self: &Controller, key: &QString, pid: i32, cwd: &QString) -> bool;
+        /// After a run in a shell's kernel: its folder and exports back to
+        /// the pane's shell (jupyter::export_to_shell).
+        #[qinvokable]
+        fn jupyter_export(self: &Controller, key: &QString, pid: i32);
         /// Answer a kernel's input request (jupyter_event {"type": "input"}).
         #[qinvokable]
         fn jupyter_input(self: &Controller, key: &QString, value: &QString) -> bool;
@@ -820,6 +824,10 @@ impl ffi::Controller {
 
     fn jupyter_sync(&self, key: &ffi::QString, pid: i32, cwd: &ffi::QString) -> bool {
         crate::jupyter::sync(&key.to_string(), pid.max(0) as u32, &local_path(cwd))
+    }
+
+    fn jupyter_export(&self, key: &ffi::QString, pid: i32) {
+        crate::jupyter::export_to_shell(&key.to_string(), pid.max(0) as u32)
     }
 
     fn jupyter_execute(&self, key: &ffi::QString, cell: &ffi::QString, code: &ffi::QString) -> bool {

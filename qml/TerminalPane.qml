@@ -188,6 +188,14 @@ Item {
             // kept alive in the pane's notebook, if there's one; else run by
             // its interpreter, once.)
             const L = compose.runLang
+            // (Another shell picked: its kernel, kept alive in the notebook,
+            // else run by it once.)
+            const S = compose.runShellUsed
+            if (S !== "" && controller) {
+                if (notebook.hasKernelFor(S)) { pane.viewMode = "notebook"; notebook.submitLang(t, S); return }
+                const cmd = controller.snippetCommand(S, t, compose.cwd, compose.shellName)
+                if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
+            }
             if (pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
                 pane.viewMode = "notebook"
                 notebook.submitLang(t, L)
@@ -358,6 +366,7 @@ Item {
     NotebookView {
         id: notebook
         z: 15
+        shellName: pane.shellName
         anchors.fill: term
         visible: pane.viewMode === "notebook" && !term.fullScreen && !(pane.runningLong && !notebook.ownRun)
         enabled: visible

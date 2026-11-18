@@ -24,6 +24,23 @@ Rectangle {
     property string aiLang: ""
     readonly property string lang: langOverride !== "" ? langOverride : contentLang !== "" ? contentLang : aiLang !== "" ? aiLang : autoLang
     property string runLang: ""        // the language of what was just run
+    // Another shell picked to run the input ("": the pane's own), and the one
+    // what was just run went to.
+    property string runShell: ""
+    property string runShellUsed: ""
+    readonly property var shellNames: ({ bash: "bash", zsh: "zsh", fish: "fish", nu: "nushell", xonsh: "xonsh", powershell: "PowerShell" })
+    // (The grammar each one is highlighted with.)
+    function shellGrammar(s) { return ({ fish: "fish", nu: "nu" })[s] || "bash" }
+    function pickLanguage(id) {
+        if (id.startsWith("shell:")) {
+            const sh = id.substring(6)
+            runShell = sh === (shellName || "bash") ? "" : sh
+            langOverride = shellGrammar(sh) === "bash" ? "bash" : shellGrammar(sh)
+        } else {
+            runShell = ""
+            langOverride = id
+        }
+    }
     property var langRecent: {
         if (!controller) return []
         try { return JSON.parse(JSON.parse(controller.readTextFile(controller.stateFolder() + "/languages.json")).text || "[]") } catch (e) { return [] }
@@ -120,6 +137,7 @@ Rectangle {
         // the quick local way, so code doesn't go to the shell.)
         if (langTimer.running) { langTimer.stop(); detectLang() }
         runLang = lang
+        runShellUsed = runShell
         useLanguage(runLang)
         edit.text = ""
         viNormal = false
@@ -127,7 +145,7 @@ Rectangle {
     }
     // A command from Tessera itself (a prompt widget's choice, a file or
     // variable clicked in the notebook): run as if typed, in the shell.
-    function runCommand(c) { runLang = "bash"; box.submitted(c) }
+    function runCommand(c) { runLang = "bash"; runShellUsed = ""; box.submitted(c) }
     function historyStep(d) {
         const h = box.history
         if (h.length === 0) return
@@ -875,7 +893,7 @@ Rectangle {
             id: langChip
             base: box.color
             // (Shell code: the shell's own name, zsh, fish.)
-            label: (box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
+            label: (box.runShell !== "" ? box.shellNames[box.runShell] : box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
             tip: "Input language (highlighting, checks, completion)"
             onClicked: { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
         }
@@ -910,7 +928,15 @@ Rectangle {
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         onOpened: { langFilter.text = ""; langFilter.forceActiveFocus() }
         onClosed: edit.forceActiveFocus()
-        readonly property var options: [["", "Automatic (" + (box.contentLang !== "" ? box.contentLang : box.autoLang) + ")"]].concat(box.languages)
+        // (The shells by name, this pane's first: picking another runs the
+        // input in it, in the pane's folder and environment.)
+        readonly property var shellOptions: {
+            const mine = box.shellName || "bash"
+            return [["shell:" + mine, (box.shellNames[mine] || mine) + " (this pane's shell)"]]
+                .concat(Object.keys(box.shellNames).filter(k => k !== mine).map(k => ["shell:" + k, box.shellNames[k]]))
+        }
+        readonly property var options: [["", "Automatic (" + (box.contentLang !== "" ? box.contentLang : box.autoLang) + ")"]].concat(shellOptions, box.languages.filter(l => l[0] !== "bash"))
+        function isPicked(id) { return id.startsWith("shell:") ? box.langOverride !== "" && (box.runShell !== "" ? id === "shell:" + box.runShell : id === "shell:" + (box.shellName || "bash") && box.langOverride === "bash") : box.runShell === "" && box.langOverride === id }
         readonly property var shown: options.filter(o => langFilter.text === "" || (o[1] + " " + o[0]).toLowerCase().indexOf(langFilter.text.toLowerCase()) >= 0)
         contentItem: Column {
             spacing: 4
@@ -921,7 +947,7 @@ Rectangle {
                 color: Theme.text
                 font.pixelSize: 12
                 background: Rectangle { radius: 6; color: Theme.bg; border.color: langFilter.activeFocus ? Theme.accent : Theme.divider }
-                Keys.onReturnPressed: if (langPop.shown.length > 0) { box.langOverride = langPop.shown[0][0]; langPop.close() }
+                Keys.onReturnPressed: if (langPop.shown.length > 0) { box.pickLanguage(langPop.shown[0][0]); langPop.close() }
                 Keys.onEscapePressed: langPop.close()
             }
             ListView {
@@ -938,10 +964,10 @@ Rectangle {
                     width: langList.width
                     height: 24
                     radius: 5
-                    color: lh.hovered ? Theme.tabHover : (box.langOverride === modelData[0] ? Theme.mix(Theme.bg, Theme.accent, 0.25) : "transparent")
+                    color: lh.hovered ? Theme.tabHover : (langPop.isPicked(modelData[0]) ? Theme.mix(Theme.bg, Theme.accent, 0.25) : "transparent")
                     Text { x: 8; anchors.verticalCenter: parent.verticalCenter; text: modelData[1]; color: Theme.text; font.pixelSize: 12 }
                     HoverHandler { id: lh }
-                    TapHandler { onTapped: { box.langOverride = modelData[0]; langPop.close() } }
+                    TapHandler { onTapped: { box.pickLanguage(modelData[0]); langPop.close() } }
                 }
             }
         }

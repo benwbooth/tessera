@@ -4,8 +4,17 @@
 TESSERA_SHELL_INTEGRATION=1
 autoload -Uz add-zsh-hook
 __tessera_running=
+# What a kernel in another shell changed (its folder, exports), handed over
+# by Tessera: applied before the next command and prompt.
+__tessera_apply() {
+    local d="${XDG_RUNTIME_DIR:-/tmp}/tessera-env"
+    [[ -f "$d/$$.apply" ]] || return 0
+    source "$d/$$.apply"
+    command rm -f "$d/$$.apply" "$d/$$.cwd"
+}
 __tessera_precmd() {
     local st=$?
+    __tessera_apply
     [[ -n $__tessera_running ]] && printf '\e]133;D;%s\a' $st
     __tessera_running=
     printf '\e]7;file://%s%s\a' "${HOST:-localhost}" "$PWD"
@@ -14,6 +23,7 @@ __tessera_precmd() {
     printf '\e]133;A;redraw=1\a'
 }
 __tessera_preexec() {
+    __tessera_apply
     __tessera_running=1
     # The command line (OSC 1337 TesseraCommand, base64), then the mark: in
     # that order, so the notebook pairs each command with its output.
