@@ -1720,6 +1720,10 @@ ApplicationWindow {
     P.Menu {
         id: termMenu
         // -- what's under the pointer
+        // (A file under the pointer: shown in Tessera, FilePreview.)
+        P.MenuItem { icon.name: "document-preview"; text: "View “" + win.shortLabel(contextLink.replace(/^file:\/\//, "")) + "”"
+            visible: contextLink.startsWith("file://")
+            onTriggered: { const p = paneOf(contextView); let f = contextLink.replace(/^file:\/\/[^/]*/, ""); try { f = decodeURIComponent(f) } catch (e) {} if (p) p.viewFile(f) } }
         P.MenuItem { icon.name: "internet-services"; text: "Open “" + win.shortLabel(contextLink.replace(/^file:\/\//, "")) + "”"
             visible: contextLink !== ""; onTriggered: Qt.openUrlExternally(contextLink) }
         P.MenuItem { icon.name: "edit-copy"; text: "Copy Link Address"; visible: contextLink !== ""

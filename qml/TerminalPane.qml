@@ -342,7 +342,7 @@ Item {
         onTerminalRequested: { pane.viewMode = "terminal"; term.forceActiveFocus() }
         onCommandRequested: (c) => compose.runCommand(c)
         onInsertRequested: (t) => { compose.focusEditor(); compose.insert(t) }
-        onViewRequested: (p) => { preview.path = ""; preview.path = p; preview.visible = true; preview.forceActiveFocus() }
+        onViewRequested: (p) => pane.viewFile(p)
         onVisibleChanged: if (visible && !(pane.editorOn && pane.preferEditor) && pane.focused) Qt.callLater(forceActiveFocus)
     }
     // Files dropped on the pane: their paths, quoted, into the editor (or
@@ -380,7 +380,8 @@ Item {
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onClosed: { visible = false; if (pane.editorOn) compose.focusEditor(); else term.forceActiveFocus() }
     }
-    // A file, shown (View, from a file listing).
+    // A file, shown (View, from a file listing or the terminal's menu).
+    function viewFile(p) { preview.path = ""; preview.path = p; preview.visible = true; preview.forceActiveFocus() }
     FilePreview {
         id: preview
         visible: false
