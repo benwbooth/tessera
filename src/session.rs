@@ -1341,7 +1341,7 @@ impl Session {
                 let vt = format_selection_as(&self.term, &sel, Format::Vt, true);
                 let cur = self.term.cursor_x().ok().zip(self.term.cursor_y().ok());
                 let at = cur.map(|(x, y)| format!("\x1b[{};{}H", y + 1, x + 1)).unwrap_or_default();
-                format!("\x1b[2J\x1b[H{}{at}", vt.replace('\n', "\r\n"))
+                format!("\x1b[2J\x1b[H{}{at}", vt.replace("\r\n", "\n").replace('\n', "\r\n"))
             }
             _ => String::new(),
         };

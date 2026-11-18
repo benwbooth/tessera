@@ -133,9 +133,10 @@ inline void tessera_test_mouse(int kind, double x, double y, int button, int mod
         if (!w->property("showAtStart").toBool() || !w->isVisible()) continue;
         const QPointF p(x, y);
         const Qt::MouseButton b = button == 2 ? Qt::RightButton : Qt::LeftButton;
-        const QEvent::Type t = kind == 0 ? QEvent::MouseButtonPress : kind == 1 ? QEvent::MouseMove : QEvent::MouseButtonRelease;
-        const Qt::MouseButton which = kind == 1 ? Qt::NoButton : b;
-        const Qt::MouseButtons held = kind == 2 ? Qt::MouseButtons() : Qt::MouseButtons(b);
+        // (kind 3: a move with no button held, to hover.)
+        const QEvent::Type t = kind == 0 ? QEvent::MouseButtonPress : kind == 1 || kind == 3 ? QEvent::MouseMove : QEvent::MouseButtonRelease;
+        const Qt::MouseButton which = kind == 1 || kind == 3 ? Qt::NoButton : b;
+        const Qt::MouseButtons held = kind == 2 || kind == 3 ? Qt::MouseButtons() : Qt::MouseButtons(b);
         QMouseEvent e(t, p, p, w->mapToGlobal(p), which, held, Qt::KeyboardModifiers(mods));
         // (A real timestamp: taps are timed from the press.)
         static QElapsedTimer clock;

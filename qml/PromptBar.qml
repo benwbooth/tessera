@@ -598,9 +598,12 @@ Item {
             HoverHandler { id: cdh; cursorShape: Qt.PointingHandCursor }
             // (Opened once the click is done: opened during it, the release closed it again.)
             TapHandler { onTapped: { bar.cdTapAt = Date.now(); Qt.callLater(() => bar.openChoices("dir", w)) } }
-            ToolTip.visible: cdh.hovered
-            ToolTip.delay: 400
-            ToolTip.text: "Recent and frequent folders (cd history)"
+            ToolTip {
+                visible: cdh.hovered && !choicesPop.opened
+                delay: 300
+                topPadding: 4.001
+                text: "cd history: this tab's folders, then recent and frequent ones"
+            }
         }
         Loader {
             id: body
@@ -651,7 +654,7 @@ Item {
                 bar.dropAt = bar.dropTarget()
             }
         }
-        ToolTip.visible: hover.hovered && bar.hoverPath === "" && bar.dragFrom < 0 && !choicesPop.opened && !widgetMenu.opened
+        ToolTip.visible: hover.hovered && !cdh.hovered && bar.hoverPath === "" && bar.dragFrom < 0 && !choicesPop.opened && !widgetMenu.opened
         ToolTip.delay: 900
         ToolTip.text: bar.title(w.wd.name) + " — click for choices, drag to move, right-click to style"
     }
