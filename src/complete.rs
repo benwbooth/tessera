@@ -547,6 +547,119 @@ pub fn parse_tldr(text: &str) -> (String, Vec<(String, String)>) {
     (desc.join(" "), examples)
 }
 
+/// A man page as plain text ("" when there's none).
+fn man_text(page: &str) -> String {
+    if cfg!(windows) {
+        return String::new();
+    }
+    let Ok(o) = std::process::Command::new("man")
+        .args(["-P", "cat", page])
+        .env("MANWIDTH", "400")
+        .env("MAN_KEEP_FORMATTING", "0")
+        .env("GROFF_NO_SGR", "1")
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return String::new();
+    };
+    let raw = String::from_utf8_lossy(&o.stdout);
+    let mut text = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        if c == '\u{8}' {
+            text.pop();
+        } else {
+            text.push(c);
+        }
+    }
+    text
+}
+
+/// What an exit status means for a command: the shell's own (not found,
+/// a signal), else what its man page says (EXIT STATUS and the like).
+pub fn exit_meaning(command: &str, status: i32) -> String {
+    match status {
+        0 => return "success".into(),
+        126 => return "found but couldn't be run (not executable?)".into(),
+        127 => return "command not found".into(),
+        s if s > 128 && s < 160 => {
+            let sig = s - 128;
+            let name = ["", "HUP", "INT (Ctrl+C)", "QUIT", "ILL", "TRAP", "ABRT", "BUS", "FPE", "KILL", "USR1", "SEGV (crashed)", "USR2", "PIPE", "ALRM", "TERM"]
+                .get(sig as usize)
+                .copied()
+                .unwrap_or("");
+            return if name.is_empty() { format!("killed by signal {sig}") } else { format!("killed by signal {sig}, SIG{name}") };
+        }
+        _ => {}
+    }
+    // (The program: the first word that isn't an assignment, sudo and the like.)
+    let prog = command
+        .split_whitespace()
+        .find(|w| !w.contains('=') && !matches!(*w, "sudo" | "env" | "time" | "nice" | "command" | "exec" | "doas"))
+        .unwrap_or("")
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    if prog.is_empty() || !prog.chars().all(|c| c.is_ascii_alphanumeric() || "-_.+".contains(c)) {
+        return String::new();
+    }
+    static CACHE: std::sync::Mutex<Option<HashMap<String, String>>> = std::sync::Mutex::new(None);
+    let text = {
+        let mut c = CACHE.lock().unwrap();
+        let m = c.get_or_insert_with(HashMap::new);
+        if let Some(t) = m.get(&prog) {
+            t.clone()
+        } else {
+            let t = man_text(&prog);
+            m.insert(prog.clone(), t.clone());
+            t
+        }
+    };
+    exit_from_man(&text, status)
+}
+
+/// The sentence a man page's exit section gives a status.
+fn exit_from_man(text: &str, status: i32) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let heads = ["EXIT STATUS", "EXIT VALUES", "EXIT CODES", "RETURN VALUE", "DIAGNOSTICS", "EXIT"];
+    // (A heading of its own, or a line inside the description: "Exit status:".)
+    let is_head = |l: &str| {
+        let t = l.trim().trim_end_matches(':');
+        heads.iter().any(|h| t.eq_ignore_ascii_case(h)) && (l.trim_end() == l.trim() || l.trim_end().ends_with(':'))
+    };
+    let Some(start) = lines.iter().position(|l| is_head(l)) else { return String::new() };
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let base = indent(lines[start]);
+    let section: Vec<&str> = lines[start + 1..].iter().take_while(|l| l.trim().is_empty() || indent(l) > base || (base == 0 && l.starts_with(' '))).copied().collect();
+    let n = status.to_string();
+    for (i, l) in section.iter().enumerate() {
+        let t = l.trim();
+        // "1      Some error." / "1  if ..." / "1: ..." / "1 - ..."
+        let rest = t.strip_prefix(&n).filter(|r| r.is_empty() || r.starts_with([' ', '\t', ':', '-', ')', '.']));
+        if let Some(r) = rest {
+            let mut m = r.trim_start_matches([':', '-', ')', '.']).trim().to_string();
+            // (The meaning on the next line, indented under the number.)
+            if m.is_empty() {
+                m = section.get(i + 1).map(|x| x.trim().to_string()).unwrap_or_default();
+            }
+            if !m.is_empty() {
+                return m;
+            }
+        }
+    }
+    // (In prose: "Exit status is 0 if OK, 1 if minor problems, 2 if serious trouble.")
+    let prose = section.iter().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
+    for part in prose.split([',', ';', '.']) {
+        let p = part.trim();
+        if let Some(i) = p.find(&format!("{n} if ")) {
+            if i == 0 || !p.as_bytes()[i - 1].is_ascii_digit() {
+                return p[i + n.len() + 4..].trim().to_string();
+            }
+        }
+    }
+    String::new()
+}
+
 fn man_options(page: &str) -> Vec<(String, String)> {
     if cfg!(windows) {
         return Vec::new();
@@ -1326,6 +1439,19 @@ mod live {
         let _ = std::fs::remove_dir_all(&d);
         labels.sort();
         assert_eq!(labels, ["alpha/", "beta/"], "{labels:?}");
+    }
+
+
+    #[test]
+    fn exit_meanings() {
+        assert_eq!(super::exit_meaning("anything", 127), "command not found");
+        assert!(super::exit_meaning("sleep 9", 130).contains("INT"));
+        let ls = "DESCRIPTION\n     List information.\n\n   Exit status:\n     0      if OK,\n\n     1      if minor problems (e.g., cannot access subdirectory),\n\n     2      if serious trouble (e.g., cannot access command-line argument).\n\nAUTHOR\n";
+        assert_eq!(super::exit_from_man(ls, 2), "if serious trouble (e.g., cannot access command-line argument).");
+        let page = "NAME\n       ls\n\nEXIT STATUS\n       0      if OK,\n\n       1      if minor problems (e.g., cannot access subdirectory),\n\n       2      if serious trouble (e.g., cannot access command-line argument).\n\nAUTHOR\n";
+        assert_eq!(super::exit_from_man(page, 2), "if serious trouble (e.g., cannot access command-line argument).");
+        let grep = "EXIT STATUS\n       Normally the exit status is 0 if a line is selected, 1 if no lines were selected, and 2 if an error occurred.\n";
+        assert_eq!(super::exit_from_man(grep, 1), "no lines were selected");
     }
 
 }

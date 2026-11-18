@@ -183,6 +183,8 @@ Item {
         shellPid: pane.shellPid
         promptEngine: pane.promptEngine
         promptSegments: pane.promptSegments
+        // (A shell picked: its kernel starts now, ready by the first Enter.)
+        onRunShellChanged: if (runShell !== "" && notebook.hasKernelFor(runShell)) notebook.warmLang(runShell)
         onSubmitted: (t) => {
             if (forNotebook) { notebook.submit(t); return }
             // (Code in another language than the shell's: its Jupyter kernel,

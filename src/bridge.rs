@@ -475,6 +475,9 @@ pub mod ffi {
         /// the pane's shell (jupyter::export_to_shell).
         #[qinvokable]
         fn jupyter_export(self: &Controller, key: &QString, pid: i32);
+        /// What an exit status means for a command (complete::exit_meaning).
+        #[qinvokable]
+        fn exit_meaning(self: &Controller, command: &QString, status: i32) -> QString;
         /// Answer a kernel's input request (jupyter_event {"type": "input"}).
         #[qinvokable]
         fn jupyter_input(self: &Controller, key: &QString, value: &QString) -> bool;
@@ -824,6 +827,10 @@ impl ffi::Controller {
 
     fn jupyter_sync(&self, key: &ffi::QString, pid: i32, cwd: &ffi::QString) -> bool {
         crate::jupyter::sync(&key.to_string(), pid.max(0) as u32, &local_path(cwd))
+    }
+
+    fn exit_meaning(&self, command: &ffi::QString, status: i32) -> ffi::QString {
+        qs(&crate::complete::exit_meaning(&command.to_string(), status))
     }
 
     fn jupyter_export(&self, key: &ffi::QString, pid: i32) {

@@ -432,6 +432,12 @@ FocusScope {
     // ---- a kernel per language (cells in another language than the notebook's) ----
     property var langKernels: ({})      // lang -> {name, display, state, message, queue: [cid]}
     property string shellName: ""       // the pane's shell (zsh, bash, fish, ...)
+    function exitTip(c) {
+        const st = c.fromTerm ? c.status : (c.failed ? 1 : 0)
+        if (!c.fromTerm) return c.failed ? "Failed (an error)" : "Done"
+        const m = controller ? controller.exitMeaning(c.source, st) : ""
+        return "Exit " + st + (m !== "" ? ": " + m : "")
+    }
     // What ran a cell: the pane's shell, its language's kernel, or the
     // notebook's kernel.
     function ranBy(c) {
@@ -468,6 +474,17 @@ FocusScope {
             return
         }
         setLang(l, { name: spec.name, display: spec.display, state: "starting", message: "" })
+        controller.jupyterStart(langKey(l), spec.name, shellDir, shellPid)
+    }
+    // Start a language's kernel ahead of its first cell (a shell picked in
+    // the editor), so the run doesn't wait for it to come up.
+    function warmLang(l) {
+        if (kernels.length === 0) listKernels()
+        const e = langKernels[l]
+        if (e && e.state !== "dead") return
+        const spec = langSpec(l)
+        if (!spec) return
+        setLang(l, { name: spec.name, display: spec.display, state: "starting", message: "", queue: [] })
         controller.jupyterStart(langKey(l), spec.name, shellDir, shellPid)
     }
     function execLang(cid, l) {
@@ -1211,21 +1228,33 @@ FocusScope {
                 width: parent.width - 20
                 height: 26
                 spacing: 6
-                // Status; a click runs it (or stops it).
+                // Status; a click runs it (or stops it). (The spinner turns on its
+                // own, so the mark after it is never left at an angle.)
                 Text { topPadding: 0.001;
-                    text: cell.running ? "◌" : cell.ended > 0 || cell.fromTerm ? (cell.failed ? "✘" : "✓") : cell.code ? "▶" : "M↓"
+                    text: cell.running ? "" : cell.ended > 0 || cell.fromTerm ? (cell.failed ? "✘" : "✓") : cell.code ? "▶" : "M↓"
                     color: cell.running ? Theme.accent : cell.ended > 0 || cell.fromTerm ? (cell.failed ? nb.ansi(1, "#e06c75") : nb.ansi(2, "#98c379"))
                          : statusHover.hovered ? Theme.accent : Theme.textDim
                     font.pixelSize: 13
                     font.weight: Font.Bold
                     Layout.minimumWidth: 14
                     horizontalAlignment: Text.AlignHCenter
-                    RotationAnimation on rotation { running: cell.running; from: 0; to: 360; duration: 1200; loops: Animation.Infinite; onRunningChanged: if (!running) parent.rotation = 0 }
+                    Text {
+                        anchors.centerIn: parent
+                        visible: cell.running
+                        text: "◌"
+                        color: Theme.accent
+                        font.pixelSize: 13
+                        font.weight: Font.Bold
+                        RotationAnimation on rotation { running: cell.running; from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
+                    }
                     HoverHandler { id: statusHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: { nb.current = cell.index; cell.running ? nb.interrupt() : nb.run(cell.index) } }
                     ToolTip.visible: statusHover.hovered
-                    ToolTip.delay: 500
-                    ToolTip.text: cell.running ? "Interrupt" : cell.code ? "Run (Ctrl+Enter)" : "Show it (Ctrl+Enter)"
+                    ToolTip.delay: 400
+                    // (Done: its exit status, and what it means for the command.)
+                    ToolTip.text: cell.running ? "Interrupt"
+                        : (cell.ended > 0 || cell.fromTerm) && cell.code ? nb.exitTip(cell) + "\nClick to run it again"
+                        : cell.code ? "Run (Ctrl+Enter)" : "Show it (Ctrl+Enter)"
                 }
                 // (What runs it: the shell, a language's kernel (and it coming
                 // up), the notebook's kernel.)

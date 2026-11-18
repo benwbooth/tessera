@@ -446,6 +446,72 @@ const FETCHED: &[Fetched] = &[
     Fetched { name: "tessera-gnuplot", display: "gnuplot (gnuplot_kernel, uv)", language: "gnuplot", how: How::Uv { pip: &["gnuplot_kernel"], runtime: &["gnuplot"], args: &["-m", "gnuplot_kernel", "-f", CF] }, interrupt_message: false },
 ];
 
+/// A `nix shell <installables> -c prog args` command as prog run from the
+/// built environment: its bin folders for PATH. Built (and remembered) the
+/// first time; after that it starts at once, and is built again in the
+/// background once a week, for updates.
+fn nix_cached(argv: &[String], status: &dyn Fn(&str)) -> Option<(Vec<String>, String)> {
+    if argv.len() < 4 || argv[0] != "nix" || argv[1] != "shell" {
+        return None;
+    }
+    let c = argv.iter().position(|a| a == "-c")?;
+    let what: Vec<String> = argv[2..c].to_vec();
+    let rest = argv[c + 1..].to_vec();
+    let prog = rest.first()?.clone();
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    what.hash(&mut h);
+    let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/tessera/kernel-envs");
+    let _ = std::fs::create_dir_all(&dir);
+    let list = dir.join(format!("{:016x}.paths", h.finish()));
+    let build = |what: &[String], list: &Path| -> bool {
+        let mut cmd = Command::new("nix");
+        cmd.arg("build").arg("--no-link").arg("--print-out-paths");
+        cmd.args(what.iter().filter(|a| *a != "--quiet"));
+        let Ok(out) = cmd.stdin(Stdio::null()).stderr(Stdio::null()).output() else { return false };
+        let paths = String::from_utf8_lossy(&out.stdout).to_string();
+        if !out.status.success() || paths.trim().is_empty() {
+            return false;
+        }
+        // (Kept from garbage collection while in use: a root per path.)
+        for (i, p) in paths.lines().enumerate() {
+            let root = list.with_extension(format!("root{i}"));
+            let _ = std::fs::remove_file(&root);
+            let _ = Command::new("nix-store").args(["--add-root"]).arg(&root).args(["--realise", p]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        }
+        std::fs::write(list, paths).is_ok()
+    };
+    let read = |list: &Path| -> Option<Vec<String>> {
+        let t = std::fs::read_to_string(list).ok()?;
+        let v: Vec<String> = t.lines().filter(|l| !l.is_empty()).map(String::from).collect();
+        (!v.is_empty() && v.iter().all(|p| Path::new(p).exists())).then_some(v)
+    };
+    let paths = match read(&list) {
+        Some(v) => {
+            let old = std::fs::metadata(&list).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a > Duration::from_secs(7 * 86400));
+            if old {
+                let (what, list) = (what.clone(), list.clone());
+                std::thread::spawn(move || {
+                    let _ = build(&what, &list);
+                });
+            }
+            v
+        }
+        None => {
+            status("Getting it with Nix (the first time takes a while)…");
+            if !build(&what, &list) {
+                return None;
+            }
+            read(&list)?
+        }
+    };
+    let bins: Vec<String> = paths.iter().map(|p| format!("{p}/bin")).filter(|b| Path::new(b).is_dir()).collect();
+    let exe = bins.iter().map(|b| format!("{b}/{prog}")).find(|e| Path::new(e).exists()).unwrap_or(prog);
+    let mut argv = vec![exe];
+    argv.extend(rest.into_iter().skip(1));
+    Some((argv, bins.join(":")))
+}
+
 fn nix_shell(attrs: &[&str]) -> Vec<String> {
     let mut v = vec!["nix".to_string(), "shell".into(), "--quiet".into()];
     v.extend(attrs.iter().map(|a| format!("nixpkgs#{a}")));
@@ -611,10 +677,21 @@ impl Kernel {
             (spec.argv.clone(), spec.env.clone())
         };
         let argv: Vec<String> = spec_argv.iter().map(|a| a.replace("{connection_file}", &conn_file.to_string_lossy())).collect();
+        // (`nix shell ... -c prog`: the environment built once and kept, the
+        // program run from it straight away.)
+        let (argv, nix_path) = match nix_cached(&argv, &|m: &str| sink(json!({"type": "status", "state": "starting", "message": m}))) {
+            Some((a, p)) => (a, Some(p)),
+            None => (argv, None),
+        };
         let mut cmd = Command::new(&argv[0]);
         // (The shell's environment, when the pane gave one: see start.)
         if let Some(env) = &shell_env {
             cmd.env_clear().envs(env.iter().cloned());
+        }
+        let mut spec_env = spec_env;
+        if let Some(p) = nix_path {
+            let base = shell_env.as_ref().and_then(|e| e.iter().find(|(k, _)| k == "PATH").map(|(_, v)| v.clone())).or_else(|| std::env::var("PATH").ok()).unwrap_or_default();
+            spec_env.insert("PATH".into(), format!("{p}:{base}"));
         }
         cmd.args(&argv[1..]).envs(&spec_env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
         if !cwd.is_empty() && Path::new(cwd).is_dir() {
@@ -1889,6 +1966,39 @@ mod tests {
         assert!(text.contains("unset TESSERA_T0"), "{text}");
         assert!(text.contains("builtin cd -- '/tmp'"), "{text}");
         assert!(!text.contains("PATH="), "only what the cell changed: {text}");
+    }
+
+
+    /// How long the bash kernel takes to start and to run: --ignored --nocapture.
+    #[test]
+    #[ignore]
+    fn bash_timing() {
+        let (tx, rx) = std::sync::mpsc::channel::<Value>();
+        let tx = Mutex::new(tx);
+        let sink: Sink = Arc::new(move |v| {
+            let _ = tx.lock().unwrap().send(v);
+        });
+        let t = std::time::Instant::now();
+        let k = Kernel::start("tessera-bash", "/", None, sink).unwrap();
+        eprintln!("spawned {:?}", t.elapsed());
+        loop {
+            let v = rx.recv_timeout(Duration::from_secs(900)).expect("up");
+            if v["type"] == "info" {
+                break;
+            }
+        }
+        eprintln!("info {:?}", t.elapsed());
+        for n in 0..3 {
+            let t = std::time::Instant::now();
+            assert!(k.execute(&format!("c{n}"), "echo hi"));
+            loop {
+                if rx.recv_timeout(Duration::from_secs(60)).expect("event")["type"] == "done" {
+                    break;
+                }
+            }
+            eprintln!("run {n} {:?}", t.elapsed());
+        }
+        k.stop();
     }
 
 }
