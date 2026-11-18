@@ -569,10 +569,22 @@ Rectangle {
         onFixRequested: box.askFix()
     }
 
+    // The prompt character, as the shell shows it: green, red after a failure.
+    Text {
+        id: promptChar
+        x: 10
+        y: flick.y - flick.contentY + 0.001
+        visible: y >= flick.y - 1
+        text: "\u276F"
+        font: edit.font
+        color: box.view && box.view.lastStatus !== 0 ? box.ansi(1, "#e06c75") : box.ansi(2, "#98c379")
+        renderType: Text.NativeRendering
+    }
+
     Flickable {
         id: flick
         anchors.fill: parent
-        anchors.leftMargin: 10
+        anchors.leftMargin: 10 + promptChar.implicitWidth + fm.advanceWidth(" ")
         anchors.rightMargin: modeTag.width + 18
         anchors.topMargin: 7 + (promptBar.visible ? promptBar.height + 4 : 0)
         anchors.bottomMargin: 7
