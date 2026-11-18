@@ -644,9 +644,13 @@ Rectangle {
                 // A "# request": the command it'd be, from the AI, as the
                 // suggestion (taken, it replaces the line).
                 if (/^#\s*\S/.test(text) && text.indexOf("\n") < 0) {
-                    box.ghost = ""
                     box.nlCommand = ""
+                    // (The words finished as they're typed; the command once they're done.)
+                    const full = box.lastGhostBase + box.ghost
+                    if (box.ghost !== "" && !box.ghost.startsWith("  \u2192") && full.startsWith(text) && full.length > text.length) box.ghost = full.substring(text.length)
+                    else box.ghost = ""
                     box.lastGhostBase = text
+                    if (box.ghost === "") reqTimer.restart()
                     nlTimer.restart()
                     if (text.trim() !== box.checkedText) box.aiNote = ""
                     return
@@ -978,10 +982,23 @@ Rectangle {
     property string nlCommand: ""       // the command a "# request" would be
     property string nlAsked: ""
     Timer {
-        id: nlTimer
-        interval: 650
+        id: reqTimer
+        interval: 250
         onTriggered: {
             const t = edit.text
+            if (!box.aiNL || !box.inlineReady || !/^#\s*\S/.test(t) || t.indexOf("\n") >= 0 || edit.cursorPosition !== t.length) return
+            box.reqAsked = t
+            box.controller.aiRun(box.aiKey + "-req", "request", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(8) + "\n\nComplete this request: " + t.replace(/^#\s*/, "") }]), box.aiContext())
+        }
+    }
+    property string reqAsked: ""
+    Timer {
+        id: nlTimer
+        interval: 1400
+        onTriggered: {
+            const t = edit.text
+            // (Only when the words are done: nothing left to finish them with.)
+            if (box.ghost !== "" && !box.ghost.startsWith("  \u2192")) return
             if (!box.aiNL || !box.chatReady || !/^#\s*\S/.test(t) || t.indexOf("\n") >= 0 || t === box.nlAsked) return
             box.nlAsked = t
             box.controller.aiRun(box.aiKey + "-nl", "command", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(10) + "\n\nWhat I want: " + t.replace(/^#\s*/, "") }]), box.aiContext())
@@ -1038,8 +1055,16 @@ Rectangle {
                 box.lastGhostBase = t
                 // (Still being written, then: a check's complaint doesn't apply.)
                 if (box.ghost !== "") { box.aiNote = ""; box.checkedText = "" }
+            } else if (key === box.aiKey + "-req") {
+                const t = edit.text
+                if (error || t !== box.reqAsked || edit.cursorPosition !== t.length) return
+                // (The reply is the whole request; what follows what's typed is the suggestion.)
+                const body = t.replace(/^#\s*/, ""), r = reply.trim().replace(/^#\s*/, "").split("\n")[0]
+                if (r.toLowerCase().startsWith(body.toLowerCase()) && r.length > body.length) {
+                    box.ghost = r.substring(body.length)
+                    box.lastGhostBase = t
+                }
             } else if (key === box.aiKey + "-nl") {
-                if (box.controller.testEnv("COMPOSE") !== "") console.log("nl reply: error=" + error + " asked=" + JSON.stringify(box.nlAsked) + " text=" + JSON.stringify(edit.text) + " reply=" + JSON.stringify(reply.slice(0, 200)))
                 if (error || edit.text !== box.nlAsked) return
                 const cmd = reply.trim().replace(/^```\w*\n?|```$/g, "").trim().split("\n")[0]
                 if (cmd === "") return

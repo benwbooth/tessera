@@ -300,6 +300,12 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
             "{base} Complete the command the user is typing. Reply with ONLY the complete command line (including what they typed), \
              no explanation, no quotes, no code fence. If you have no good completion, reply with exactly what they typed."
         ),
+        "request" => format!(
+            "{base} The user is writing, in plain words, what they want done in their terminal (a request the AI will turn into a command). \
+             Finish their sentence with the ending they most likely mean, from their recent commands and folder: add a few words \
+             (what to find, where, how). Reply with ONLY the whole request: what they typed, exactly as typed, then your ending. \
+             One line, no quotes, no explanation. Only if it's plainly finished already, reply with exactly what they typed."
+        ),
         "command" => format!(
             "{base} Turn the user's request into one shell command (or a short pipeline) for their shell. \
              Reply with ONLY the command, no explanation, no code fence."
