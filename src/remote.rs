@@ -273,7 +273,30 @@ pub fn static_build(arch: &str) -> Option<PathBuf> {
     if let Some(h) = std::env::var_os("HOME") {
         cands.push(PathBuf::from(h).join(".cache/tessera").join(&name));
     }
-    cands.into_iter().find(|p| p.is_file() && elf_static_for(p, arch))
+    if let Some(p) = cands.into_iter().find(|p| p.is_file() && elf_static_for(p, arch)) {
+        return Some(p);
+    }
+    download(arch)
+}
+
+/// The release's static tesserad for `arch` (this version's), fetched once
+/// into ~/.cache/tessera: for builds that carry none (a dev build).
+fn download(arch: &str) -> Option<PathBuf> {
+    let version = env!("CARGO_PKG_VERSION");
+    let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/tessera");
+    let file = dir.join(format!("tesserad-{version}-{arch}-linux"));
+    if file.is_file() && elf_static_for(&file, arch) {
+        return Some(file);
+    }
+    let url = format!("https://github.com/benwbooth/tessera/releases/download/v{version}/tesserad-{arch}-linux");
+    let tmp = dir.join(format!(".tesserad-{}", std::process::id()));
+    let ok = std::fs::create_dir_all(&dir).is_ok()
+        && Command::new("curl").args(["-fsSL", "--max-time", "120", "-o"]).arg(&tmp).arg(&url).stdin(Stdio::null()).status().is_ok_and(|s| s.success());
+    if ok && elf_static_for(&tmp, arch) && std::fs::rename(&tmp, &file).is_ok() {
+        return Some(file);
+    }
+    let _ = std::fs::remove_file(&tmp);
+    None
 }
 
 /// Whether `p` is an ELF executable for `arch` with no dynamic loader.

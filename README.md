@@ -23,7 +23,8 @@ built-in `tmux -CC`, and shells that survive closing the window.
 
 - **Ghostty inside.** Emulation by [libghostty-vt](https://github.com/uzaaft/libghostty-rs): parsing, reflow, scrollback, Kitty keyboard protocol, mouse reporting, OSC 8 links, OSC 133 prompts.
 - **Native text.** Rows are painted with QPainter (FreeType, glyphs on exact cells) only when they change, then composited as GPU textures. Box drawing and block characters are drawn as shapes, so lines join at any line height; Powerline and Nerd Font symbols keep their colors.
-- **Shells that outlive the window.** A small daemon owns the shells. Close the window, update, or crash, and the next launch reattaches every shell — splits, scrollback, screen and all. After a reboot, tabs come back in their folders under their last screen.
+- **Shells that outlive the window.** `tesserad`, a small backend in the spirit of tmux's server, owns the shells, the notebook kernels, each pane's notebook cells, and Nix runs. Close the window, update, or crash, and the next launch reattaches every shell and notebook — splits, scrollback, screen, running kernels and what they printed meanwhile. After a reboot, tabs come back in their folders under their last screen.
+- **SSH hosts, the same way.** Pick a host from the + menu: its shells and notebook kernels run there, in that host's `tesserad`, reached through one shared SSH connection. A host without `tesserad` gets a static build of it copied over (to `~/.local/bin`, or `~`). Reconnecting attaches to what's still running there. Features that need Nix say how to install it when the host has none.
 - **`tmux -CC` built in.** tmux windows become native tabs and panes native splits.
 - **Shell integration without setup.** zsh and fish load it automatically: command marks, jump between prompts, select a command's output, new tabs in the same folder, and prompts that redraw cleanly when the window or text size changes.
 - **A modern window.** The tab bar is the title bar, with KDE-style buttons on the right. Tabs drag to reorder, out to a new window, or into another window, shells and all. A split **+** button opens profiles, other shells and SSH hosts from `~/.ssh/config`.
@@ -108,6 +109,12 @@ nix develop -c cargo build
 target/debug/tessera
 ```
 
+That builds both `tessera` (the window) and `tesserad` (the backend, a crate
+of its own in `tesserad/` with no Qt). The static `tesserad` copied to SSH
+hosts: `nix build .#tesserad-static` (the `tessera` package carries it in
+`libexec/tessera/tesserad-<arch>-linux`; elsewhere set
+`TESSERA_TESSERAD_STATIC` to it).
+
 The dev shell provides Qt 6 and Zig 0.15 (libghostty-vt's build compiles Ghostty).
 Without Nix: Rust, Qt 6 (set `QMAKE` to its qmake) and Zig 0.15 on `PATH`, then
 `cargo build --release`. Releases are built by `.github/workflows/release.yml`
@@ -115,7 +122,9 @@ Without Nix: Rust, Qt 6 (set `QMAKE` to its qmake) and Zig 0.15 on `PATH`, then
 
 Testing: `--screenshot out.png` saves the window and quits, `--run CMD` types a command into the first terminal, `--then CMD` types another a few seconds later into whichever terminal has focus, `--prefs PAGE` opens Preferences (the screenshot is then of Preferences). Set `TESSERA_SOCKET`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to keep a test run apart from your own sessions and settings.
 
-Development: `devloop start tessera` (from home-services) rebuilds and restarts the window on every change; shells survive, since they live in the daemon.
+Tests: `cargo test -p tesserad` runs tesserad end to end on a scratch socket (cells kept while no window is attached, kernels reattaching); `TESSERA_TESSERAD_STATIC=… cargo test -p tesserad -- --ignored ssh_localhost` deploys it over `ssh localhost` into a scratch home.
+
+Development: `devloop start tessera` (from home-services) rebuilds and restarts the window on every change; shells and kernels survive, since they live in tesserad.
 
 ## License
 

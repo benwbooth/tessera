@@ -46,6 +46,7 @@ fi
 cargo build --release --locked
 
 install -Dm755 target/release/tessera /app/bin/tessera
+install -Dm755 target/release/tesserad /app/bin/tesserad
 install -Dm644 packaging/linux/io.github.benwbooth.Tessera.desktop /app/share/applications/io.github.benwbooth.Tessera.desktop
 install -Dm644 packaging/linux/io.github.benwbooth.Tessera.metainfo.xml /app/share/metainfo/io.github.benwbooth.Tessera.metainfo.xml
 install -Dm644 icons/tessera.svg /app/share/icons/hicolor/scalable/apps/io.github.benwbooth.Tessera.svg

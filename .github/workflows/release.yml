@@ -1,6 +1,8 @@
 # Release builds: Windows installer and portable zip, macOS dmgs (Apple Silicon
-# and Intel) with a Homebrew cask, an AppImage, a Flatpak bundle and repo, and
-# a check that the Nix flake builds.
+# and Intel) with a Homebrew cask, an AppImage, a Flatpak bundle and repo,
+# static tesserad builds for Linux (x86_64, aarch64), and a check that the Nix
+# flake builds. Every package carries the static tesserads, which the window
+# copies to SSH hosts that don't have one.
 #
 # Runs when a GitHub release is published, and attaches every file to it.
 # Pushing a tag like v1.2.3 also cuts the release (with generated notes) and
@@ -87,14 +89,48 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building Tessera $version"
 
-  windows:
+  # tesserad alone, static (musl, from the flake): runs on any Linux of its
+  # architecture.
+  tesserad:
     needs: version
+    if: needs.version.outputs.skip != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: nix build .#tesserad-static
+        run: |
+          nix build -L .#tesserad-static
+          mkdir -p dist
+          install -m755 result/bin/tesserad dist/tesserad-${{ matrix.arch }}-linux
+          file dist/tesserad-${{ matrix.arch }}-linux
+          dist/tesserad-${{ matrix.arch }}-linux version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tesserad-${{ matrix.arch }}
+          path: dist/tesserad-*-linux
+
+  windows:
+    needs: [version, tesserad]
     if: needs.version.outputs.skip != 'true'
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tesserad-*
+          path: static
+          merge-multiple: true
       - name: Find the Qt build for MSVC
         id: qt
         shell: bash
@@ -134,6 +170,9 @@ jobs:
           $dist = 'dist\Tessera'
           New-Item -ItemType Directory -Force $dist | Out-Null
           Copy-Item target\release\tessera.exe $dist
+          Copy-Item target\release\tesserad.exe $dist
+          # (Linux tesserads, copied to SSH hosts that lack one.)
+          Copy-Item static\tesserad-*-linux $dist
           # Ghostty's terminal library (linked as a DLL on Windows).
           $dll = Get-ChildItem target\release\build -Recurse -Filter ghostty-vt.dll | Select-Object -First 1
           if (-not $dll) { throw "ghostty-vt.dll not found" }
@@ -166,7 +205,7 @@ jobs:
             dist/*.exe
 
   macos:
-    needs: version
+    needs: [version, tesserad]
     if: needs.version.outputs.skip != 'true'
     strategy:
       fail-fast: false
@@ -182,6 +221,11 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tesserad-*
+          path: static
+          merge-multiple: true
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
@@ -203,6 +247,9 @@ jobs:
           app=dist/Tessera.app
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           cp target/release/tessera "$app/Contents/MacOS/tessera"
+          cp target/release/tesserad "$app/Contents/MacOS/tesserad"
+          # (Linux tesserads, copied to SSH hosts that lack one.)
+          install -m755 static/tesserad-*-linux "$app/Contents/MacOS/"
           cp packaging/icons/tessera.icns "$app/Contents/Resources/tessera.icns"
           sed "s/@VERSION@/$VERSION/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
           plutil -lint "$app/Contents/Info.plist"
@@ -227,7 +274,7 @@ jobs:
           path: dist/*.dmg
 
   appimage:
-    needs: version
+    needs: [version, tesserad]
     if: needs.version.outputs.skip != 'true'
     # The oldest supported Ubuntu, so the AppImage runs on older systems too.
     runs-on: ubuntu-22.04
@@ -235,6 +282,11 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tesserad-*
+          path: static
+          merge-multiple: true
       - name: System libraries
         run: |
           sudo apt-get update
@@ -283,8 +335,12 @@ jobs:
           export EXTRA_PLATFORM_PLUGINS="${plugins#;}"
           export EXTRA_QT_MODULES="svg"
           export OUTPUT="Tessera-$VERSION-x86_64.AppImage"
+          # tesserad next to tessera, and the static ones for SSH hosts.
+          install -Dm755 target/release/tesserad AppDir/usr/bin/tesserad
+          install -m755 static/tesserad-*-linux AppDir/usr/bin/
           ./linuxdeploy --appdir AppDir \
             --executable target/release/tessera \
+            --executable AppDir/usr/bin/tesserad \
             --desktop-file appimage/tessera.desktop \
             --icon-file icons/tessera.svg \
             --plugin qt --output appimage
@@ -379,12 +435,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
       - name: nix build
-        run: nix build -L .#default && ls -la result/bin
+        run: nix build -L .#default && ls -la result/bin result/libexec/tessera
 
   publish:
     # Attaches everything to the release and updates the Homebrew cask.
     if: needs.version.outputs.tag != ''
-    needs: [version, windows, macos, appimage, flatpak, nix]
+    needs: [version, tesserad, windows, macos, appimage, flatpak, nix]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
