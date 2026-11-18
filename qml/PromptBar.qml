@@ -308,7 +308,7 @@ Item {
                 width: m1.implicitWidth - m0.implicitWidth
                 height: ph.height
                 Rectangle {
-                    visible: hh.hovered && !modelData.last
+                    visible: hh.hovered
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 1
                     width: parent.width
@@ -318,12 +318,16 @@ Item {
                 // (A click on the widget goes there while the pointer is over it.)
                 HoverHandler {
                     id: hh
-                    cursorShape: modelData.last ? Qt.ArrowCursor : Qt.PointingHandCursor
-                    onHoveredChanged: if (!modelData.last) bar.hoverPath = hovered ? modelData.path : (bar.hoverPath === modelData.path ? "" : bar.hoverPath)
+                    cursorShape: Qt.PointingHandCursor
+                    // (The folder itself: its menu, recent places first; a parent: cd there.)
+                    onHoveredChanged: {
+                        const v = modelData.last ? "@here" : modelData.path
+                        bar.hoverPath = hovered ? v : (bar.hoverPath === v ? "" : bar.hoverPath)
+                    }
                 }
-                ToolTip.visible: hh.hovered && !modelData.last
+                ToolTip.visible: hh.hovered
                 ToolTip.delay: 600
-                ToolTip.text: "cd " + modelData.path
+                ToolTip.text: modelData.last ? "Recent and frequent folders, and this one's" : "cd " + modelData.path
             }
         }
     }
@@ -575,7 +579,8 @@ Item {
             // (On a parent folder of its path: cd there.)
             onTapped: {
                 const p = bar.hoverPath
-                if (p !== "") bar.runRequested("cd " + (/^[A-Za-z0-9_\/.~+:@-]+$/.test(p) ? p : "'" + p.replace(/'/g, "'\\''") + "'"))
+                if (p === "@here") bar.openChoices("dir", w)
+                else if (p !== "") bar.runRequested("cd " + (/^[A-Za-z0-9_\/.~+:@-]+$/.test(p) ? p : "'" + p.replace(/'/g, "'\\''") + "'"))
                 else bar.openChoices(w.wd.name, w)
             }
         }

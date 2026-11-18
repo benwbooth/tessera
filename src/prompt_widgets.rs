@@ -193,6 +193,22 @@ pub fn choices(widget: &str, cwd: &str, pid: u32) -> String {
     match w {
         "dir" | "directory" => {
             let here = PathBuf::from(cwd);
+            // Where you've been lately and often first (the cd history: zoxide
+            // and the commands' folders), then this folder's, then up.
+            let recent: Vec<String> = crate::complete::frecent_dirs()
+                .into_iter()
+                .map(|(p, _)| p)
+                .filter(|p| p != cwd && !p.starts_with("/tmp/") && !p.starts_with("/nix/store"))
+                .take(15)
+                .collect();
+            if !recent.is_empty() {
+                let h = home.to_string_lossy().to_string();
+                out.push(head("Recent and frequent"));
+                for p in recent {
+                    let shown = if !h.is_empty() && (p == h || p.starts_with(&format!("{h}/"))) { format!("~{}", &p[h.len()..]) } else { p.clone() };
+                    out.push(item(shown, format!("cd {}", sh_quote(&p)), false));
+                }
+            }
             let show = |p: &Path| {
                 let s = p.to_string_lossy().to_string();
                 let h = home.to_string_lossy().to_string();

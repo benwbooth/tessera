@@ -744,7 +744,7 @@ fn tilde(p: &str) -> String {
 /// Folders by how often and how lately they were visited: zoxide's
 /// database (if it's installed), and the history (where commands ran, and
 /// where cd commands went). Highest first.
-fn frecent_dirs() -> Vec<(String, f64)> {
+pub fn frecent_dirs() -> Vec<(String, f64)> {
     static CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<(String, f64)>)>> = std::sync::Mutex::new(None);
     if let Some((at, v)) = CACHE.lock().unwrap().as_ref() {
         if at.elapsed() < std::time::Duration::from_secs(20) {
