@@ -25,6 +25,7 @@ Item {
     signal commandRequested(string command)
     signal insertRequested(string text)
     signal viewRequested(string path)   // show it in Tessera (FilePreview)
+    signal fileCardRequested(string path)  // show it in a card of its own (FileView)
 
     // ---- this card's view: its own (the notebook keeps it, by card), first
     // taken from the last one chosen (settings: file_browser). A change is
@@ -162,11 +163,11 @@ Item {
         return r === ""
     }
     // A click: a folder goes in; a text file that isn't a program shows in a
-    // new card below (its view picked by its type); anything else opens with
-    // its app.
+    // new card below, in Tessera's viewer (line numbers, highlighting);
+    // anything else opens with its app.
     function openEntry(e) {
         if (e.dir) go(e.path)
-        else if (e.text && !e.exec) commandRequested("command cat -- " + (/^[A-Za-z0-9_\/.~+:@-]+$/.test(e.path) ? e.path : "'" + e.path.replace(/'/g, "'\\''") + "'"))
+        else if (e.text && !e.exec) fileCardRequested(e.path)
         else act("open", e.path)
     }
     // ---- drag and drop -----------------------------------------------------

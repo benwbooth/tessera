@@ -214,7 +214,7 @@ FocusScope {
         return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
                  type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
                  started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
-                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "" }
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "" }
     }
     function insertCell(at, type, edit) {
         at = Math.max(0, Math.min(cells.count, at))
@@ -303,6 +303,8 @@ FocusScope {
         if (!c) return
         if (c.type === "markdown") { if (c.source.trim() !== "") cells.setProperty(i, "editing", false); return }
         if (c.type !== "code" || c.source.trim() === "") return
+        // (A file card: read the file again.)
+        if (c.viewPath !== "") { fileRev++; return }
         if (c.tid > 0) retire(c.tid)
         cells.setProperty(i, "tid", 0)
         cells.setProperty(i, "outputs", "[]")
@@ -443,6 +445,21 @@ FocusScope {
     // ---- a kernel per language (cells in another language than the notebook's) ----
     property var langKernels: ({})      // lang -> {name, display, state, message, queue: [cid]}
     property string shellName: ""       // the pane's shell (zsh, bash, fish, ...)
+    // A file shown in a card (a text file clicked in a listing): its lines,
+    // highlighted, in Tessera's viewer.
+    property int fileRev: 0
+    function addFileCard(path) {
+        const c = newCell("code", path)
+        c.viewPath = path
+        c.ranIn = "file"
+        c.cwd = path.replace(/\/[^\/]*$/, "") || "/"
+        c.started = Date.now()
+        c.ended = c.started
+        cells.append(c)
+        current = cells.count - 1
+        touch()
+        follow()
+    }
     // (Cards made before the shell's name was known get it now.)
     onShellNameChanged: if (shellName !== "") for (let i = 0; i < cells.count; ++i) if (cells.get(i).tid > 0 && cells.get(i).ranIn === "") cells.setProperty(i, "ranIn", shellName)
     // What a cell's exit status means: the shell's codes or the command's man
@@ -783,6 +800,7 @@ FocusScope {
             if (keepTids && !(tm.tid > 0) && tm.cid) { x.cid = tm.cid; if (tm.running) { x.running = true; x.ended = 0 } }
             if (tm.lang) x.lang = tm.lang
             if (tm.ran_in) x.ranIn = tm.ran_in
+            if (tm.view) x.viewPath = tm.view
             if (x.type === "code") {
                 x.outputs = JSON.stringify((c.outputs || []).map(normalOutput))
                 x.count = c.execution_count === null || c.execution_count === undefined ? -1 : c.execution_count
@@ -954,6 +972,7 @@ FocusScope {
                 }
                 if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
                 if (c.ranIn !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { ran_in: c.ranIn })
+                if (c.viewPath !== "") { meta.tessera = Object.assign({}, meta.tessera || {}, { view: c.viewPath }); outs = [] }
                 cell.execution_count = c.count >= 0 ? c.count : (c.tid > 0 && !kept ? ++n : null)
                 if (c.hideOutput) meta.jupyter = Object.assign({}, meta.jupyter || {}, { outputs_hidden: true })
                 cell.outputs = outs.map(o => {
@@ -1311,6 +1330,7 @@ FocusScope {
             required property bool hideOutput
             required property string lang
             required property string ranIn     // what ran it, as it was then (a shell's name, a kernel's)
+            required property string viewPath  // a file card: the file it shows
             readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
@@ -1318,7 +1338,7 @@ FocusScope {
             readonly property bool fromTerm: tid > 0
             readonly property var outs: { try { return JSON.parse(outputs) } catch (e) { return [] } }
             readonly property string kind: fromTerm ? nb.shownKind(cid, tkind, source) : ""
-            readonly property bool hasOutput: code && (fromTerm || outs.length > 0)
+            readonly property bool hasOutput: code && (fromTerm || outs.length > 0 || viewPath !== "")
             readonly property bool expanded: nb.expandedId === cid
             readonly property bool plainMd: !code && !editing
             width: list.width - 12
@@ -1343,7 +1363,7 @@ FocusScope {
                 // Status; a click runs it (or stops it). (The spinner turns on its
                 // own, so the mark after it is never left at an angle.)
                 Text { topPadding: 0.001;
-                    text: cell.running ? "" : cell.ended > 0 || cell.fromTerm ? (cell.failed ? "✘" : "✓") : cell.code ? "▶" : "M↓"
+                    text: cell.viewPath !== "" ? "\u2261" : cell.running ? "" : cell.ended > 0 || cell.fromTerm ? (cell.failed ? "✘" : "✓") : cell.code ? "▶" : "M↓"
                     color: cell.running ? Theme.accent : cell.ended > 0 || cell.fromTerm ? (cell.failed ? nb.ansi(1, "#e06c75") : nb.ansi(2, "#98c379"))
                          : statusHover.hovered ? Theme.accent : Theme.textDim
                     font.pixelSize: 13
@@ -1364,7 +1384,8 @@ FocusScope {
                     ToolTip.visible: statusHover.hovered
                     ToolTip.delay: 400
                     // (Done: its exit status, and what it means for the command.)
-                    ToolTip.text: cell.running ? "Interrupt"
+                    ToolTip.text: cell.viewPath !== "" ? "A file: click to read it again"
+                        : cell.running ? "Interrupt"
                         : (cell.ended > 0 || cell.fromTerm) && cell.code ? nb.exitTip(cell) + "\nClick to run it again"
                         : cell.code ? "Run (Ctrl+Enter)" : "Show it (Ctrl+Enter)"
                 }
@@ -1562,8 +1583,10 @@ FocusScope {
                     property string command: cell.source
                     property string cid: cell.cid
                     property bool running: cell.running
+                    property string viewPath: cell.viewPath
                     readonly property string kind: cell.kind
-                    sourceComponent: !cell.fromTerm ? jupyterOutputs
+                    sourceComponent: cell.viewPath !== "" ? fileCardView
+                                   : !cell.fromTerm ? jupyterOutputs
                                    : cell.kind === "html" ? htmlView
                                    : cell.kind === "markdown" || cell.kind === "mdtext" ? markdownView
                                    : cell.kind === "image" ? imageView
@@ -1674,6 +1697,7 @@ FocusScope {
         const c = cells.get(i)
         if (!c) return ""
         if (c.tid > 0) return view ? view.cellOutput(c.tid, "text") : ""
+        if (c.viewPath !== "") { try { return JSON.parse(controller.readTextFile(c.viewPath)).text || "" } catch (e) { return "" } }
         let outs = []
         try { outs = JSON.parse(c.outputs) } catch (e) {}
         return outs.map(o => o.output_type === "stream" ? o.text
@@ -1949,6 +1973,23 @@ FocusScope {
             onCommandRequested: (c) => nb.commandRequested(c)
             onInsertRequested: (t) => nb.insertRequested(t)
             onViewRequested: (p) => nb.viewRequested(p)
+            onFileCardRequested: (p) => nb.addFileCard(p)
+        }
+    }
+
+    // ---- a file card: the file in Tessera's viewer ----
+    Component {
+        id: fileCardView
+        FileView {
+            readonly property var src: parent
+            anchors.fill: parent
+            controller: nb.controller
+            path: src.viewPath
+            fontFamily: nb.fontFamily
+            pointSize: nb.outputPointSize
+            themeData: nb.themeData
+            property int rev: nb.fileRev
+            onRevChanged: reload()
         }
     }
 

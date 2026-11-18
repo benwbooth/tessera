@@ -51,7 +51,6 @@ Rectangle {
         if (t.indexOf("\u0000") >= 0 || (t.match(/�/g) || []).length > t.length / 20) { problem = "It's a binary file."; return }
         text = t.length > 3000000 ? t.substring(0, 3000000) : t
         if (t.length > 3000000) problem = "Only the first 3 MB are shown."
-        Qt.callLater(highlight)
     }
 
     // ---- the bar: what it is, and what to do with it ----------------------
@@ -129,59 +128,17 @@ Rectangle {
         onClosed: pv.closed()
     }
 
-    // ---- code and text: highlighted, read-only ----------------------------
-    Flickable {
-        id: textFlick
+    // ---- code and text: highlighted, line numbers, read-only -------------
+    FileView {
         visible: !pv.isImage && pv.richKind === "" && pv.text !== ""
         anchors.fill: parent
         anchors.topMargin: head.height
-        anchors.leftMargin: 10
-        clip: true
-        contentWidth: Math.max(width, view.implicitWidth + 20)
-        contentHeight: view.implicitHeight + 16
-        boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {}
-        ScrollBar.horizontal: ScrollBar {}
-        MomentumWheel { flick: textFlick }
-        TextEdit {
-            id: view
-            y: 8
-            readOnly: true
-            selectByMouse: true
-            text: pv.text
-            textFormat: TextEdit.PlainText
-            color: Theme.text
-            selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)
-            selectedTextColor: Theme.text
-            font.family: pv.fontFamily
-            font.pointSize: pv.pointSize
-            tabStopDistance: 4 * fm.advanceWidth(" ")
-            renderType: Text.NativeRendering
-            FontMetrics { id: fm; font: view.font }
-            BlockSelect {}
-        }
-    }
-    SyntaxHighlighter {
-        id: hl
-        document: view.textDocument
-        errorColor: "transparent"
-        colors: ({
-            keyword: pv.ansi(5, "#c678dd"), string: pv.ansi(2, "#98c379"), comment: Theme.textDim,
-            number: pv.ansi(3, "#d19a66"), constant: pv.ansi(3, "#d19a66"), function: pv.ansi(4, "#61afef"),
-            operator: pv.ansi(6, "#56b6c2"), property: pv.ansi(6, "#56b6c2"), variable: Theme.text,
-            embedded: pv.ansi(13, "#c678dd"), type: pv.ansi(3, "#e5c07b"), constructor: pv.ansi(3, "#e5c07b"),
-            punctuation: Theme.textDim, escape: pv.ansi(6, "#56b6c2"), attribute: pv.ansi(3, "#e5c07b"),
-            tag: pv.ansi(1, "#e06c75")
-        })
-    }
-    function highlight() {
-        if (!controller || lang === "" || text === "" || text.length > 500000) return
-        if (!controller.languageInstalled(lang)) { controller.ensureLanguage(lang); return }
-        try { const r = JSON.parse(controller.syntax(lang, text)); r.errors = []; hl.analysis = JSON.stringify(r) } catch (e) {}
-    }
-    Connections {
-        target: pv.controller
-        function onLanguageReady(name, error) { if (name === pv.lang && !error) pv.highlight() }
+        maxHeight: 100000
+        controller: pv.controller
+        path: pv.isImage || pv.richKind !== "" ? "" : pv.path
+        fontFamily: pv.fontFamily
+        pointSize: pv.pointSize
+        themeData: pv.themeData
     }
 
     // ---- nothing to show ------------------------------------------------------
