@@ -682,6 +682,8 @@ ApplicationWindow {
             else win.toggleRecording(activeView)
         }
     }
+    // (Test hook: TESSERA_TEST_SWITCH=<shell>,<ms>: the pane switches to that shell then.)
+    Timer { interval: Number(controller.testEnv("SWITCH").split(",")[1] || 0); running: controller.testEnv("SWITCH") !== ""; onTriggered: if (activePane) activePane.switchShell(controller.testEnv("SWITCH").split(",")[0]) }
     // (Test hook: TESSERA_TEST_HOVER=x,y[,ms] moves the pointer there after 6 s (or ms).)
     Timer { interval: Number(controller.testEnv("HOVER").split(",")[2] || 6000); running: controller.testEnv("HOVER") !== ""; onTriggered: { const p = controller.testEnv("HOVER").split(",").map(Number); controller.testMouse(3, p[0] - 1, p[1], 0, 0); controller.testMouse(3, p[0], p[1], 0, 0) } }
     // A note at the bottom of the window for a few seconds, with buttons.

@@ -67,6 +67,43 @@ Item {
     // having said so since: nothing running in front of it counts as that,
     // until the shell integration says otherwise.)
     property bool idleShell: false
+    // Shells started in the pane's shell from the editor's language list, the
+    // first (bottom) the pane's own: [{name, pid}]. Switching to one below
+    // leaves the ones above (exit), what they changed handed down; to a new
+    // one starts it on top.
+    property var shellStack: []
+    function switchShell(sh) {
+        if (!controller || term.exited || !(term.atPrompt || idleShell)) return
+        const cur = pane.shellName !== "" ? pane.shellName : "bash"
+        let st = shellStack.length ? shellStack.slice() : [{ name: cur, pid: pane.shellPid }]
+        const below = st.slice(0, -1).map(x => x.name).lastIndexOf(sh)
+        if (below >= 0) {
+            const top = st[st.length - 1]
+            controller.shellHandBack(top.pid || pane.shellPid, st[below].pid)
+            for (let k = st.length - 1; k > below; --k) term.sendText(" exit\r")
+            shellStack = st.slice(0, below + 1)
+            return
+        }
+        const line = controller.shellLaunchLine(sh, pane.shellPid)
+        if (line === "") return
+        st.push({ name: sh, pid: 0 })
+        shellStack = st
+        term.sendText(line + "\r")
+    }
+    // (Its pid once it's the shell in front; and a shell left by hand (exit)
+    // comes off the list: the one in front is then one below. The daemon
+    // reports the name first, then the pid: this goes by the pid.)
+    onShellPidChanged: {
+        if (shellStack.length < 2 || shellPid === 0) return
+        const st = shellStack.slice()
+        const top = st[st.length - 1]
+        if (top.pid === 0) {
+            if (shellName === top.name) { st[st.length - 1] = { name: top.name, pid: shellPid }; shellStack = st }
+            return
+        }
+        const i = st.map(x => x.pid).lastIndexOf(shellPid)
+        if (i >= 0 && i < st.length - 1) shellStack = st.slice(0, i + 1)
+    }
     Timer {
         id: idleCheck
         interval: 1500
@@ -183,8 +220,7 @@ Item {
         shellPid: pane.shellPid
         promptEngine: pane.promptEngine
         promptSegments: pane.promptSegments
-        // (A shell picked: its kernel starts now, ready by the first Enter.)
-        onRunShellChanged: if (runShell !== "" && notebook.hasKernelFor(runShell)) notebook.warmLang(runShell)
+        onShellSwitchRequested: (sh) => pane.switchShell(sh)
         onSubmitted: (t) => {
             if (forNotebook) { notebook.submit(t); return }
             // (Code in another language than the shell's: its Jupyter kernel,

@@ -475,6 +475,12 @@ pub mod ffi {
         /// the pane's shell (jupyter::export_to_shell).
         #[qinvokable]
         fn jupyter_export(self: &Controller, key: &QString, pid: i32);
+        /// The line that starts a shell in the pane's shell (with Tessera's
+        /// integration), and handing a nested shell's changes back down.
+        #[qinvokable]
+        fn shell_launch_line(self: &Controller, shell: &QString, parent: i32) -> QString;
+        #[qinvokable]
+        fn shell_hand_back(self: &Controller, child: i32, parent: i32);
         /// What an exit status means for a command (complete::exit_meaning).
         #[qinvokable]
         fn exit_meaning(self: &Controller, command: &QString, status: i32) -> QString;
@@ -831,6 +837,14 @@ impl ffi::Controller {
 
     fn exit_meaning(&self, command: &ffi::QString, status: i32) -> ffi::QString {
         qs(&crate::complete::exit_meaning(&command.to_string(), status))
+    }
+
+    fn shell_launch_line(&self, shell: &ffi::QString, parent: i32) -> ffi::QString {
+        qs(&crate::shell_integration::launch_line(&shell.to_string(), parent.max(0) as u32))
+    }
+
+    fn shell_hand_back(&self, child: i32, parent: i32) {
+        crate::shell_integration::hand_back(child.max(0) as u32, parent.max(0) as u32)
     }
 
     fn jupyter_export(&self, key: &ffi::QString, pid: i32) {

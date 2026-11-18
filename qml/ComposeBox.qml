@@ -31,11 +31,16 @@ Rectangle {
     readonly property var shellNames: ({ bash: "bash", zsh: "zsh", fish: "fish", nu: "nushell", xonsh: "xonsh", powershell: "PowerShell" })
     // (The grammar each one is highlighted with.)
     function shellGrammar(s) { return ({ fish: "fish", nu: "nu" })[s] || "bash" }
+    // A shell picked: the pane's shell becomes it (started in it, or left
+    // for it when it's the one this was started from), the folder and
+    // variables carried along.
+    signal shellSwitchRequested(string shell)
     function pickLanguage(id) {
         if (id.startsWith("shell:")) {
             const sh = id.substring(6)
-            runShell = sh === (shellName || "bash") ? "" : sh
-            langOverride = shellGrammar(sh) === "bash" ? "bash" : shellGrammar(sh)
+            runShell = ""
+            langOverride = ""
+            if (sh !== (shellName || "bash")) shellSwitchRequested(sh)
         } else {
             runShell = ""
             langOverride = id

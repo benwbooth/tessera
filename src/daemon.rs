@@ -286,7 +286,26 @@ fn proc_info(s: &DSession) -> crate::client::ProcInfo {
     }
     // The shell is whatever runs at the prompt (a login bash may exec zsh).
     let shell = if job.is_empty() { pgid.or(s.shell_pid).map(comm).unwrap_or_default() } else { s.shell_pid.map(comm).unwrap_or_default() };
+    // (A shell started in it, switched to from the editor, is the shell now:
+    // its prompt, its environment. Under nix shell: the shell nix started.)
+    let nested = if is_shell(&job) {
+        pgid.map(|p| (job.clone(), p))
+    } else if job == "nix" {
+        pgid.and_then(|p| std::fs::read_to_string(format!("/proc/{p}/task/{p}/children")).ok()).and_then(|c| {
+            c.split_whitespace().filter_map(|x| x.parse::<u32>().ok()).map(|c| (comm(c), c)).find(|(n, _)| is_shell(n))
+        })
+    } else {
+        None
+    };
+    if let Some((name, pid)) = nested {
+        let dir = cwd(pid);
+        return crate::client::ProcInfo { job: String::new(), cwd: if dir.is_empty() { s.shell_pid.map(cwd).unwrap_or_default() } else { dir }, shell: name, pid };
+    }
     crate::client::ProcInfo { job, cwd: dir, shell, pid: s.shell_pid.unwrap_or(0) }
+}
+
+fn is_shell(name: &str) -> bool {
+    matches!(name, "bash" | "zsh" | "fish" | "nu" | "xonsh" | "pwsh" | "sh" | "dash" | "ksh" | "mksh" | "tcsh" | "elvish")
 }
 
 fn foreground_job(s: &DSession) -> String {

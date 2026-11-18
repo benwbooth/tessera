@@ -446,11 +446,68 @@ const FETCHED: &[Fetched] = &[
     Fetched { name: "tessera-gnuplot", display: "gnuplot (gnuplot_kernel, uv)", language: "gnuplot", how: How::Uv { pip: &["gnuplot_kernel"], runtime: &["gnuplot"], args: &["-m", "gnuplot_kernel", "-f", CF] }, interrupt_message: false },
 ];
 
+/// Hand changes to a shell (pid): its folder (cd), exports set and unset,
+/// applied there before its next command and prompt (shell/tessera.*), and
+/// its environment as the kernels see it updated now.
+pub fn write_apply(pid: u32, set: Vec<(String, String)>, unset: Vec<String>, cd: Option<String>) {
+    let dir = env_dir();
+    // In the pane's shell's own words.
+    let shell = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default().trim().to_string();
+    let fish = shell == "fish";
+    let name_ok = |a: &str| !a.is_empty() && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let mut lines = Vec::new();
+    for (a, b) in set.iter().filter(|(a, _)| name_ok(a)) {
+        lines.push(if fish { format!("set -gx {a} {}", sh_quote(b)) } else { format!("export {a}={}", sh_quote(b)) });
+    }
+    for a in unset.iter().filter(|a| name_ok(a)) {
+        lines.push(if fish { format!("set -e {a}") } else { format!("unset {a}") });
+    }
+    if let Some(d) = &cd {
+        lines.push(if fish { format!("builtin cd {}", sh_quote(d)) } else { format!("builtin cd -- {}", sh_quote(d)) });
+        let _ = std::fs::write(dir.join(format!("{pid}.cwd")), d);
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(format!("{pid}.apply"))) {
+        let _ = writeln!(f, "{}", lines.join("\n"));
+    }
+    // (The shell's exported environment as the other kernels will see
+    // it, until its next prompt writes it again.)
+    if let Some(mut env) = crate::prompt::shell_env(pid).map(|e| e.into_iter().collect::<HashMap<String, String>>()) {
+        for (a, b) in set {
+            env.insert(a, b);
+        }
+        for a in unset {
+            env.remove(&a);
+        }
+        let mut out = Vec::new();
+        for (a, b) in env {
+            out.extend_from_slice(format!("{a}={b}").as_bytes());
+            out.push(0);
+        }
+        let _ = std::fs::write(dir.join(pid.to_string()), out);
+    }
+}
+
+
+/// The program of a `nix shell ... -c prog` that's been built and kept
+/// already (nix_cached), without building it.
+pub fn nix_kept(argv: &[String]) -> Option<String> {
+    let c = argv.iter().position(|a| a == "-c")?;
+    let what: Vec<String> = argv[2..c].to_vec();
+    let prog = argv.get(c + 1)?;
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    what.hash(&mut h);
+    let list = PathBuf::from(std::env::var_os("HOME")?).join(".cache/tessera/kernel-envs").join(format!("{:016x}.paths", h.finish()));
+    let t = std::fs::read_to_string(list).ok()?;
+    t.lines().map(|p| format!("{p}/bin/{prog}")).find(|e| Path::new(e).exists())
+}
+
 /// A `nix shell <installables> -c prog args` command as prog run from the
 /// built environment: its bin folders for PATH. Built (and remembered) the
 /// first time; after that it starts at once, and is built again in the
 /// background once a week, for updates.
-fn nix_cached(argv: &[String], status: &dyn Fn(&str)) -> Option<(Vec<String>, String)> {
+pub fn nix_cached(argv: &[String], status: &dyn Fn(&str)) -> Option<(Vec<String>, String)> {
     if argv.len() < 4 || argv[0] != "nix" || argv[1] != "shell" {
         return None;
     }
@@ -1410,42 +1467,7 @@ pub fn export_to_shell(key: &str, pid: u32) {
                 had.1 = d.clone();
             }
         }
-        let dir = env_dir();
-        // In the pane's shell's own words.
-        let shell = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default().trim().to_string();
-        let fish = shell == "fish";
-        let name_ok = |a: &str| !a.is_empty() && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-        let mut lines = Vec::new();
-        for (a, b) in set.iter().filter(|(a, _)| name_ok(a)) {
-            lines.push(if fish { format!("set -gx {a} {}", sh_quote(b)) } else { format!("export {a}={}", sh_quote(b)) });
-        }
-        for a in unset.iter().filter(|a| name_ok(a)) {
-            lines.push(if fish { format!("set -e {a}") } else { format!("unset {a}") });
-        }
-        if let Some(d) = &cd {
-            lines.push(if fish { format!("builtin cd {}", sh_quote(d)) } else { format!("builtin cd -- {}", sh_quote(d)) });
-            let _ = std::fs::write(dir.join(format!("{pid}.cwd")), d);
-        }
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(format!("{pid}.apply"))) {
-            let _ = writeln!(f, "{}", lines.join("\n"));
-        }
-        // (The shell's exported environment as the other kernels will see
-        // it, until its next prompt writes it again.)
-        if let Some(mut env) = crate::prompt::shell_env(pid).map(|e| e.into_iter().collect::<HashMap<String, String>>()) {
-            for (a, b) in set {
-                env.insert(a, b);
-            }
-            for a in unset {
-                env.remove(&a);
-            }
-            let mut out = Vec::new();
-            for (a, b) in env {
-                out.extend_from_slice(format!("{a}={b}").as_bytes());
-                out.push(0);
-            }
-            let _ = std::fs::write(dir.join(pid.to_string()), out);
-        }
+        write_apply(pid, set, unset, cd);
     });
 }
 

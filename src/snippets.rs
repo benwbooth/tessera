@@ -737,6 +737,15 @@ mod tests {
         assert!(g.is_empty() || g.contains("mod tidy"), "{g}");
         assert!(missing_python_modules("import os\nimport surely_not_a_module_xyz").contains(&"surely_not_a_module_xyz".to_string()));
     }
+
+    #[test]
+    #[ignore]
+    fn shells_print() {
+        for l in ["fish", "nu", "powershell", "xonsh"] {
+            eprintln!("{l}: {}", super::command(l, "echo hi", "/", "zsh"));
+        }
+    }
+
 }
 
 

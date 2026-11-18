@@ -101,6 +101,7 @@ fn write_auto_scripts() -> Option<std::path::PathBuf> {
         ("zsh/tessera.zsh", ZSH),
         ("fish/vendor_conf.d/tessera.fish", FISH),
         ("bash/tessera.bash", BASH),
+        ("bash/bashrc", BASHRC),
     ];
     for (rel, text) in files {
         let p = base.join(rel);
@@ -110,4 +111,81 @@ fn write_auto_scripts() -> Option<std::path::PathBuf> {
         }
     }
     Some(base)
+}
+
+// A nested bash: the user's .bashrc, then the integration.
+const BASHRC: &str = "[ -f ~/.bashrc ] && . ~/.bashrc\n. \"$(dirname \"${BASH_SOURCE[0]}\")/tessera.bash\"\n";
+
+/// The line that starts `shell` inside the pane's shell (parent: its pid),
+/// with Tessera's integration loaded (zsh, bash, fish), the program from Nix
+/// when it isn't installed. (A space first: kept out of the history.)
+pub fn launch_line(shell: &str, parent: u32) -> String {
+    #[allow(unused)]
+    let (prog, pkg) = match shell {
+        "bash" => ("bash", "bashInteractive"),
+        "zsh" => ("zsh", "zsh"),
+        "fish" => ("fish", "fish"),
+        "nu" => ("nu", "nushell"),
+        "xonsh" => ("xonsh", "xonsh"),
+        "powershell" => ("pwsh", "powershell"),
+        _ => return String::new(),
+    };
+    let on_path = std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()));
+    // (Not installed: from Nix: its kept path when it's been fetched before,
+    // else through nix shell now, fetched and kept for next time meanwhile.)
+    let run = if on_path {
+        prog.to_string()
+    } else {
+        let argv: Vec<String> = ["nix", "shell", &format!("nixpkgs#{pkg}"), "-c", prog].iter().map(|s| s.to_string()).collect();
+        match crate::jupyter::nix_kept(&argv) {
+            Some(exe) => format!("'{}'", exe.replace('\'', "'\\''")),
+            None => {
+                std::thread::spawn(move || {
+                    let _ = crate::jupyter::nix_cached(&argv, &|_| {});
+                });
+                format!("nix shell nixpkgs#{pkg} -c {prog}")
+            }
+        }
+    };
+    let q = |p: &std::path::Path| format!("'{}'", p.display().to_string().replace('\'', "'\\''"));
+    let Some(base) = write_auto_scripts() else { return format!(" {run}") };
+    match shell {
+        "zsh" => {
+            // (Through Tessera's ZDOTDIR, which puts the user's back.)
+            let user = crate::prompt::shell_env(parent).and_then(|e| e.into_iter().find(|(k, _)| k == "ZDOTDIR").map(|(_, v)| v)).filter(|z| !z.contains("tessera/shell-integration"));
+            let back = user.map(|z| format!(" TESSERA_ZDOTDIR='{}'", z.replace('\'', "'\\''"))).unwrap_or_default();
+            format!(" env ZDOTDIR={}{back} {run}", q(&base.join("zsh")))
+        }
+        "bash" => format!(" {run} --rcfile {}", q(&base.join("bash/bashrc"))),
+        "fish" => format!(" {run} --init-command 'source {}'", base.join("fish/vendor_conf.d/tessera.fish").display()),
+        _ => format!(" {run}"),
+    }
+}
+
+/// Leaving a nested shell (pid) for the one it was started from (parent):
+/// its folder and what it exported go back down (applied there before its
+/// next prompt), so switching shells carries them along.
+pub fn hand_back(child: u32, parent: u32) {
+    if child == 0 || parent == 0 || child == parent {
+        return;
+    }
+    let (Some(now), Some(was)) = (crate::prompt::shell_env(child), crate::prompt::shell_env(parent)) else { return };
+    let now: std::collections::HashMap<String, String> = now.into_iter().collect();
+    let was: std::collections::HashMap<String, String> = was.into_iter().collect();
+    // (Not the shells' own: their levels, prompts, integration.)
+    let own = |k: &str| {
+        matches!(k, "SHLVL" | "_" | "PWD" | "OLDPWD" | "PS1" | "PS2" | "PROMPT" | "RPROMPT" | "ZDOTDIR" | "TESSERA_ZDOTDIR" | "SHELL" | "TESSERA_SHELL_INTEGRATION" | "fish_pid" | "XONSH_VERSION")
+            || k.starts_with("BASH")
+            || k.starts_with("ZSH")
+            || k.starts_with("__fish")
+    };
+    let set: Vec<(String, String)> = now.iter().filter(|(k, v)| !own(k) && was.get(*k) != Some(v)).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let unset: Vec<String> = was.keys().filter(|k| !own(k) && !now.contains_key(*k)).cloned().collect();
+    let cwd = std::fs::read_link(format!("/proc/{child}/cwd")).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let pcwd = std::fs::read_link(format!("/proc/{parent}/cwd")).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let cd = (!cwd.is_empty() && cwd != pcwd).then_some(cwd);
+    if set.is_empty() && unset.is_empty() && cd.is_none() {
+        return;
+    }
+    crate::jupyter::write_apply(parent, set, unset, cd);
 }
