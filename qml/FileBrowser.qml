@@ -161,8 +161,12 @@ Item {
         if (r === "") refresh++
         return r === ""
     }
+    // A click: a folder goes in; a text file that isn't a program shows in a
+    // new card below (its view picked by its type); anything else opens with
+    // its app.
     function openEntry(e) {
         if (e.dir) go(e.path)
+        else if (e.text && !e.exec) commandRequested("command cat -- " + (/^[A-Za-z0-9_\/.~+:@-]+$/.test(e.path) ? e.path : "'" + e.path.replace(/'/g, "'\\''") + "'"))
         else act("open", e.path)
     }
     // ---- drag and drop -----------------------------------------------------

@@ -310,6 +310,7 @@ Rectangle {
     // takes the choice (Enter too once you've moved through the list).
     property var comp: ({ start: 0, end: 0, items: [], pending: false })
     property bool compOpen: false
+    property bool typing: false        // keys coming: the list waits for a pause
     property bool compChosen: false    // Up/Down used: Enter takes the item
     property int compIndex: 0
     property bool historyMode: false   // the dropdown lists history (Ctrl+R, the clock)
@@ -333,7 +334,7 @@ Rectangle {
         if (r.items.length === 0 && !r.pending) closeComp()
         if (r.pending) compRetry.restart()
     }
-    function openComp() { compOpen = true; compChosen = false; compIndex = 0; requestComplete() }
+    function openComp() { compOpen = true; compChosen = false; compIndex = 0; typing = false; requestComplete() }
     function closeComp() { compOpen = false; compChosen = false; historyMode = false }
     function acceptComp(i) {
         const it = comp.items[i === undefined ? compIndex : i]
@@ -351,8 +352,10 @@ Rectangle {
     Timer { id: compRetry; interval: 250; onTriggered: if (box.compOpen) box.requestComplete() }
     Timer {
         id: compAuto
-        interval: 110
+        // (Once typing pauses: the list is hidden while keys come.)
+        interval: 300
         onTriggered: {
+            box.typing = false
             // Open by itself on a word being typed (not after a space, not in
             // the middle of a word), and keep an open list up to date.
             const p = edit.cursorPosition, t = edit.text
@@ -680,6 +683,7 @@ Rectangle {
                 if (text.trim() === "") { box.aiLang = ""; box.langAsked = "" }
                 langTimer.restart()
                 box.analyze(false)
+                if (!box.historyMode) box.typing = true
                 compAuto.restart()
                 // A "# request": the command it'd be, from the AI, as the
                 // suggestion (taken, it replaces the line).
@@ -1307,7 +1311,7 @@ Rectangle {
         id: compPopup
         // History: the editor's full width, with its own search field.
         readonly property bool hist: box.historyMode
-        visible: box.compOpen && (hist || box.comp.items.length > 0) && (edit.activeFocus || historySearch.activeFocus)
+        visible: box.compOpen && (hist || (box.comp.items.length > 0 && !box.typing)) && (edit.activeFocus || historySearch.activeFocus)
         z: 50
         readonly property real rowH: Math.ceil(fm.height) + 6
         readonly property int rows: Math.max(hist ? 1 : 0, Math.min(hist ? 14 : 10, box.comp.items.length))

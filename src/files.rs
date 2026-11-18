@@ -84,6 +84,32 @@ fn kind_of(name: &str, is_dir: bool, exec: bool) -> &'static str {
     }
 }
 
+/// Whether a file reads as text: by its kind, else (no telling kind) its
+/// first bytes: no NULs, and UTF-8.
+fn is_text(p: &Path, kind: &str, size: u64) -> bool {
+    match kind {
+        "text" | "config" | "code" => true,
+        "image" | "video" | "audio" | "archive" | "document" | "folder" => false,
+        _ => {
+            if size == 0 {
+                return true;
+            }
+            use std::io::Read;
+            let mut buf = [0u8; 1024];
+            let Ok(n) = std::fs::File::open(p).and_then(|mut f| f.read(&mut buf)) else { return false };
+            let b = &buf[..n];
+            if b.contains(&0) {
+                return false;
+            }
+            // (A character cut off at the end of the sample is fine.)
+            match std::str::from_utf8(b) {
+                Ok(_) => true,
+                Err(e) => e.error_len().is_none(),
+            }
+        }
+    }
+}
+
 /// A folder's entries: JSON [{name, path, dir, link, target, exec, hidden,
 /// size, items (a folder's), mtime, mode, user, group, kind}].
 pub fn list(dir: &str, all: bool) -> String {
@@ -113,6 +139,7 @@ pub fn list(dir: &str, all: bool) -> String {
                 "user": names("/etc/passwd").get(&owner_of(&md).0).cloned().unwrap_or_else(|| owner_of(&md).0.to_string()),
                 "group": names("/etc/group").get(&owner_of(&md).1).cloned().unwrap_or_else(|| owner_of(&md).1.to_string()),
                 "kind": kind_of(&name, is_dir, exec),
+                "text": !is_dir && is_text(&p, kind_of(&name, is_dir, exec), md.len()),
             }));
         }
     }
