@@ -139,6 +139,8 @@ pub struct Session {
     taken: bool,
     /// Minimum-contrast results per (fg, bg) pair.
     contrast_cache: std::collections::HashMap<(u32, u32), u32>,
+    /// Each viewport row's kitty placeholder runs (kept for rows not re-read).
+    ph_rows: Vec<Vec<crate::images::PhRun>>,
     triggers: Vec<(regex::Regex, TriggerSpec)>,
     /// Screen row up to which output has been checked by triggers.
     trigger_row: usize,
@@ -356,6 +358,7 @@ pub fn session_open(
         find: None,
         taken: false,
         contrast_cache: std::collections::HashMap::new(),
+        ph_rows: Vec::new(),
         triggers: Vec::new(),
         trigger_row: 0,
         highlights: Vec::new(),
@@ -1812,6 +1815,11 @@ impl Session {
                     }
                     None => Vec::new(),
                 };
+                if self.ph_rows.len() <= y as usize {
+                    self.ph_rows.resize(y as usize + 1, Vec::new());
+                }
+                self.ph_rows[y as usize].clear();
+                let has_ph = row.raw_row().ok().and_then(|r| r.has_kitty_virtual_placeholder().ok()).unwrap_or(false);
                 if let Ok(mut cell_it) = self.cells_it.update(row) {
                     let mut x: u16 = 0;
                     let mut cur: Option<Run> = None;
@@ -1828,6 +1836,14 @@ impl Session {
                             let _ = cell.graphemes_utf8(&mut text);
                         }
                         if text.is_empty() {
+                            text.push(' ');
+                        }
+                        // (A kitty placeholder: the image draws there, not the character.)
+                        if has_ph && text.starts_with(crate::images::PLACEHOLDER) {
+                            let st = cell.style().ok();
+                            let none = libghostty_vt::style::StyleColor::None;
+                            crate::images::placeholder_cell(&mut self.ph_rows[y as usize], x, &text, st.map(|s| s.fg_color).unwrap_or(none), st.map(|s| s.underline_color).unwrap_or(none));
+                            text.clear();
                             text.push(' ');
                         }
                         let mut fg = cell.fg_color().ok().flatten().map(rgb).unwrap_or(out.default_fg);
@@ -1936,6 +1952,8 @@ impl Session {
         }
         let (_, _, cw, ch) = self.size.get();
         crate::images::placements(&self.term, cw, ch, &mut out.images);
+        self.ph_rows.truncate(rows as usize);
+        crate::images::placeholder_places(&self.term, &self.ph_rows, cw, ch, &mut out.images);
         true
     }
 }

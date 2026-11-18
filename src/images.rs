@@ -162,6 +162,157 @@ pub fn is_image(data: &[u8]) -> bool {
         || data.starts_with(b"BM")
 }
 
+// ---- kitty's Unicode placeholders ---------------------------------------
+// An image placed virtually (U=1) shows where the text has U+10EEEE cells:
+// the cell's foreground color is the image's id, its underline color the
+// placement's, and combining marks after it the image's row, column and the
+// id's high byte (kitty's table of diacritics; the n-th means n). A run of
+// such cells shows a strip of the image, fitted into the placement's rows
+// and columns. (Mdfried's headings, among others.)
+
+pub const PLACEHOLDER: char = '\u{10EEEE}';
+
+const DIACRITICS: [u32; 297] = [
+    0x0305, 0x030D, 0x030E, 0x0310, 0x0312, 0x033D, 0x033E, 0x033F, 0x0346, 0x034A, 0x034B, 0x034C, 0x0350,
+    0x0351, 0x0352, 0x0357, 0x035B, 0x0363, 0x0364, 0x0365, 0x0366, 0x0367, 0x0368, 0x0369, 0x036A, 0x036B,
+    0x036C, 0x036D, 0x036E, 0x036F, 0x0483, 0x0484, 0x0485, 0x0486, 0x0487, 0x0592, 0x0593, 0x0594, 0x0595,
+    0x0597, 0x0598, 0x0599, 0x059C, 0x059D, 0x059E, 0x059F, 0x05A0, 0x05A1, 0x05A8, 0x05A9, 0x05AB, 0x05AC,
+    0x05AF, 0x05C4, 0x0610, 0x0611, 0x0612, 0x0613, 0x0614, 0x0615, 0x0616, 0x0617, 0x0657, 0x0658, 0x0659,
+    0x065A, 0x065B, 0x065D, 0x065E, 0x06D6, 0x06D7, 0x06D8, 0x06D9, 0x06DA, 0x06DB, 0x06DC, 0x06DF, 0x06E0,
+    0x06E1, 0x06E2, 0x06E4, 0x06E7, 0x06E8, 0x06EB, 0x06EC, 0x0730, 0x0732, 0x0733, 0x0735, 0x0736, 0x073A,
+    0x073D, 0x073F, 0x0740, 0x0741, 0x0743, 0x0745, 0x0747, 0x0749, 0x074A, 0x07EB, 0x07EC, 0x07ED, 0x07EE,
+    0x07EF, 0x07F0, 0x07F1, 0x07F3, 0x0816, 0x0817, 0x0818, 0x0819, 0x081B, 0x081C, 0x081D, 0x081E, 0x081F,
+    0x0820, 0x0821, 0x0822, 0x0823, 0x0825, 0x0826, 0x0827, 0x0829, 0x082A, 0x082B, 0x082C, 0x082D, 0x0951,
+    0x0953, 0x0954, 0x0F82, 0x0F83, 0x0F86, 0x0F87, 0x135D, 0x135E, 0x135F, 0x17DD, 0x193A, 0x1A17, 0x1A75,
+    0x1A76, 0x1A77, 0x1A78, 0x1A79, 0x1A7A, 0x1A7B, 0x1A7C, 0x1B6B, 0x1B6D, 0x1B6E, 0x1B6F, 0x1B70, 0x1B71,
+    0x1B72, 0x1B73, 0x1CD0, 0x1CD1, 0x1CD2, 0x1CDA, 0x1CDB, 0x1CE0, 0x1DC0, 0x1DC1, 0x1DC3, 0x1DC4, 0x1DC5,
+    0x1DC6, 0x1DC7, 0x1DC8, 0x1DC9, 0x1DCB, 0x1DCC, 0x1DD1, 0x1DD2, 0x1DD3, 0x1DD4, 0x1DD5, 0x1DD6, 0x1DD7,
+    0x1DD8, 0x1DD9, 0x1DDA, 0x1DDB, 0x1DDC, 0x1DDD, 0x1DDE, 0x1DDF, 0x1DE0, 0x1DE1, 0x1DE2, 0x1DE3, 0x1DE4,
+    0x1DE5, 0x1DE6, 0x1DFE, 0x20D0, 0x20D1, 0x20D4, 0x20D5, 0x20D6, 0x20D7, 0x20DB, 0x20DC, 0x20E1, 0x20E7,
+    0x20E9, 0x20F0, 0x2CEF, 0x2CF0, 0x2CF1, 0x2DE0, 0x2DE1, 0x2DE2, 0x2DE3, 0x2DE4, 0x2DE5, 0x2DE6, 0x2DE7,
+    0x2DE8, 0x2DE9, 0x2DEA, 0x2DEB, 0x2DEC, 0x2DED, 0x2DEE, 0x2DEF, 0x2DF0, 0x2DF1, 0x2DF2, 0x2DF3, 0x2DF4,
+    0x2DF5, 0x2DF6, 0x2DF7, 0x2DF8, 0x2DF9, 0x2DFA, 0x2DFB, 0x2DFC, 0x2DFD, 0x2DFE, 0x2DFF, 0xA66F, 0xA67C,
+    0xA67D, 0xA6F0, 0xA6F1, 0xA8E0, 0xA8E1, 0xA8E2, 0xA8E3, 0xA8E4, 0xA8E5, 0xA8E6, 0xA8E7, 0xA8E8, 0xA8E9,
+    0xA8EA, 0xA8EB, 0xA8EC, 0xA8ED, 0xA8EE, 0xA8EF, 0xA8F0, 0xA8F1, 0xAAB0, 0xAAB2, 0xAAB3, 0xAAB7, 0xAAB8,
+    0xAABE, 0xAABF, 0xAAC1, 0xFE20, 0xFE21, 0xFE22, 0xFE23, 0xFE24, 0xFE25, 0xFE26, 0x10A0F, 0x10A38, 0x1D185,
+    0x1D186, 0x1D187, 0x1D188, 0x1D189, 0x1D1AA, 0x1D1AB, 0x1D1AC, 0x1D1AD, 0x1D242, 0x1D243, 0x1D244
+];
+
+fn diacritic(c: char) -> Option<u32> {
+    DIACRITICS.binary_search(&(c as u32)).ok().map(|i| i as u32)
+}
+
+fn color_id(c: libghostty_vt::style::StyleColor) -> u32 {
+    use libghostty_vt::style::StyleColor;
+    match c {
+        StyleColor::None => 0,
+        StyleColor::Palette(p) => p.0 as u32,
+        StyleColor::Rgb(c) => (c.r as u32) << 16 | (c.g as u32) << 8 | c.b as u32,
+    }
+}
+
+/// A run of placeholder cells on one row: from viewport column `x`, `width`
+/// cells showing the image's cells from (`row`, `col`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhRun {
+    pub x: u16,
+    pub image_id: u32,
+    pub placement_id: u32,
+    pub row: u32,
+    pub col: u32,
+    pub width: u32,
+    high: Option<u32>,
+}
+
+/// A placeholder cell at column `x` (its text: U+10EEEE and the marks),
+/// added to the row's runs; false when it isn't one.
+pub fn placeholder_cell(runs: &mut Vec<PhRun>, x: u16, text: &str, fg: libghostty_vt::style::StyleColor, underline: libghostty_vt::style::StyleColor) -> bool {
+    let mut cs = text.chars();
+    if cs.next() != Some(PLACEHOLDER) {
+        return false;
+    }
+    let low = color_id(fg);
+    let pid = color_id(underline);
+    let marks: Vec<Option<u32>> = cs.take(3).map(diacritic).collect();
+    let row = marks.first().copied().flatten();
+    let col = marks.get(1).copied().flatten();
+    let high = marks.get(2).copied().flatten().filter(|h| *h < 256);
+    if let Some(p) = runs.last_mut() {
+        // (Kitty's rule: the same image and placement, the same row, the next
+        // column, the cell right after.)
+        if p.x as u32 + p.width == x as u32
+            && p.image_id & 0xffffff == low
+            && p.placement_id == pid
+            && row.is_none_or(|r| r == p.row)
+            && col.is_none_or(|c| c == p.col + p.width)
+            && high.is_none_or(|h| Some(h) == p.high)
+        {
+            p.width += 1;
+            return true;
+        }
+    }
+    runs.push(PhRun { x, image_id: low | high.unwrap_or(0) << 24, placement_id: pid, row: row.unwrap_or(0), col: col.unwrap_or(0), width: 1, high });
+    true
+}
+
+/// Where the runs on each viewport row (`rows[y]`) draw their images.
+pub fn placeholder_places(term: &Terminal<'static, 'static>, rows: &[Vec<PhRun>], cell_w: u32, cell_h: u32, out: &mut Vec<crate::bridge::ffi::ImagePlace>) {
+    if rows.iter().all(|r| r.is_empty()) {
+        return;
+    }
+    let Ok(g) = term.kitty_graphics() else { return };
+    // The virtual placements: (image, placement) -> (columns, rows).
+    let mut virt: Vec<(u32, u32, u32, u32)> = Vec::new();
+    if let Ok(mut it) = PlacementIterator::new() {
+        if let Ok(mut iter) = it.update(&g) {
+            while let Some(p) = iter.next() {
+                if p.is_virtual().unwrap_or(false) {
+                    if let Ok(id) = p.image_id() {
+                        virt.push((id, p.placement_id().unwrap_or(0), p.columns().unwrap_or(0), p.rows().unwrap_or(0)));
+                    }
+                }
+            }
+        }
+    }
+    let (cw, ch) = (cell_w as f64, cell_h as f64);
+    for (y, runs) in rows.iter().enumerate() {
+        for r in runs {
+            let Some(&(_, _, cols, prows)) = virt.iter().find(|v| v.0 == r.image_id && (r.placement_id == 0 || v.1 == r.placement_id)) else { continue };
+            let Some(img) = g.image(r.image_id) else { continue };
+            let (Ok(iw), Ok(ih)) = (img.width(), img.height()) else { continue };
+            let (iw, ih) = (iw.max(1) as f64, ih.max(1) as f64);
+            let cols = if cols == 0 { (iw / cw).ceil() } else { cols as f64 };
+            let prows = if prows == 0 { (ih / ch).ceil() } else { prows as f64 };
+            // The image fitted into the placement's box, centred.
+            let (bw, bh) = (cols * cw, prows * ch);
+            let s = (bw / iw).min(bh / ih);
+            let (ox, oy) = ((bw - iw * s) / 2.0, (bh - ih * s) / 2.0);
+            // This run's part of the box, and of the image in it.
+            let (rx, ry, rw, rh) = (r.col as f64 * cw, r.row as f64 * ch, r.width as f64 * cw, ch);
+            let x0 = rx.max(ox);
+            let y0 = ry.max(oy);
+            let x1 = (rx + rw).min(ox + iw * s);
+            let y1 = (ry + rh).min(oy + ih * s);
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            out.push(crate::bridge::ffi::ImagePlace {
+                id: r.image_id,
+                generation: img.generation().unwrap_or(0),
+                x: (r.x as f64 * cw + (x0 - rx)).round() as i32,
+                y: (y as f64 * ch + (y0 - ry)).round() as i32,
+                width: (x1 - x0).round() as u32,
+                height: (y1 - y0).round() as u32,
+                src_x: ((x0 - ox) / s).round() as u32,
+                src_y: ((y0 - oy) / s).round() as u32,
+                src_w: ((x1 - x0) / s).round().max(1.0) as u32,
+                src_h: ((y1 - y0) / s).round().max(1.0) as u32,
+                z: 0,
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
