@@ -935,7 +935,10 @@ Rectangle {
             return [["shell:" + mine, (box.shellNames[mine] || mine) + " (this pane's shell)"]]
                 .concat(Object.keys(box.shellNames).filter(k => k !== mine).map(k => ["shell:" + k, box.shellNames[k]]))
         }
-        readonly property var options: [["", "Automatic (" + (box.contentLang !== "" ? box.contentLang : box.autoLang) + ")"]].concat(shellOptions, box.languages.filter(l => l[0] !== "bash"))
+        // (The shells first, then Automatic, then the rest; the one in use
+        // isn't in the list: switching is to something else.)
+        readonly property var options: shellOptions.concat([["", "Automatic (" + (box.contentLang !== "" ? box.contentLang : box.autoLang) + ")"]], box.languages.filter(l => l[0] !== "bash"))
+            .filter(o => !(o[0] === "" ? box.langOverride === "" : isPicked(o[0])))
         function isPicked(id) { return id.startsWith("shell:") ? box.langOverride !== "" && (box.runShell !== "" ? id === "shell:" + box.runShell : id === "shell:" + (box.shellName || "bash") && box.langOverride === "bash") : box.runShell === "" && box.langOverride === id }
         readonly property var shown: options.filter(o => langFilter.text === "" || (o[1] + " " + o[0]).toLowerCase().indexOf(langFilter.text.toLowerCase()) >= 0)
         contentItem: Column {

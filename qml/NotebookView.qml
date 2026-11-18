@@ -60,6 +60,9 @@ FocusScope {
     readonly property bool shellKernel: kernelName === "tessera-shell"
     readonly property bool kernelUp: shellKernel || kernelState === "idle" || kernelState === "busy"
     readonly property string codeLang: shellKernel ? "bash" : language
+    // (What runs a cell with no language of its own: the pane's shell by its
+    // name, so bash from a zsh pane goes to bash's kernel, not to zsh.)
+    readonly property string runsIn: shellKernel ? (shellName || "bash") : language
     property var queue: []              // cells waiting for the kernel to come up
 
     function listKernels() {
@@ -306,7 +309,7 @@ FocusScope {
         cells.setProperty(i, "editing", false)
         touch()
         // (A cell in another language: that language's kernel.)
-        if (c.lang !== "" && c.lang !== codeLang) { runLang(c.cid, c.lang); return }
+        if (c.lang !== "" && !sameLang(c.lang, runsIn)) { runLang(c.cid, c.lang); return }
         if (shellKernel) { shellRun(c.cid, c.source); return }
         if (kernelUp) execute(c.cid)
         else {
@@ -501,7 +504,7 @@ FocusScope {
     // language at the end, run in its kernel.
     function submitLang(code, l) {
         const c = newCell("code", code)
-        c.lang = sameLang(l, codeLang) ? "" : l
+        c.lang = sameLang(l, runsIn) ? "" : l
         cells.append(c)
         current = cells.count - 1
         run(cells.count - 1)
