@@ -62,3 +62,42 @@ pub fn shell_name(pid: u32) -> String {
     }
     comm
 }
+
+pub fn is_shell(name: &str) -> bool {
+    matches!(name, "bash" | "zsh" | "fish" | "nu" | "xonsh" | "pwsh" | "sh" | "dash" | "ksh" | "mksh" | "tcsh" | "csh" | "elvish")
+}
+
+fn parent(pid: u32) -> u32 {
+    // (The field after the name, which may have spaces: after its last ')'.)
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+    stat.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(1)).and_then(|p| p.parse().ok()).unwrap_or(0)
+}
+
+/// The shells a pane's shell (pid, the one in front) was started in, the
+/// first the pane's own: [{name, pid}]. From the processes, so it holds
+/// after Tessera restarts. (A nix shell or env between two is passed over.)
+pub fn shell_chain(pid: u32) -> String {
+    let mut chain = Vec::new();
+    let mut p = pid;
+    while p > 1 && is_shell(&shell_name(p)) {
+        chain.push(serde_json::json!({"name": shell_name(p), "pid": p}));
+        let mut q = parent(p);
+        while q > 1 && matches!(name(q).as_str(), "nix" | "env" | "sudo" | "doas") {
+            q = parent(q);
+        }
+        p = q;
+    }
+    chain.reverse();
+    serde_json::Value::Array(chain).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    /// TESSERA_CHAIN_PID=<pid>: prints its chain (--ignored --nocapture).
+    #[test]
+    #[ignore]
+    fn chain_of() {
+        let pid: u32 = std::env::var("TESSERA_CHAIN_PID").ok().and_then(|p| p.parse().ok()).unwrap_or(std::process::id());
+        eprintln!("chain: {}", super::shell_chain(pid));
+    }
+}

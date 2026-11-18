@@ -306,7 +306,7 @@ fn proc_info(s: &DSession) -> crate::client::ProcInfo {
 }
 
 fn is_shell(name: &str) -> bool {
-    matches!(name, "bash" | "zsh" | "fish" | "nu" | "xonsh" | "pwsh" | "sh" | "dash" | "ksh" | "mksh" | "tcsh" | "csh" | "elvish")
+    crate::procinfo::is_shell(name)
 }
 
 fn foreground_job(s: &DSession) -> String {

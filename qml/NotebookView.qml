@@ -483,7 +483,8 @@ FocusScope {
     // The kernel for a language: one installed, else one Tessera fetches.
     function langSpec(l) {
         const ks = kernels.filter(k => k.name !== "tessera-shell" && sameLang(k.language, l))
-        return ks.find(k => !k.name.startsWith("tessera-")) || ks.find(k => k.name === "tessera-" + l) || ks[0] || null
+        // (A shell: Tessera's own shell kernel first.)
+        return ks.find(k => k.name.startsWith("tessera-sh-")) || ks.find(k => !k.name.startsWith("tessera-")) || ks.find(k => k.name === "tessera-" + l) || ks[0] || null
     }
     function hasKernelFor(l) { if (kernels.length === 0) listKernels(); return l !== "" && langSpec(l) !== null }
     function setLang(l, patch) { const m = Object.assign({}, langKernels); m[l] = Object.assign({}, m[l] || {}, patch); langKernels = m }

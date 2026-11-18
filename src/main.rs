@@ -25,6 +25,7 @@ mod proto;
 mod record;
 mod settings;
 mod shell_integration;
+mod shellk;
 mod snapshot;
 mod syntax;
 mod session;

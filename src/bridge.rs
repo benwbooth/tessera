@@ -481,6 +481,9 @@ pub mod ffi {
         fn shell_launch_line(self: &Controller, shell: &QString, parent: i32) -> QString;
         #[qinvokable]
         fn shell_hand_back(self: &Controller, child: i32, parent: i32);
+        /// The shells the one in front (pid) was started in: [{name, pid}].
+        #[qinvokable]
+        fn shell_chain(self: &Controller, pid: i32) -> QString;
         /// What an exit status means for a command (complete::exit_meaning).
         #[qinvokable]
         fn exit_meaning(self: &Controller, command: &QString, status: i32) -> QString;
@@ -810,11 +813,16 @@ impl ffi::Controller {
     }
 
     fn jupyter_running(&self) -> ffi::QString {
-        qs(&crate::jupyter::running())
+        // (Jupyter's kernels and Tessera's shell kernels, together.)
+        let mut all: Vec<serde_json::Value> = serde_json::from_str(&crate::jupyter::running()).unwrap_or_default();
+        all.extend(crate::shellk::running());
+        qs(&serde_json::Value::Array(all).to_string())
     }
 
     fn jupyter_kernels(&self) -> ffi::QString {
-        qs(&crate::jupyter::specs_json())
+        let mut all: Vec<serde_json::Value> = serde_json::from_str(&crate::jupyter::specs_json()).unwrap_or_default();
+        all.extend(crate::shellk::specs());
+        qs(&serde_json::Value::Array(all).to_string())
     }
 
     fn jupyter_start(self: Pin<&mut Self>, key: &ffi::QString, spec: &ffi::QString, cwd: &ffi::QString, pid: i32) {
@@ -824,6 +832,11 @@ impl ffi::Controller {
             let (k, j) = (k.clone(), v.to_string());
             let _ = qt.queue(move |c| c.jupyter_event(qs(&k), qs(&j)));
         });
+        // (A shell: Tessera's own shell kernel, not Jupyter.)
+        if crate::shellk::is_spec(&spec.to_string()) {
+            crate::shellk::start(&key.to_string(), &spec.to_string(), &local_path(cwd), pid.max(0) as u32, sink);
+            return;
+        }
         crate::jupyter::start(&key.to_string(), &spec.to_string(), &local_path(cwd), pid.max(0) as u32, sink);
     }
 
@@ -832,6 +845,9 @@ impl ffi::Controller {
     }
 
     fn jupyter_sync(&self, key: &ffi::QString, pid: i32, cwd: &ffi::QString) -> bool {
+        if crate::shellk::has(&key.to_string()) {
+            return crate::shellk::sync(&key.to_string(), pid.max(0) as u32, &local_path(cwd));
+        }
         crate::jupyter::sync(&key.to_string(), pid.max(0) as u32, &local_path(cwd))
     }
 
@@ -843,15 +859,25 @@ impl ffi::Controller {
         qs(&crate::shell_integration::launch_line(&shell.to_string(), parent.max(0) as u32))
     }
 
+    fn shell_chain(&self, pid: i32) -> ffi::QString {
+        qs(&crate::procinfo::shell_chain(pid.max(0) as u32))
+    }
+
     fn shell_hand_back(&self, child: i32, parent: i32) {
         crate::shell_integration::hand_back(child.max(0) as u32, parent.max(0) as u32)
     }
 
     fn jupyter_export(&self, key: &ffi::QString, pid: i32) {
-        crate::jupyter::export_to_shell(&key.to_string(), pid.max(0) as u32)
+        // (Tessera's shell kernels hand back by themselves, after each run.)
+        if !crate::shellk::has(&key.to_string()) {
+            crate::jupyter::export_to_shell(&key.to_string(), pid.max(0) as u32)
+        }
     }
 
     fn jupyter_execute(&self, key: &ffi::QString, cell: &ffi::QString, code: &ffi::QString) -> bool {
+        if crate::shellk::has(&key.to_string()) {
+            return crate::shellk::execute(&key.to_string(), &cell.to_string(), &code.to_string());
+        }
         crate::jupyter::execute(&key.to_string(), &cell.to_string(), &code.to_string())
     }
 
@@ -871,10 +897,12 @@ impl ffi::Controller {
     }
 
     fn jupyter_interrupt(&self, key: &ffi::QString) {
+        crate::shellk::interrupt(&key.to_string());
         crate::jupyter::interrupt(&key.to_string());
     }
 
     fn jupyter_stop(&self, key: &ffi::QString) {
+        crate::shellk::stop(&key.to_string());
         crate::jupyter::stop(&key.to_string());
     }
 

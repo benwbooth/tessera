@@ -32,17 +32,14 @@ Rectangle {
     readonly property var shellNames: ({ zsh: "zsh", bash: "bash", fish: "fish", nu: "nushell", xonsh: "xonsh", pwsh: "PowerShell", elvish: "elvish", ksh: "ksh", dash: "dash", tcsh: "tcsh", sh: "sh" })
     // (The grammar each one is highlighted with.)
     function shellGrammar(s) { return ({ fish: "fish", nu: "nu" })[s] || "bash" }
-    // A shell picked: the pane's shell becomes it (started in it, or left
-    // for it when it's the one this was started from), the folder and
-    // variables carried along.
-    signal shellSwitchRequested(string shell)
     function pickLanguage(id) {
         if (id.startsWith("shell:")) {
             const sh = id.substring(6)
-            runShell = ""
-            // (Chosen, not guessed: the shell's code, named by the shell.)
+            // (Chosen, not guessed. Another shell than the pane's: the input
+            // runs in its kernel, a card each time, the folder and variables
+            // shared with the pane's shell.)
+            runShell = sh === (shellName || "bash") ? "" : sh
             langOverride = "bash"
-            if (sh !== (shellName || "bash")) shellSwitchRequested(sh)
         } else {
             runShell = ""
             langOverride = id
