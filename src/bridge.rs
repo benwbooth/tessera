@@ -108,6 +108,10 @@ pub mod ffi {
         /// Start (non-empty path) or stop (empty) logging output to a file.
         fn log_to_file(self: &mut Session, path: &str) -> bool;
         fn is_logging(self: &Session) -> bool;
+        /// Start (a path) or stop ("") recording the output (asciicast);
+        /// the recording's path ("" when it couldn't start).
+        fn record_to_file(self: &mut Session, path: &str) -> String;
+        fn is_recording(self: &Session) -> bool;
         /// The selection with colors as HTML, and as VT control sequences.
         fn selected_html(self: &Session) -> String;
         fn selected_vt(self: &Session) -> String;

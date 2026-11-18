@@ -22,6 +22,7 @@ mod lsp;
 mod prompt;
 mod prompt_widgets;
 mod proto;
+mod record;
 mod settings;
 mod shell_integration;
 mod snapshot;

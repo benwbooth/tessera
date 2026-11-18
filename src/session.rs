@@ -134,6 +134,8 @@ pub struct Session {
     selected_html: String,
     selected_vt: String,
     log: Option<std::fs::File>,
+    /// A recording of the output (asciicast), while one is made.
+    rec: Option<crate::record::Recorder>,
     clipboard: Rc<RefCell<Option<String>>>,
     find: Option<FindState>,
     taken: bool,
@@ -354,6 +356,7 @@ pub fn session_open(
         selected_html: String::new(),
         selected_vt: String::new(),
         log: None,
+        rec: None,
         clipboard,
         find: None,
         taken: false,
@@ -474,6 +477,9 @@ impl Session {
                             if let Some(f) = self.log.as_mut() {
                                 let _ = f.write_all(&payload);
                             }
+                            if let Some(r) = self.rec.as_mut() {
+                                r.output(&payload);
+                            }
                             self.process_output(&payload);
                             self.run_triggers();
                             sig |= SIG_DIRTY;
@@ -512,6 +518,9 @@ impl Session {
                 if !data.is_empty() {
                     if let Some(f) = self.log.as_mut() {
                         let _ = f.write_all(&data);
+                    }
+                    if let Some(r) = self.rec.as_mut() {
+                        r.output(&data);
                     }
                     self.term.vt_write(&data);
                     self.run_triggers();
@@ -932,6 +941,11 @@ impl Session {
             let _ = self.term.resize(c, r, cell_w, cell_h);
             return;
         }
+        if let Some(r) = self.rec.as_mut() {
+            if (self.size.get().0, self.size.get().1) != (cols, rows) {
+                r.resize(cols, rows);
+            }
+        }
         self.size.set((cols, rows, cell_w, cell_h));
         let _ = self.term.resize(cols, rows, cell_w.max(1), cell_h.max(1));
         if let Some(gw) = &self.gateway {
@@ -1301,6 +1315,47 @@ impl Session {
 
     pub fn is_logging(&self) -> bool {
         self.log.is_some()
+    }
+
+    /// Start (a path) or stop ("") recording the output as an asciicast;
+    /// stopping returns the recording's path.
+    pub fn record_to_file(&mut self, path: &str) -> String {
+        if path.is_empty() {
+            return match self.rec.take() {
+                Some(r) => {
+                    let p = r.path.clone();
+                    r.finish();
+                    p
+                }
+                None => String::new(),
+            };
+        }
+        let (cols, rows, _, _) = self.size.get();
+        // (It starts with the screen as it is.)
+        let screen = match (
+            self.term.grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 })),
+            self.term.grid_ref(Point::Active(PointCoordinate { x: cols.saturating_sub(1), y: rows.saturating_sub(1) as u32 })),
+        ) {
+            (Ok(a), Ok(b)) => {
+                let sel = Selection::new(a, b, false);
+                let vt = format_selection_as(&self.term, &sel, Format::Vt, true);
+                let cur = self.term.cursor_x().ok().zip(self.term.cursor_y().ok());
+                let at = cur.map(|(x, y)| format!("\x1b[{};{}H", y + 1, x + 1)).unwrap_or_default();
+                format!("\x1b[2J\x1b[H{}{at}", vt.replace('\n', "\r\n"))
+            }
+            _ => String::new(),
+        };
+        match crate::record::Recorder::start(path, cols, rows, &screen) {
+            Some(r) => {
+                self.rec = Some(r);
+                r_path(&self.rec)
+            }
+            None => String::new(),
+        }
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.rec.is_some()
     }
 
     pub fn select_all(&mut self) {
@@ -2023,4 +2078,8 @@ mod scrollback_tests {
             assert!(t.scrollback_rows().unwrap() >= lines as usize, "{cols} cols: {} < {lines}", t.scrollback_rows().unwrap());
         }
     }
+}
+
+fn r_path(r: &Option<crate::record::Recorder>) -> String {
+    r.as_ref().map(|r| r.path.clone()).unwrap_or_default()
 }
