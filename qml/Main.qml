@@ -511,6 +511,12 @@ ApplicationWindow {
             if (opts.title) t.launchTitle = opts.title
             if (opts.attachId) props.attachId = opts.attachId
             if (opts.doc) { props.docPath = opts.doc; props.viewMode = "notebook" }
+            // (The view the tab it's opened from is in, unless one's asked for.)
+            else {
+                const from = active ? paneOf(active) : null
+                const v = opts.view || (from ? from.viewMode : "")
+                if (v === "notebook" || v === "terminal") props.viewMode = v
+            }
             const cwd = opts.cwd !== undefined ? opts.cwd : cwdFor(prof, active)
             if (cwd) props.cwd = cwd
             const p = makePane(t.root, props)
@@ -1504,6 +1510,10 @@ ApplicationWindow {
         id: launchMenu
         onAboutToShow: { win.launchData = JSON.parse(controller.launchers()); win.launchOpen = true }
         onAboutToHide: win.launchOpen = false
+        // (Either view, whichever the current tab is in.)
+        P.MenuItem { icon.name: "view-list-details"; text: "New Notebook Tab"; onTriggered: newTab({ view: "notebook" }) }
+        P.MenuItem { icon.name: "utilities-terminal"; text: "New Terminal Tab"; onTriggered: newTab({ view: "terminal" }) }
+        P.MenuSeparator {}
         Instantiator {
             model: win.profileList
             delegate: P.MenuItem {
@@ -1511,7 +1521,7 @@ ApplicationWindow {
                 text: modelData.name + (index < 9 ? "\tCtrl+Shift+" + (index + 1) : "")
                 onTriggered: newTab({ profile: modelData.name })
             }
-            onObjectAdded: (i, o) => launchMenu.insertItem(i, o)
+            onObjectAdded: (i, o) => launchMenu.insertItem(i + 3, o)
             onObjectRemoved: (i, o) => launchMenu.removeItem(o)
         }
         P.MenuSeparator {}
