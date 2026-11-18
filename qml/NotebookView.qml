@@ -773,6 +773,7 @@ FocusScope {
             x.meta = JSON.stringify(m)
             if (keepTids && tm.tid > 0) { x.tid = tm.tid; x.mine = !!tm.mine; if (tm.cid) x.cid = tm.cid }
             if (tm.cwd) x.cwd = tm.cwd
+            if (!(tm.tid > 0) && tm.started > 1) { x.started = tm.started; x.ended = tm.started + (tm.duration_ms || 0); x.failed = !!tm.failed }
             if (tm.lang) x.lang = tm.lang
             if (tm.ran_in) x.ranIn = tm.ran_in
             if (x.type === "code") {
@@ -913,7 +914,11 @@ FocusScope {
                     outs = kept ? [] : termOutputs(c.tid)
                     meta.tessera = { cwd: c.cwd, status: c.status, duration_ms: Math.max(0, c.ended - c.started), started: c.started }
                     if (kept) Object.assign(meta.tessera, { tid: c.tid, mine: c.mine, cid: c.cid })
-                } else try { outs = JSON.parse(c.outputs) } catch (e) {}
+                } else {
+                    try { outs = JSON.parse(c.outputs) } catch (e) {}
+                    // (Where, when and how it ran, kept with it.)
+                    if (c.started > 1) meta.tessera = Object.assign({}, meta.tessera || {}, { cwd: c.cwd, started: c.started, duration_ms: Math.max(0, c.ended - c.started), failed: !!c.failed })
+                }
                 if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
                 if (c.ranIn !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { ran_in: c.ranIn })
                 cell.execution_count = c.count >= 0 ? c.count : (c.tid > 0 && !kept ? ++n : null)
