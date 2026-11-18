@@ -165,9 +165,13 @@ Item {
         color: tab.raised ? Theme.text : (tab.hovered ? Theme.text : Theme.textDim)
         font.pixelSize: 12
         clip: true
-        // Fade the end of a long title instead of an ellipsis.
+        // A folder too long for the tab: cut from the left, so its own name
+        // shows (tabs are a fixed width). Anything else fades at the end.
+        readonly property bool isPath: /^[~\/]/.test(tab.text)
+        elide: isPath ? Text.ElideLeft : Text.ElideNone
+        renderType: Text.NativeRendering
         Rectangle {
-            visible: title.implicitWidth > title.width
+            visible: !title.isPath && title.implicitWidth > title.width
             anchors.right: parent.right
             width: 18
             height: parent.height
