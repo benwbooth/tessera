@@ -141,9 +141,10 @@ Item {
             // (A notebook over it takes the keys, when the editor doesn't.)
             else if (activeFocus && notebook.visible) Qt.callLater(() => notebook.forceActiveFocus())
         }
-        // (A click or a selection drag at a prompt: the editor, once it's done.
-        // While a program runs, the keys stay here.)
-        PointHandler { onActiveChanged: if (!active && pane.editorOn) { pane.preferEditor = true; Qt.callLater(compose.focusEditor) } }
+        // (At a prompt a click keeps the keys in the editor, unless it's on
+        // the cursor's line: then the terminal takes them, as it's typed in.)
+        focusOnCursorLineOnly: pane.editorOn
+        onCursorLineClicked: pane.preferEditor = false
         // Shift+Tab at a prompt: back to the editor (elsewhere it goes to the program).
         Keys.onPressed: (e) => {
             if (e.key === Qt.Key_Backtab && pane.editorOn && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
