@@ -132,6 +132,10 @@ fn main() {
     }
     let session = if wayland { std::fs::read_to_string(&session_file).unwrap_or_default().trim().to_string() } else { String::new() };
     bridge::ffi::tessera_webengine_initialize();
+    // (Its own Qt's plugins, looked in first: bootstrap.h.)
+    if let Some(p) = option_env!("TESSERA_QT_PLUGINS").filter(|p| std::path::Path::new(p).is_dir()) {
+        std::env::set_var("TESSERA_OWN_QT_PLUGINS", p);
+    }
     bridge::ffi::tessera_create_app(&QString::from(session.as_str()));
     if main_window {
         kde::remember_window_position();

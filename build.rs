@@ -20,6 +20,13 @@ fn main() {
             println!("cargo::rustc-env=TESSERA_QT_QML={qml}");
         }
     }
+    // Its own Qt's plugins, looked in first (see bootstrap.h).
+    if let Ok(o) = std::process::Command::new(&qmake).args(["-query", "QT_INSTALL_PLUGINS"]).output() {
+        let p = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if !p.is_empty() {
+            println!("cargo::rustc-env=TESSERA_QT_PLUGINS={p}");
+        }
+    }
 
     // Qt's private window interface (Wayland session restore: the desktop
     // puts the window back where it was).

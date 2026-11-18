@@ -72,7 +72,21 @@ inline void tessera_create_app(const QString& session)
     }
     // QApplication (not QGuiApplication): Qt.labs.platform menus then use the
     // desktop's own menus (Breeze on KDE, with theme icons and shortcuts).
+    // Its own Qt's plugins first: the desktop's QT_PLUGIN_PATH may be another
+    // Qt's (a system update), and Qt won't load a platform plugin built for a
+    // newer Qt than its own: the window wouldn't open. (Not QT_PLUGIN_PATH
+    // itself: that would reach the shells and the programs run in them.)
+    // (Put first just while Qt starts and reads it, then back as it was.)
+    const QByteArray own = qgetenv("TESSERA_OWN_QT_PLUGINS");
+    qunsetenv("TESSERA_OWN_QT_PLUGINS");
+    const bool hadPath = qEnvironmentVariableIsSet("QT_PLUGIN_PATH");
+    const QByteArray oldPath = qgetenv("QT_PLUGIN_PATH");
+    if (!own.isEmpty()) qputenv("QT_PLUGIN_PATH", oldPath.isEmpty() ? own : own + ':' + oldPath);
     new QApplication(argc, argv);
+    if (!own.isEmpty()) {
+        if (hadPath) qputenv("QT_PLUGIN_PATH", oldPath);
+        else qunsetenv("QT_PLUGIN_PATH");
+    }
     qApp->installEventFilter(new TesseraBacktab(qApp));
     QApplication::setApplicationName(QStringLiteral("tessera"));
     QApplication::setApplicationDisplayName(QStringLiteral("Tessera"));
