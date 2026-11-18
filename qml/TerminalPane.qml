@@ -120,15 +120,18 @@ Item {
         anchors.bottom: pane.editorOn ? compose.top : parent.bottom
         focus: true
         onContextMenuRequested: (x, y) => pane.contextMenu(term, x, y)
-        // Type in the terminal (click it) or in the editor under it (click
-        // there): the pane remembers which, and goes back to it when it gets
-        // the keys again (switching tabs or panes).
+        // At a prompt the keys go to the editor under it, even after a click
+        // up here (Shift+Tab in the editor hands them to the terminal); the
+        // pane remembers which, and goes back to it when it gets the keys
+        // again (switching tabs or panes).
         onActiveFocusChanged: {
             if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
             // (A notebook over it takes the keys, when the editor doesn't.)
             else if (activeFocus && notebook.visible) Qt.callLater(() => notebook.forceActiveFocus())
         }
-        PointHandler { onActiveChanged: if (active) pane.preferEditor = false }
+        // (A click or a selection drag at a prompt: the editor, once it's done.
+        // While a program runs, the keys stay here.)
+        PointHandler { onActiveChanged: if (!active && pane.editorOn) { pane.preferEditor = true; Qt.callLater(compose.focusEditor) } }
         // Shift+Tab at a prompt: back to the editor (elsewhere it goes to the program).
         Keys.onPressed: (e) => {
             if (e.key === Qt.Key_Backtab && pane.editorOn && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
