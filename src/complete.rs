@@ -1179,7 +1179,8 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
             let dirs_only = matches!(cmd.as_str(), "cd" | "pushd" | "rmdir" | "z");
             items.extend(rank(paths(&typed, cwd, dirs_only), name_of(&typed), |i| i.label.clone()));
             // (cd: also where you go often or lately, folders further down, CDPATH.)
-            if matches!(cmd.as_str(), "cd" | "pushd" | "z") && args.is_empty() {
+            // (A folder typed out to its slash: just what's in it.)
+            if matches!(cmd.as_str(), "cd" | "pushd" | "z") && args.is_empty() && !typed.ends_with('/') {
                 let places = cd_places(&typed, cwd);
                 // (A subfolder matching only letter by letter gives way to
                 // a place that matches properly.)
@@ -1313,5 +1314,19 @@ mod live {
             println!("{line:?} -> {items:#?}");
         }
     }
+
+    #[test]
+    fn cd_into_folder_lists_its_subfolders() {
+        let d = std::env::temp_dir().join(format!("tessera-cd-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("alpha")).unwrap();
+        std::fs::create_dir_all(d.join("beta")).unwrap();
+        let line = format!("cd {}/", d.display());
+        let r: serde_json::Value = serde_json::from_str(&super::complete(&line, line.encode_utf16().count(), "/", &serde_json::Value::Null)).unwrap();
+        let mut labels: Vec<String> = r["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect();
+        let _ = std::fs::remove_dir_all(&d);
+        labels.sort();
+        assert_eq!(labels, ["alpha/", "beta/"], "{labels:?}");
+    }
+
 }
 

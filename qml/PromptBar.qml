@@ -103,7 +103,7 @@ Item {
     }
 
     implicitHeight: Math.max(24, Math.max(leftRow.implicitHeight, rightRow.implicitHeight) + 6)
-    FontMetrics { id: sfm; font.family: bar.fontFamily; font.pointSize: Math.max(8, bar.fontSize - 1) }
+    FontMetrics { id: sfm; font.family: bar.fontFamily; font.pointSize: bar.fontSize }
 
     function ansi(i, fallback) {
         const a = bar.themeData && bar.themeData.ansi
@@ -387,13 +387,14 @@ Item {
         Text {
             id: label
             anchors.centerIn: parent
-            anchors.horizontalCenterOffset: icon.visible ? (icon.width + 4) / 2 : 0
+            // (Off the half pixel both ways: native text smears on one.)
+            anchors.horizontalCenterOffset: (icon.visible ? (icon.width + 4) / 2 : 0) + 0.001
             anchors.verticalCenterOffset: 0.001
             text: bar.glyphs(seg.s.text)
             textFormat: Text.RichText
             color: seg.s.fg
             font.family: bar.fontFamily
-            font.pointSize: Math.max(8, bar.fontSize - 1)
+            font.pointSize: bar.fontSize
             font.weight: seg.s.bold !== undefined ? (seg.s.bold ? Font.Bold : Font.Normal) : seg.s.bg !== "" ? Font.DemiBold : Font.Normal
             font.underline: seg.hot
             renderType: Text.NativeRendering
@@ -417,13 +418,14 @@ Item {
         Text {
             id: rt
             visible: run.cap === ""
+            x: 0.001
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: 0.001
             text: bar.glyphs(run.r.t)
             textFormat: Text.RichText
             color: run.ink
             font.family: bar.fontFamily
-            font.pointSize: Math.max(8, bar.fontSize - 1)
+            font.pointSize: bar.fontSize
             font.bold: run.r.b
             font.underline: run.hot && run.r.t.trim() !== ""
             renderType: Text.NativeRendering
