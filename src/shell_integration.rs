@@ -3,6 +3,9 @@
 const BASH: &str = include_str!("../shell/tessera.bash");
 const ZSH: &str = include_str!("../shell/tessera.zsh");
 const FISH: &str = include_str!("../shell/tessera.fish");
+const NU: &str = include_str!("../shell/tessera.nu");
+const XONSH: &str = include_str!("../shell/tessera.xsh");
+const PWSH: &str = include_str!("../shell/tessera.ps1");
 
 pub fn install(shell: &str) -> String {
     let (script, file, rc) = match shell {
@@ -102,6 +105,9 @@ fn write_auto_scripts() -> Option<std::path::PathBuf> {
         ("fish/vendor_conf.d/tessera.fish", FISH),
         ("bash/tessera.bash", BASH),
         ("bash/bashrc", BASHRC),
+        ("nu/tessera.nu", NU),
+        ("xonsh/tessera.xsh", XONSH),
+        ("powershell/tessera.ps1", PWSH),
     ];
     for (rel, text) in files {
         let p = base.join(rel);
@@ -127,7 +133,13 @@ pub fn launch_line(shell: &str, parent: u32) -> String {
         "fish" => ("fish", "fish"),
         "nu" => ("nu", "nushell"),
         "xonsh" => ("xonsh", "xonsh"),
-        "powershell" => ("pwsh", "powershell"),
+        "powershell" | "pwsh" => ("pwsh", "powershell"),
+        "elvish" => ("elvish", "elvish"),
+        "ksh" => ("ksh", "ksh"),
+        "mksh" => ("mksh", "mksh"),
+        "dash" => ("dash", "dash"),
+        "tcsh" => ("tcsh", "tcsh"),
+        "sh" => ("sh", "bashInteractive"),
         _ => return String::new(),
     };
     let on_path = std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()));
@@ -158,6 +170,9 @@ pub fn launch_line(shell: &str, parent: u32) -> String {
         }
         "bash" => format!(" {run} --rcfile {}", q(&base.join("bash/bashrc"))),
         "fish" => format!(" {run} --init-command 'source {}'", base.join("fish/vendor_conf.d/tessera.fish").display()),
+        "nu" => format!(" {run} -e {}", q(&std::path::PathBuf::from(format!("source {}", base.join("nu/tessera.nu").display())))),
+        "xonsh" => format!(" {run} -i --rc {}", q(&base.join("xonsh/tessera.xsh"))),
+        "powershell" | "pwsh" => format!(" {run} -NoLogo -NoExit -Command {}", q(&std::path::PathBuf::from(format!(". '{}'", base.join("powershell/tessera.ps1").display())))),
         _ => format!(" {run}"),
     }
 }

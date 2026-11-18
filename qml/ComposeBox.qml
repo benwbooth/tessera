@@ -28,7 +28,8 @@ Rectangle {
     // what was just run went to.
     property string runShell: ""
     property string runShellUsed: ""
-    readonly property var shellNames: ({ bash: "bash", zsh: "zsh", fish: "fish", nu: "nushell", xonsh: "xonsh", powershell: "PowerShell" })
+    // (By the names their programs go by, as the daemon reports the shell.)
+    readonly property var shellNames: ({ zsh: "zsh", bash: "bash", fish: "fish", nu: "nushell", xonsh: "xonsh", pwsh: "PowerShell", elvish: "elvish", ksh: "ksh", dash: "dash", tcsh: "tcsh", sh: "sh" })
     // (The grammar each one is highlighted with.)
     function shellGrammar(s) { return ({ fish: "fish", nu: "nu" })[s] || "bash" }
     // A shell picked: the pane's shell becomes it (started in it, or left

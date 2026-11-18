@@ -451,27 +451,72 @@ const FETCHED: &[Fetched] = &[
 /// its environment as the kernels see it updated now.
 pub fn write_apply(pid: u32, set: Vec<(String, String)>, unset: Vec<String>, cd: Option<String>) {
     let dir = env_dir();
-    // In the pane's shell's own words.
-    let shell = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default().trim().to_string();
-    let fish = shell == "fish";
+    // In the shell's own words: nushell and xonsh read JSON (merged with any
+    // not applied yet), PowerShell its own, fish its own, the rest POSIX.
+    let shell = crate::procinfo::shell_name(pid);
     let name_ok = |a: &str| !a.is_empty() && a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    let mut lines = Vec::new();
-    for (a, b) in set.iter().filter(|(a, _)| name_ok(a)) {
-        lines.push(if fish { format!("set -gx {a} {}", sh_quote(b)) } else { format!("export {a}={}", sh_quote(b)) });
-    }
-    for a in unset.iter().filter(|a| name_ok(a)) {
-        lines.push(if fish { format!("set -e {a}") } else { format!("unset {a}") });
-    }
+    let set: Vec<(String, String)> = set.into_iter().filter(|(a, _)| name_ok(a)).collect();
+    let unset: Vec<String> = unset.into_iter().filter(|a| name_ok(a)).collect();
+    let apply = dir.join(format!("{pid}.apply"));
     if let Some(d) = &cd {
-        lines.push(if fish { format!("builtin cd {}", sh_quote(d)) } else { format!("builtin cd -- {}", sh_quote(d)) });
         let _ = std::fs::write(dir.join(format!("{pid}.cwd")), d);
     }
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(format!("{pid}.apply"))) {
-        let _ = writeln!(f, "{}", lines.join("\n"));
+    if matches!(shell.as_str(), "nu" | "xonsh") {
+        let mut a: Value = std::fs::read_to_string(&apply).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({"set": {}, "unset": []}));
+        for (k, v) in &set {
+            a["set"][k] = json!(v);
+            if let Some(u) = a["unset"].as_array_mut() {
+                u.retain(|x| x.as_str() != Some(k));
+            }
+        }
+        for k in &unset {
+            if let Some(m) = a["set"].as_object_mut() {
+                m.remove(k);
+            }
+            if let Some(u) = a["unset"].as_array_mut() {
+                u.push(json!(k));
+            }
+        }
+        if let Some(d) = &cd {
+            a["cd"] = json!(d);
+        }
+        let _ = std::fs::write(&apply, a.to_string());
+    } else {
+        let ps = |s: &str| format!("'{}'", s.replace('\'', "''"));
+        let mut lines = Vec::new();
+        for (a, b) in &set {
+            lines.push(match shell.as_str() {
+                "fish" => format!("set -gx {a} {}", sh_quote(b)),
+                "pwsh" => format!("$env:{a} = {}", ps(b)),
+                "tcsh" | "csh" => format!("setenv {a} {}", sh_quote(b)),
+                "elvish" => format!("set-env {a} {}", sh_quote(b)),
+                _ => format!("export {a}={}", sh_quote(b)),
+            });
+        }
+        for a in &unset {
+            lines.push(match shell.as_str() {
+                "fish" => format!("set -e {a}"),
+                "pwsh" => format!("Remove-Item -ErrorAction SilentlyContinue env:{a}"),
+                "tcsh" | "csh" => format!("unsetenv {a}"),
+                "elvish" => format!("unset-env {a}"),
+                _ => format!("unset {a}"),
+            });
+        }
+        if let Some(d) = &cd {
+            lines.push(match shell.as_str() {
+                "fish" => format!("builtin cd {}", sh_quote(d)),
+                "pwsh" => format!("Set-Location -LiteralPath {}", ps(d)),
+                "tcsh" | "csh" | "elvish" => format!("cd {}", sh_quote(d)),
+                _ => format!("builtin cd -- {}", sh_quote(d)),
+            });
+        }
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&apply) {
+            let _ = writeln!(f, "{}", lines.join("\n"));
+        }
     }
-    // (The shell's exported environment as the other kernels will see
-    // it, until its next prompt writes it again.)
+    // (The shell's exported environment as the kernels will see it, until
+    // its next prompt writes it again.)
     if let Some(mut env) = crate::prompt::shell_env(pid).map(|e| e.into_iter().collect::<HashMap<String, String>>()) {
         for (a, b) in set {
             env.insert(a, b);

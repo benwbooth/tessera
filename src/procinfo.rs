@@ -48,3 +48,17 @@ fn ps(pid: u32, field: &str) -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default()
 }
+
+/// A shell's name from its process: its program, unwrapped (NixOS's
+/// .xonsh-wrapped, a Python running xonsh).
+pub fn shell_name(pid: u32) -> String {
+    let comm = name(pid);
+    let comm = comm.strip_prefix('.').and_then(|c| c.strip_suffix("-wrapped")).map(String::from).unwrap_or(comm);
+    if comm.starts_with("python") || comm == "xonsh" {
+        let cmd = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        if String::from_utf8_lossy(&cmd).contains("xonsh") {
+            return "xonsh".into();
+        }
+    }
+    comm
+}

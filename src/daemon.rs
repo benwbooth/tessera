@@ -288,11 +288,12 @@ fn proc_info(s: &DSession) -> crate::client::ProcInfo {
     let shell = if job.is_empty() { pgid.or(s.shell_pid).map(comm).unwrap_or_default() } else { s.shell_pid.map(comm).unwrap_or_default() };
     // (A shell started in it, switched to from the editor, is the shell now:
     // its prompt, its environment. Under nix shell: the shell nix started.)
-    let nested = if is_shell(&job) {
-        pgid.map(|p| (job.clone(), p))
+    let job_shell = pgid.filter(|_| !job.is_empty()).map(crate::procinfo::shell_name).unwrap_or_default();
+    let nested = if is_shell(&job_shell) {
+        pgid.map(|p| (job_shell.clone(), p))
     } else if job == "nix" {
         pgid.and_then(|p| std::fs::read_to_string(format!("/proc/{p}/task/{p}/children")).ok()).and_then(|c| {
-            c.split_whitespace().filter_map(|x| x.parse::<u32>().ok()).map(|c| (comm(c), c)).find(|(n, _)| is_shell(n))
+            c.split_whitespace().filter_map(|x| x.parse::<u32>().ok()).map(|c| (crate::procinfo::shell_name(c), c)).find(|(n, _)| is_shell(n))
         })
     } else {
         None
@@ -305,7 +306,7 @@ fn proc_info(s: &DSession) -> crate::client::ProcInfo {
 }
 
 fn is_shell(name: &str) -> bool {
-    matches!(name, "bash" | "zsh" | "fish" | "nu" | "xonsh" | "pwsh" | "sh" | "dash" | "ksh" | "mksh" | "tcsh" | "elvish")
+    matches!(name, "bash" | "zsh" | "fish" | "nu" | "xonsh" | "pwsh" | "sh" | "dash" | "ksh" | "mksh" | "tcsh" | "csh" | "elvish")
 }
 
 fn foreground_job(s: &DSession) -> String {
