@@ -16,6 +16,7 @@ Item {
     property bool current: false
     property bool nextIsCurrent: false   // no divider next to the current tab
     property bool tmux: false
+    property string view: ""             // "notebook" or "terminal": its icon
     property bool activity: false        // new output while in the background
     property bool bell: false
     property color tabColor: "transparent"
@@ -137,10 +138,26 @@ Item {
         font.weight: Font.Bold
     }
 
+    // Notebook or terminal, at a glance.
+    Text {
+        id: viewIcon
+        visible: tab.view !== ""
+        anchors.left: glyph.visible ? glyph.right : parent.left
+        anchors.leftMargin: glyph.visible ? 6 : 12
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: 0.001
+        text: tab.view === "notebook" ? "\u25a4" : ">_"
+        color: tab.view === "notebook" ? Theme.accent : (tab.raised || tab.hovered ? Theme.text : Theme.textDim)
+        font.family: tab.view === "notebook" ? "" : "monospace"
+        font.pixelSize: tab.view === "notebook" ? 12 : 10
+        font.weight: Font.Bold
+        renderType: Text.NativeRendering
+    }
+
     Text {
         id: title
-        anchors.left: glyph.visible ? glyph.right : parent.left
-        anchors.leftMargin: glyph.visible ? 6 : 13
+        anchors.left: viewIcon.visible ? viewIcon.right : glyph.visible ? glyph.right : parent.left
+        anchors.leftMargin: viewIcon.visible || glyph.visible ? 6 : 13
         anchors.right: tail.left
         anchors.rightMargin: 4
         anchors.verticalCenter: parent.verticalCenter

@@ -1997,6 +1997,7 @@ ApplicationWindow {
                         current: index === currentTab
                         nextIsCurrent: index + 1 === currentTab
                         tmux: modelData.tmuxWindow >= 0
+                        view: modelData.lastPane ? modelData.lastPane.viewMode : ""
                         activity: modelData.activity
                         bell: modelData.bell
                         tabColor: modelData.tabColor
