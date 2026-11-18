@@ -412,7 +412,17 @@ Item {
         readonly property color ink: bar.color(r.fg, Theme.fg)
         width: cap !== "" ? Math.ceil(height / 2) : Math.ceil(rt.implicitWidth)
         height: Math.ceil(sfm.height) + 2
-        color: r.bg ? bar.color(r.bg, "transparent") : "transparent"
+        color: "transparent"
+        // (Its background reaches a little under its neighbours: edge to edge
+        // at 130% they land between pixels, and a hairline of the bar's dark
+        // background shows through.)
+        Rectangle {
+            visible: run.r.bg ? true : false
+            x: -0.75
+            width: parent.width + 1.5
+            height: parent.height
+            color: run.r.bg ? bar.color(run.r.bg, "transparent") : "transparent"
+        }
         Text {
             id: rt
             visible: run.cap === ""
@@ -431,7 +441,11 @@ Item {
         }
         Canvas {
             visible: run.cap !== ""
-            anchors.fill: parent
+            // (A pixel more on its flat side, under the next run: no seam.)
+            readonly property bool flatRight: ["\ue0b6", "\ue0b2", "\ue0ba", "\ue0be"].indexOf(cap) >= 0
+            x: flatRight ? 0 : -1
+            width: parent.width + 1
+            height: parent.height
             property color ink: run.ink
             property string cap: run.cap
             onInkChanged: requestPaint()
@@ -442,7 +456,9 @@ Item {
                 const c = getContext("2d")
                 c.reset()
                 c.fillStyle = ink
-                const w = width, h = height
+                const w = width - 1, h = height
+                if (!flatRight) c.translate(1, 0)
+                c.fillRect(flatRight ? w - 0.5 : -1, 0, 1.5, h)
                 c.beginPath()
                 switch (cap) {
                 case "\ue0b6": // left half circle
