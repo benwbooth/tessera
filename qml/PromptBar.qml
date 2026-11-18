@@ -175,7 +175,17 @@ Item {
         if (!c) return fallback
         return c[0] === "p" ? ansi(parseInt(c.slice(1)), fallback) : c
     }
-    onCwdChanged: refresh()
+    onCwdChanged: { refresh(); noteVisit() }
+    // The folders this tab has been in, the latest first (the cd history
+    // shows them before everywhere else's).
+    property var visited: []
+    function noteVisit() {
+        if (cwd === "") return
+        const v = visited.filter(p => p !== cwd)
+        v.unshift(cwd)
+        visited = v.slice(0, 30)
+    }
+    function shQuote(s) { return /^[A-Za-z0-9\/._+~:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
     onVisibleChanged: refresh()
     Connections {
         target: bar.view
@@ -838,6 +848,18 @@ Item {
         let c = []
         try { c = JSON.parse(controller.promptChoices(name, bar.cwd, bar.shellPid)) } catch (e) {}
         if (c.length === 0) { openWidgetMenu(layout.indexOf(name), name, item); return }
+        // (The folder's choices: this tab's own folders first.)
+        if (c.some(o => o.section && o.label === "Up") && visited.length > 1) {
+            const home = controller.homeDir()
+            const mine = visited.filter(p => p !== cwd).map(p => ({
+                label: home !== "" && (p === home || p.startsWith(home + "/")) ? "~" + p.substring(home.length) : p,
+                cmd: "cd " + shQuote(p), current: false
+            }))
+            const cmds = new Set(mine.map(o => o.cmd))
+            c = [{ label: "This tab", cmd: "", section: true }].concat(mine, c.filter(o => o.section || !cmds.has(o.cmd)))
+            // (A heading left with nothing under it goes.)
+            c = c.filter((o, i) => !o.section || (i + 1 < c.length && !c[i + 1].section))
+        }
         choices = c
         choicesFor = name
         choiceFilter.text = ""
@@ -1043,14 +1065,15 @@ Item {
         }
     }
     Timer { id: t2; property string cmd; interval: 2500; onTriggered: { for (let k = 0; k < leftRow.children.length; k++) { const c = leftRow.children[k]; if (c.wd && c.wd.name === cmd.substring(cmd.indexOf(":") + 1)) { if (cmd.startsWith("choices:")) bar.openChoices(c.wd.name, c); else bar.openStyle(c.wd.name) } } } }
-    // (Test hook: TESSERA_TEST_PROMPT=add | choices:<widget> | style:<widget> | split[,choices:… | ,style:…] | run:<a folder choice's command>.)
+    // (Test hook: TESSERA_TEST_PROMPT=add | cdhist | choices:<widget> | style:<widget> | split[,choices:… | ,style:…] | run:<a folder choice's command>.)
     Timer {
-        interval: 5000
+        interval: Number(bar.controller ? bar.controller.testEnv("PROMPT_WAIT") || 5000 : 5000)
         running: bar.controller !== null && bar.visible && bar.controller.testEnv("PROMPT") !== ""
         onTriggered: {
             const t = bar.controller.testEnv("PROMPT")
             if (t === "add") { addPop.x = Math.max(0, bar.width - addPop.width - 4); addPop.open() }
             else if (t === "split") bar.splitStarship()
+            else if (t === "cdhist") bar.openChoices("dir", leftRow)
             else if (t.startsWith("run:")) { let c = []; try { c = JSON.parse(controller.promptChoices("dir", "/usr", 0)) } catch (e) {} const x = c.find(o => o.cmd === t.substring(4)); if (x) bar.runRequested(x.cmd) }
             else if (t.startsWith("split,")) { bar.splitStarship(); t2.cmd = t.substring(6); t2.start() }
             else for (const row of [leftRow, rightRow]) for (let k = 0; k < row.children.length; k++) {
