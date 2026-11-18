@@ -204,6 +204,7 @@ pub fn choices(widget: &str, cwd: &str, pid: u32) -> String {
             if !recent.is_empty() {
                 let h = home.to_string_lossy().to_string();
                 out.push(head("Recent and frequent"));
+                // (Full paths, ~ for home: where each is, plainly.)
                 for p in recent {
                     let shown = if !h.is_empty() && (p == h || p.starts_with(&format!("{h}/"))) { format!("~{}", &p[h.len()..]) } else { p.clone() };
                     out.push(item(shown, format!("cd {}", sh_quote(&p)), false));
@@ -221,7 +222,7 @@ pub fn choices(widget: &str, cwd: &str, pid: u32) -> String {
             if !subs.is_empty() {
                 out.push(head("Folders here"));
                 for p in subs.iter().take(60) {
-                    out.push(item(format!("{}/", p.file_name().unwrap_or_default().to_string_lossy()), format!("cd {}", sh_quote(&p.to_string_lossy())), false));
+                    out.push(item(format!("{}/", show(p)), format!("cd {}", sh_quote(&p.to_string_lossy())), false));
                 }
             }
             out.push(head("Up"));

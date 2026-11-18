@@ -290,6 +290,10 @@ Item {
         }
         return []
     }
+    TextMetrics { id: choiceMetrics; font.family: bar.fontFamily; font.pixelSize: 12 }
+    readonly property real choiceWidth: { let w = 0; for (const c of choices) { choiceMetrics.text = c.label; w = Math.max(w, choiceMetrics.advanceWidth) } return w }
+    property double cdTapAt: 0          // the drop-up was the click
+    property string choicesFor: ""      // whose choices are open
     property string hoverPath: ""       // the parent folder of the path under the pointer
     // Over a path's text: a click area per folder (a parent: cd there).
     component PathHits: Item {
@@ -549,7 +553,10 @@ Item {
         required property var modelData
         readonly property var wd: modelData
         readonly property int wi: wd.i
-        implicitWidth: body.implicitWidth
+        // (A folder widget, or Starship's prompt with the folder in it: a
+        // drop-up for the cd history after it.)
+        readonly property bool hasFolder: ["dir", "star:directory", "starship"].indexOf(wd.name) >= 0
+        implicitWidth: body.implicitWidth + (hasFolder ? cdHistory.width + 2 : 0)
         implicitHeight: body.implicitHeight
         width: implicitWidth
         height: implicitHeight
@@ -557,8 +564,35 @@ Item {
         opacity: bar.dragFrom === wi ? 0.35 : 1
         // (Hovered, and not on a folder of its path: underlined, it's clickable.)
         readonly property bool hot: hover.hovered && bar.hoverPath === "" && bar.dragFrom < 0
+        Rectangle {
+            id: cdHistory
+            visible: w.hasFolder
+            // (Before the folder: a whole Starship prompt fills the row, so its end is far off.)
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: 16
+            height: 16
+            radius: 4
+            color: cdh.hovered || (choicesPop.opened && bar.choicesFor === "dir") ? Theme.mix(Theme.bg, Theme.fg, 0.15) : "transparent"
+            Text {
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: 0.001
+                text: "\u25b4"
+                color: cdh.hovered ? Theme.text : Theme.textDim
+                font.pixelSize: 12
+                font.underline: cdh.hovered
+                renderType: Text.NativeRendering
+            }
+            HoverHandler { id: cdh; cursorShape: Qt.PointingHandCursor }
+            // (Opened once the click is done: opened during it, the release closed it again.)
+            TapHandler { onTapped: { bar.cdTapAt = Date.now(); Qt.callLater(() => bar.openChoices("dir", w)) } }
+            ToolTip.visible: cdh.hovered
+            ToolTip.delay: 400
+            ToolTip.text: "Recent and frequent folders (cd history)"
+        }
         Loader {
             id: body
+            x: w.hasFolder ? cdHistory.width + 2 : 0
             sourceComponent: w.wd.kind === "seg" ? segBody : w.wd.kind === "lines" ? linesBody : runsBody
             property var wd: w.wd
             property bool hot: w.hot
@@ -579,9 +613,10 @@ Item {
             // (On a parent folder of its path: cd there.)
             onTapped: {
                 const p = bar.hoverPath
-                if (p === "@here") bar.openChoices("dir", w)
+                if (Date.now() - bar.cdTapAt < 300 || cdh.hovered) return
+                if (p === "@here") Qt.callLater(() => bar.openChoices("dir", w))
                 else if (p !== "") bar.runRequested("cd " + (/^[A-Za-z0-9_\/.~+:@-]+$/.test(p) ? p : "'" + p.replace(/'/g, "'\\''") + "'"))
-                else bar.openChoices(w.wd.name, w)
+                else Qt.callLater(() => bar.openChoices(w.wd.name, w))
             }
         }
         TapHandler {
@@ -802,6 +837,7 @@ Item {
         try { c = JSON.parse(controller.promptChoices(name, bar.cwd, bar.shellPid)) } catch (e) {}
         if (c.length === 0) { openWidgetMenu(layout.indexOf(name), name, item); return }
         choices = c
+        choicesFor = name
         choiceFilter.text = ""
         const p = item.mapToItem(bar, 0, 0)
         choicesPop.x = Math.min(Math.max(0, p.x), bar.width - choicesPop.width)
@@ -816,8 +852,10 @@ Item {
     Popup {
         id: choicesPop
         y: -height - 4
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onOpened: if (bar.choices.length > 8) choiceFilter.forceActiveFocus()
-        width: 280
+        // (As wide as the longest entry needs, up to 640: full paths.)
+        width: Math.min(640, Math.max(280, bar.choiceWidth + 40))
         height: Math.min(420, choiceList.contentHeight + 12 + (choiceFilter.visible ? choiceFilter.height + 6 : 0))
         padding: 6
         topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
