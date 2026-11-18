@@ -194,6 +194,9 @@ pub fn read_lines(path: &str, start: usize, count: usize) -> String {
         if k > 0 {
             out.push('\n');
         }
+        // (Windows line ends: the \r goes, or the highlighting, counted with
+        // it, drifts a character a line from the text shown without it.)
+        let line = line.strip_suffix('\r').unwrap_or(line);
         if line.chars().count() > 4000 {
             out.extend(line.chars().take(4000));
             out.push_str(" …");
@@ -430,6 +433,15 @@ mod tests {
         assert_eq!(v["lines"], 20000);
         assert_eq!(super::read_lines(&p, 0, 2), "line 1\nline 2");
         assert_eq!(super::read_lines(&p, 19998, 5), "line 19999\nline 20000");
+        let crlf = d.join("crlf.txt");
+        std::fs::write(&crlf, "a\r\nb\r\n").unwrap();
+        let c = crlf.to_string_lossy().to_string();
+        let mut v: serde_json::Value = serde_json::from_str(&super::line_index(&c)).unwrap();
+        while !v["done"].as_bool().unwrap() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            v = serde_json::from_str(&super::line_index(&c)).unwrap();
+        }
+        assert_eq!(super::read_lines(&c, 0, 2), "a\nb");
         let _ = std::fs::remove_dir_all(d);
     }
 

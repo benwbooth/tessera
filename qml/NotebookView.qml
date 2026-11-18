@@ -1048,6 +1048,8 @@ FocusScope {
     Timer { interval: 1500; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_RUN_ALL") !== ""; onTriggered: nb.runAll() }
     Timer { interval: 20000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SAVE") !== ""; onTriggered: nb.save() }
     Timer { interval: 16000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_END") !== ""; onTriggered: list.positionViewAtEnd() }
+    // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
+    Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
     // (Test hook: TESSERA_TEST_NB_SCROLL_TOP=<ms>: to the top then.)
     Timer { interval: Number(nb.controller ? nb.controller.testEnv("NB_SCROLL_TOP") || 0 : 0); running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_TOP") !== ""; onTriggered: { nb.sticking = false; list.positionViewAtBeginning() } }
     Timer { interval: 3000; running: nb.visible && nb.controller !== null && nb.controller.testEnv("NB_EXPORT") !== ""; onTriggered: nb.writeTo(nb.controller.testEnv("NB_EXPORT")) }
