@@ -393,6 +393,9 @@ Rectangle {
         const lastLine = edit.text.indexOf("\n", edit.cursorPosition) < 0
         if (e.key === Qt.Key_Up && !shift && firstLine && !(keys === "vi" && viNormal)) { historyStep(-1); return true }
         if (e.key === Qt.Key_Down && !shift && lastLine && !(keys === "vi" && viNormal)) { historyStep(1); return true }
+        // (PgUp/PgDn: history a whole entry at a time, wherever the cursor is.)
+        if (e.key === Qt.Key_PageUp && !shift) { historyStep(-1); return true }
+        if (e.key === Qt.Key_PageDown && !shift) { historyStep(1); return true }
         return false
     }
 
@@ -638,6 +641,17 @@ Rectangle {
                 langTimer.restart()
                 box.analyze(false)
                 compAuto.restart()
+                // A "# request": the command it'd be, from the AI, as the
+                // suggestion (taken, it replaces the line).
+                if (/^#\s*\S/.test(text) && text.indexOf("\n") < 0) {
+                    box.ghost = ""
+                    box.nlCommand = ""
+                    box.lastGhostBase = text
+                    nlTimer.restart()
+                    if (text.trim() !== box.checkedText) box.aiNote = ""
+                    return
+                }
+                box.nlCommand = ""
                 // A suggestion stays while what's typed still leads into it.
                 const full = box.lastGhostBase + box.ghost
                 if (box.ghost !== "" && text.length > box.lastGhostBase.length && full.startsWith(text) && full.length > text.length) {
@@ -961,8 +975,27 @@ Rectangle {
         controller.aiRun(aiKey + "-cmd", "fix", JSON.stringify([{ role: "user", content: "Command: " + last + "\nExit status: " + box.view.lastStatus + "\nThe terminal's last lines:\n" + tail }]), aiContext())
     }
     property string ghostAsked: ""      // the text an AI suggestion was asked for
+    property string nlCommand: ""       // the command a "# request" would be
+    property string nlAsked: ""
+    Timer {
+        id: nlTimer
+        interval: 650
+        onTriggered: {
+            const t = edit.text
+            if (!box.aiNL || !box.chatReady || !/^#\s*\S/.test(t) || t.indexOf("\n") >= 0 || t === box.nlAsked) return
+            box.nlAsked = t
+            box.controller.aiRun(box.aiKey + "-nl", "command", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(10) + "\n\nWhat I want: " + t.replace(/^#\s*/, "") }]), box.aiContext())
+        }
+    }
     function askGhostNow() { ghostTimer.stop(); ghostTimer.triggered() }
     function acceptGhost() {
+        // (A "# request"'s suggestion: the command, in place of the line.)
+        if (nlCommand !== "" && /^#/.test(edit.text)) {
+            setText(nlCommand)
+            nlCommand = ""
+            ghost = ""
+            return true
+        }
         if (ghost === "") return false
         edit.insert(edit.length, ghost)
         edit.cursorPosition = edit.length
@@ -1005,6 +1038,13 @@ Rectangle {
                 box.lastGhostBase = t
                 // (Still being written, then: a check's complaint doesn't apply.)
                 if (box.ghost !== "") { box.aiNote = ""; box.checkedText = "" }
+            } else if (key === box.aiKey + "-nl") {
+                if (error || edit.text !== box.nlAsked) return
+                const cmd = reply.trim().replace(/^```\w*\n?|```$/g, "").trim().split("\n")[0]
+                if (cmd === "") return
+                box.nlCommand = cmd
+                box.ghost = "  \u2192 " + cmd
+                box.lastGhostBase = edit.text
             } else if (key === box.aiKey + "-lang") {
                 if (edit.text !== box.langAsked) return
                 const best = error ? "" : box.controller.rankLanguages(reply, JSON.stringify(box.langRecent))
