@@ -128,8 +128,10 @@ Item {
             const c = leftRow.children[k]
             if (c.wd !== undefined && c.wd.name !== "starship" && c.visible) others += c.width + leftRow.spacing
         }
-        const room = bar.width - 8 - others - addButton.width - 12 - (rightRow.width > 0 ? rightRow.width + 16 : 0)
-        return Math.max(1, Math.floor(room / Math.max(1, sfm.averageCharacterWidth)))
+        // (Less the cd history's arrow before it, and two characters' slack:
+        // icons can be wider than a character.)
+        const room = bar.width - 8 - others - addButton.width - 12 - 18 - (rightRow.width > 0 ? rightRow.width + 16 : 0)
+        return Math.max(1, Math.floor(room / Math.max(1, sfm.averageCharacterWidth)) - 2)
     }
     // (Nothing redrawn while a widget is dragged: that would drop it.)
     property int lastCols: 0
