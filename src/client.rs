@@ -121,7 +121,7 @@ pub fn subscription(host: &str) -> u64 {
                 continue;
             }
             for k in keys {
-                let _ = attach_kernels(&join_key(&host, &k));
+                let _ = attach_kernels(&join_key(&host, &k), "");
             }
             return;
         }
@@ -164,11 +164,11 @@ fn deliver_buffered(host: &str, key: &str, events: &Value) {
 /// A notebook (key) takes its kernels back after the window was away:
 /// {kernels: [running ones, keys as the window has them]}; what they said
 /// meanwhile is delivered as events.
-pub fn attach_kernels(key: &str) -> Value {
+pub fn attach_kernels(key: &str, session: &str) -> Value {
     let (host, k) = split_key(key);
     let sub = subscription(&host);
     subs().lock().unwrap().claimed.entry(host.clone()).or_default().insert(k.clone());
-    let Ok(mut v) = rpc(&host, "kernel.attach", serde_json::json!({"key": k, "sub": sub})) else { return serde_json::json!({"kernels": []}) };
+    let Ok(mut v) = rpc(&host, "kernel.attach", serde_json::json!({"key": k, "sub": sub, "session": session})) else { return serde_json::json!({"kernels": []}) };
     if let Some(list) = v["kernels"].as_array_mut() {
         for x in list.iter_mut() {
             if let Some(kk) = x["key"].as_str().map(String::from) {
@@ -461,7 +461,7 @@ fn session_env() -> Vec<(String, String)> {
             })
             .collect();
     }
-    for k in ["TESSERA_SOCKET", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"] {
+    for k in ["TESSERA_SOCKET", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME"] {
         if let Ok(v) = std::env::var(k) {
             env.retain(|(e, _)| e != k);
             env.push((k.to_string(), v));

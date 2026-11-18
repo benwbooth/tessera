@@ -853,12 +853,7 @@ impl ffi::Controller {
 
     fn jupyter_attach(self: Pin<&mut Self>, key: &ffi::QString, session: &ffi::QString) -> ffi::QString {
         ensure_kernel_events(&self);
-        let key = key.to_string();
-        let (host, k) = crate::client::split_key(&key);
-        if !session.to_string().is_empty() {
-            let _ = crate::client::rpc(&host, "kernel.attach", serde_json::json!({"key": k, "session": session.to_string(), "sub": 0}));
-        }
-        qs(&crate::client::attach_kernels(&key).to_string())
+        qs(&crate::client::attach_kernels(&key.to_string(), &session.to_string()).to_string())
     }
 
     fn notebook_read(&self, host: &ffi::QString, session: &ffi::QString) -> ffi::QString {
