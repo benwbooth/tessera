@@ -802,22 +802,46 @@ Item {
         try { c = JSON.parse(controller.promptChoices(name, bar.cwd, bar.shellPid)) } catch (e) {}
         if (c.length === 0) { openWidgetMenu(layout.indexOf(name), name, item); return }
         choices = c
+        choiceFilter.text = ""
         const p = item.mapToItem(bar, 0, 0)
         choicesPop.x = Math.min(Math.max(0, p.x), bar.width - choicesPop.width)
         choicesPop.open()
     }
+    // (Long lists, the folder's: a search field filters them.)
+    readonly property var shownChoices: {
+        const f = choiceFilter.text.toLowerCase()
+        if (f === "") return choices
+        return choices.filter(c => !c.section && c.label.toLowerCase().indexOf(f) >= 0)
+    }
     Popup {
         id: choicesPop
         y: -height - 4
+        onOpened: if (bar.choices.length > 8) choiceFilter.forceActiveFocus()
         width: 280
-        height: Math.min(380, choiceList.contentHeight + 12)
+        height: Math.min(420, choiceList.contentHeight + 12 + (choiceFilter.visible ? choiceFilter.height + 6 : 0))
         padding: 6
         topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
-        contentItem: ListView {
+        contentItem: Column {
+          spacing: 6
+          TextField {
+            id: choiceFilter
+            visible: bar.choices.length > 8
+            width: parent.width
+            height: visible ? implicitHeight : 0
+            placeholderText: "Search"
+            color: Theme.text
+            font.pixelSize: 12
+            background: Rectangle { radius: 6; color: Theme.bg; border.color: choiceFilter.activeFocus ? Theme.accent : Theme.divider }
+            Keys.onReturnPressed: { const c = bar.shownChoices.find(x => !x.section); if (c) { choicesPop.close(); bar.runRequested(c.cmd) } }
+            Keys.onEscapePressed: choicesPop.close()
+          }
+          ListView {
             id: choiceList
+            width: parent.width
+            height: Math.min(380, contentHeight)
             clip: true
-            model: bar.choices
+            model: bar.shownChoices
             ScrollBar.vertical: ScrollBar {}
             MomentumWheel { flick: choiceList }
             delegate: Rectangle {
@@ -844,6 +868,7 @@ Item {
                 TapHandler { enabled: !modelData.section; onTapped: { choicesPop.close(); bar.runRequested(modelData.cmd) } }
             }
         }
+  }
     }
 
     // ---- a right click: the widget's own menu, and its style ----------------

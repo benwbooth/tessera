@@ -1154,7 +1154,16 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
                     items.retain(|i| i.kind != "dir" || score(i.label.trim_end_matches('/'), &t).is_some_and(|s| s < 100));
                 }
                 let have: std::collections::HashSet<String> = items.iter().map(|i| i.insert.clone()).collect();
-                items.extend(places.into_iter().filter(|i| !have.contains(&i.insert)));
+                let mut places: Vec<Item> = places.into_iter().filter(|i| !have.contains(&i.insert)).collect();
+                if name_of(&typed).is_empty() {
+                    // (Nothing typed yet: the five places used most, first.)
+                    let top: Vec<Item> = places.drain(..places.len().min(5)).map(|mut i| {
+                        i.detail = "most used".into();
+                        i
+                    }).collect();
+                    items.splice(0..0, top);
+                }
+                items.extend(places);
             }
         }
     }
