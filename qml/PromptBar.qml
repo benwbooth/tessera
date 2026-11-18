@@ -305,6 +305,8 @@ Item {
     TextMetrics { id: choiceMetrics; font.family: bar.fontFamily; font.pixelSize: 12 }
     readonly property real choiceWidth: { let w = 0; for (const c of choices) { choiceMetrics.text = c.label; w = Math.max(w, choiceMetrics.advanceWidth) } return w }
     property double cdTapAt: 0          // the drop-up was the click
+    property double choicesClosedAt: 0  // when the choices list last closed, and whose it was
+    property string choicesClosedFor: ""
     property string choicesFor: ""      // whose choices are open
     property string hoverPath: ""       // the parent folder of the path under the pointer
     // Over a path's text: a click area per folder (a parent: cd there).
@@ -597,7 +599,12 @@ Item {
             }
             HoverHandler { id: cdh; cursorShape: Qt.PointingHandCursor }
             // (Opened once the click is done: opened during it, the release closed it again.)
-            TapHandler { onTapped: { bar.cdTapAt = Date.now(); Qt.callLater(() => bar.openChoices("dir", w)) } }
+            // (A click while it's open closes it: the press outside the list
+            // already did, so the click doesn't open it again.)
+            TapHandler { onTapped: {
+                if (choicesPop.opened && bar.choicesFor === "dir") { choicesPop.close(); return }
+                if (bar.choicesClosedFor === "dir" && Date.now() - bar.choicesClosedAt < 500) return
+                bar.cdTapAt = Date.now(); Qt.callLater(() => bar.openChoices("dir", w)) } }
             ToolTip {
                 visible: cdh.hovered && !choicesPop.opened
                 delay: 300
@@ -880,6 +887,7 @@ Item {
         id: choicesPop
         y: -height - 4
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: { bar.choicesClosedAt = Date.now(); bar.choicesClosedFor = bar.choicesFor }
         onOpened: if (bar.choices.length > 8) choiceFilter.forceActiveFocus()
         // (As wide as the longest entry needs, up to 640: full paths.)
         width: Math.min(640, Math.max(280, bar.choiceWidth + 40))
