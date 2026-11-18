@@ -1377,6 +1377,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "tesserad"
+version = "0.2.2"
+dependencies = [
+ "anyhow",
+ "base64",
+ "hmac",
+ "image",
+ "libc",
+ "libghostty-vt",
+ "libghostty-vt-sys",
+ "libloading",
+ "miniz_oxide 0.9.1",
+ "portable-pty",
+ "pulldown-cmark",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shell-words",
+ "streaming-iterator",
+ "toml_edit",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-c",
+ "tree-sitter-cpp",
+ "tree-sitter-css",
+ "tree-sitter-go",
+ "tree-sitter-html",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-language",
+ "tree-sitter-lua",
+ "tree-sitter-md",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-sequel",
+ "tree-sitter-toml-ng",
+ "tree-sitter-typescript",
+ "tree-sitter-yaml",
+ "uds_windows",
+ "ureq",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"

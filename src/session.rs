@@ -50,18 +50,11 @@ const MATCH_FG: u32 = 0x1a1a1a;
 
 const SCROLLBACK: usize = 10_000;
 
-/// libghostty limits scrollback in bytes, not lines: a row takes about
-/// 9.3 bytes per column (measured). Budget for 300 columns so at least
-/// `lines` rows are kept at any usual width (more when narrower).
-pub fn scrollback_bytes(lines: u32) -> usize {
-    if lines >= 10_000_000 {
-        return usize::MAX;
-    }
-    (lines as usize).saturating_mul(2_900) + (1 << 20)
-}
+pub use crate::snapshot::scrollback_bytes;
 
 enum Backend {
-    Daemon { stream: UnixStream, reader: FrameReader, id: String },
+    /// A shell in tesserad, this computer's ("" host) or another's over SSH.
+    Daemon { stream: UnixStream, reader: FrameReader, id: String, host: String },
     Tmux { gw: Rc<RefCell<Gateway>>, pane: u32, shared: Rc<RefCell<PaneShared>> },
 }
 
@@ -218,6 +211,7 @@ pub fn session_open(
     command: &str,
     term_name: &str,
     startup_input: &str,
+    host: &str,
 ) -> Result<Box<Session>, String> {
     let (cols, rows) = (cols.max(2), rows.max(1));
     let backend = if !tmux_pane.is_empty() {
@@ -227,7 +221,7 @@ pub fn session_open(
         let shared = gw.borrow().panes.get(&pane).cloned().ok_or("unknown tmux pane")?;
         Backend::Tmux { gw, pane, shared }
     } else {
-        let mut stream = crate::client::connect().map_err(|e| format!("daemon: {e}"))?;
+        let mut stream = crate::client::connect_to(host).map_err(|e| if host.is_empty() { format!("tesserad: {e}") } else { format!("{host}: {e}") })?;
         if attach_id.is_empty() {
             write_json(&mut stream, T_CREATE, &Create { cols, rows, cwd: cwd.to_string(), command: command.to_string(), term: term_name.to_string(), input: startup_input.to_string(), scrollback })
         } else {
@@ -235,7 +229,7 @@ pub fn session_open(
         }
         .map_err(|e| e.to_string())?;
         stream.set_nonblocking(true).map_err(|e| e.to_string())?;
-        Backend::Daemon { stream, reader: FrameReader::default(), id: attach_id.to_string() }
+        Backend::Daemon { stream, reader: FrameReader::default(), id: attach_id.to_string(), host: host.to_string() }
     };
 
     let (cols, rows) = match &backend {
@@ -464,17 +458,26 @@ impl Session {
                 for (tag, payload) in frames {
                     match tag {
                         T_ATTACHED => {
-                            if let (Ok(new_id), Backend::Daemon { id, .. }) =
+                            if let (Ok(new_id), Backend::Daemon { id, host, .. }) =
                                 (serde_json::from_slice::<String>(&payload), &mut self.backend)
                             {
                                 *id = new_id;
+                                crate::client::set_session_host(id, host);
                                 self.events.push(json!({"type": "attached", "id": id.clone()}));
-                                // The notebook's cells from before (a restart, or a reboot).
-                                let id = id.clone();
+                                // The notebook's cells from before (a restart, or a reboot),
+                                // as tesserad kept them.
+                                let (id, host) = (id.clone(), host.clone());
                                 let from = self.cells_from.take().unwrap_or_else(|| id.clone());
-                                if self.cells.restore(&from, &id) {
+                                let kept = crate::client::rpc(&host, "cells.load", json!({"session": id, "from": from}));
+                                if self.cells.restore_text(kept.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("")) {
                                     self.events.push(json!({"type": "cell", "id": 0, "done": true}));
                                 }
+                            }
+                        }
+                        // (The next cell's id, from tesserad, which keeps them.)
+                        T_CELL => {
+                            if let Ok(n) = serde_json::from_slice::<u64>(&payload) {
+                                self.cells.given = Some(n);
                             }
                         }
                         T_OUTPUT => {
@@ -812,11 +815,7 @@ impl Session {
                             if let Some(c) = self.cells.list.iter_mut().find(|c| c.id == id) {
                                 c.image = image;
                             }
-                            if let Backend::Daemon { id: sid, .. } = &self.backend {
-                                if !sid.is_empty() {
-                                    self.cells.persist(sid, id);
-                                }
-                            }
+                            // (Kept on disk by tesserad, which sees the same output.)
                             self.events.push(json!({"type": "cell", "id": id, "done": true}));
                         }
                         rest = &rest[i + END.len()..];
@@ -1432,8 +1431,11 @@ impl Session {
 
     pub fn kill(&mut self) {
         match &mut self.backend {
-            Backend::Daemon { stream, id, .. } => {
-                crate::cells::Cells::forget(id);
+            Backend::Daemon { stream, id, host, .. } => {
+                let (id, host) = (id.clone(), host.clone());
+                std::thread::spawn(move || {
+                    let _ = crate::client::rpc(&host, "cells.forget", json!({"session": id}));
+                });
                 write_blocking(stream, T_KILL, b"")
             }
             Backend::Tmux { gw, pane, .. } => gw.borrow_mut().user_command(&format!("kill-pane -t %{pane}")),
@@ -1772,7 +1774,7 @@ impl Session {
     }
 
     pub fn image_pixels(&self, id: u32) -> crate::bridge::ffi::ImagePixels {
-        crate::images::rgba(&self.term, id)
+        crate::image_places::rgba(&self.term, id)
     }
 
     pub fn full_screen(&self) -> bool {
@@ -2028,9 +2030,9 @@ impl Session {
             out.scroll_len = sb.len;
         }
         let (_, _, cw, ch) = self.size.get();
-        crate::images::placements(&self.term, cw, ch, &mut out.images);
+        crate::image_places::placements(&self.term, cw, ch, &mut out.images);
         self.ph_rows.truncate(rows as usize);
-        crate::images::placeholder_places(&self.term, &self.ph_rows, cw, ch, &mut out.images);
+        crate::image_places::placeholder_places(&self.term, &self.ph_rows, cw, ch, &mut out.images);
         true
     }
 }
@@ -2044,25 +2046,8 @@ fn boundary_chars(word_chars: &[char]) -> Vec<char> {
         .collect()
 }
 
-fn decode_b64_text(b64: &[u8]) -> String {
-    use base64::Engine;
-    let clean: Vec<u8> = b64.iter().filter(|c| !c.is_ascii_whitespace()).copied().collect();
-    base64::engine::general_purpose::STANDARD.decode(clean).map(|r| String::from_utf8_lossy(&r).trim().to_string()).unwrap_or_default()
-}
+use crate::cells::{decode_b64_text, strip_zsh_marker};
 
-/// Without zsh's partial-line marker ("%" and padding) before its prompt.
-fn strip_zsh_marker(mut text: String) -> String {
-    while let Some(last) = text.trim_end_matches('\n').rsplit('\n').next().map(str::to_string) {
-        let t = last.trim();
-        if (t == "%" || t == "#") && text.trim_end_matches('\n').len() >= last.len() {
-            let keep = text.trim_end_matches('\n').len() - last.len();
-            text.truncate(keep);
-        } else {
-            break;
-        }
-    }
-    text
-}
 
 fn format_selection_as(term: &Terminal<'static, 'static>, sel: &Selection<'_>, fmt: Format, style: bool) -> String {
     let opts = FormatterOptions::new().with_format(fmt).with_selection(sel).with_trim(true).with_unwrap(true).with_style(style);

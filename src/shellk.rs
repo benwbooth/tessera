@@ -68,6 +68,12 @@ fn on_path(prog: &str) -> Option<String> {
     std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(prog)).find(|f| f.is_file())).map(|f| f.to_string_lossy().to_string())
 }
 
+/// Whether the shell kernel `spec` needs Nix to start (it isn't installed).
+pub fn needs_nix(spec: &str) -> bool {
+    let shell = spec.strip_prefix("tessera-sh-").map(|s| if s == "powershell" { "pwsh" } else { s }).unwrap_or("");
+    known(shell).is_some_and(|(prog, _, _)| on_path(prog).is_none())
+}
+
 /// The program: installed, else from Nix (built once, kept).
 fn program(shell: &str, status: &dyn Fn(&str)) -> Option<String> {
     let (prog, pkg, _) = known(shell)?;

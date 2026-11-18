@@ -323,6 +323,32 @@ fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
 }
 
+/// Where `nix` is: on PATH, else where its installers put it (a shell
+/// started over SSH without a login profile may not have it on PATH; it's
+/// added to this process's PATH then, for every `nix` run after).
+pub fn nix_program() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("nix")).find(|f| f.is_file())) {
+        return Some(p);
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let found = [PathBuf::from("/nix/var/nix/profiles/default/bin/nix"), home.join(".nix-profile/bin/nix"), PathBuf::from("/run/current-system/sw/bin/nix")]
+        .into_iter()
+        .find(|f| f.is_file())?;
+    if let Some(dir) = found.parent() {
+        let mut paths = vec![dir.to_path_buf()];
+        paths.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default());
+        if let Ok(p) = std::env::join_paths(paths) {
+            std::env::set_var("PATH", p);
+        }
+    }
+    Some(found)
+}
+
+/// Whether starting kernel `name` needs Nix (it comes from nixpkgs).
+pub fn needs_nix(name: &str) -> bool {
+    specs().iter().find(|s| s.name == name).is_some_and(|s| s.argv.first().is_some_and(|a| a == "nix" || a == "@kernel-json"))
+}
+
 /// Python packages the Nix kernel comes with.
 pub const NIX_PYTHON_PACKAGES: &str = "ipykernel numpy pandas matplotlib";
 
@@ -1390,6 +1416,10 @@ pub fn start(key: &str, spec: &str, cwd: &str, pid: u32, sink: Sink) {
 
 fn get(key: &str) -> Option<Arc<Kernel>> {
     KERNELS.lock().unwrap().as_ref()?.get(key).cloned()
+}
+
+pub fn has(key: &str) -> bool {
+    get(key).is_some()
 }
 
 pub fn execute(key: &str, cell: &str, code: &str) -> bool {

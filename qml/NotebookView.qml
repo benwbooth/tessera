@@ -39,7 +39,12 @@ FocusScope {
     signal insertRequested(string text)       // into the pane's editor
     signal viewRequested(string path)         // a file, shown over the pane
 
-    readonly property string key: "nb-" + Math.random().toString(36).slice(2)
+    // The notebook's kernels, in its host's tesserad ("host//nb-..." for
+    // another host's). A pane's notebook keeps its key with it, so its
+    // kernels (run on while the window was closed) are found again.
+    property string sshHost: ""
+    property string keyBase: "nb-" + Math.random().toString(36).slice(2)
+    readonly property string key: (sshHost !== "" ? sshHost + "//" : "") + keyBase
     readonly property string fileName: path.replace(/^.*\//, "")
     readonly property string folder: path.indexOf("/") >= 0 ? path.replace(/\/[^/]*$/, "") : (view ? view.pwd : "")
     property bool dirty: false
@@ -92,7 +97,7 @@ FocusScope {
         if (!controller || kernelName === "" || shellKernel) return
         kernelState = "starting"
         kernelMessage = ""
-        controller.jupyterStart(key, kernelName, folder, shellPid)
+        controller.jupyterStart(key, kernelName, folder, shellPid, path === "" ? storeKey : "")
     }
     function stopRunning() {
         for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).tid <= 0) cells.setProperty(i, "running", false)
@@ -508,7 +513,7 @@ FocusScope {
             return
         }
         setLang(l, { name: spec.name, display: spec.display, state: "starting", message: "" })
-        controller.jupyterStart(langKey(l), spec.name, shellDir, shellPid)
+        controller.jupyterStart(langKey(l), spec.name, shellDir, shellPid, path === "" ? storeKey : "")
     }
     // Start a language's kernel ahead of its first cell (a shell picked in
     // the editor), so the run doesn't wait for it to come up.
@@ -519,7 +524,7 @@ FocusScope {
         const spec = langSpec(l)
         if (!spec) return
         setLang(l, { name: spec.name, display: spec.display, state: "starting", message: "", queue: [] })
-        controller.jupyterStart(langKey(l), spec.name, shellDir, shellPid)
+        controller.jupyterStart(langKey(l), spec.name, shellDir, shellPid, path === "" ? storeKey : "")
     }
     function execLang(cid, l) {
         const i = indexOf(cid)
@@ -763,6 +768,7 @@ FocusScope {
         cells.clear()
         metadata = nbj.metadata || {}
         const t = metadata.tessera || {}
+        if (keepTids && t.kernel_key) keyBase = t.kernel_key
         let maxCount = 0
         for (const c of nbj.cells || []) {
             const x = newCell(c.cell_type === "markdown" ? "markdown" : c.cell_type === "raw" ? "raw" : "code", joined(c.source))
@@ -804,7 +810,8 @@ FocusScope {
         loaded = false
         loadError = ""
         saveError = ""
-        controller.jupyterStop(key)
+        // (A pane's notebook's kernels are kept: reattach() finds them.)
+        if (path !== "") controller.jupyterStop(key)
         kernelState = ""
         shellWaiting = []
         listKernels()
@@ -815,6 +822,7 @@ FocusScope {
             fileStart = 0
             pickKernel(null)
             loadStore()
+            reattach()
         } else {
             const r = JSON.parse(controller.readTextFile(path))
             cells.clear(); metadata = ({})
@@ -844,9 +852,8 @@ FocusScope {
     property bool storeFound: false
     function storePath() { return controller && storeKey !== "" ? controller.stateFolder() + "/notebooks/" + storeKey + ".ipynb" : "" }
     function loadStore() {
-        const p = storePath()
-        if (p === "") return
-        const r = JSON.parse(controller.readTextFile(p))
+        if (!controller || storeKey === "") return
+        const r = JSON.parse(controller.notebookRead(sshHost, storeKey))
         if (r.error !== undefined) return
         try { fill(JSON.parse(r.text), true); storeFound = true } catch (e) {}
         dirty = false
@@ -867,7 +874,23 @@ FocusScope {
             touch()
             return
         }
-        if (loaded && path === "" && !storeFound) { loadStore(); syncTerm() }
+        if (loaded && path === "" && !storeFound) { loadStore(); reattach(); syncTerm() }
+    }
+    // The pane's notebook's kernels that ran on in tesserad (the window was
+    // closed, or rebuilt): taken back, with what they printed meanwhile.
+    function reattach() {
+        if (!controller || path !== "") return
+        let r = null
+        try { r = JSON.parse(controller.jupyterAttach(key, storeKey)) } catch (e) { return }
+        const up = (s) => s === "busy" ? "busy" : s === "starting" ? "starting" : "idle"
+        for (const k of (r && r.kernels) || []) {
+            if (k.key === key) {
+                if (k.name !== kernelName && k.name !== "") { kernelName = k.name; language = k.language || language }
+                kernelState = up(k.state)
+            } else if (k.key.startsWith(key + "~")) {
+                setLang(k.key.substring(key.length + 1), { name: k.name, display: k.display, state: up(k.state), message: "", queue: [] })
+            }
+        }
     }
     function touch() {
         dirty = true
@@ -875,9 +898,8 @@ FocusScope {
     }
     Timer { id: storeTimer; interval: 1500; onTriggered: nb.keep() }
     function keep() {
-        const p = storePath()
-        if (p === "" || path !== "") return
-        controller.writeTextFile(p, serialize(true))
+        if (!controller || storeKey === "" || path !== "") return
+        controller.notebookWrite(sshHost, storeKey, serialize(true))
         storeFound = true
         dirty = false
     }
@@ -948,6 +970,7 @@ FocusScope {
         if (Object.keys(fileViews).length) t.fileViews = fileViews
         if (Object.keys(heights).length) t.heights = heights
         if (kept && retired.length) t.retired = retired.slice(-500)
+        if (kept) t.kernel_key = keyBase
         if (Object.keys(t).length) md.tessera = t
         return JSON.stringify(sorted({ cells: out, metadata: md, nbformat: 4, nbformat_minor: 5 }), null, 1) + "\n"
     }
@@ -975,7 +998,9 @@ FocusScope {
     }
     Component.onCompleted: if (controller) load()
     onControllerChanged: if (controller && !loaded) load()
-    Component.onDestruction: { if (controller) { if (path === "" && dirty) keep(); controller.jupyterStop(key); stopLangKernels() } }
+    // (A pane's notebook's kernels stay, in tesserad, as long as its session:
+    // the window closing doesn't end them. A file's go with it.)
+    Component.onDestruction: { if (controller) { if (path === "" && dirty) keep(); if (path !== "") { controller.jupyterStop(key); stopLangKernels() } } }
     FileDialog {
         id: saveDialog
         title: "Save as Jupyter Notebook"

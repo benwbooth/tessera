@@ -9,6 +9,12 @@ license = "MIT"
 name = "tessera"
 path = "src/main.rs"
 
+# tesserad, the backend (shells, kernels, cells, Nix), is its own crate: no
+# Qt, so it builds static. `cargo build` here builds both.
+[workspace]
+members = [".", "tesserad"]
+default-members = [".", "tesserad"]
+
 [dependencies]
 anyhow = "1.0.104"
 base64 = "0.23.1"

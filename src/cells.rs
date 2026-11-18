@@ -30,6 +30,8 @@ const MAX_TOTAL_BYTES: usize = 96 << 20;
 pub struct Cells {
     pub list: VecDeque<Cell>,
     next: u64,
+    /// The id tesserad gave the next cell (T_CELL), used instead of counting.
+    pub given: Option<u64>,
 }
 
 fn now_ms() -> u64 {
@@ -39,7 +41,10 @@ fn now_ms() -> u64 {
 impl Cells {
     /// A command started.
     pub fn start(&mut self, command: String, cwd: String) -> u64 {
-        self.next += 1;
+        self.next = match self.given.take() {
+            Some(id) => id.max(self.next + 1),
+            None => self.next + 1,
+        };
         self.list.push_back(Cell {
             id: self.next,
             command,
@@ -123,7 +128,7 @@ fn store_path(session: &str) -> std::path::PathBuf {
 
 /// The pane's notebook (its cells written there, the order, what's shown
 /// how), kept by the GUI next to the cells.
-fn notebook_path(session: &str) -> std::path::PathBuf {
+pub fn notebook_path(session: &str) -> std::path::PathBuf {
     crate::settings::state_dir().join("notebooks").join(format!("{session}.ipynb"))
 }
 
@@ -154,6 +159,11 @@ fn line_cell(l: &str) -> Option<Cell> {
         image: v["image"].as_str().and_then(|i| b.decode(i).ok()),
         truncated: v["truncated"].as_bool().unwrap_or(false),
     })
+}
+
+/// A session's kept cells as stored (one JSON line each), for a window.
+pub fn load_text(session: &str) -> String {
+    std::fs::read_to_string(store_path(session)).unwrap_or_default()
 }
 
 impl Cells {
@@ -216,6 +226,28 @@ impl Cells {
         true
     }
 
+    /// Bring back cells tesserad kept (cells.load's text): ids as they are,
+    /// before any this window has made already.
+    pub fn restore_text(&mut self, text: &str) -> bool {
+        let mut list: VecDeque<Cell> = text.lines().filter_map(line_cell).collect();
+        while list.len() > MAX_CELLS {
+            list.pop_front();
+        }
+        if list.is_empty() {
+            return false;
+        }
+        let top = list.iter().map(|c| c.id).max().unwrap_or(0);
+        let mine = std::mem::take(&mut self.list);
+        self.list = list;
+        for c in mine {
+            if c.id > top {
+                self.list.push_back(c);
+            }
+        }
+        self.next = self.next.max(top);
+        true
+    }
+
     /// The session ended for good: its kept cells go.
     pub fn forget(session: &str) {
         let _ = std::fs::remove_file(store_path(session));
@@ -229,7 +261,7 @@ pub fn to_html(raw: &[u8], cols: u16) -> String {
     use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
     use libghostty_vt::{terminal::Options, Terminal};
     let lines = raw.iter().filter(|&&b| b == b'\n').count() as u32 + 2;
-    let Ok(mut t) = Terminal::new(Options { cols: cols.max(20), rows: 4, max_scrollback: crate::session::scrollback_bytes(lines.max(100)) }) else {
+    let Ok(mut t) = Terminal::new(Options { cols: cols.max(20), rows: 4, max_scrollback: crate::snapshot::scrollback_bytes(lines.max(100)) }) else {
         return String::new();
     };
     // (A newline at the start keeps the first line clear of a prompt's leftovers.)
@@ -376,3 +408,250 @@ mod tests {
     }
 }
 
+
+pub fn decode_b64_text(b64: &[u8]) -> String {
+    use base64::Engine;
+    let clean: Vec<u8> = b64.iter().filter(|c| !c.is_ascii_whitespace()).copied().collect();
+    base64::engine::general_purpose::STANDARD.decode(clean).map(|r| String::from_utf8_lossy(&r).trim().to_string()).unwrap_or_default()
+}
+
+/// Without zsh's partial-line marker ("%" and padding) before its prompt.
+pub fn strip_zsh_marker(mut text: String) -> String {
+    while let Some(last) = text.trim_end_matches('\n').rsplit('\n').next().map(str::to_string) {
+        let t = last.trim();
+        if (t == "%" || t == "#") && text.trim_end_matches('\n').len() >= last.len() {
+            let keep = text.trim_end_matches('\n').len() - last.len();
+            text.truncate(keep);
+        } else {
+            break;
+        }
+    }
+    text
+}
+
+/// tesserad's side of the cells: it reads every byte the shell prints, so
+/// it keeps each session's cells (their file) whether a window is attached
+/// or not, numbering them for the window too (T_CELL).
+pub struct Recorder {
+    session: String,
+    cells: Cells,
+    pending_command: String,
+    command_buf: Option<Vec<u8>>,
+    /// The running command's output, and those of commands it runs under.
+    cmd_out: Option<Vec<u8>>,
+    cmd_outer: Vec<Vec<u8>>,
+    /// The folder from the last OSC 7 (and a report cut off by a read).
+    cwd: String,
+    osc7_buf: Option<Vec<u8>>,
+    /// The shell's pid, for its folder when OSC 7 hasn't said.
+    pid: u32,
+}
+
+impl Recorder {
+    pub fn new(session: &str, pid: u32) -> Recorder {
+        let mut cells = Cells::default();
+        // (Carrying on after an upgrade, or a session taken over: the ids go
+        // on from the kept ones.)
+        cells.next = load_text(session).lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()?["id"].as_u64()).max().unwrap_or(0);
+        Recorder { session: session.to_string(), cells, pending_command: String::new(), command_buf: None, cmd_out: None, cmd_outer: Vec::new(), cwd: String::new(), osc7_buf: None, pid }
+    }
+
+    /// Takes `from`'s cells and notebook (a session that's gone, its screen
+    /// brought back in this one).
+    pub fn adopt(&mut self, from: &str) {
+        if from.is_empty() || from == self.session {
+            return;
+        }
+        let mut c = Cells::default();
+        if c.restore(from, &self.session) {
+            self.cells.next = self.cells.next.max(c.next);
+        } else {
+            let _ = std::fs::rename(notebook_path(from), notebook_path(&self.session));
+        }
+    }
+
+    pub fn next_id(&self) -> u64 {
+        self.cells.next
+    }
+
+    fn folder(&self) -> String {
+        if !self.cwd.is_empty() {
+            return self.cwd.clone();
+        }
+        crate::procinfo::cwd(self.pid)
+    }
+
+    fn take_osc7(&mut self, payload: &[u8]) {
+        let p = String::from_utf8_lossy(payload).to_string();
+        self.cwd = match p.strip_prefix("file://") {
+            Some(rest) => rest.find('/').map(|i| percent_decode(&rest[i..])).unwrap_or_default(),
+            None => p,
+        };
+    }
+
+    /// The shell's output, in order. Returns where cells start in it: (the
+    /// offset of each start mark, the new cell's id).
+    pub fn feed(&mut self, data: &[u8]) -> Vec<(usize, u64)> {
+        const START: &[u8] = b"\x1b]133;C";
+        const END: &[u8] = b"\x1b]133;D";
+        const CMD: &[u8] = b"\x1b]1337;TesseraCommand=";
+        const OSC7: &[u8] = b"\x1b]7;";
+        let find = |hay: &[u8], pat: &[u8]| hay.windows(pat.len()).position(|w| w == pat);
+        let mut starts = Vec::new();
+        // (OSC 7 anywhere: the folder, as the window's terminal tracks it.)
+        {
+            let mut rest = data;
+            loop {
+                if let Some(buf) = self.osc7_buf.as_mut() {
+                    match rest.iter().position(|&b| b == 7 || b == 0x1b) {
+                        Some(e) => {
+                            buf.extend_from_slice(&rest[..e]);
+                            let p = self.osc7_buf.take().unwrap();
+                            self.take_osc7(&p);
+                            rest = &rest[e..];
+                        }
+                        None => {
+                            if buf.len() < 8192 {
+                                buf.extend_from_slice(rest);
+                            } else {
+                                self.osc7_buf = None;
+                            }
+                            break;
+                        }
+                    }
+                }
+                let Some(i) = find(rest, OSC7) else { break };
+                let after = &rest[i + OSC7.len()..];
+                match after.iter().position(|&b| b == 7 || b == 0x1b) {
+                    Some(e) => {
+                        let p = after[..e].to_vec();
+                        self.take_osc7(&p);
+                        rest = &after[e..];
+                    }
+                    None => {
+                        self.osc7_buf = Some(after.to_vec());
+                        break;
+                    }
+                }
+            }
+        }
+        let base = data.as_ptr() as usize;
+        let mut rest = data;
+        loop {
+            if let Some(buf) = self.command_buf.as_mut() {
+                match rest.iter().position(|&b| b == 7 || b == 0x1b) {
+                    Some(e) => {
+                        buf.extend_from_slice(&rest[..e]);
+                        let b64 = self.command_buf.take().unwrap();
+                        self.pending_command = decode_b64_text(&b64);
+                        rest = &rest[e..];
+                    }
+                    None => {
+                        if buf.len() < 1 << 20 {
+                            buf.extend_from_slice(rest);
+                        } else {
+                            self.command_buf = None;
+                        }
+                        return starts;
+                    }
+                }
+            }
+            if self.cmd_out.is_some() {
+                let e = find(rest, END);
+                let n = [find(rest, CMD), find(rest, START)].into_iter().flatten().min();
+                if let Some(n) = n.filter(|&n| e.is_none_or(|e| n < e)) {
+                    let mut buf = self.cmd_out.take().unwrap();
+                    buf.extend_from_slice(&rest[..n]);
+                    self.cells.output(&rest[..n]);
+                    self.cmd_outer.push(buf);
+                    rest = &rest[n..];
+                    continue;
+                }
+            }
+            if let Some(buf) = self.cmd_out.as_mut() {
+                match find(rest, END) {
+                    Some(i) => {
+                        buf.extend_from_slice(&rest[..i]);
+                        let raw = self.cmd_out.take().unwrap();
+                        self.cells.output(&rest[..i]);
+                        let after = &rest[i + END.len()..];
+                        let digits: String = after.iter().skip_while(|&&c| c == b';').take_while(|c| c.is_ascii_digit()).map(|&c| c as char).collect();
+                        let status: i64 = digits.parse().unwrap_or(0);
+                        let image = {
+                            let img = crate::images::un_onlcr(&raw);
+                            (crate::images::output_is_image(&raw) && crate::images::is_image(&img)).then_some(img)
+                        };
+                        let text = strip_frame(&strip_zsh_marker(crate::images::plain_text(&raw)));
+                        let named = self.cells.list.iter().rev().find(|c| !c.done).map(|c| crate::images::kind_from_command(&c.command)).unwrap_or("");
+                        let kind = if named.is_empty() { crate::images::detect_text(&text) } else { named };
+                        if let Some(id) = self.cells.finish(status, kind) {
+                            if let Some(c) = self.cells.list.iter_mut().find(|c| c.id == id) {
+                                c.image = image;
+                            }
+                            self.cells.persist(&self.session, id);
+                        }
+                        rest = &rest[i + END.len()..];
+                        if let Some(outer) = self.cmd_outer.pop() {
+                            self.cmd_out = Some(outer);
+                        }
+                    }
+                    None => {
+                        self.cells.output(rest);
+                        if buf.len() + rest.len() <= 4 << 20 {
+                            buf.extend_from_slice(rest);
+                        } else {
+                            self.cmd_out = None;
+                        }
+                        return starts;
+                    }
+                }
+            }
+            let (c, s) = (find(rest, CMD), find(rest, START));
+            if let Some(c) = c.filter(|&c| s.is_none_or(|s| c < s)) {
+                let payload = &rest[c + CMD.len()..];
+                match payload.iter().position(|&b| b == 7 || b == 0x1b) {
+                    Some(e) => {
+                        self.pending_command = decode_b64_text(&payload[..e]);
+                        rest = &payload[e..];
+                    }
+                    None => {
+                        self.command_buf = Some(payload.to_vec());
+                        return starts;
+                    }
+                }
+                continue;
+            }
+            match s {
+                Some(s) => {
+                    let after = &rest[s..];
+                    let end = after.iter().position(|&b| b == 7).map(|i| i + 1).unwrap_or(after.len());
+                    self.cmd_out = Some(Vec::new());
+                    let cmd = std::mem::take(&mut self.pending_command);
+                    let cwd = self.folder();
+                    let id = self.cells.start(cmd, cwd);
+                    starts.push((rest.as_ptr() as usize - base + s, id));
+                    rest = &rest[s + end..];
+                }
+                None => return starts,
+            }
+        }
+    }
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}

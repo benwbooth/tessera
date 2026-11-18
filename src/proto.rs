@@ -25,6 +25,11 @@ pub const T_INFO: u8 = 9;
 pub const T_VERSION: u8 = 10;
 /// Swap in another build without ending any shell: payload JSON {exe}.
 pub const T_UPGRADE: u8 = 11;
+/// tesserad's other requests (rpc.rs): JSON {method, params} → T_RPC_REPLY.
+pub const T_RPC: u8 = 12;
+/// A window's event connection (kernels' events): T_SUBSCRIBED {id}, then
+/// T_EVENT {key, event} frames.
+pub const T_SUBSCRIBE: u8 = 13;
 
 pub const T_ATTACHED: u8 = 101;
 pub const T_OUTPUT: u8 = 102;
@@ -37,6 +42,13 @@ pub const T_VERSION_REPLY: u8 = 109;
 pub const T_UPGRADE_REPLY: u8 = 110;
 /// Another window attached the session: this client is no longer it.
 pub const T_TAKEN: u8 = 107;
+pub const T_RPC_REPLY: u8 = 111;
+pub const T_SUBSCRIBED: u8 = 112;
+pub const T_EVENT: u8 = 113;
+/// The next notebook cell (command) of the attached session gets this id:
+/// sent just before the output with its start mark, so the window's cells
+/// and tesserad's kept ones are numbered alike.
+pub const T_CELL: u8 = 114;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Create {
@@ -142,7 +154,11 @@ pub fn admin_socket_path() -> PathBuf {
 /// inode (devloop and package managers replace it with a new file).
 pub fn exe_identity() -> String {
     let Ok(exe) = std::env::current_exe() else { return String::new() };
-    let Ok(m) = std::fs::metadata(&exe) else { return String::new() };
+    exe_identity_of(&exe)
+}
+
+pub fn exe_identity_of(exe: &std::path::Path) -> String {
+    let Ok(m) = std::fs::metadata(exe) else { return String::new() };
     let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
     #[cfg(unix)]
     let ino = std::os::unix::fs::MetadataExt::ino(&m);

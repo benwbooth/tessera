@@ -102,3 +102,13 @@ mod tests {
         let _ = child.kill();
     }
 }
+
+/// libghostty limits scrollback in bytes, not lines: a row takes about
+/// 9.3 bytes per column (measured). Budget for 300 columns so at least
+/// `lines` rows are kept at any usual width (more when narrower).
+pub fn scrollback_bytes(lines: u32) -> usize {
+    if lines >= 10_000_000 {
+        return usize::MAX;
+    }
+    (lines as usize).saturating_mul(2_900) + (1 << 20)
+}

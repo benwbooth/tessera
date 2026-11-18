@@ -41,13 +41,46 @@
             outputHash = "sha256-PnM+hZIlLyQwK8vJgd/Bhjt1lNIz06T8FahwliRmMrY=";
           };
           qtEnv = qtEnvFor pkgs;
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type: !(pkgs.lib.hasInfix "/target" path) && baseNameOf path != ".qt-env" && baseNameOf path != "result";
+          };
+          ghosttyEnv = {
+            GHOSTTY_SOURCE_DIR = "${ghosttySrc}";
+            GHOSTTY_ZIG_SYSTEM_DIR = "${zigDeps}";
+          };
+          ghosttyPreBuild = ''
+            export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
+            # zig writes into the source tree: give it a writable copy.
+            cp -r ${ghosttySrc} $TMPDIR/ghostty && chmod -R u+w $TMPDIR/ghostty
+            export GHOSTTY_SOURCE_DIR=$TMPDIR/ghostty
+          '';
+          # tesserad alone, static (musl): it runs on any Linux of its
+          # architecture, so the window copies it to SSH hosts that lack it.
+          tesseradStatic = pkgs.pkgsStatic.rustPlatform.buildRustPackage {
+            pname = "tesserad";
+            version = (pkgs.lib.importTOML ./tesserad/Cargo.toml).package.version;
+            inherit src;
+            cargoLock.lockFile = ./Cargo.lock;
+            cargoBuildFlags = [ "-p" "tesserad" ];
+            nativeBuildInputs = [ pkgs.zig_0_15 ];
+            dontUseZigBuild = true;
+            dontUseZigInstall = true;
+            dontUseZigCheck = true;
+            doCheck = false;
+            env = ghosttyEnv;
+            preBuild = ghosttyPreBuild;
+            meta = {
+              description = "Tessera's backend (shells, notebook kernels, cells, Nix runs), static";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "tesserad";
+              platforms = pkgs.lib.platforms.linux;
+            };
+          };
           tessera = pkgs.rustPlatform.buildRustPackage {
             pname = "tessera";
             version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
-            src = pkgs.lib.cleanSourceWith {
-              src = ./.;
-              filter = path: type: !(pkgs.lib.hasInfix "/target" path) && baseNameOf path != ".qt-env";
-            };
+            inherit src;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.pkg-config pkgs.zig_0_15 pkgs.qt6.wrapQtAppsHook pkgs.qt6.qtbase ];
             buildInputs = qtFor pkgs ++ [ qtEnv pkgs.libGL ];
@@ -55,21 +88,17 @@
             dontUseZigInstall = true;
             dontUseZigCheck = true;
             doCheck = false;
-            env = {
-              GHOSTTY_SOURCE_DIR = "${ghosttySrc}";
-              GHOSTTY_ZIG_SYSTEM_DIR = "${zigDeps}";
+            env = ghosttyEnv // {
               # cxx-qt wants every Qt module under one prefix.
               QMAKE = "${qtEnv}/bin/qmake";
             };
             preBuild = ''
               # (Qt's setup hook sets QMAKE to qtbase's alone.)
               export QMAKE=${qtEnv}/bin/qmake
-              export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-              # zig writes into the source tree: give it a writable copy.
-              cp -r ${ghosttySrc} $TMPDIR/ghostty && chmod -R u+w $TMPDIR/ghostty
-              export GHOSTTY_SOURCE_DIR=$TMPDIR/ghostty
-            '';
+            '' + ghosttyPreBuild;
             postInstall = ''
+              # The static tesserad, for SSH hosts without one (remote.rs).
+              install -Dm755 ${tesseradStatic}/bin/tesserad $out/libexec/tessera/tesserad-${pkgs.stdenv.hostPlatform.uname.processor}-linux
               install -Dm644 icons/tessera.svg $out/share/icons/hicolor/scalable/apps/tessera.svg
               # (Outside a Flatpak the app id is plain "tessera".)
               mkdir -p $out/share/applications
@@ -84,7 +113,7 @@
             };
           };
         in
-        { default = tessera; inherit tessera; });
+        { default = tessera; inherit tessera; tesserad-static = tesseradStatic; });
 
       apps = forAll (pkgs: {
         default = { type = "app"; program = "${self.packages.${pkgs.system}.default}/bin/tessera"; };

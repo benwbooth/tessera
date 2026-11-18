@@ -12,6 +12,7 @@ mod kde;
 mod grammars;
 mod history;
 mod images;
+mod image_places;
 mod jupyter;
 mod keymap;
 mod net;
@@ -23,6 +24,8 @@ mod prompt;
 mod prompt_widgets;
 mod proto;
 mod record;
+mod remote;
+mod rpc;
 mod settings;
 mod shell_integration;
 mod shellk;
@@ -147,7 +150,7 @@ fn main() {
     }
     bridge::ffi::tessera_show_windows();
     let code = bridge::ffi::tessera_exec();
-    jupyter::stop_all();
+    // (Kernels run on in tesserad, like the shells.)
     if wayland {
         // Qt reads "-session id_key", so an id with "_" in it can't be passed back.
         let id = bridge::ffi::tessera_session_id().to_string();

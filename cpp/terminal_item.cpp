@@ -394,17 +394,17 @@ void TerminalItem::updateMetrics()
 
 void TerminalItem::open()
 {
-    if (m_session || m_exited || !m_complete) return;
+    if (m_session || m_exited || !m_complete || !m_ready) return;
     const int cols = qMax(2, int((width() * m_dpr - 2 * m_pad) / m_cw));
     const int rows = qMax(1, int((height() * m_dpr - 2 * m_pad) / m_ch));
     try {
         const QByteArray a = m_attachId.toUtf8(), t = m_tmuxPane.toUtf8(), c = m_cwd.toUtf8();
-        const QByteArray cmd = m_command.toUtf8(), term = m_termName.toUtf8();
+        const QByteArray cmd = m_command.toUtf8(), term = m_termName.toUtf8(), host = m_host.toUtf8();
         // Startup text only for a new shell, not one being reattached.
         const QByteArray input = m_attachId.isEmpty() && m_tmuxPane.isEmpty() && !m_startupInput.isEmpty()
             ? (m_startupInput + QStringLiteral("\n")).toUtf8() : QByteArray();
         auto box = tessera::session_open(rs(a), rs(t), rs(c), uint16_t(cols), uint16_t(rows), uint32_t(m_cw),
-                                         uint32_t(m_ch), uint32_t(qMax(0, m_scrollback)), rs(cmd), rs(term), rs(input));
+                                         uint32_t(m_ch), uint32_t(qMax(0, m_scrollback)), rs(cmd), rs(term), rs(input), rs(host));
         m_session = box.into_raw();
         if (!m_themeJson.isEmpty()) {
             const QByteArray b = m_themeJson.toUtf8();

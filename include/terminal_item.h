@@ -26,6 +26,10 @@ struct Frame;
 class TerminalItem : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(QString attachId READ attachId WRITE setAttachId NOTIFY attachIdChanged)
+    // Where the shell runs: "" here, else an SSH host (its tesserad).
+    Q_PROPERTY(QString host READ host WRITE setHost NOTIFY hostChanged)
+    // False until the shell can be opened (an SSH host still connecting).
+    Q_PROPERTY(bool ready READ ready WRITE setReady NOTIFY readyChanged)
     Q_PROPERTY(QString tmuxPane READ tmuxPane WRITE setTmuxPane NOTIFY tmuxPaneChanged)
     Q_PROPERTY(QString cwd READ cwd WRITE setCwd NOTIFY cwdChanged)
     Q_PROPERTY(QString fontFamily READ fontFamily WRITE setFontFamily NOTIFY fontChanged)
@@ -107,6 +111,16 @@ public:
     ~TerminalItem() override;
 
     QString attachId() const { return m_attachId; }
+    QString host() const { return m_host; }
+    bool ready() const { return m_ready; }
+    void setReady(bool v)
+    {
+        if (v == m_ready) return;
+        m_ready = v;
+        emit readyChanged();
+        if (v && m_complete && width() > 0 && height() > 0) open();
+    }
+    void setHost(const QString& v) { if (v == m_host) return; m_host = v; emit hostChanged(); }
     void setAttachId(const QString& v);
     QString tmuxPane() const { return m_tmuxPane; }
     void setTmuxPane(const QString& v);
@@ -190,6 +204,8 @@ public:
 
 signals:
     void attachIdChanged();
+    void hostChanged();
+    void readyChanged();
     void tmuxPaneChanged();
     void cwdChanged();
     void fontChanged();
@@ -272,6 +288,8 @@ private:
     tessera::Frame* m_frame = nullptr;
     QSocketNotifier* m_notifier = nullptr;
 
+    QString m_host;
+    bool m_ready = true;
     QString m_attachId, m_tmuxPane, m_cwd, m_sessionId, m_title, m_pwd, m_tmuxGateway;
     QString m_fontFamily;
     qreal m_fontPointSize = 0;

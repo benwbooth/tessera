@@ -9,6 +9,37 @@ Item {
     property var host: null
     property alias view: term
     property alias attachId: term.attachId
+    // Where its shell runs: "" here, else an SSH host (its tesserad, set up
+    // there when the pane opens; the shell waits for that).
+    property alias sshHost: term.host
+    property bool hostUp: sshHost === ""
+    property string hostError: ""
+    // (A saved remote pane's screen, shown when its shell there is gone.)
+    property string restoreSnapshot: ""
+    // The shell's pid when it's on this computer (what's looked up here:
+    // the prompt's and the editor's environment); 0 for another host's.
+    readonly property int localPid: sshHost === "" ? shellPid : 0
+    function connectHost() { hostError = ""; controller.connectHost(sshHost) }
+    Component.onCompleted: if (sshHost !== "" && controller) connectHost()
+    Connections {
+        target: pane.controller
+        enabled: pane.sshHost !== "" && !pane.hostUp
+        function onHostConnected(h, err) {
+            if (h !== pane.sshHost) return
+            if (err !== "") { pane.hostError = err; return }
+            // (Reattaching: when the shell there has ended, a new one starts
+            // under the saved screen.)
+            if (term.attachId !== "") {
+                let ids = []
+                try { ids = JSON.parse(pane.controller.restorableSessions(h)) } catch (e) {}
+                if (ids.indexOf(term.attachId) < 0) {
+                    term.attachId = ""
+                    if (pane.restoreSnapshot !== "") term.preloadFile = pane.restoreSnapshot
+                }
+            }
+            pane.hostUp = true
+        }
+    }
     property alias tmuxPane: term.tmuxPane
     property alias cwd: term.cwd
     property string profileName: ""
@@ -77,15 +108,15 @@ Item {
         if (!controller || term.exited || !(term.atPrompt || idleShell)) return
         const cur = pane.shellName !== "" ? pane.shellName : "bash"
         let st = []
-        try { st = JSON.parse(controller.shellChain(pane.shellPid)) } catch (e) {}
+        try { st = JSON.parse(controller.shellChain(pane.shellPid, pane.sshHost)) } catch (e) {}
         if (st.length === 0) st = [{ name: cur, pid: pane.shellPid }]
         const below = st.slice(0, -1).map(x => x.name).lastIndexOf(sh)
         if (below >= 0) {
-            controller.shellHandBack(st[st.length - 1].pid, st[below].pid)
+            controller.shellHandBack(st[st.length - 1].pid, st[below].pid, pane.sshHost)
             for (let k = st.length - 1; k > below; --k) { shellCmdPending++; term.sendText(" exit\r") }
             return
         }
-        const line = controller.shellLaunchLine(sh, pane.shellPid)
+        const line = controller.shellLaunchLine(sh, pane.shellPid, pane.sshHost)
         if (line === "") return
         shellCmdPending++
         term.sendText(line + "\r")
@@ -147,6 +178,7 @@ Item {
     TerminalView {
         property bool keepsBacktab: true    // (it decides: the editor at a prompt, else the program)
         id: term
+        ready: pane.hostUp
         anchors.top: titleBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -203,7 +235,7 @@ Item {
         aiCheck: pane.aiSettings.check !== false
         aiNL: pane.aiSettings.natural_language !== false
         shellName: pane.shellName !== "" ? pane.shellName : "bash"
-        shellPid: pane.shellPid
+        shellPid: pane.localPid
         promptEngine: pane.promptEngine
         promptSegments: pane.promptSegments
         // (A shell picked: its kernel starts now, ready by the first Enter.)
@@ -219,7 +251,7 @@ Item {
             const S = compose.runShellUsed
             if (S !== "" && controller) {
                 if (notebook.hasKernelFor(S)) { pane.viewMode = "notebook"; notebook.submitLang(t, S); return }
-                const cmd = controller.snippetCommand(S, t, compose.cwd, compose.shellName)
+                const cmd = controller.snippetCommand(S, t, compose.cwd, compose.shellName, pane.sshHost)
                 if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
             }
             if (pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
@@ -228,7 +260,7 @@ Item {
                 return
             }
             if (pane.replLang === "" && L !== "" && L !== "bash" && controller) {
-                const cmd = controller.snippetCommand(L, t, compose.cwd, compose.shellName)
+                const cmd = controller.snippetCommand(L, t, compose.cwd, compose.shellName, pane.sshHost)
                 if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
             }
             if (t.indexOf("\n") < 0) term.sendText(t + "\r")
@@ -397,6 +429,44 @@ Item {
             else longTimer.restart()
         }
     }
+    // Another host's pane while SSH connects (and tesserad is started, or
+    // copied there), or why it couldn't.
+    Rectangle {
+        z: 20
+        anchors.fill: term
+        visible: !pane.hostUp
+        color: Theme.dark ? "#1e1f22" : "#f4f4f5"
+        Column {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 48, 640)
+            spacing: 12
+            Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                renderType: Text.NativeRendering
+                color: Theme.dark ? "#e6e6e6" : "#222"
+                font.pointSize: 11
+                text: pane.hostError === "" ? "Connecting to " + pane.sshHost + "\u2026" : "Couldn't connect to " + pane.sshHost
+            }
+            TextEdit {
+                width: parent.width
+                visible: pane.hostError !== ""
+                readOnly: true
+                selectByMouse: true
+                wrapMode: Text.Wrap
+                renderType: Text.NativeRendering
+                color: Theme.dark ? "#c8c8c8" : "#444"
+                text: pane.hostError
+            }
+            Button {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: pane.hostError !== ""
+                text: "Try Again"
+                onClicked: pane.connectHost()
+            }
+        }
+    }
     NotebookView {
         id: notebook
         z: 15
@@ -408,6 +478,7 @@ Item {
         controller: pane.controller
         path: pane.docPath
         storeKey: term.sessionId
+        sshHost: pane.sshHost
         shellPid: pane.shellPid
         fontFamily: term.fontFamily
         markdownStyle: pane.markdownStyle

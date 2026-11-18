@@ -1,8 +1,198 @@
-//! Connecting to the PTY daemon, starting it when it isn't running.
+//! Connecting to tesserad, starting it when it isn't running; on another
+//! host, through SSH (remote.rs).
 
-use crate::proto::*;
 use crate::net::UnixStream;
+use crate::proto::*;
+use serde_json::Value;
 use std::time::{Duration, Instant};
+
+/// A connection to `host`'s tesserad ("" for this computer's).
+pub fn connect_to(host: &str) -> std::io::Result<UnixStream> {
+    if host.is_empty() {
+        connect()
+    } else {
+        crate::remote::connect(host)
+    }
+}
+
+/// One request to `host`'s tesserad (rpc.rs): its result.
+pub fn rpc(host: &str, method: &str, params: Value) -> Result<Value, String> {
+    let mut s = connect_to(host).map_err(|e| e.to_string())?;
+    // (Long ones, like a Nix lookup building its index, answer later.)
+    let _ = s.set_read_timeout(Some(Duration::from_secs(120)));
+    write_json(&mut s, T_RPC, &serde_json::json!({"method": method, "params": params})).map_err(|e| e.to_string())?;
+    match read_frame(&mut s).map_err(|e| e.to_string())? {
+        (T_RPC_REPLY, p) => serde_json::from_slice(&p).map_err(|e| e.to_string()),
+        (T_ERROR, p) => Err(serde_json::from_slice::<String>(&p).unwrap_or_default()),
+        (t, _) => Err(format!("tesserad: unexpected reply {t}")),
+    }
+}
+
+/// tesserad on this computer, started unless it's running.
+pub fn ensure_daemon() -> std::io::Result<()> {
+    connect().map(drop)
+}
+
+/// The tesserad to run here: the one next to this program (the window's
+/// build), this program when it's tesserad, else `tessera daemon`.
+pub fn daemon_exe() -> std::io::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    let name = if cfg!(windows) { "tesserad.exe" } else { "tesserad" };
+    if exe.file_name().is_some_and(|n| n == name) {
+        return Ok(exe);
+    }
+    let beside = exe.with_file_name(name);
+    Ok(if beside.is_file() { beside } else { exe })
+}
+
+// ---- kernels' events (rpc.rs's T_SUBSCRIBE), per host ----------------------
+
+type Deliver = std::sync::Arc<dyn Fn(String, Value) + Send + Sync>;
+
+#[derive(Default)]
+struct Subs {
+    /// Each host's subscription id (its event connection is up).
+    ids: std::collections::HashMap<String, u64>,
+    /// The notebooks' kernel keys this window has there (re-claimed when
+    /// the connection comes back).
+    claimed: std::collections::HashMap<String, std::collections::BTreeSet<String>>,
+    deliver: Option<Deliver>,
+}
+
+fn subs() -> &'static std::sync::Mutex<Subs> {
+    static S: std::sync::OnceLock<std::sync::Mutex<Subs>> = std::sync::OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+/// A kernel key as the window has it: "host//key" for another host's.
+pub fn split_key(key: &str) -> (String, String) {
+    match key.split_once("//") {
+        Some((h, k)) => (h.to_string(), k.to_string()),
+        None => (String::new(), key.to_string()),
+    }
+}
+
+fn join_key(host: &str, key: &str) -> String {
+    if host.is_empty() { key.to_string() } else { format!("{host}//{key}") }
+}
+
+/// Where kernels' events go (the window's Qt thread).
+pub fn set_event_sink(deliver: Deliver) {
+    subs().lock().unwrap().deliver = Some(deliver);
+}
+
+/// This window's subscription on `host` (its event connection started now
+/// if it isn't up): its id, for kernel.start/attach.
+pub fn subscription(host: &str) -> u64 {
+    if let Some(id) = subs().lock().unwrap().ids.get(host) {
+        return *id;
+    }
+    let Ok(mut s) = connect_to(host) else { return 0 };
+    if write_frame(&mut s, T_SUBSCRIBE, b"").is_err() {
+        return 0;
+    }
+    let id = match read_frame(&mut s) {
+        Ok((T_SUBSCRIBED, p)) => serde_json::from_slice::<u64>(&p).unwrap_or(0),
+        _ => return 0,
+    };
+    subs().lock().unwrap().ids.insert(host.to_string(), id);
+    let host = host.to_string();
+    std::thread::spawn(move || {
+        while let Ok((tag, p)) = read_frame(&mut s) {
+            if tag != T_EVENT {
+                continue;
+            }
+            let v: Value = serde_json::from_slice(&p).unwrap_or_default();
+            let deliver = subs().lock().unwrap().deliver.clone();
+            if let (Some(d), Some(k)) = (deliver, v["key"].as_str()) {
+                d(join_key(&host, k), v["event"].clone());
+            }
+        }
+        // (Gone: tesserad restarted, the network dropped. Back as soon as it
+        // can be, with the kernels this window had.)
+        subs().lock().unwrap().ids.remove(&host);
+        for _ in 0..600 {
+            std::thread::sleep(Duration::from_secs(1));
+            let keys: Vec<String> = subs().lock().unwrap().claimed.get(&host).map(|k| k.iter().cloned().collect()).unwrap_or_default();
+            if keys.is_empty() {
+                return;
+            }
+            if subscription(&host) == 0 {
+                continue;
+            }
+            for k in keys {
+                let _ = attach_kernels(&join_key(&host, &k));
+            }
+            return;
+        }
+    });
+    id
+}
+
+/// Start kernel `spec` for `key` (unless it runs already); its events come
+/// to the event sink. Returns what tesserad said ({running, events}).
+pub fn start_kernel(key: &str, spec: &str, cwd: &str, pid: u32, session: &str) -> Value {
+    let (host, k) = split_key(key);
+    let sub = subscription(&host);
+    subs().lock().unwrap().claimed.entry(host.clone()).or_default().insert(k.clone());
+    let r = rpc(&host, "kernel.start", serde_json::json!({"key": k, "spec": spec, "cwd": cwd, "pid": pid, "sub": sub, "session": session}));
+    match r {
+        Ok(v) => {
+            deliver_buffered(&host, &k, &v["events"]);
+            v
+        }
+        Err(e) => {
+            if let Some(d) = subs().lock().unwrap().deliver.clone() {
+                d(key.to_string(), serde_json::json!({"type": "status", "state": "dead", "message": e}));
+            }
+            Value::Null
+        }
+    }
+}
+
+fn deliver_buffered(host: &str, key: &str, events: &Value) {
+    let Some(d) = subs().lock().unwrap().deliver.clone() else { return };
+    for e in events.as_array().into_iter().flatten() {
+        // (kernel.attach's are {key, event}; kernel.start's, the events.)
+        match (e["key"].as_str(), e.get("event")) {
+            (Some(k), Some(ev)) => d(join_key(host, k), ev.clone()),
+            _ => d(join_key(host, key), e.clone()),
+        }
+    }
+}
+
+/// A notebook (key) takes its kernels back after the window was away:
+/// {kernels: [running ones, keys as the window has them]}; what they said
+/// meanwhile is delivered as events.
+pub fn attach_kernels(key: &str) -> Value {
+    let (host, k) = split_key(key);
+    let sub = subscription(&host);
+    subs().lock().unwrap().claimed.entry(host.clone()).or_default().insert(k.clone());
+    let Ok(mut v) = rpc(&host, "kernel.attach", serde_json::json!({"key": k, "sub": sub})) else { return serde_json::json!({"kernels": []}) };
+    if let Some(list) = v["kernels"].as_array_mut() {
+        for x in list.iter_mut() {
+            if let Some(kk) = x["key"].as_str().map(String::from) {
+                x["key"] = Value::String(join_key(&host, &kk));
+            }
+            // (Each kernel's own key under this notebook: also claimed.)
+            if let Some(kk) = x["key"].as_str() {
+                let (_, base) = split_key(kk);
+                subs().lock().unwrap().claimed.entry(host.clone()).or_default().insert(base);
+            }
+        }
+    }
+    let events = v["events"].take();
+    deliver_buffered(&host, &k, &events);
+    v
+}
+
+/// The kernel for `key` is done with (stopped, or the notebook closed).
+pub fn release_kernel(key: &str) {
+    let (host, k) = split_key(key);
+    if let Some(c) = subs().lock().unwrap().claimed.get_mut(&host) {
+        c.remove(&k);
+    }
+}
 
 pub fn connect() -> std::io::Result<UnixStream> {
     let path = socket_path();
@@ -21,7 +211,7 @@ pub fn connect() -> std::io::Result<UnixStream> {
 }
 
 fn spawn_daemon() -> std::io::Result<()> {
-    let exe = std::env::current_exe()?;
+    let exe = daemon_exe()?;
     let log = log_path();
     let stderr = std::fs::OpenOptions::new()
         .create(true)
@@ -33,7 +223,11 @@ fn spawn_daemon() -> std::io::Result<()> {
     // Shells get the desktop session's environment, not whatever this GUI
     // was started from (a `nix develop` shell under devloop, say: its SHELL
     // is a bash without completion and its build variables would leak in).
-    cmd.env_clear().envs(session_env());
+    // (Over SSH, `tesserad start` keeps the login's environment: there's
+    // no desktop session there.)
+    if std::env::var_os("TESSERA_REMOTE").is_none() {
+        cmd.env_clear().envs(session_env());
+    }
     cmd.arg("daemon")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -70,9 +264,37 @@ fn log_path() -> std::path::PathBuf {
     base.join("daemon.log")
 }
 
-pub fn list_sessions() -> std::io::Result<Vec<SessionInfo>> {
+/// Which host each session the window has is on (its pane's), for the
+/// calls that only name the session.
+fn session_hosts() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    H.get_or_init(Default::default)
+}
+
+pub fn set_session_host(id: &str, host: &str) {
+    if !host.is_empty() {
+        session_hosts().lock().unwrap().insert(id.to_string(), host.to_string());
+    }
+}
+
+pub fn host_of(id: &str) -> String {
+    session_hosts().lock().unwrap().get(id).cloned().unwrap_or_default()
+}
+
+/// A session's connection: to its host's tesserad, never starting one
+/// just to ask about it.
+fn connect_for(id: &str) -> std::io::Result<UnixStream> {
+    let host = host_of(id);
+    if host.is_empty() {
+        UnixStream::connect(socket_path())
+    } else {
+        crate::remote::connect(&host)
+    }
+}
+
+pub fn list_sessions(host: &str) -> std::io::Result<Vec<SessionInfo>> {
     // Don't start a daemon just to learn there's nothing to restore.
-    let mut s = UnixStream::connect(socket_path())?;
+    let mut s = if host.is_empty() { UnixStream::connect(socket_path())? } else { crate::remote::connect(host)? };
     write_frame(&mut s, T_LIST, b"")?;
     let (tag, payload) = read_frame(&mut s)?;
     if tag != T_SESSIONS {
@@ -83,7 +305,7 @@ pub fn list_sessions() -> std::io::Result<Vec<SessionInfo>> {
 
 /// End a (detached) session.
 pub fn kill_session(id: &str) {
-    if let Ok(mut s) = UnixStream::connect(socket_path()) {
+    if let Ok(mut s) = connect_for(id) {
         let _ = write_json(&mut s, T_KILL_ID, &id);
     }
 }
@@ -104,7 +326,7 @@ pub fn proc_info(id: &str) -> std::io::Result<ProcInfo> {
     use std::sync::atomic::{AtomicBool, Ordering};
     static OLD_DAEMON: AtomicBool = AtomicBool::new(false);
     if !OLD_DAEMON.load(Ordering::Relaxed) {
-        let mut s = UnixStream::connect(socket_path())?;
+        let mut s = connect_for(id)?;
         s.set_read_timeout(Some(Duration::from_millis(500)))?;
         write_json(&mut s, T_INFO, &id)?;
         match read_frame(&mut s) {
@@ -117,7 +339,7 @@ pub fn proc_info(id: &str) -> std::io::Result<ProcInfo> {
 }
 
 pub fn session_job(id: &str) -> std::io::Result<String> {
-    let mut s = UnixStream::connect(socket_path())?;
+    let mut s = connect_for(id)?;
     s.set_read_timeout(Some(Duration::from_millis(500)))?;
     write_json(&mut s, T_JOB, &id)?;
     let (tag, payload) = read_frame(&mut s)?;
@@ -142,7 +364,8 @@ pub fn sync_daemon() -> &'static str {
             _ => None,
         }
     };
-    let mine = exe_identity();
+    let Ok(exe) = daemon_exe() else { return "current" };
+    let mine = exe_identity_of(&exe);
     let theirs = match ask_version() {
         None => return "none",
         Some(Err(())) => return "outdated",
@@ -156,16 +379,17 @@ pub fn sync_daemon() -> &'static str {
     if mtime(&theirs) > mtime(&mine) {
         return "newer";
     }
-    let Ok(exe) = std::env::current_exe() else { return "current" };
-    let sent = (|| -> std::io::Result<()> {
+    let sent = (|| -> std::io::Result<String> {
         let mut s = UnixStream::connect(socket_path())?;
         s.set_read_timeout(Some(Duration::from_secs(5)))?;
         write_json(&mut s, T_UPGRADE, &serde_json::json!({ "exe": exe.display().to_string() }))?;
-        let _ = read_frame(&mut s)?;
-        Ok(())
+        let (_, p) = read_frame(&mut s)?;
+        Ok(serde_json::from_slice::<String>(&p).unwrap_or_default())
     })();
-    if sent.is_err() {
-        return "current";
+    // (Deferred: kernels are running; it swaps itself in when they're done.)
+    match sent.as_deref() {
+        Ok("deferred") | Err(_) => return "current",
+        _ => {}
     }
     // The new build answers on the same socket once it has taken over.
     let start = Instant::now();

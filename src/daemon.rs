@@ -44,6 +44,8 @@ struct DSession {
     size: Mutex<(u16, u16)>,
     /// Scrollback lines its emulator keeps (for a resumed one after an upgrade).
     lines: u32,
+    /// Its notebook cells, kept as the output goes by (attached or not).
+    rec: Mutex<crate::cells::Recorder>,
 }
 
 type Registry = Arc<Mutex<HashMap<String, Arc<DSession>>>>;
@@ -82,6 +84,9 @@ pub fn lock_down_admin_dir(sock: &std::path::Path) -> std::io::Result<()> {
 
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
+/// A build to swap in once no kernel runs (T_UPGRADE while one did).
+static PENDING_UPGRADE: Mutex<Option<String>> = Mutex::new(None);
+
 /// This daemon's build (see proto::exe_identity), fixed at startup.
 static IDENTITY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// The listening socket's fd (handed to the next build on an upgrade).
@@ -118,7 +123,20 @@ pub fn run() -> std::io::Result<()> {
     serve(listener, Arc::default(), path)
 }
 
+static REGISTRY: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+
+/// Session `id` takes over `from`'s cells and notebook (`from` is gone: its
+/// screen was brought back from the saved layout in this new shell).
+pub fn adopt_cells(id: &str, from: &str) {
+    let s = REGISTRY.get().and_then(|r| r.lock().unwrap().get(id).cloned());
+    match s {
+        Some(s) => s.rec.lock().unwrap().adopt(from),
+        None => crate::cells::Recorder::new(id, 0).adopt(from),
+    }
+}
+
 fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -> std::io::Result<()> {
+    let _ = REGISTRY.set(registry.clone());
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -134,9 +152,18 @@ fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -
             let mut idle = 0;
             loop {
                 std::thread::sleep(Duration::from_secs(1));
+                // (Kernels keep it running too: a notebook's, its window closed.)
                 let empty = registry.lock().unwrap().is_empty()
-                    && CONNECTIONS.load(Ordering::SeqCst) == 0;
+                    && CONNECTIONS.load(Ordering::SeqCst) == 0
+                    && !crate::rpc::kernels_running();
                 idle = if empty { idle + 1 } else { 0 };
+                #[cfg(unix)]
+                if !crate::rpc::kernels_running() {
+                    if let Some(exe) = PENDING_UPGRADE.lock().unwrap().take() {
+                        let err = upgrade::exec_new_build(&registry, &exe);
+                        eprintln!("tesserad: deferred upgrade failed: {err}");
+                    }
+                }
                 if idle >= 5 {
                     let _ = std::fs::remove_file(&path);
                     std::process::exit(0);
@@ -218,8 +245,11 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
         let (cols, rows, lines) = (c.cols.max(2), c.rows.max(1), if c.scrollback > 0 { c.scrollback } else { 10_000 });
         std::thread::spawn(move || emulate(emu_rx, cols, rows, lines));
     }
+    let id = new_id();
+    let rec = crate::cells::Recorder::new(&id, shell_pid.unwrap_or(0));
     let s = Arc::new(DSession {
-        id: new_id(),
+        rec: Mutex::new(rec),
+        id,
         shell_pid,
         created: now(),
         master: Mutex::new(pair.master),
@@ -250,8 +280,22 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
         };
         let mut sh = s.shared.lock().unwrap();
         let _ = s.emu.lock().unwrap().send(Emu::Output(buf[..n].to_vec()));
+        let starts = s.rec.lock().unwrap().feed(&buf[..n]);
         if let Some(c) = sh.client.as_mut() {
-            if write_frame(c, T_OUTPUT, &buf[..n]).is_err() {
+            // (Each cell's id just before the output its start mark is in.)
+            let mut from = 0;
+            let mut ok = true;
+            for (at, id) in starts {
+                if at > from {
+                    ok &= write_frame(c, T_OUTPUT, &buf[from..at]).is_ok();
+                }
+                ok &= write_json(c, T_CELL, &id).is_ok();
+                from = at;
+            }
+            if from < n {
+                ok &= write_frame(c, T_OUTPUT, &buf[from..n]).is_ok();
+            }
+            if !ok {
                 sh.client = None;
             }
         }
@@ -264,6 +308,7 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
         .map(|st| st.exit_code() as i32)
         .unwrap_or(-1);
     registry.lock().unwrap().remove(&s.id);
+    crate::rpc::session_ended(&s.id);
     let mut sh = s.shared.lock().unwrap();
     if let Some(c) = sh.client.as_mut() {
         let _ = write_json(c, T_EXITED, &code);
@@ -361,7 +406,7 @@ fn foreground_pgid(s: &DSession) -> Option<u32> {
 /// The emulator thread: libghostty types stay on the thread that made them.
 fn emulate(rx: mpsc::Receiver<Emu>, cols: u16, rows: u16, lines: u32) {
     use libghostty_vt::{terminal::Options, Terminal};
-    let Ok(mut term) = Terminal::new(Options { cols, rows, max_scrollback: crate::session::scrollback_bytes(lines) }) else { return };
+    let Ok(mut term) = Terminal::new(Options { cols, rows, max_scrollback: crate::snapshot::scrollback_bytes(lines) }) else { return };
     crate::images::enable(&mut term);
     for msg in rx {
         match msg {
@@ -420,6 +465,8 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
         T_VERSION => {
             return write_json(&mut stream, T_VERSION_REPLY, IDENTITY.get_or_init(exe_identity));
         }
+        T_RPC => return crate::rpc::handle(stream, &payload),
+        T_SUBSCRIBE => return crate::rpc::subscribe(stream),
         T_UPGRADE => {
             #[derive(serde::Deserialize)]
             struct Up {
@@ -428,6 +475,12 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
             let up: Up = serde_json::from_slice(&payload)?;
             #[cfg(unix)]
             {
+                // (Kernels can't be handed over: the swap waits until none
+                // runs. The shells don't mind either way.)
+                if crate::rpc::kernels_running() {
+                    *PENDING_UPGRADE.lock().unwrap() = Some(up.exe.clone());
+                    return write_json(&mut stream, T_UPGRADE_REPLY, &"deferred");
+                }
                 write_json(&mut stream, T_UPGRADE_REPLY, &"upgrading")?;
                 drop(stream);
                 let err = upgrade::exec_new_build(registry, &up.exe);
@@ -663,6 +716,7 @@ mod upgrade {
                 unsafe { UnixStream::from_raw_fd(c) }
             });
             let s = Arc::new(DSession {
+                rec: Mutex::new(crate::cells::Recorder::new(&st.id, st.pid.unwrap_or(0))),
                 id: st.id.clone(),
                 shell_pid: st.pid,
                 created: st.created,

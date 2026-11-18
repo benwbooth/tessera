@@ -335,7 +335,8 @@ ApplicationWindow {
             return
         }
         const prof = profileFor(profileName !== undefined ? profileName : p.profileName)
-        const props = { profileName: prof.name, cwd: cwdFor(prof, p.view) }
+        // (A split of another host's pane opens there too, as tmux's do.)
+        const props = { profileName: prof.name, cwd: cwdFor(prof, p.view), sshHost: p.sshHost }
         const h = p.host
         if (h.count === 1) h.orientation = orientation
         let np
@@ -514,6 +515,7 @@ ApplicationWindow {
             if (opts.command) props.commandOverride = opts.command
             if (opts.title) t.launchTitle = opts.title
             if (opts.attachId) props.attachId = opts.attachId
+            if (opts.host) props.sshHost = opts.host
             if (opts.doc) { props.docPath = opts.doc; props.viewMode = "notebook" }
             // (The view the tab it's opened from is in, unless one's asked for.)
             else {
@@ -829,7 +831,7 @@ ApplicationWindow {
     function serializeNode(n, withIds) {
         if (n.view !== undefined)
             return { t: "pane", profile: n.profileName, cwd: n.view.pwd || n.view.cwd, cmd: n.commandOverride,
-                     mode: n.viewMode, doc: n.docPath, id: withIds ? n.view.sessionId : "", w: n.width, h: n.height }
+                     mode: n.viewMode, doc: n.docPath, id: withIds ? n.view.sessionId : "", host: n.sshHost, w: n.width, h: n.height }
         const c = []
         for (let i = 0; i < n.count; ++i) c.push(serializeNode(n.itemAt(i), withIds))
         return { t: n.orientation === Qt.Horizontal ? "h" : "v", c: c, w: n.width, h: n.height }
@@ -852,8 +854,12 @@ ApplicationWindow {
     function buildSavedTree(t, node, alive, recreate) {
         function build(n, host) {
             if (n.t === "pane") {
-                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "" }
-                if (alive) {
+                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "", sshHost: n.host || "" }
+                // (Another host's: whether it's still running there is known
+                // once connected; the pane looks then.)
+                if (alive && n.host) {
+                    if (n.id) { props.attachId = n.id; props.restoreSnapshot = snapshotPath(n.id) }
+                } else if (alive) {
                     if (n.id && alive[n.id]) {
                         props.attachId = n.id
                         alive[n.id] = false
@@ -1553,7 +1559,8 @@ ApplicationWindow {
                 delegate: P.MenuItem {
                     icon.name: "network-server"
                     text: modelData
-                    onTriggered: newTab({ command: "ssh " + modelData, title: modelData })
+                    // (Its shells and notebook kernels run there, in tesserad.)
+                    onTriggered: newTab({ host: modelData, title: modelData })
                 }
                 onObjectAdded: (i, o) => sshMenu.insertItem(i, o)
                 onObjectRemoved: (i, o) => sshMenu.removeItem(o)
@@ -1564,7 +1571,7 @@ ApplicationWindow {
                 text: "New Connection\u2026"
                 onTriggered: askText("New SSH Connection", "user@host, and any ssh options", "", function(t) {
                     t = t.trim()
-                    if (t !== "") newTab({ command: "ssh " + t, title: t.split(/\s+/).pop() })
+                    if (t !== "") newTab({ host: t, title: t.split(/\s+/).pop() })
                 })
             }
         }
@@ -2310,7 +2317,7 @@ ApplicationWindow {
                 restored = tabs.length > 0
             } catch (e) {}
         } else if (controller.restoreAllowed()) {
-            const ids = JSON.parse(controller.restorableSessions())
+            const ids = JSON.parse(controller.restorableSessions(""))
             for (const id of ids) alive[id] = true
             if (settings.restore_sessions) {
                 let layout = null
