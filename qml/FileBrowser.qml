@@ -7,7 +7,7 @@ import Tessera
 // then across (ls's own layout), `ls -l` lines, or tiles, in the
 // terminal's font, one terminal row per line. Underneath: a click on a
 // folder goes into it (back, forward and up, a path bar once away from
-// where it started), a double click opens a file, a right click has the
+// where it started), a click on a file opens it, a right click has the
 // file manager's actions (Dolphin, Finder), and a small bar (on hover)
 // switches the view, the sort, folders first and hidden files. Those
 // choices are kept (settings: file_browser) for the next card.
@@ -274,7 +274,7 @@ Item {
                 height: fb.view === "tiles" ? fb.tileW + 20 : fb.row
                 radius: 3
                 color: sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : eh.hovered ? Theme.mix(Theme.bg, Theme.fg, 0.07) : "transparent"
-                HoverHandler { id: eh; cursorShape: ent.e.dir ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                HoverHandler { id: eh; cursorShape: Qt.PointingHandCursor }
                 // (Dragged out: as a file, to a file manager, an editor, the desktop.)
                 Drag.dragType: Drag.Automatic
                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
@@ -293,8 +293,8 @@ Item {
                 border.color: fb.dropOn === ent.e.path ? Theme.accent : "transparent"
                 border.width: 1
                 TapHandler {
-                    onTapped: { fb.selected = ent.e.path; if (ent.e.dir) fb.go(ent.e.path) }
-                    onDoubleTapped: if (!ent.e.dir) fb.act("open", ent.e.path)
+                    // (One click: a folder goes in, a file opens with its app.)
+                    onTapped: { fb.selected = ent.e.path; fb.openEntry(ent.e) }
                 }
                 TapHandler { acceptedButtons: Qt.RightButton; onTapped: { fb.selected = ent.e.path; fb.menuEntry = ent.e; itemMenu.popup() } }
                 ToolTip.visible: eh.hovered && fb.view !== "details"
