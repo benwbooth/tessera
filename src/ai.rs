@@ -325,6 +325,12 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
              [name, probability] with lowercase names (bash, python, javascript, typescript, ruby, perl, lua, php, r, julia, go, rust, c, cpp, \
              java, kotlin, haskell, sql, ...). A command that runs a program is bash."
         ),
+        "exit" => format!(
+            "{base} A command the user ran exited with a status that isn't 0. Say what that exit status means for that particular \
+             program (its documented meaning, e.g. from its manual), judged from the command, the status and its output: a short \
+             phrase, under 15 words, about this program and this status only. Reply with ONLY that phrase. If you don't know, \
+             reply with exactly unknown."
+        ),
         "fix" => format!(
             "{base} The user's last command failed. From the command, its exit status and output, reply with ONLY a corrected command, \
              no explanation, no code fence."

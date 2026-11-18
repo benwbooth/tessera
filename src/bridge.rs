@@ -909,7 +909,7 @@ impl ffi::Controller {
         let ctx: serde_json::Value = serde_json::from_str(&ctx_json.to_string()).unwrap_or_default();
         let s = crate::settings::load();
         let model_ref = match task.as_str() {
-            "inline" | "classify" | "language" | "request" => s.ai.inline_model.clone(),
+            "inline" | "classify" | "language" | "request" | "exit" => s.ai.inline_model.clone(),
             "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
             _ => s.ai.chat_model.clone(),
         };
@@ -927,6 +927,7 @@ impl ffi::Controller {
             "inline" | "request" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(8) },
             "classify" => crate::ai::Options { max_tokens: 8, temperature: 0.0, timeout: std::time::Duration::from_secs(10) },
             "language" => crate::ai::Options { max_tokens: 60, temperature: 0.0, timeout: std::time::Duration::from_secs(8) },
+            "exit" => crate::ai::Options { max_tokens: 60, temperature: 0.1, timeout: std::time::Duration::from_secs(20) },
             "check" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(15) },
             "command" | "fix" => crate::ai::Options { max_tokens: 300, temperature: 0.2, timeout: std::time::Duration::from_secs(60) },
             _ => crate::ai::Options { max_tokens: 4096, temperature: 0.4, timeout: std::time::Duration::from_secs(600) },

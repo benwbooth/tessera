@@ -682,8 +682,8 @@ ApplicationWindow {
             else win.toggleRecording(activeView)
         }
     }
-    // (Test hook: TESSERA_TEST_HOVER=x,y moves the pointer there after 6 s.)
-    Timer { interval: 6000; running: controller.testEnv("HOVER") !== ""; onTriggered: { const p = controller.testEnv("HOVER").split(",").map(Number); controller.testMouse(3, p[0] - 1, p[1], 0, 0); controller.testMouse(3, p[0], p[1], 0, 0) } }
+    // (Test hook: TESSERA_TEST_HOVER=x,y[,ms] moves the pointer there after 6 s (or ms).)
+    Timer { interval: Number(controller.testEnv("HOVER").split(",")[2] || 6000); running: controller.testEnv("HOVER") !== ""; onTriggered: { const p = controller.testEnv("HOVER").split(",").map(Number); controller.testMouse(3, p[0] - 1, p[1], 0, 0); controller.testMouse(3, p[0], p[1], 0, 0) } }
     // A note at the bottom of the window for a few seconds, with buttons.
     function notice(text, actions) { noticeBox.text = text; noticeBox.actions = actions; noticeBox.shown = true; noticeTimer.restart() }
     Timer { id: noticeTimer; interval: 7000; onTriggered: noticeBox.shown = false }

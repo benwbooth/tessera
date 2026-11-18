@@ -432,11 +432,35 @@ FocusScope {
     // ---- a kernel per language (cells in another language than the notebook's) ----
     property var langKernels: ({})      // lang -> {name, display, state, message, queue: [cid]}
     property string shellName: ""       // the pane's shell (zsh, bash, fish, ...)
+    // What a cell's exit status means: the shell's codes or the command's man
+    // page, else (asked when hovered) the AI's reading of it.
+    property var exitNotes: ({})        // cid -> the AI's meaning ("…" while asked)
+    readonly property string exitKey: "nb-exit-" + Math.random().toString(36).slice(2) + "-"
     function exitTip(c) {
         const st = c.fromTerm ? c.status : (c.failed ? 1 : 0)
         if (!c.fromTerm) return c.failed ? "Failed (an error)" : "Done"
         const m = controller ? controller.exitMeaning(c.source, st) : ""
-        return "Exit " + st + (m !== "" ? ": " + m : "")
+        const ai = exitNotes[c.cid] || ""
+        return "Exit " + st + (m !== "" ? ": " + m : ai === "…" ? ": asking the AI…" : ai !== "" ? ": " + ai + " (AI)" : "")
+    }
+    function askExit(c, i) {
+        if (!controller || !(c.tid > 0) || c.status === 0 || exitNotes[c.cid] !== undefined) return
+        if (controller.exitMeaning(c.source, c.status) !== "" || !controller.aiReady("inline")) return
+        const n = Object.assign({}, exitNotes); n[c.cid] = "…"; exitNotes = n
+        const out = outputText(i).split("\n").slice(-30).join("\n")
+        controller.aiRun(exitKey + c.cid, "exit", JSON.stringify([{ role: "user", content: "Command: " + c.source + "\nExit status: " + c.status + "\nIts output (the end):\n" + out }]), JSON.stringify({ cwd: c.cwd, shell: shellName }))
+    }
+    // (Test hook: TESSERA_TEST_EXIT_AI: the last cell's status asked about at
+    // 12 s, its tip logged at 30 s.)
+    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("EXIT_AI") !== ""; onTriggered: { const i = cells.count - 1; if (i >= 0) nb.askExit(cells.get(i), i) } }
+    Timer { interval: 30000; running: nb.controller !== null && nb.controller.testEnv("EXIT_AI") !== ""; onTriggered: { const i = cells.count - 1; if (i >= 0) console.log("exit tip: " + nb.exitTip(Object.assign({ fromTerm: cells.get(i).tid > 0 }, cells.get(i)))) } }
+    Connections {
+        target: nb.controller
+        function onAiDone(key, reply, error) {
+            if (!key.startsWith(nb.exitKey)) return
+            const r = (reply || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim().split("\n")[0].replace(/^["']|["'.]$/g, "")
+            const n = Object.assign({}, nb.exitNotes); n[key.substring(nb.exitKey.length)] = error || r === "" || /^unknown$/i.test(r) ? "" : r; nb.exitNotes = n
+        }
     }
     // What ran a cell: the pane's shell, its language's kernel, or the
     // notebook's kernel.
@@ -1247,7 +1271,7 @@ FocusScope {
                         font.weight: Font.Bold
                         RotationAnimation on rotation { running: cell.running; from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
                     }
-                    HoverHandler { id: statusHover; cursorShape: Qt.PointingHandCursor }
+                    HoverHandler { id: statusHover; cursorShape: Qt.PointingHandCursor; onHoveredChanged: if (hovered && cell.failed) nb.askExit(cells.get(cell.index), cell.index) }
                     TapHandler { onTapped: { nb.current = cell.index; cell.running ? nb.interrupt() : nb.run(cell.index) } }
                     ToolTip.visible: statusHover.hovered
                     ToolTip.delay: 400
