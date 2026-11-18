@@ -310,3 +310,67 @@ pub fn has_errors(lang_name: &str, text: &str) -> bool {
     }
     p.parse(text, None).is_some_and(|t| t.root_node().has_error())
 }
+
+/// The shell's own syntax check: `zsh -n` (bash, fish) reads the line
+/// without running it. Its complaints, on the lines they name: JSON
+/// [[start, length, message]] in UTF-16 units; [] when it parses (or the
+/// shell isn't there).
+pub fn shell_check(shell: &str, text: &str) -> String {
+    let sh = match shell.rsplit('/').next().unwrap_or(shell) {
+        s @ ("zsh" | "bash" | "fish" | "sh" | "dash" | "ksh") => s.to_string(),
+        _ => "bash".to_string(),
+    };
+    let out = std::process::Command::new(&sh)
+        .arg("-n")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut c| {
+            use std::io::Write;
+            if let Some(mut i) = c.stdin.take() {
+                let _ = i.write_all(text.as_bytes());
+                let _ = i.write_all(b"\n");
+            }
+            c.wait_with_output()
+        });
+    let Ok(out) = out else { return "[]".into() };
+    if out.status.success() {
+        return "[]".into();
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let lines: Vec<&str> = text.split('\n').collect();
+    let starts: Vec<usize> = lines.iter().scan(0usize, |acc, l| {
+        let s = *acc;
+        *acc += l.encode_utf16().count() + 1;
+        Some(s)
+    }).collect();
+    let mut found = Vec::new();
+    for e in err.lines().filter(|l| !l.trim().is_empty()).take(3) {
+        // "zsh: parse error near `)'", "bash: line 1: syntax error ...", "fish: ...: Missing end ..."
+        let line_no = e
+            .split(|c: char| c == ':' || c == ' ')
+            .filter_map(|w| w.trim().parse::<usize>().ok())
+            .next()
+            .unwrap_or(lines.len())
+            .clamp(1, lines.len().max(1));
+        let i = line_no - 1;
+        let msg = e.trim_start_matches(&format!("{sh}:")).trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == ':').trim();
+        let msg = msg.strip_prefix("line ").map(|r| r.trim_start_matches(|c: char| c.is_ascii_digit() || c == ':').trim()).unwrap_or(msg);
+        found.push(serde_json::json!([starts.get(i).copied().unwrap_or(0), lines.get(i).map(|l| l.encode_utf16().count()).unwrap_or(0).max(1), msg]));
+    }
+    serde_json::Value::Array(found).to_string()
+}
+
+#[cfg(test)]
+mod shell_check_tests {
+    #[test]
+    fn checks() {
+        if std::process::Command::new("bash").arg("--version").output().is_err() {
+            return;
+        }
+        assert_eq!(super::shell_check("bash", "echo hi && ls -la"), "[]");
+        assert_ne!(super::shell_check("bash", "echo (hi"), "[]");
+        assert_ne!(super::shell_check("bash", "if true; then echo x"), "[]");
+    }
+}

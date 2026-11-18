@@ -838,7 +838,8 @@ Rectangle {
         Chip {
             id: langChip
             base: box.color
-            label: box.lang + (box.langOverride !== "" ? "" : " \u00b7 auto")
+            // (Shell code: the shell's own name, zsh, fish.)
+            label: (box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
             tip: "Input language (highlighting, checks, completion)"
             onClicked: { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
         }
@@ -1034,6 +1035,13 @@ Rectangle {
     function analyze(withErrors) {
         if (!controller) return
         const r = JSON.parse(controller.syntax(box.lang, edit.text))
+        // (Shell: the shell's own check, zsh -n and the like, when typing
+        // pauses; tree-sitter's bash grammar and shellcheck are too strict
+        // for a command line, and zsh isn't bash.)
+        if (box.lang === "bash") {
+            r.errors = []
+            if (withErrors && edit.text.trim() !== "") { try { r.errors = JSON.parse(controller.shellSyntax(box.shellName, edit.text)) } catch (e) {} }
+        }
         if (!withErrors) r.errors = []
         problem = r.errors.length > 0 ? r.errors[0][2] : ""
         lspNote = ""
@@ -1044,7 +1052,7 @@ Rectangle {
             if (warn) lspNote = warn[2]
         }
         hl.analysis = JSON.stringify(r)
-        if (withErrors && box.lspServer !== "" && (box.lspText !== edit.text || box.lspLang !== box.lang) && edit.text.trim() !== "") {
+        if (withErrors && box.lspServer !== "" && box.lang !== "bash" && (box.lspText !== edit.text || box.lspLang !== box.lang) && edit.text.trim() !== "") {
             box.lspAskedLang = box.lang
             controller.lspAsk(aiKey + "-diag", box.lang, box.cwd, edit.text, "diagnostics", 0)
         }

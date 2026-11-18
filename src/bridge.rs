@@ -321,6 +321,10 @@ pub mod ffi {
         /// The input editor's syntax analysis (src/syntax.rs) as JSON.
         #[qinvokable]
         fn syntax(self: &Controller, lang: &QString, text: &QString) -> QString;
+        /// The shell's own syntax check (zsh -n, bash -n, fish -n): JSON
+        /// [[start, length, message]] (UTF-16), [] when it parses.
+        #[qinvokable]
+        fn shell_syntax(self: &Controller, shell: &QString, text: &QString) -> QString;
         /// The input editor's language for the program at the prompt.
         #[qinvokable]
         fn language_for(self: &Controller, program: &QString) -> QString;
@@ -1167,6 +1171,10 @@ impl ffi::Controller {
 
     fn grammar_count(&self) -> i32 {
         crate::grammars::count() as i32
+    }
+
+    fn shell_syntax(&self, shell: &ffi::QString, text: &ffi::QString) -> ffi::QString {
+        qs(&crate::syntax::shell_check(&shell.to_string(), &text.to_string()))
     }
 
     fn detect_language(&self, text: &ffi::QString) -> ffi::QString {
