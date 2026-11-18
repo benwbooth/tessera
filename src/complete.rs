@@ -700,11 +700,15 @@ fn shell_quote_path(s: &str) -> String {
 /// How well `cand` matches what was typed: prefix first, then substring,
 /// then letters in order (fuzzy). None: not at all.
 fn score(cand: &str, typed: &str) -> Option<u32> {
+    score_case(cand, typed, false)
+}
+
+/// `score`, with the case as typed (`exact`) or ignored.
+fn score_case(cand: &str, typed: &str, exact: bool) -> Option<u32> {
     if typed.is_empty() {
         return Some(0);
     }
-    let c = cand.to_lowercase();
-    let t = typed.to_lowercase();
+    let (c, t) = if exact { (cand.to_string(), typed.to_string()) } else { (cand.to_lowercase(), typed.to_lowercase()) };
     if c.starts_with(&t) {
         return Some(0);
     }
@@ -922,11 +926,24 @@ fn cd_places(typed: &str, cwd: &str) -> Vec<Item> {
 }
 
 fn rank(mut items: Vec<Item>, typed: &str, key: impl Fn(&Item) -> String) -> Vec<Item> {
-    let mut scored: Vec<(u32, Item)> = items.drain(..).filter_map(|i| score(&key(&i), typed).map(|s| (s, i))).collect();
-    // Loose (fuzzy) matches only when nothing matches more closely.
-    if scored.iter().any(|(s, _)| *s < 100) {
-        scored.retain(|(s, _)| *s < 100);
-    }
+    // The case as typed first; any case only when that finds nothing; and
+    // loose (fuzzy) matches only when nothing matches more closely (the
+    // same way round).
+    let tier = |i: &Item| {
+        let k = key(i);
+        let e = score_case(&k, typed, true);
+        let a = score_case(&k, typed, false);
+        match (e, a) {
+            (Some(s), _) if s < 100 => Some((0, s)),
+            (_, Some(s)) if s < 100 => Some((1, s)),
+            (Some(s), _) => Some((2, s)),
+            (_, Some(s)) => Some((3, s)),
+            _ => None,
+        }
+    };
+    let tiered: Vec<((u8, u32), Item)> = items.drain(..).filter_map(|i| tier(&i).map(|t| (t, i))).collect();
+    let best = tiered.iter().map(|(t, _)| t.0).min().unwrap_or(0);
+    let mut scored: Vec<(u32, Item)> = tiered.into_iter().filter(|(t, _)| t.0 == best).map(|(t, i)| (t.1, i)).collect();
     scored.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.label.len().cmp(&b.1.label.len())).then(a.1.label.cmp(&b.1.label)));
     scored.into_iter().map(|(_, i)| i).take(200).collect()
 }
@@ -1257,6 +1274,13 @@ mod tests {
         assert!(score("--no-verbose", "verb").unwrap() > 0);
         assert!(score("checkout", "cko").is_some());
         assert!(score("abc", "x").is_none());
+        let it = |l: &str| super::Item { insert: l.into(), label: l.into(), detail: String::new(), kind: "opt", doc: String::new() };
+        let r = super::rank(vec![it("-v"), it("-V")], "-V", |i| i.label.clone());
+        assert_eq!(r.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["-V"]);
+        let r = super::rank(vec![it("Makefile"), it("main.rs")], "ma", |i| i.label.clone());
+        assert_eq!(r.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["main.rs"]);
+        let r = super::rank(vec![it("Makefile")], "ma", |i| i.label.clone());
+        assert_eq!(r.len(), 1);
     }
 
     #[test]
