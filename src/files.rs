@@ -146,6 +146,14 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
     let parent = p.parent().unwrap_or(Path::new("/"));
     let r: Result<(), String> = match op {
         "open" => spawn("xdg-open", &[path]),
+        // (A recording as a GIF beside it, by agg, in the background; then
+        // the GIF opens.)
+        "gif" => {
+            let gif = p.with_extension("gif").to_string_lossy().into_owned();
+            let agg = if on_path("agg") { "agg".to_string() } else { "nix run nixpkgs#agg --".to_string() };
+            let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+            spawn("sh", &["-c", &format!("{agg} {} {} && xdg-open {}", q(path), q(&gif), q(&gif))])
+        }
         // (The file manager, with the item selected: FileManager1 over D-Bus.)
         "reveal" => {
             let uri = format!("file://{path}");
@@ -176,6 +184,7 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
                 std::fs::rename(p, &to).map_err(|e| e.to_string())
             }
         }
+        "mkdirs" => std::fs::create_dir_all(p).map_err(|e| e.to_string()),
         "mkdir" => {
             let to = p.join(if arg.is_empty() { "New Folder" } else { arg });
             if to.exists() { Err(format!("{} is already there.", to.display())) } else { std::fs::create_dir(&to).map_err(|e| e.to_string()) }

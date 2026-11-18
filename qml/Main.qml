@@ -635,6 +635,86 @@ ApplicationWindow {
     }
     Sheet { id: sheet }
 
+    // ---- screenshots and recordings ------------------------------------------
+    // A screenshot (of the pane, or the window) goes to ~/Pictures/Screenshots
+    // and the clipboard; a recording (asciicast) of a pane's output to
+    // ~/Videos/Tessera, and can be made a GIF (agg) when it stops.
+    function fileStamp() {
+        const d = new Date(), z = n => (n < 10 ? "0" : "") + n
+        return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate()) + " " + z(d.getHours()) + "." + z(d.getMinutes()) + "." + z(d.getSeconds())
+    }
+    function screenshot(item) {
+        if (!item) return
+        const dir = controller.homeDir() + "/Pictures/Screenshots"
+        controller.fileAction("mkdirs", dir, "")
+        const path = dir + "/Tessera " + fileStamp() + ".png"
+        item.grabToImage(r => {
+            if (!r.saveToFile(path)) { notice("Couldn't save the screenshot to " + dir, []); return }
+            if (activeView) activeView.copyImageFile(path)
+            notice("Screenshot saved and copied: " + path.replace(controller.homeDir(), "~"), [
+                { label: "Open", run: () => controller.fileAction("open", path, "") },
+                { label: "Show in folder", run: () => controller.fileAction("reveal", path, "") }])
+        })
+    }
+    function toggleRecording(view) {
+        if (!view) return
+        if (view.recording) {
+            const path = view.stopRecording()
+            if (path === "") return
+            notice("Recording saved: " + path.replace(controller.homeDir(), "~"), [
+                { label: "Make a GIF", run: () => { controller.fileAction("gif", path, ""); notice("Making the GIF (agg)… it opens when it's done.", []) } },
+                { label: "Show in folder", run: () => controller.fileAction("reveal", path, "") }])
+        } else {
+            const dir = controller.homeDir() + "/Videos/Tessera"
+            controller.fileAction("mkdirs", dir, "")
+            const path = view.startRecording(dir + "/Tessera " + fileStamp() + ".cast")
+            notice(path !== "" ? "Recording this pane (the red dot); Session › Stop Recording ends it." : "Couldn't start recording in " + dir, [])
+        }
+    }
+    // (Test hook: TESSERA_TEST_RECORD=<ms>: record the pane from 5 s for that
+    // long, with a window screenshot at the start.)
+    Timer {
+        interval: 5000
+        running: controller.testEnv("RECORD") !== ""
+        property bool on: false
+        onTriggered: {
+            if (!on) { win.toggleRecording(activeView); win.screenshot(rootLayout); on = true; interval = Number(controller.testEnv("RECORD")); start() }
+            else win.toggleRecording(activeView)
+        }
+    }
+    // A note at the bottom of the window for a few seconds, with buttons.
+    function notice(text, actions) { noticeBox.text = text; noticeBox.actions = actions; noticeBox.shown = true; noticeTimer.restart() }
+    Timer { id: noticeTimer; interval: 7000; onTriggered: noticeBox.shown = false }
+    Rectangle {
+        id: noticeBox
+        property string text: ""
+        property var actions: []
+        property bool shown: false
+        parent: win.contentItem
+        z: 1000
+        visible: shown
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 70
+        width: Math.min(parent.width - 40, noticeRow.implicitWidth + 24)
+        height: 34
+        radius: 6
+        color: Theme.panel
+        border.color: Theme.divider
+        HoverHandler { onHoveredChanged: if (hovered) noticeTimer.stop(); else noticeTimer.restart() }
+        Row {
+            id: noticeRow
+            anchors.centerIn: parent
+            spacing: 10
+            Text { text: noticeBox.text; color: Theme.text; font.pixelSize: 12; elide: Text.ElideMiddle; width: Math.min(implicitWidth, noticeBox.parent.width - 300); anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: 0.001; renderType: Text.NativeRendering }
+            Repeater {
+                model: noticeBox.actions
+                Chip { required property var modelData; base: Theme.panel; label: modelData.label; anchors.verticalCenter: parent.verticalCenter; onClicked: { noticeBox.shown = false; modelData.run() } }
+            }
+            Chip { base: Theme.panel; label: "×"; anchors.verticalCenter: parent.verticalCenter; onClicked: noticeBox.shown = false }
+        }
+    }
+
     onClosing: (close) => {
         if (allowClose) { finishClose(); return }
         const panes = allPanes()
@@ -1313,6 +1393,10 @@ ApplicationWindow {
                 P.MenuItem { icon.name: "media-record"; text: "Log to File…"; enabled: activeView !== null && !activeView.logging; onTriggered: logDialog.open() }
                 P.MenuItem { icon.name: "media-playback-stop"; text: "Stop Logging"; enabled: activeView !== null && activeView.logging; onTriggered: activeView.stopLogging() }
             }
+            P.MenuItem { icon.name: activeView && activeView.recording ? "media-playback-stop" : "media-record"; text: activeView && activeView.recording ? "Stop Recording" : "Record Pane (asciicast)"
+                enabled: activeView !== null; onTriggered: win.toggleRecording(activeView) }
+            P.MenuItem { icon.name: "camera-photo"; text: "Screenshot of Pane"; enabled: activeView !== null; onTriggered: win.screenshot(paneOf(activeView)) }
+            P.MenuItem { icon.name: "camera-photo"; text: "Screenshot of Window"; onTriggered: win.screenshot(rootLayout) }
         }
 
         P.Menu {
@@ -1791,6 +1875,9 @@ ApplicationWindow {
         P.MenuItem { icon.name: "link"; text: "Find URLs"; onTriggered: { const p = paneOf(contextView); if (p) p.findBar.findUrls() } }
         P.MenuItem { icon.name: "media-record"; text: contextView && contextView.logging ? "Stop Logging" : "Log to File…"
             onTriggered: contextView.logging ? contextView.stopLogging() : logDialog.open() }
+        P.MenuItem { icon.name: contextView && contextView.recording ? "media-playback-stop" : "media-record"; text: contextView && contextView.recording ? "Stop Recording" : "Record Pane"
+            onTriggered: win.toggleRecording(contextView) }
+        P.MenuItem { icon.name: "camera-photo"; text: "Screenshot of Pane"; onTriggered: win.screenshot(paneOf(contextView)) }
         P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Buffer\tCtrl+Shift+K"; onTriggered: contextView.clearScrollback() }
         P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Scrollback Buffer"; onTriggered: contextView.showMessage("\u001b[3J") }
         P.MenuItem { icon.name: "edit-clear"; text: "Reset"; onTriggered: contextView.resetTerminal() }

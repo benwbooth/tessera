@@ -83,6 +83,8 @@ class TerminalItem : public QQuickItem {
     // Other views that receive this one's typing (Broadcast Input).
     Q_PROPERTY(QVariantList broadcastTo MEMBER m_broadcastTo NOTIFY optionsChanged)
     Q_PROPERTY(bool logging READ logging NOTIFY loggingChanged)
+    // A recording (asciicast) of the output is being made.
+    Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
     // Shell integration mark indicators in the left margin.
     Q_PROPERTY(bool showMarks MEMBER m_showMarks NOTIFY optionsChanged)
     Q_PROPERTY(QColor markColor MEMBER m_markColor NOTIFY optionsChanged)
@@ -158,6 +160,12 @@ public:
     Q_INVOKABLE void showMessage(const QString& text);
     Q_INVOKABLE bool startLogging(const QString& path);
     Q_INVOKABLE void stopLogging();
+    // Start recording to `path` (an asciicast); its path, "" when it can't.
+    Q_INVOKABLE QString startRecording(const QString& path);
+    // Stop it; the recording's path.
+    Q_INVOKABLE QString stopRecording();
+    // Put a picture file on the clipboard (a screenshot).
+    Q_INVOKABLE bool copyImageFile(const QString& path);
     Q_INVOKABLE void findCursor();
     // Broadcast Input: replay another view's typing here.
     Q_INVOKABLE void receiveKey(int key, int mods, const QString& text, bool release);
@@ -199,6 +207,7 @@ signals:
     void contextMenuRequested(qreal x, qreal y);
     void optionsChanged();
     void loggingChanged();
+    void recordingChanged();
     void activity();
     // The session was attached by another window (a tab dragged there).
     void takenOver();
@@ -338,6 +347,7 @@ private:
     bool keepBackgroundsOpaque() const { return m_keepOpaque; }
     void setKeepBackgroundsOpaque(bool v) { m_keepOpaque = v; repaintAll(); emit optionsChanged(); }
     bool logging() const;
+    bool recording() const;
 
     void repaintAll();
     void repaintRow(int row);

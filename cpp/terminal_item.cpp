@@ -240,6 +240,7 @@ void TerminalItem::setCursorBlink(bool v)
 }
 
 bool TerminalItem::logging() const { return m_session && m_session->is_logging(); }
+bool TerminalItem::recording() const { return m_session && m_session->is_recording(); }
 
 void TerminalItem::repaintRow(int row)
 {
@@ -1482,6 +1483,35 @@ bool TerminalItem::startLogging(const QString& path)
     const bool ok = m_session->log_to_file(rs(b));
     emit loggingChanged();
     return ok;
+}
+
+QString TerminalItem::startRecording(const QString& path)
+{
+    if (!m_session) return {};
+    QString p = path;
+    if (p.startsWith(u"file://")) p = QUrl(p).toLocalFile();
+    const QByteArray b = p.toUtf8();
+    const QString out = qs(m_session->record_to_file(rs(b)));
+    emit recordingChanged();
+    return out;
+}
+
+QString TerminalItem::stopRecording()
+{
+    if (!m_session) return {};
+    const QString out = qs(m_session->record_to_file(rs(QByteArray())));
+    emit recordingChanged();
+    return out;
+}
+
+bool TerminalItem::copyImageFile(const QString& path)
+{
+    QString p = path;
+    if (p.startsWith(u"file://")) p = QUrl(p).toLocalFile();
+    QImage img(p);
+    if (img.isNull()) return false;
+    QGuiApplication::clipboard()->setImage(img);
+    return true;
 }
 
 void TerminalItem::stopLogging()

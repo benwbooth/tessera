@@ -414,6 +414,21 @@ Item {
         opacity: 0.8
     }
 
+    // Recording (asciicast): a red dot in the corner while it lasts.
+    Rectangle {
+        visible: term.recording
+        z: 30
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 8
+        width: 12; height: 12; radius: 6
+        color: "#e04848"
+        SequentialAnimation on opacity { running: term.recording; loops: Animation.Infinite; NumberAnimation { to: 0.35; duration: 800 } NumberAnimation { to: 1; duration: 800 } }
+        HoverHandler { id: recHover }
+        ToolTip.visible: recHover.hovered
+        ToolTip.text: "Recording this pane (Session › Stop Recording)"
+    }
+
     // Dim panes without focus when the tab is split (like iTerm2).
     Rectangle {
         anchors.fill: parent
