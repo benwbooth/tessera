@@ -152,6 +152,7 @@ Item {
     implicitHeight: headerH + bodyH + 8
 
     property string selected: ""        // a path
+    property double entryTapAt: 0       // an entry was just clicked (not the space around them)
     property var menuEntry: null        // what the right click was on (null: the folder)
     property string error: ""
     function act(op, path, arg) {
@@ -250,8 +251,9 @@ Item {
         width: parent.width
         height: fb.bodyH
         // (A right click on nothing: the folder's own menu.)
-        TapHandler { acceptedButtons: Qt.RightButton; onTapped: { fb.menuEntry = null; folderMenu.popup() } }
-        TapHandler { onTapped: fb.selected = "" }
+        // (Only on nothing: a click on an entry reaches these too, after it.)
+        TapHandler { acceptedButtons: Qt.RightButton; onTapped: Qt.callLater(() => { if (Date.now() - fb.entryTapAt > 300) { fb.menuEntry = null; folderMenu.popup() } }) }
+        TapHandler { onTapped: Qt.callLater(() => { if (Date.now() - fb.entryTapAt > 300) fb.selected = "" }) }
         Text {
             visible: fb.entries.length === 0
             text: fb.raw.length === 0 && fb.dir !== "" ? "(empty)" : ""
@@ -295,9 +297,9 @@ Item {
                 border.width: 1
                 TapHandler {
                     // (One click: a folder goes in, a file opens with its app.)
-                    onTapped: { fb.selected = ent.e.path; fb.openEntry(ent.e) }
+                    onTapped: { fb.entryTapAt = Date.now(); fb.selected = ent.e.path; fb.openEntry(ent.e) }
                 }
-                TapHandler { acceptedButtons: Qt.RightButton; onTapped: { fb.selected = ent.e.path; fb.menuEntry = ent.e; itemMenu.popup() } }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: { fb.entryTapAt = Date.now(); fb.selected = ent.e.path; fb.menuEntry = ent.e; itemMenu.popup() } }
                 ToolTip.visible: eh.hovered && fb.view !== "details"
                 ToolTip.delay: 900
                 ToolTip.text: ent.e.mode + "  " + ent.e.user + " " + ent.e.group + "  " + fb.sizeText(ent.e) + "\n" + fb.when(ent.e.mtime) + (ent.e.link ? "\n→ " + ent.e.target : "")

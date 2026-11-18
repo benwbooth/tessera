@@ -1039,6 +1039,7 @@ Rectangle {
                 // (Still being written, then: a check's complaint doesn't apply.)
                 if (box.ghost !== "") { box.aiNote = ""; box.checkedText = "" }
             } else if (key === box.aiKey + "-nl") {
+                if (box.controller.testEnv("COMPOSE") !== "") console.log("nl reply: error=" + error + " asked=" + JSON.stringify(box.nlAsked) + " text=" + JSON.stringify(edit.text) + " reply=" + JSON.stringify(reply.slice(0, 200)))
                 if (error || edit.text !== box.nlAsked) return
                 const cmd = reply.trim().replace(/^```\w*\n?|```$/g, "").trim().split("\n")[0]
                 if (cmd === "") return
