@@ -606,7 +606,7 @@ impl Kernel {
         if let Some(env) = &shell_env {
             cmd.env_clear().envs(env.iter().cloned());
         }
-        cmd.args(&argv[1..]).envs(&spec_env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(&argv[1..]).envs(&spec_env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
         if !cwd.is_empty() && Path::new(cwd).is_dir() {
             cmd.current_dir(cwd);
         }
@@ -618,27 +618,7 @@ impl Kernel {
         }
         let mut child = cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", argv[0]))?;
         // Its complaints, for when it dies before answering.
-        // What it writes to its own stdout (C's printf under xeus, Deno's
-        // console): into the cell running then, as its stdout.
         let running: Arc<Mutex<String>> = Arc::default();
-        if let Some(mut out) = child.stdout.take() {
-            let (running, sink) = (running.clone(), sink.clone());
-            std::thread::spawn(move || {
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = out.read(&mut buf) {
-                    if n == 0 {
-                        break;
-                    }
-                    let cell = running.lock().unwrap().clone();
-                    if std::env::var_os("TESSERA_KERNEL_DEBUG").is_some() {
-                        eprintln!("kernel stdout ({cell}): {:?}", String::from_utf8_lossy(&buf[..n]));
-                    }
-                    if !cell.is_empty() {
-                        sink(json!({"type": "output", "cell": cell, "output": {"output_type": "stream", "name": "stdout", "text": String::from_utf8_lossy(&buf[..n])}}));
-                    }
-                }
-            });
-        }
         let stderr_tail: Arc<Mutex<String>> = Arc::default();
         if let Some(mut err) = child.stderr.take() {
             let tail = stderr_tail.clone();
@@ -707,7 +687,11 @@ impl Kernel {
                     eprintln!("{}: iopub connected", k.spec.name);
                 }
                 let shell = connect(ports[0], "DEALER")?;
-                let stdin = connect(ports[2], "DEALER")?;
+                if dbg {
+                    eprintln!("{}: shell connected", k.spec.name);
+                }
+                // (stdin is optional too: IHaskell has none; no input() then.)
+                let stdin = Zmtp::connect_as(ports[2], "DEALER", Duration::from_secs(3), &identity).ok();
                 // (Control is optional: IRuby has none. A few seconds once
                 // the rest are up; interrupt falls back to a signal.)
                 let control = Zmtp::connect_as(ports[3], "DEALER", Duration::from_secs(3), &identity).ok();
@@ -715,12 +699,14 @@ impl Kernel {
                     eprintln!("{}: all connected", k.spec.name);
                 }
                 let shell_reader = shell.try_clone().map_err(|e| e.to_string())?;
-                let stdin_reader = stdin.try_clone().map_err(|e| e.to_string())?;
+                let stdin_reader = stdin.as_ref().and_then(|s| s.try_clone().ok());
                 *k.shell.lock().unwrap() = Some(shell);
                 *k.control.lock().unwrap() = control;
-                *k.stdin.lock().unwrap() = Some(stdin);
+                *k.stdin.lock().unwrap() = stdin;
                 k.spawn_readers(iopub, shell_reader, sink.clone());
-                k.spawn_stdin_reader(stdin_reader, sink.clone());
+                if let Some(r) = stdin_reader {
+                    k.spawn_stdin_reader(r, sink.clone());
+                }
                 // (ilua crashes on a request that comes before its Lua is
                 // connected, kernel_info too: give it time first.)
                 if k.spec.name == "tessera-lua" {
