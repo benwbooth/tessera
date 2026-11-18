@@ -1148,6 +1148,8 @@ void TerminalItem::mousePressEvent(QMouseEvent* e)
     if (!m_focusOnCursorLineOnly || pressRow == m_cursorY) {
         if (m_focusOnCursorLineOnly) emit cursorLineClicked();
         forceActiveFocus(Qt::MouseFocusReason);
+    } else {
+        emit offCursorLineClicked();
     }
     const bool appWantsMouse = m_session && m_session->wants_mouse(uint32_t(e->modifiers()));
     if (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier) && m_ctrlClickOpens && m_session) {

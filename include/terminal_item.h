@@ -216,6 +216,8 @@ signals:
     // A press on the cursor's line while focusOnCursorLineOnly (just before
     // the terminal takes the keys).
     void cursorLineClicked();
+    // A press anywhere else while focusOnCursorLineOnly (the editor's turn).
+    void offCursorLineClicked();
     void activity();
     // The session was attached by another window (a tab dragged there).
     void takenOver();

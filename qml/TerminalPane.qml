@@ -145,6 +145,7 @@ Item {
         // the cursor's line: then the terminal takes them, as it's typed in.)
         focusOnCursorLineOnly: pane.editorOn
         onCursorLineClicked: pane.preferEditor = false
+        onOffCursorLineClicked: { pane.preferEditor = true; compose.focusEditor() }
         // Shift+Tab at a prompt: back to the editor (elsewhere it goes to the program).
         Keys.onPressed: (e) => {
             if (e.key === Qt.Key_Backtab && pane.editorOn && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
