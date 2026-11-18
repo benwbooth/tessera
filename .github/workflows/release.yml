@@ -39,7 +39,9 @@ env:
   # (Windows takes the newest 6.11 aqt can install).
   QT_VERSION: '6.11.*'
   # Qt WebEngine: HTML output in notebook cells.
-  QT_MODULES: 'qtwebengine qtwebchannel qtpositioning'
+  # (qtserialport: Qt Positioning's NMEA plugin needs it, and the AppImage's
+  # Qt deployment fails without it.)
+  QT_MODULES: 'qtwebengine qtwebchannel qtpositioning qtserialport'
   AQT_VERSION: '==3.3.*'
   # libghostty-vt builds Ghostty's terminal library with Zig.
   ZIG_VERSION: '0.15.2'
@@ -98,9 +100,9 @@ jobs:
         shell: bash
         run: |
           pip install -q "aqtinstall$AQT_VERSION"
-          # The newest Qt 6 that aqt can read for Windows (it may lag the
+          # The newest Qt 6 up to 6.11 that aqt can read for Windows (it may lag the
           # newest release by a version).
-          for v in $(python -m aqt list-qt windows desktop | tr ' ' '\n' | grep "^${QT_VERSION%\*}" | sort -Vr); do
+          for v in $(python -m aqt list-qt windows desktop | tr ' ' '\n' | grep -E '^6\.([0-9]|1[01])\.' | sort -Vr); do
             archs=$(python -m aqt list-qt windows desktop --arch "$v" 2>/dev/null) || continue
             arch=$(tr ' ' '\n' <<<"$archs" | grep -E '^win64_msvc[0-9]+_64$' | sort -V | tail -1)
             [ -n "$arch" ] && break
