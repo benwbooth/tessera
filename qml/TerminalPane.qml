@@ -62,7 +62,23 @@ Item {
         if (editorOn && focused) { preferEditor = true; Qt.callLater(compose.focusEditor) }
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
-    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || replLang !== "")      // the window's text zoom, shown with the size
+    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || idleShell || replLang !== "")
+    // (Reattached after a restart, the shell may be at its prompt without
+    // having said so since: nothing running in front of it counts as that,
+    // until the shell integration says otherwise.)
+    property bool idleShell: false
+    Timer {
+        id: idleCheck
+        interval: 1500
+        repeat: true
+        running: !term.atPrompt && !pane.idleShell && term.sessionId !== "" && !term.fullScreen && !term.exited
+        property int tries: 0
+        onTriggered: {
+            if (pane.controller && pane.controller.sessionJob(term.sessionId) === "" && !pane.runningLong && ++tries >= 2) { pane.idleShell = true; tries = 0 }
+            else if (pane.controller && pane.controller.sessionJob(term.sessionId) !== "") tries = 0
+        }
+    }
+    Connections { target: term; function onPromptChanged() { pane.idleShell = false; idleCheck.tries = 0 } }      // the window's text zoom, shown with the size
     signal contextMenu(var view, real x, real y)
     SplitView.preferredWidth: prefW
     SplitView.preferredHeight: prefH

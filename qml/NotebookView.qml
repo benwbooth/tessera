@@ -1112,15 +1112,16 @@ FocusScope {
         cacheBuffer: 1500
         interactive: false   // (a drag selects text; the wheel, touchpad and bar scroll)
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {}
-        MomentumWheel { flick: list }
+        ScrollBar.vertical: ScrollBar { id: listBar; onPressedChanged: if (pressed) nb.sticking = false }
+        // (A wheel or touchpad scroll up lets go of the end; cards laying out don't.)
+        MomentumWheel { id: listWheel; flick: list }
+        Connections { target: listWheel; function onWheel(w) { if (w.angleDelta.y > 0 || w.pixelDelta.y > 0) nb.sticking = false } }
         property real lastY: 0
         property real lastH: 0
         onContentHeightChanged: if (nb.sticking) { nb.pin(); Qt.callLater(nb.pin) }
         onHeightChanged: if (nb.sticking) { nb.pin(); Qt.callLater(nb.pin) }
         onContentYChanged: {
             // (Scrolled up by hand lets go; cards being laid out don't.)
-            if (!nb.pinning && contentY < lastY - 2 && contentHeight === lastH) nb.sticking = false
             lastH = contentHeight
             if (nb.visible && height > 0) nb.wasAtEnd = atYEnd || nb.sticking
             lastY = contentY
