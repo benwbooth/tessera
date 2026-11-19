@@ -1406,6 +1406,7 @@ ApplicationWindow {
         }
 
         P.MenuSeparator {}
+        P.MenuItem { icon.name: "view-refresh"; text: "Restart tesserad…"; onTriggered: win.askRestartDaemon() }
         P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
         P.MenuItem { icon.name: "application-exit"; text: "Quit Tessera\tCtrl+Shift+Q"; onTriggered: win.close() }
     }
@@ -1615,25 +1616,45 @@ ApplicationWindow {
                    + "From now on it updates itself in place, keeping your shells.",
             okText: "Restart Shells",
             destructive: true,
-            onAccept: function() {
-                // New shells (from a new daemon) in every tab's place, each
-                // under its saved screen; then the old tabs go.
-                win.saveSnapshots()
-                const layout = win.serializeWindow(true)
-                const old = win.tabs.slice(), cur = win.currentTab
-                Async.call(controller, k => controller.stopDaemon(k), stopped => {
-                    if (stopped !== "true") {
-                        sheet.ask({ title: "Couldn't restart it", message: "The background process didn't stop. Logging out and back in restarts it.", infoOnly: true, okText: "OK" })
-                        return
-                    }
-                    win.restoreArrangement(layout, {}, true)
-                    for (const t of old) win.removeTab(t)
-                    win.focusTab(Math.min(cur, win.tabs.length - 1))
-                    win.saveLayoutNow()
-                })
-            }
+            onAccept: win.restartDaemon
         })
     }
+    // tesserad, the shells' background process, started again (this build's):
+    // new shells in every tab's place, each under its saved screen, then the
+    // old tabs go. Programs running in them, and notebook kernels, end.
+    function restartDaemon() {
+        win.saveSnapshots()
+        const layout = win.serializeWindow(true)
+        const old = win.tabs.slice(), cur = win.currentTab
+        // (Their shells end with the daemon: the old panes mustn't close
+        // themselves, and the window with them, before the new ones are in.)
+        const panes = win.allPanes()
+        for (const p of panes) p.taken = true
+        Async.call(controller, k => controller.stopDaemon(k), stopped => {
+            if (stopped !== "true") {
+                for (const p of panes) p.taken = false
+                sheet.ask({ title: "Couldn't restart it", message: "The background process didn't stop. Logging out and back in restarts it.", infoOnly: true, okText: "OK" })
+                return
+            }
+            win.restoreArrangement(layout, {}, true)
+            for (const t of old) win.removeTab(t)
+            win.focusTab(Math.min(cur, win.tabs.length - 1))
+            win.saveLayoutNow()
+        })
+    }
+    function askRestartDaemon() {
+        sheet.ask({
+            title: "Restart tesserad?",
+            message: "tesserad is the background process your shells and notebook kernels run in. Restarting it starts this version's. "
+                   + "Every tab comes back in its folder with its screen; programs running in them (and in other Tessera windows) end, "
+                   + "and notebooks' kernels start again (their variables are lost).",
+            okText: "Restart",
+            destructive: true,
+            onAccept: win.restartDaemon
+        })
+    }
+    // (Test hook: TESSERA_TEST_RESTART_DAEMON restarts tesserad at 6 s.)
+    Timer { interval: 6000; running: controller.testEnv("RESTART_DAEMON") !== ""; onTriggered: win.restartDaemon() }
     // Test hook: TESSERA_TEST_KEYS="term|editor|away:key,key,..." (tab, bs, enter,
     // lshift, rshift, or text), one key every 150 ms after the window settles.
     Timer {
