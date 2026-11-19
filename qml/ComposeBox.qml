@@ -300,6 +300,9 @@ Rectangle {
     // A new line keeping the indentation, one deeper after an opener
     // (do, then, {, (, :, ...); between a bracket pair the closer moves down.
     function newline() {
+        // (A new line isn't taking the suggestion: it goes.)
+        ghost = ""
+        lastGhostBase = ""
         let p = edit.cursorPosition
         if (lang === "tessh") {
             tesshOutdent()
@@ -1242,6 +1245,8 @@ Rectangle {
     // history has nothing.
     function refreshGhost() {
         if (/^#\s*\S/.test(edit.text)) return
+        // (A new line just begun: nothing to finish on it yet.)
+        if (/\n[ \t]*$/.test(edit.text.substring(0, edit.cursorPosition))) { ghost = ""; lastGhostBase = ""; return }
         const t = suggestBase()
         const full = lastGhostBase + ghost
         if (ghost !== "" && t.length > lastGhostBase.length && full.startsWith(t) && full.length > t.length) {
