@@ -420,6 +420,22 @@ pub mod ffi {
         fn ai_run(self: Pin<&mut Controller>, key: &QString, task: &QString, messages_json: &QString, ctx_json: &QString);
         #[qinvokable]
         fn ai_cancel(self: &Controller, key: &QString);
+        /// The assistant's saved conversations (src/chats.rs): newest first,
+        /// [{id, title, updated, count}].
+        #[qinvokable]
+        fn chats_list(self: &Controller) -> QString;
+        /// Conversations with every word of `query`, with a snippet:
+        /// [{id, title, updated, count, snippet}].
+        #[qinvokable]
+        fn chats_search(self: &Controller, query: &QString) -> QString;
+        /// One conversation's messages (JSON array; "[]" if there's none).
+        #[qinvokable]
+        fn chat_load(self: &Controller, id: &QString) -> QString;
+        /// Keep a conversation (an empty one is removed).
+        #[qinvokable]
+        fn chat_save(self: &Controller, id: &QString, messages_json: &QString);
+        #[qinvokable]
+        fn chat_delete(self: &Controller, id: &QString);
         /// For tests: a wheel notch at a point in the window.
         #[qinvokable]
         fn test_wheel(self: &Controller, x: f64, y: f64, dy: i32, px: i32, phase: i32);
@@ -1319,6 +1335,30 @@ impl ffi::Controller {
         if let Some(c) = ai_jobs().lock().unwrap().remove(&key.to_string()) {
             c.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+    }
+
+    fn chats_list(&self) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::chats::list()).unwrap_or_default())
+    }
+
+    fn chats_search(&self, query: &ffi::QString) -> ffi::QString {
+        qs(&serde_json::to_string(&crate::chats::search(&query.to_string())).unwrap_or_default())
+    }
+
+    fn chat_load(&self, id: &ffi::QString) -> ffi::QString {
+        let msgs = crate::chats::load(&id.to_string()).and_then(|v| v.get("messages").cloned()).unwrap_or_else(|| serde_json::json!([]));
+        qs(&msgs.to_string())
+    }
+
+    fn chat_save(&self, id: &ffi::QString, messages_json: &ffi::QString) {
+        let msgs: Vec<serde_json::Value> = serde_json::from_str(&messages_json.to_string()).unwrap_or_default();
+        if let Err(e) = crate::chats::save(&id.to_string(), &msgs) {
+            eprintln!("tessera: saving the assistant conversation: {e}");
+        }
+    }
+
+    fn chat_delete(&self, id: &ffi::QString) {
+        crate::chats::delete(&id.to_string());
     }
 
     fn ai_ready(&self, task: &ffi::QString) -> bool {

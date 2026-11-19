@@ -23,6 +23,11 @@ Rectangle {
     property bool includeTerminal: true
     property bool sendBack: true
     readonly property string key: "chat-" + Math.random().toString(36).slice(2)
+    // The conversation shown, kept under the state folder (src/chats.rs) and
+    // listed in the header's history dropdown.
+    property string chatId: newId()
+    property string chatTitle: ""
+    function newId() { return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8) }
     readonly property bool ready: controller !== null && controller.revision >= 0 && controller.aiReady("chat")
     readonly property string modelName: {
         controller ? controller.revision : 0
@@ -64,7 +69,69 @@ Rectangle {
         controller.aiRun(key, "chat", JSON.stringify(msgs), JSON.stringify(context()))
     }
     function stop() { controller.aiCancel(key); busy = false }
-    function clear() { stop(); messages = [] }
+    function clear() { stop(); saveNow(); messages = []; chatId = newId(); chatTitle = "" }
+
+    // ---- history -------------------------------------------------------------
+    // Saved a moment after each change (and right away before switching).
+    Timer { id: saveTimer; interval: 400; onTriggered: panel.saveNow() }
+    onMessagesChanged: saveTimer.restart()
+    function saveNow() {
+        saveTimer.stop()
+        if (!controller) return
+        const keep = messages.filter(m => !(m.role === "assistant" && m.content === ""))
+        controller.chatSave(chatId, JSON.stringify(keep))
+        if (keep.length > 0 && chatTitle === "") {
+            const first = keep.find(m => m.role === "user")
+            if (first) chatTitle = (first.shown || first.content).split("\n")[0].trim()
+        }
+    }
+    function open(id, title) {
+        if (id === chatId) return
+        stop(); saveNow()
+        let msgs = []
+        try { msgs = JSON.parse(controller.chatLoad(id)) } catch (e) {}
+        chatId = id
+        chatTitle = title || ""
+        messages = msgs
+        saveTimer.stop()
+        Qt.callLater(list.positionViewAtEnd)
+    }
+    function remove(id) {
+        controller.chatDelete(id)
+        if (id === chatId) { stop(); messages = []; chatId = newId(); chatTitle = ""; saveTimer.stop() }
+    }
+    // "Today 14:05", "Yesterday", "Mon", "12 Nov", "12 Nov 2025"
+    function when(secs) {
+        const d = new Date(secs * 1000), now = new Date()
+        const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+        const days = Math.round((day(now) - day(d)) / 86400000)
+        if (days === 0) return d.toLocaleTimeString(Qt.locale(), "HH:mm")
+        if (days === 1) return "Yesterday"
+        if (days < 7) return d.toLocaleDateString(Qt.locale(), "ddd")
+        if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString(Qt.locale(), "d MMM")
+        return d.toLocaleDateString(Qt.locale(), "d MMM yyyy")
+    }
+    // The last conversation comes back with the window.
+    Component.onCompleted: Qt.callLater(() => {
+        if (!controller) return
+        let all = []
+        try { all = JSON.parse(controller.chatsList()) } catch (e) {}
+        if (all.length > 0) open(all[0].id, all[0].title)
+        // (Test hooks: TESSERA_TEST_CHAT_HISTORY opens the dropdown;
+        // TESSERA_TEST_CHAT_SEARCH=<text> also types that in its search.)
+        if (controller.testEnv("CHAT_HISTORY") !== "" || controller.testEnv("CHAT_SEARCH") !== "") historyTest.start()
+    })
+    Timer {
+        id: historyTest
+        interval: 6000
+        onTriggered: {
+            history.openIt()
+            const q = panel.controller.testEnv("CHAT_SEARCH")
+            if (q !== "") search.text = q
+            // (TESSERA_TEST_CHAT_CHOOSE: and open the first match.)
+            if (panel.controller.testEnv("CHAT_CHOOSE") !== "") history.choose(0)
+        }
+    }
 
     Connections {
         target: panel.controller
@@ -152,14 +219,43 @@ Rectangle {
             Layout.margins: 10
             spacing: 8
             Text { text: "✦"; color: Theme.accent; font.pixelSize: 15 }
-            ColumnLayout {
-                spacing: 0
+            // The conversation's title: opens the history dropdown.
+            Rectangle {
+                id: titleButton
                 Layout.fillWidth: true
-                Text { text: "Assistant"; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold }
-                Text {
-                    text: panel.ready ? panel.modelName : "No model set up — Preferences › AI"
-                    color: Theme.textDim; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true
+                Layout.preferredHeight: titleCol.implicitHeight + 6
+                radius: 6
+                color: titleHover.hovered || history.opened ? Theme.mix(Theme.bg, Theme.fg, 0.07) : "transparent"
+                ColumnLayout {
+                    id: titleCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: 4
+                    anchors.rightMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 0
+                    RowLayout {
+                        spacing: 4
+                        Layout.fillWidth: true
+                        Text {
+                            text: panel.chatTitle !== "" ? panel.chatTitle : "Assistant"
+                            color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: titleCol.width - 20
+                        }
+                        Text { text: "\u2304"; color: Theme.textDim; font.pixelSize: 13; font.bold: true; Layout.alignment: Qt.AlignTop }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Text {
+                        text: panel.ready ? panel.modelName : "No model set up — Preferences › AI"
+                        color: Theme.textDim; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true
+                    }
                 }
+                HoverHandler { id: titleHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: history.opened ? history.close() : history.openIt() }
+                ToolTip.visible: titleHover.hovered && !history.opened
+                ToolTip.delay: 600
+                ToolTip.text: "Past conversations"
             }
             BarButton { icon: "plus"; tip: "New conversation"; onClicked: panel.clear() }
             BarButton { icon: "close"; tip: "Close (Ctrl+Shift+I)"; onClicked: panel.closeRequested() }
@@ -402,6 +498,180 @@ Rectangle {
                 Text { anchors.centerIn: parent; text: panel.busy ? "■" : "↑"; color: panel.busy ? "#e06c75" : Theme.accent; font.pixelSize: 15; font.weight: Font.Bold }
                 HoverHandler { id: sendHover }
                 TapHandler { onTapped: { if (panel.busy) panel.stop(); else { panel.send(input.text); input.text = "" } } }
+            }
+        }
+    }
+    // ---- the history dropdown: past conversations, newest first, and a search
+    // through their text -----------------------------------------------------
+    // (An item over the panel rather than a Popup: it always fits inside the
+    // panel, and window screenshots then show it.)
+    MouseArea {
+        anchors.fill: parent
+        visible: history.opened
+        z: 9
+        onPressed: history.close()
+        onWheel: (w) => w.accepted = true
+    }
+    Rectangle {
+        id: history
+        property bool opened: false
+        function open() { opened = true }
+        function close() { opened = false }
+        visible: opened
+        z: 10
+        property var rows: []
+        property int current: 0
+        function refresh() {
+            panel.saveNow()
+            try { rows = JSON.parse(search.text.trim() === "" ? panel.controller.chatsList() : panel.controller.chatsSearch(search.text)) } catch (e) { rows = [] }
+            current = 0
+        }
+        function openIt() {
+            // (On whole pixels in the window, plus the nudge: native text at
+            // 130% smears on half pixels.)
+            const g = titleButton.mapToItem(null, 0, titleButton.height + 4), o = panel.mapToItem(null, 0, 0)
+            x = Math.round(o.x + Math.max(8, Math.min(g.x - o.x, panel.width - width - 8))) - o.x + 0.001
+            y = Math.round(g.y) - o.y + 0.001
+            search.text = ""
+            refresh()
+            open()
+            search.forceActiveFocus()
+        }
+        function choose(i) {
+            if (i < 0 || i >= rows.length) return
+            panel.open(rows[i].id, rows[i].title)
+            close()
+            panel.focusInput()
+        }
+        width: Math.min(panel.width - 16, 420)
+        height: Math.min(panel.height - y - 10, header.implicitHeight + Math.max(rowsView.contentHeight, 40) + 16)
+        radius: 8
+        color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.03)
+        border.color: Theme.divider
+        MouseArea { anchors.fill: parent; onWheel: (w) => w.accepted = true }
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 4
+            ColumnLayout {
+                id: header
+                spacing: 4
+                Layout.fillWidth: true
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 30
+                    radius: 6
+                    color: Theme.bg
+                    border.color: search.activeFocus ? Theme.accent : Theme.divider
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 4
+                        spacing: 4
+                        Text { text: "⌕"; color: Theme.textDim; font.pixelSize: 14 }
+                        TextField {
+                            id: search
+                            Layout.fillWidth: true
+                            placeholderText: "Search conversations"
+                            placeholderTextColor: Theme.textDim
+                            color: Theme.text
+                            font.pixelSize: 12
+                            selectByMouse: true
+                            background: Item {}
+                            onTextChanged: if (history.opened) history.refresh()
+                            Keys.onDownPressed: history.current = Math.min(history.rows.length - 1, history.current + 1)
+                            Keys.onUpPressed: history.current = Math.max(0, history.current - 1)
+                            Keys.onReturnPressed: history.choose(history.current)
+                            Keys.onEnterPressed: history.choose(history.current)
+                            Keys.onEscapePressed: { history.close(); panel.focusInput() }
+                        }
+                    }
+                }
+                // A new one, at the top.
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 26
+                    visible: search.text === ""
+                    radius: 5
+                    color: newHover.hovered ? Theme.tabHover : "transparent"
+                    Text { x: 8; anchors.verticalCenter: parent.verticalCenter; text: "+  New conversation"; color: Theme.accent; font.pixelSize: 12 }
+                    HoverHandler { id: newHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: { panel.clear(); history.close(); panel.focusInput() } }
+                }
+            }
+            ListView {
+                id: rowsView
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: history.rows
+                boundsBehavior: Flickable.StopAtBounds
+                currentIndex: history.current
+                onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                ScrollBar.vertical: ScrollBar {}
+                delegate: Rectangle {
+                    id: row
+                    required property var modelData
+                    required property int index
+                    width: rowsView.width
+                    height: rowCol.implicitHeight + 10
+                    radius: 5
+                    readonly property bool here: modelData.id === panel.chatId
+                    color: index === history.current || rowHover.hovered ? Theme.tabHover : "transparent"
+                    ColumnLayout {
+                        id: rowCol
+                        x: 8
+                        y: 5
+                        width: row.width - 16 - (rowHover.hovered ? 22 : 0)
+                        spacing: 1
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Text {
+                                Layout.fillWidth: true
+                                text: (row.here ? "✓ " : "") + (row.modelData.title || "New conversation")
+                                color: Theme.text
+                                font.pixelSize: 12
+                                font.weight: row.here ? Font.DemiBold : Font.Normal
+                                elide: Text.ElideRight
+                            }
+                            Text { text: panel.when(row.modelData.updated || 0); color: Theme.textDim; font.pixelSize: 11 }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            visible: text !== ""
+                            text: row.modelData.snippet || ""
+                            color: Theme.textDim
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                        }
+                    }
+                    HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: history.choose(row.index) }
+                    // Forget it.
+                    Rectangle {
+                        visible: rowHover.hovered
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 20; height: 20; radius: 4
+                        color: delHover.hovered ? Theme.mix(Theme.bg, Theme.fg, 0.15) : "transparent"
+                        Text { anchors.centerIn: parent; text: "✕"; color: delHover.hovered ? "#e06c75" : Theme.textDim; font.pixelSize: 11 }
+                        HoverHandler { id: delHover }
+                        TapHandler { onTapped: { panel.remove(row.modelData.id); history.refresh() } }
+                        ToolTip.visible: delHover.hovered
+                        ToolTip.delay: 600
+                        ToolTip.text: "Delete this conversation"
+                    }
+                }
+                Text {
+                    anchors.centerIn: parent
+                    visible: history.rows.length === 0
+                    text: search.text === "" ? "No past conversations" : "Nothing matches"
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                }
             }
         }
     }

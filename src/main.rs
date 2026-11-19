@@ -2,6 +2,7 @@
 mod ai;
 mod bridge;
 mod cells;
+mod chats;
 mod client;
 mod complete;
 mod contrast;

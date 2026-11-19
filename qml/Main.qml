@@ -2282,6 +2282,8 @@ ApplicationWindow {
         if (controller.testEnv("CONTEXT") !== "") contextTestTimer.start()
         if (controller.testEnv("COMPOSE") !== "") composeTestTimer.start()
         if (controller.testEnv("ASSISTANT") !== "") assistantTestTimer.start()
+        // (Test hook: the assistant's history dropdown, AssistantPanel.qml.)
+        if (controller.testEnv("CHAT_HISTORY") !== "" || controller.testEnv("CHAT_SEARCH") !== "") win.toggleAssistant()
         if (controller.testEnv("RICH") !== "") richTestTimer.start()
         if (controller.testEnv("NOTEBOOK") !== "") notebookTestTimer.start()
         if (controller.testEnv("TAB") !== "") tabTestTimer.start()
