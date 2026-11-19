@@ -1480,7 +1480,8 @@ FocusScope {
                 Text { topPadding: 0.001;
                     Layout.fillWidth: true
                     // (A file card: its whole path, wrapped if need be, never cut short.)
-                    text: cell.viewPath !== "" ? cell.viewPath
+                    // (Another host's: its name as typed, not URL-encoded.)
+                    text: cell.viewPath !== "" ? cell.viewPath.replace(/^ssh:\/\/([^\/]*)/, (m, h) => { try { return "ssh://" + decodeURIComponent(h) } catch (e) { return m } })
                         : cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.trim().replace(/\s*\n\s*/g, "  ⏎  ") : "(empty)"
                     // (A command wraps too, so a path in it shows whole; past six
                     // lines, the rest is in the cell.)
