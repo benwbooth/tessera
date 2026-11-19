@@ -90,26 +90,34 @@ jobs:
           name: tesserad-${{ matrix.arch }}-macos
           path: dist/tesserad-*-macos
 
+  # Windows, cross-built on Linux for windows-gnu: Zig builds Ghostty's
+  # library with its own MinGW headers and libc++ (on a Windows runner it
+  # picks MSVC's, whose current release wants a newer clang than Zig's),
+  # MinGW's GCC links. One .exe needing only Windows' own DLLs.
   windows:
-    runs-on: windows-latest
-    env:
-      # (The C runtime linked in, as Zig builds Ghostty's library: one .exe,
-      # nothing to install beside it.)
-      RUSTFLAGS: '-C target-feature=+crt-static'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
       - uses: Swatinem/rust-cache@v2
-      - name: cargo build -p tesserad
-        shell: bash
+      - name: MinGW
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+      - name: cargo build -p tesserad --target x86_64-pc-windows-gnu
+        env:
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc-posix
+          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++-posix
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc-posix
         run: |
-          cargo build --release --locked -p tesserad
+          cargo build --release --locked -p tesserad --target x86_64-pc-windows-gnu
           mkdir -p dist
-          cp target/release/tesserad.exe dist/tesserad-x86_64-windows.exe
-          dist/tesserad-x86_64-windows.exe version
+          cp target/x86_64-pc-windows-gnu/release/tesserad.exe dist/tesserad-x86_64-windows.exe
+          x86_64-w64-mingw32-objdump -p dist/tesserad-x86_64-windows.exe | grep "DLL Name" | sort -u
       - uses: actions/upload-artifact@v4
         with:
           name: tesserad-x86_64-windows
