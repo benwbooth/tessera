@@ -1641,6 +1641,14 @@ ApplicationWindow {
     // (Test hook: TESSERA_TEST_TABS=<n> opens n more tabs at 3 s; with
     // TESSERA_TEST_TAB_MENU, the all-tabs dropdown opens at 8 s.)
     Timer { interval: 3000; running: controller.testEnv("TABS") !== ""; onTriggered: { for (let i = 0; i < Number(controller.testEnv("TABS")); ++i) newTab({}) } }
+    // (TESSERA_TEST_TAB_SWITCH=<n>: from 9 s, the next of the first n tabs
+    // every 1.5 s, eight times, logging how long until the frame after each switch is shown.)
+    property double switchAt: 0
+    Connections { target: win; function onFrameSwapped() { if (win.switchAt > 0) { console.log("tab switch: " + (Date.now() - win.switchAt) + " ms"); win.switchAt = 0 } } }
+    Timer { id: switchTest; interval: 1500; repeat: true; property int left: 8
+            running: false
+            onTriggered: { if (--left < 0) { stop(); return } const n = Math.min(win.tabs.length, Number(controller.testEnv("TAB_SWITCH")) || win.tabs.length); win.switchAt = Date.now(); win.focusTab((win.currentTab + 1) % n) } }
+    Timer { interval: 9000; running: controller.testEnv("TAB_SWITCH") !== ""; onTriggered: switchTest.start() }
     Timer { interval: 8000; running: controller.testEnv("TAB_MENU") !== ""
             onTriggered: tabMenuTest.go() }
     QtObject {

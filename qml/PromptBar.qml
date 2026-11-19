@@ -154,8 +154,11 @@ Item {
         }
         const mods = layout.filter(w => w.startsWith("star:")).map(w => w.substring(5))
         if (mods.length > 0) controller.requestPromptModules(key, JSON.stringify(mods), bar.cwd, st, du, bar.shellPid, bar.sshHost)
-        try { info = JSON.parse(controller.promptInfo(bar.cwd, bar.shellPid, bar.sshHost)) } catch (e) { info = {} }
+        // (In the background: git status in a big repo takes a while, and a
+        // tab switch waited on it. The last answer shows until then.)
+        controller.requestPromptInfo(key + "#" + (++infoSeq), bar.cwd, bar.shellPid, bar.sshHost)
     }
+    property int infoSeq: 0
     onLayoutChanged: refresh()
     Connections {
         target: bar.controller
@@ -163,6 +166,10 @@ Item {
             if (k !== bar.key) return
             if (bar.dragFrom >= 0) { bar.heldStar = json; return }
             try { const r = JSON.parse(json); bar.starLines = r.lines; bar.starRight = r.right } catch (e) {}
+        }
+        function onPromptInfoReady(k, json) {
+            if (k !== bar.key + "#" + bar.infoSeq) return
+            try { bar.info = JSON.parse(json) } catch (e) { bar.info = {} }
         }
         function onPromptModulesReady(k, json) {
             if (k !== bar.key) return

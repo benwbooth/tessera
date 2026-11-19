@@ -367,6 +367,12 @@ pub mod ffi {
         /// The prompt bar's facts about a folder (git, user, host), JSON.
         #[qinvokable]
         fn prompt_info(self: &Controller, cwd: &QString, pid: i32, host: &QString) -> QString;
+        /// The same in the background (a slow git status mustn't hold up a
+        /// tab switch): prompt_info_ready(key, json).
+        #[qinvokable]
+        fn request_prompt_info(self: Pin<&mut Controller>, key: &QString, cwd: &QString, pid: i32, host: &QString);
+        #[qsignal]
+        fn prompt_info_ready(self: Pin<&mut Controller>, key: QString, json: QString);
         #[qinvokable]
         fn has_starship(self: &Controller) -> bool;
         /// Whether Starship is on `host` (the pane's prompt is drawn there).
@@ -1238,6 +1244,16 @@ impl ffi::Controller {
     fn prompt_info(&self, cwd: &ffi::QString, pid: i32, host: &ffi::QString) -> ffi::QString {
         let r = crate::client::rpc_within(&host.to_string(), "prompt.info", serde_json::json!({"cwd": local_path(cwd), "pid": pid.max(0)}), std::time::Duration::from_millis(400));
         qs(&r.map(|v| v.to_string()).unwrap_or_else(|_| "{}".into()))
+    }
+
+    fn request_prompt_info(self: Pin<&mut Self>, key: &ffi::QString, cwd: &ffi::QString, pid: i32, host: &ffi::QString) {
+        let (key, cwd, host) = (key.to_string(), local_path(cwd), host.to_string());
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let r = crate::client::rpc_within(&host, "prompt.info", serde_json::json!({"cwd": cwd, "pid": pid.max(0)}), std::time::Duration::from_secs(5));
+            let json = r.map(|v| v.to_string()).unwrap_or_else(|_| "{}".into());
+            let _ = qt.queue(move |c| c.prompt_info_ready(qs(&key), qs(&json)));
+        });
     }
 
     fn ai_run(self: Pin<&mut Self>, key: &ffi::QString, task: &ffi::QString, messages_json: &ffi::QString, ctx_json: &ffi::QString) {
