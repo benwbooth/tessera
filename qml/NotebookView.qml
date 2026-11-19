@@ -956,6 +956,8 @@ FocusScope {
     // into liveHost (TerminalPane's termSlot), which sits over that card's
     // output, at its size; Expand makes it the window's.
     property bool shown: true               // (the pane shows the notebook)
+    // A terminal app's card: most of the notebook, at least 300 px.
+    readonly property int liveHeight: Math.max(300, Math.round(list.height * 0.7))
     readonly property bool liveWanted: view !== null && view.fullScreen && shown
     property int liveIndex: -1
     property Item liveBox: null            // the card's place for it (set by the card)
@@ -1459,6 +1461,8 @@ FocusScope {
     Timer { interval: 11000; running: nb.controller !== null && nb.controller.testEnv("NB_CELL") !== ""; onTriggered: nb.submit(nb.controller.testEnv("NB_CELL").replace(/\\n/g, "\n")) }
     // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s.)
     Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") !== ""; onTriggered: if (cells.count > 0) nb.expandedId = cells.get(cells.count - 1).cid }
+    // (TESSERA_TEST_EXPAND_LAST=restore: and back to its own size at 19 s.)
+    Timer { interval: 19000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") === "restore"; onTriggered: nb.expandedId = "" }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
     // (Test hook: TESSERA_TEST_EDIT_FILE: the last card edited at 12 s, saved at 20 s.)
@@ -1974,7 +1978,8 @@ FocusScope {
                         nb.expandedId = cell.expanded ? "" : cell.cid
                         cells.setProperty(cell.index, "hideOutput", false)
                         const i = cell.index
-                        Qt.callLater(() => list.positionViewAtIndex(i, ListView.Beginning))
+                        // (Back from expanded, a terminal app's card stays in view.)
+                        Qt.callLater(() => { list.positionViewAtIndex(i, nb.expandedId === "" && i === nb.liveIndex ? ListView.Contain : ListView.Beginning); nb.placeLive() })
                     }
                 }
                 Chip { id: moreChip; base: cell.color; label: "⋯"; tip: "More"; Layout.minimumWidth: implicitWidth
@@ -2125,8 +2130,11 @@ FocusScope {
                 // whole window when expanded.
                 readonly property real natural: loader.item ? loader.item.implicitHeight : 0
                 height: !visible ? 0 : cell.expanded ? Math.max(80, list.height - list.topMargin - list.bottomMargin - header.height - 12 - (cell.editing ? editorBox.height + 8 : 0))
+                      // (A terminal app running in it: room for it, whatever
+                      // size the card was dragged to before.)
+                      : live ? Math.max(nb.heights[cell.cid] || 0, nb.liveHeight)
                       : nb.heights[cell.cid] > 0 ? nb.heights[cell.cid]
-                      : live ? Math.max(240, Math.round(list.height * 0.6)) : Math.min(Math.max(natural, 16), 460)
+                      : Math.min(Math.max(natural, 16), 460)
                 clip: true
                 Item {
                     id: liveBox
