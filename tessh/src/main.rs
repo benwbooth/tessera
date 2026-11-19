@@ -10,6 +10,7 @@
 mod compiler;
 mod deps;
 mod forms;
+mod kernel;
 mod pyforms;
 mod reader;
 mod repl;
@@ -105,6 +106,10 @@ fn run(args: Vec<String>) -> i32 {
                     }
                 }
                 if problems.is_empty() { 0 } else { 1 }
+            }
+            "--kernel" => {
+                let conn = args.iter().position(|x| x == "-f").and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
+                py.detach(|| kernel::run(&conn))
             }
             "--py" => {
                 let Some(f) = args.get(1) else {

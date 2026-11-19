@@ -569,44 +569,31 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
         return Ok(Py::new(py, JobRef { n: job })?.into_any());
     }
     if let Some(mut r) = cap_reader {
-        let mut buf = vec![];
-        let (code, children) = py.detach(|| {
+        let reader = std::thread::spawn(move || {
+            let mut buf = vec![];
             let _ = r.read_to_end(&mut buf);
-            let mut children = children;
-            let mut code = 0;
-            for ch in children.iter_mut() {
-                code = ch.wait().map(exit_code).unwrap_or(1);
-            }
-            (code, children)
+            buf
         });
-        drop(children);
+        let code = wait_all(py, children)?;
+        let buf = py.detach(|| reader.join().unwrap_or_default());
         STATUS.store(code, Ordering::SeqCst);
         let mut text = decode(py, &buf)?;
         if pass {
             let sys = py.import("sys")?;
             sys.getattr("stdout")?.call_method1("write", (text.as_str(),))?;
             flush_python(py);
-            py.check_signals()?;
             return output(py, "", code, true);
         }
         if text.ends_with('\n') {
             text.pop();
         }
-        py.check_signals()?;
         return output(py, &text, code, false);
     }
     let code = if job_control {
         let words = cmds[0].words.join(" ");
         py.detach(|| wait_foreground(children, pgid, words))
     } else {
-        py.detach(|| {
-            let mut code = 0;
-            let mut children = children;
-            for ch in children.iter_mut() {
-                code = ch.wait().map(exit_code).unwrap_or(1);
-            }
-            code
-        })
+        wait_all(py, children)?
     };
     STATUS.store(code, Ordering::SeqCst);
     py.check_signals()?;
@@ -614,6 +601,54 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
         return Err(pyo3::exceptions::PyKeyboardInterrupt::new_err(""));
     }
     output(py, "", code, true)
+}
+
+/// Wait for the programs, letting Ctrl+C (a KeyboardInterrupt) through: they
+/// get SIGINT, then SIGKILL if they linger.
+fn wait_all(py: Python<'_>, mut children: Vec<Child>) -> PyResult<i32> {
+    let mut code = 0;
+    loop {
+        let done = py.detach(|| {
+            let mut all = true;
+            for ch in children.iter_mut() {
+                match ch.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => all = false,
+                    Err(_) => {}
+                }
+            }
+            if !all {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            all
+        });
+        if done {
+            for ch in children.iter_mut() {
+                code = ch.wait().map(exit_code).unwrap_or(1);
+            }
+            return Ok(code);
+        }
+        if let Err(e) = py.check_signals() {
+            for ch in children.iter() {
+                unsafe { libc::kill(ch.id() as i32, libc::SIGINT) };
+            }
+            py.detach(|| {
+                let start = std::time::Instant::now();
+                while start.elapsed() < std::time::Duration::from_millis(500) {
+                    if children.iter_mut().all(|c| matches!(c.try_wait(), Ok(Some(_)))) {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                for c in children.iter_mut() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+            });
+            STATUS.store(130, Ordering::SeqCst);
+            return Err(e);
+        }
+    }
 }
 
 fn exit_code(s: std::process::ExitStatus) -> i32 {
