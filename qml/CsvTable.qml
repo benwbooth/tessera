@@ -36,6 +36,14 @@ Item {
     property var pages: ({})
     property int total: 0
     property var shownCols: []          // what the rows are (a SELECT's own columns)
+    property var idPages: ({})          // each page's rows' _row (to edit them by)
+    property bool editable: true        // (a SELECT's rows aren't the table's)
+    property bool dirty: false
+    property int selRow: -1             // the row picked (its number clicked)
+    property int editRow: -1            // the cell being edited
+    property int editCol: -1
+    property string note: ""            // what an SQL change did
+    signal saveAsRequested()
     property var widths: ({})
     property int gen: 0
     readonly property bool wholeQuery: /^\s*(select|with)\b/i.test(query)
@@ -60,13 +68,14 @@ Item {
         numeric = r.numeric || []
         rows = r.rows || 0
         done = !!r.done
+        dirty = !!r.dirty
         if (fresh) order = columns.slice()
         refresh()
     }
     Timer { interval: 400; repeat: true; running: !tv.done && tv.path !== ""; onTriggered: tv.poll() }
 
     // Asked again from the top (the view changed, or more rows came in).
-    function refresh() { pages = ({}); gen++; fetch(0) }
+    function refresh() { pages = ({}); idPages = ({}); gen++; fetch(0) }
     function fetch(page) {
         if (!controller || pages[page] !== undefined) return
         const spec = { columns: order, sort: sort, filter: filter, query: query, offset: page * pageSize, limit: pageSize }
@@ -75,6 +84,10 @@ Item {
         const p = Object.assign({}, pages)
         p[page] = r.rows || []
         pages = p
+        const ip = Object.assign({}, idPages)
+        ip[page] = r.ids || []
+        idPages = ip
+        editable = r.editable !== false
         total = r.total >= 0 ? r.total : total
         error = r.error || ""
         if (r.columns && JSON.stringify(r.columns) !== JSON.stringify(shownCols)) shownCols = r.columns
@@ -98,6 +111,74 @@ Item {
         const r = p[row - pg * pageSize]
         return r ? (r[col] === undefined ? "" : r[col]) : ""
     }
+    // ---- editing: a cell, rows, SQL; saved back ----------------------------------
+    function idOf(row) { const pg = Math.floor(row / pageSize); const ids = idPages[pg]; return ids ? ids[row - pg * pageSize] : undefined }
+    function beginEdit(row, col) { if (!editable || idOf(row) === undefined) return; editRow = row; editCol = col }
+    function commitEdit(text) {
+        const row = editRow, col = editCol
+        editRow = -1; editCol = -1
+        if (row < 0 || col < 0 || text === cell(row, col)) return
+        const err = controller.tableEditCell(path, idOf(row), shownCols[col], text)
+        if (err !== "") { error = err; return }
+        // (Shown at once, without asking for the page again.)
+        const pg = Math.floor(row / pageSize)
+        const p = Object.assign({}, pages)
+        const rows2 = p[pg].slice()
+        const r = rows2[row - pg * pageSize].slice()
+        r[col] = text
+        rows2[row - pg * pageSize] = r
+        p[pg] = rows2
+        pages = p
+        dirty = true
+    }
+    function addRow() {
+        let r = {}
+        try { r = JSON.parse(controller.tableAddRow(path)) } catch (e) {}
+        if (r.error) { error = r.error; return }
+        dirty = true
+        rows++
+        refresh()
+        // (To it, to fill in: the end, when it isn't sorted.)
+        Qt.callLater(() => { list.positionViewAtEnd(); if (sort.length === 0) beginEdit(total - 1, 0) })
+    }
+    function deleteSelected() {
+        const id = idOf(selRow)
+        if (id === undefined) return
+        const err = controller.tableDeleteRows(path, JSON.stringify([id]))
+        if (err !== "") { error = err; return }
+        selRow = -1
+        dirty = true
+        refresh()
+    }
+    readonly property bool changingSql: /^\s*(update|insert|delete|alter|replace|create|drop)\b/i.test(queryField.text)
+    function runSql(text) {
+        if (/^\s*(update|insert|delete|alter|replace|create|drop)\b/i.test(text)) {
+            let r = {}
+            try { r = JSON.parse(controller.tableExec(path, text)) } catch (e) {}
+            if (r.error) { error = r.error; return }
+            error = ""
+            note = r.changed + " row" + (r.changed === 1 ? "" : "s") + " changed"
+            dirty = true
+            // (Columns added: shown too.)
+            const before = columns
+            poll()
+            for (const c of columns) if (before.indexOf(c) < 0 && order.indexOf(c) < 0) { const o = order.slice(); o.push(c); order = o }
+            query = ""
+            widths = ({})
+            refresh()
+            return
+        }
+        note = ""
+        query = text
+        refresh()
+    }
+    function saveAs(p) { saveTo(p) }
+    function saveTo(dest) {
+        const err = controller.tableSave(path, dest || "")
+        error = err
+        if (err === "" && !dest) dirty = false
+        if (err === "") note = dest ? "Saved as " + dest : "Saved"
+    }
     function sortBy(c, add) {
         const at = sort.findIndex(s => s[0] === c)
         let s = add ? sort.slice() : []
@@ -118,10 +199,10 @@ Item {
     readonly property real tableWidth: { let w = 0; for (const c of shownCols) w += widths[c] || 80; return w + 50 }
 
     // ---- the bar: filter, SQL, columns, how many --------------------------------
-    Row {
+    // (Wrapping onto a second line when the card is narrow.)
+    Flow {
         id: bar
         width: parent.width
-        height: 28
         spacing: 6
         TextField {
             id: filterField
@@ -138,29 +219,31 @@ Item {
             id: queryField
             width: Math.min(420, tv.width * 0.45)
             height: 24
-            placeholderText: "SQL: age > 30, or SELECT … FROM t"
+            placeholderText: "SQL: age > 30, SELECT … FROM t, UPDATE t SET …"
             font.family: tv.fontFamily
             font.pixelSize: 12
             color: Theme.text
             background: Rectangle { radius: 5; color: Theme.bg; border.color: tv.error !== "" ? tv.ansi(1, "#e06c75") : queryField.activeFocus ? Theme.accent : Theme.divider }
-            onAccepted: { tv.query = text; tv.refresh() }
+            onAccepted: tv.runSql(text)
             ToolTip.visible: hovered && tv.error !== ""
             ToolTip.text: tv.error
         }
         Chip {
             id: colsChip
-            anchors.verticalCenter: parent.verticalCenter
             base: Theme.bg
             label: "Columns ▾"
             tip: "Show, hide and order the columns"
             onClicked: { colsPop.x = colsChip.x; colsPop.y = bar.height; colsPop.open() }
         }
+        Chip { base: Theme.bg; label: "+ Row"; tip: "Add a row"; visible: tv.editable; onClicked: tv.addRow() }
+        Chip { base: Theme.bg; label: "− Row"; tip: "Delete the row picked (click its number)"; visible: tv.editable && tv.selRow >= 0; onClicked: tv.deleteSelected() }
+        Chip { base: Theme.bg; label: (tv.dirty ? "● " : "") + "Save"; tip: "Write it back to the file"; onClicked: tv.saveTo("") }
+        Chip { base: Theme.bg; label: "Save as…"; onClicked: tv.saveAsRequested() }
         Text {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: 0.001
-            text: tv.error !== "" ? tv.error
+            text: tv.error !== "" ? tv.error : tv.note !== "" ? tv.note
                 : (tv.total.toLocaleString(Qt.locale(), "f", 0) + (tv.filter !== "" || (tv.query !== "" && !tv.wholeQuery) ? " of " + tv.rows.toLocaleString(Qt.locale(), "f", 0) : "") + " rows")
                   + (tv.done ? "" : " (reading…)")
+            topPadding: 5.001
             color: tv.error !== "" ? tv.ansi(1, "#e06c75") : Theme.textDim
             font.pixelSize: 11
             elide: Text.ElideRight
@@ -261,9 +344,11 @@ Item {
             required property int index
             width: tv.tableWidth
             height: tv.rowH
-            color: index % 2 ? Theme.mix(Theme.bg, Theme.fg, 0.025) : "transparent"
+            color: tv.selRow === index ? Theme.mix(Theme.bg, Theme.accent, 0.22) : index % 2 ? Theme.mix(Theme.bg, Theme.fg, 0.025) : "transparent"
             Text {
                 width: 44
+                TapHandler { onTapped: tv.selRow = tv.selRow === rowItem.index ? -1 : rowItem.index }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
                 horizontalAlignment: Text.AlignRight
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.verticalCenterOffset: 0.001
@@ -283,8 +368,32 @@ Item {
                         required property int index
                         width: tv.widths[modelData] || 80
                         height: parent.height
+                        id: cellItem
                         readonly property bool num: !tv.wholeQuery && tv.numeric[tv.columns.indexOf(modelData)] === true
+                        readonly property bool editingIt: tv.editRow === rowItem.index && tv.editCol === index
+                        TapHandler { onDoubleTapped: tv.beginEdit(rowItem.index, cellItem.index) }
+                        // (Edited in place: Enter keeps it, Tab the next cell, Esc doesn't.)
+                        Loader {
+                            active: cellItem.editingIt
+                            anchors.fill: parent
+                            z: 2
+                            sourceComponent: TextField {
+                                text: tv.cell(rowItem.index, cellItem.index)
+                                font.family: tv.fontFamily
+                                font.pointSize: tv.pointSize
+                                color: Theme.text
+                                padding: 2
+                                leftPadding: 6
+                                background: Rectangle { color: Theme.bg; border.color: Theme.accent }
+                                Component.onCompleted: { forceActiveFocus(); selectAll() }
+                                onAccepted: tv.commitEdit(text)
+                                Keys.onEscapePressed: { tv.editRow = -1; tv.editCol = -1 }
+                                Keys.onTabPressed: { const r = rowItem.index, c = cellItem.index; tv.commitEdit(text); if (c + 1 < tv.shownCols.length) tv.beginEdit(r, c + 1); else tv.beginEdit(r + 1, 0) }
+                                onActiveFocusChanged: if (!activeFocus && cellItem.editingIt) tv.commitEdit(text)
+                            }
+                        }
                         Text {
+                            visible: !cellItem.editingIt
                             x: 8.001
                             width: parent.width - 14
                             anchors.verticalCenter: parent.verticalCenter

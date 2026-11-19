@@ -23,6 +23,9 @@ struct Table {
     error: String,
     size: u64,
     mtime: Option<std::time::SystemTime>,
+    /// Changed since read or saved (cells edited, SQL run).
+    dirty: bool,
+    delim: u8,
 }
 
 fn tables() -> &'static Mutex<HashMap<String, Arc<Mutex<Table>>>> {
@@ -66,7 +69,7 @@ pub fn open(path: &str) -> String {
             if let Some(old) = all.get(path) {
                 let _ = std::fs::remove_file(&old.lock().unwrap().db);
             }
-            let t = Arc::new(Mutex::new(Table { path: path.to_string(), db, columns: Vec::new(), numeric: Vec::new(), rows: 0, done: false, error: String::new(), size, mtime }));
+            let t = Arc::new(Mutex::new(Table { path: path.to_string(), db, columns: Vec::new(), numeric: Vec::new(), rows: 0, done: false, error: String::new(), size, mtime, dirty: false, delim: b',' }));
             all.insert(path.to_string(), t.clone());
             let t2 = t.clone();
             std::thread::spawn(move || {
@@ -80,7 +83,7 @@ pub fn open(path: &str) -> String {
         all.get(path).cloned().unwrap()
     };
     let t = t.lock().unwrap();
-    json!({"columns": t.columns, "numeric": t.numeric, "rows": t.rows, "done": t.done, "size": t.size, "error": t.error}).to_string()
+    json!({"columns": t.columns, "numeric": t.numeric, "rows": t.rows, "done": t.done, "size": t.size, "error": t.error, "dirty": t.dirty}).to_string()
 }
 
 fn quote_ident(s: &str) -> String {
@@ -99,6 +102,7 @@ fn import(t: &Arc<Mutex<Table>>) -> Result<(), String> {
     };
     first.truncate(n);
     let delim = delimiter(&path, &first);
+    t.lock().unwrap().delim = delim;
     let mut rdr = csv::ReaderBuilder::new().delimiter(delim).flexible(true).has_headers(true).from_path(&path).map_err(|e| e.to_string())?;
     // (Headers: as in the file, made unique, "column N" for blank ones.)
     let mut seen: HashMap<String, usize> = HashMap::new();
@@ -233,7 +237,11 @@ pub fn query(path: &str, spec: &str) -> String {
         order.push("_row".into());
     }
     let ord = if order.is_empty() { String::new() } else { format!(" ORDER BY {}", order.join(", ")) };
-    let select: Vec<String> = cols.iter().map(|c| quote_ident(c)).collect();
+    let mut select: Vec<String> = cols.iter().map(|c| quote_ident(c)).collect();
+    // (The table's own rows carry their _row, to edit by; a SELECT's don't.)
+    if !whole {
+        select.insert(0, "_row".into());
+    }
     let sql = format!("SELECT {} FROM {from}{wh}{ord} LIMIT {limit} OFFSET {offset}", if select.is_empty() { "*".into() } else { select.join(", ") });
     let total: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {from}{wh}"), params_from_iter(args.iter()), |r| r.get(0)).unwrap_or(-1);
     let mut st = match conn.prepare(&sql) {
@@ -257,9 +265,157 @@ pub fn query(path: &str, spec: &str) -> String {
         })
         .and_then(|it| it.collect());
     match rows {
-        Ok(rows) => json!({"columns": cols, "rows": rows, "total": total}).to_string(),
+        Ok(mut rows) => {
+            let ids: Vec<i64> = if whole { Vec::new() } else { rows.iter_mut().map(|r| if r.is_empty() { 0 } else { r.remove(0).parse().unwrap_or(0) }).collect() };
+            json!({"columns": cols, "rows": rows, "ids": ids, "total": total, "editable": !whole}).to_string()
+        }
         Err(e) => json!({"columns": cols, "rows": [], "total": 0, "error": e.to_string()}).to_string(),
     }
+}
+
+fn writable(path: &str) -> Result<(Arc<Mutex<Table>>, Connection), String> {
+    let t = tables().lock().unwrap().get(path).cloned().ok_or("Not read yet.")?;
+    if !t.lock().unwrap().done {
+        return Err("Still reading it: a moment.".into());
+    }
+    let db = t.lock().unwrap().db.clone();
+    let c = Connection::open(&db).map_err(|e| e.to_string())?;
+    Ok((t, c))
+}
+
+fn columns_of(c: &Connection) -> Vec<String> {
+    c.prepare("SELECT * FROM t LIMIT 0").map(|s| s.column_names().map(|n| n.to_string()).filter(|n| n != "_row").collect()).unwrap_or_default()
+}
+
+/// One cell set (row by its _row, column by name): "" or what went wrong.
+pub fn edit_cell(path: &str, row: i64, column: &str, value: &str) -> String {
+    let (t, c) = match writable(path) {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    match c.execute(&format!("UPDATE t SET {} = ?1 WHERE _row = ?2", quote_ident(column)), rusqlite::params![value, row]) {
+        Ok(_) => {
+            t.lock().unwrap().dirty = true;
+            String::new()
+        }
+        Err(e) => e.to_string(),
+    }
+}
+
+/// A row added (empty, at the end; after `after` when given): its _row.
+pub fn add_row(path: &str) -> String {
+    let (t, c) = match writable(path) {
+        Ok(x) => x,
+        Err(e) => return json!({"error": e}).to_string(),
+    };
+    match c.execute("INSERT INTO t (_row) VALUES ((SELECT COALESCE(MAX(_row), 0) + 1 FROM t))", []) {
+        Ok(_) => {
+            let mut t = t.lock().unwrap();
+            t.dirty = true;
+            t.rows += 1;
+            json!({"row": c.last_insert_rowid()}).to_string()
+        }
+        Err(e) => json!({"error": e.to_string()}).to_string(),
+    }
+}
+
+/// Rows deleted (by _row): "" or what went wrong.
+pub fn delete_rows(path: &str, rows: &str) -> String {
+    let (t, c) = match writable(path) {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let ids: Vec<i64> = serde_json::from_str(rows).unwrap_or_default();
+    let mut n = 0;
+    for id in ids {
+        n += c.execute("DELETE FROM t WHERE _row = ?1", [id]).unwrap_or(0);
+    }
+    let mut t = t.lock().unwrap();
+    t.dirty = true;
+    t.rows = t.rows.saturating_sub(n as u64);
+    String::new()
+}
+
+/// SQL that changes the table (UPDATE, INSERT, DELETE, ALTER TABLE t ...):
+/// {"changed", "columns", "error"}.
+pub fn exec(path: &str, sql: &str) -> String {
+    let (t, c) = match writable(path) {
+        Ok(x) => x,
+        Err(e) => return json!({"error": e}).to_string(),
+    };
+    match c.execute_batch(sql) {
+        Ok(()) => {
+            let changed = c.changes();
+            let cols = columns_of(&c);
+            let rows: i64 = c.query_row("SELECT COUNT(*) FROM t", [], |r| r.get(0)).unwrap_or(0);
+            let mut t = t.lock().unwrap();
+            t.dirty = true;
+            t.rows = rows as u64;
+            // (Columns added or renamed: kept up to date, new ones not numbers.)
+            if cols != t.columns {
+                let old = std::mem::take(&mut t.columns);
+                t.numeric = cols.iter().map(|c| old.iter().position(|o| o == c).and_then(|i| t.numeric.get(i).copied()).unwrap_or(false)).collect();
+                t.columns = cols.clone();
+            }
+            json!({"changed": changed, "columns": cols}).to_string()
+        }
+        Err(e) => json!({"error": e.to_string()}).to_string(),
+    }
+}
+
+/// The table written back as CSV/TSV (in its order, with the delimiter it
+/// had) to `dest` ("" for the file itself, in place): "" or what went wrong.
+pub fn save(path: &str, dest: &str) -> String {
+    let (t, c) = match writable(path) {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let dest = if dest.is_empty() { path.to_string() } else { dest.to_string() };
+    let delim = if dest.to_ascii_lowercase().ends_with(".tsv") { b'\t' } else if dest.to_ascii_lowercase().ends_with(".csv") && dest != path { b',' } else { t.lock().unwrap().delim };
+    let cols = columns_of(&c);
+    let file = match std::fs::OpenOptions::new().write(true).truncate(true).create(true).open(&dest) {
+        Ok(f) => f,
+        Err(e) => return e.to_string(),
+    };
+    let mut w = csv::WriterBuilder::new().delimiter(delim).from_writer(std::io::BufWriter::new(file));
+    if let Err(e) = w.write_record(&cols) {
+        return e.to_string();
+    }
+    let select: Vec<String> = cols.iter().map(|c| format!("COALESCE({}, '')", quote_ident(c))).collect();
+    let mut st = match c.prepare(&format!("SELECT {} FROM t ORDER BY _row", select.join(", "))) {
+        Ok(s) => s,
+        Err(e) => return e.to_string(),
+    };
+    let n = cols.len();
+    let res = st.query_map([], |r| (0..n).map(|i| r.get::<_, String>(i)).collect::<Result<Vec<String>, _>>());
+    match res {
+        Ok(it) => {
+            for row in it {
+                match row {
+                    Ok(v) => {
+                        if let Err(e) = w.write_record(&v) {
+                            return e.to_string();
+                        }
+                    }
+                    Err(e) => return e.to_string(),
+                }
+            }
+        }
+        Err(e) => return e.to_string(),
+    }
+    if let Err(e) = w.flush() {
+        return e.to_string();
+    }
+    // (Saved in place: what it reads now is what it has, not to be read again.)
+    if dest == path {
+        let mut t = t.lock().unwrap();
+        t.dirty = false;
+        if let Ok(m) = std::fs::metadata(&dest) {
+            t.size = m.len();
+            t.mtime = m.modified().ok();
+        }
+    }
+    String::new()
 }
 
 /// Its temporary table goes (the card closed).
@@ -313,6 +469,16 @@ mod tests {
         let r = q(r#"{"query": "SELECT city, COUNT(*) AS n FROM t GROUP BY city ORDER BY n DESC"}"#);
         assert_eq!(r["rows"][0][0], "Oslo", "{r}");
         assert_eq!(r["columns"][1], "n");
+        // Edited: a cell, SQL, a row; saved back.
+        let ids = q(r#"{}"#)["ids"].clone();
+        assert_eq!(super::edit_cell(&p, ids[0].as_i64().unwrap(), "city", "Bergen"), "");
+        let e: serde_json::Value = serde_json::from_str(&super::exec(&p, "UPDATE t SET age = '10' WHERE name = 'bob'")).unwrap();
+        assert_eq!(e["changed"], 1, "{e}");
+        let e: serde_json::Value = serde_json::from_str(&super::exec(&p, "ALTER TABLE t ADD COLUMN note TEXT")).unwrap();
+        assert_eq!(e["columns"][3], "note", "{e}");
+        assert_eq!(super::save(&p, ""), "");
+        let text = std::fs::read_to_string(&f).unwrap();
+        assert!(text.starts_with("name,age,city,note\nann,31,Bergen,\nbob,10,Rome,\n"), "{text}");
         super::close(&p);
         let _ = std::fs::remove_dir_all(d);
     }

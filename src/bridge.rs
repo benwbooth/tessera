@@ -547,6 +547,18 @@ pub mod ffi {
         fn table_query(self: &Controller, path: &QString, spec: &QString) -> QString;
         #[qinvokable]
         fn table_close(self: &Controller, path: &QString);
+        /// Editing it: a cell, a row added or rows deleted, SQL that changes
+        /// it, and saved back (dest "": the file itself).
+        #[qinvokable]
+        fn table_edit_cell(self: &Controller, path: &QString, row: i64, column: &QString, value: &QString) -> QString;
+        #[qinvokable]
+        fn table_add_row(self: &Controller, path: &QString) -> QString;
+        #[qinvokable]
+        fn table_delete_rows(self: &Controller, path: &QString, rows: &QString) -> QString;
+        #[qinvokable]
+        fn table_exec(self: &Controller, path: &QString, sql: &QString) -> QString;
+        #[qinvokable]
+        fn table_save(self: &Controller, path: &QString, dest: &QString) -> QString;
         /// Write a text file (atomically); "" or what went wrong.
         #[qinvokable]
         fn write_text_file(self: &Controller, path: &QString, text: &QString) -> QString;
@@ -1017,6 +1029,27 @@ impl ffi::Controller {
 
     fn table_query(&self, path: &ffi::QString, spec: &ffi::QString) -> ffi::QString {
         qs(&crate::tables::query(&local_path(path), &spec.to_string()))
+    }
+
+    fn table_edit_cell(&self, path: &ffi::QString, row: i64, column: &ffi::QString, value: &ffi::QString) -> ffi::QString {
+        qs(&crate::tables::edit_cell(&local_path(path), row, &column.to_string(), &value.to_string()))
+    }
+
+    fn table_add_row(&self, path: &ffi::QString) -> ffi::QString {
+        qs(&crate::tables::add_row(&local_path(path)))
+    }
+
+    fn table_delete_rows(&self, path: &ffi::QString, rows: &ffi::QString) -> ffi::QString {
+        qs(&crate::tables::delete_rows(&local_path(path), &rows.to_string()))
+    }
+
+    fn table_exec(&self, path: &ffi::QString, sql: &ffi::QString) -> ffi::QString {
+        qs(&crate::tables::exec(&local_path(path), &sql.to_string()))
+    }
+
+    fn table_save(&self, path: &ffi::QString, dest: &ffi::QString) -> ffi::QString {
+        let d = dest.to_string();
+        qs(&crate::tables::save(&local_path(path), if d.is_empty() { "" } else { &d }))
     }
 
     fn table_close(&self, path: &ffi::QString) {

@@ -1075,6 +1075,9 @@ FocusScope {
     function lastViewer() { const it = list.itemAtIndex(cells.count - 1); if (it) for (let k = 0; k < it.children.length; ++k) { const c = it.children[k]; if (c.objectName === "cardBody") return c.viewer } return null }
     Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("EDIT_FILE") !== ""; onTriggered: { const v = nb.lastViewer(); if (v) v.startEdit() } }
     Timer { interval: 20000; running: nb.controller !== null && nb.controller.testEnv("EDIT_FILE") !== ""; onTriggered: { const v = nb.lastViewer(); if (v) console.log("edit test: saved " + v.save() + " dirty " + v.dirty) } }
+    // (Test hook: TESSERA_TEST_TABLE_SQL=<sql>: run on the last card's table at 14 s, saved at 18 s.)
+    Timer { interval: 14000; running: nb.controller !== null && nb.controller.testEnv("TABLE_SQL") !== ""; onTriggered: { const v = nb.lastViewer(); if (v && v.runSql) v.runSql(nb.controller.testEnv("TABLE_SQL")) } }
+    Timer { interval: 18000; running: nb.controller !== null && nb.controller.testEnv("TABLE_SQL") !== ""; onTriggered: { const v = nb.lastViewer(); if (v && v.saveTo) { v.saveTo(""); console.log("table test: " + v.note + " " + v.error) } } }
     // (Test hook: TESSERA_TEST_NB_SCROLL_TOP=<ms>: to the top then.)
     Timer { interval: Number(nb.controller ? nb.controller.testEnv("NB_SCROLL_TOP") || 0 : 0); running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_TOP") !== ""; onTriggered: { nb.sticking = false; list.positionViewAtBeginning() } }
     Timer { interval: 3000; running: nb.visible && nb.controller !== null && nb.controller.testEnv("NB_EXPORT") !== ""; onTriggered: nb.writeTo(nb.controller.testEnv("NB_EXPORT")) }
@@ -2134,6 +2137,7 @@ FocusScope {
         CsvTable {
             readonly property var src: parent
             anchors.fill: parent
+            onSaveAsRequested: { nb.saveAsCell = nb.indexOf(src.cid); fileSaveDialog.currentFolder = "file://" + src.viewPath.replace(/\/[^\/]*$/, ""); fileSaveDialog.open() }
             controller: nb.controller
             path: src.viewPath
             fontFamily: nb.fontFamily
