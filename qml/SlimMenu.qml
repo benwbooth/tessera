@@ -10,6 +10,14 @@ T.Menu {
     implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
     padding: 4
     topPadding: 4.001   // (off the half pixel: 130% scale smears native text there)
+    // (Where it opens, on whole pixels plus the nudge too: a chip it opens
+    // from can sit at a fraction of one.)
+    onAboutToShow: {
+        if (!parent) return
+        const p = parent.mapToItem(null, x, y)
+        x += Math.round(p.x) - p.x + 0.001
+        y += Math.round(p.y) - p.y + 0.001
+    }
     margins: 4
     delegate: SlimMenuItem {}
     contentItem: ListView {

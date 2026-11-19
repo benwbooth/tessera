@@ -420,14 +420,22 @@ Item {
             spacing: 2
             component BarItem: Rectangle {
                 property string label
+                property string icon: ""        // (a Nerd Font glyph before the label, a gap after it)
                 property bool on: false
                 property string tip
                 signal clicked()
-                width: bt.implicitWidth + 10
+                width: btRow.implicitWidth + 10
                 height: 18
                 radius: 4
                 color: on ? Theme.mix(Theme.bg, Theme.accent, 0.4) : bh.hovered ? Theme.tabHover : "transparent"
-                Text { id: bt; anchors.centerIn: parent; anchors.verticalCenterOffset: 0.001; text: parent.label; color: Theme.text; font.pixelSize: 11; font.underline: bh.hovered }
+                Row {
+                    id: btRow
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: 0.001
+                    spacing: 4
+                    Text { visible: text !== ""; anchors.verticalCenter: parent.verticalCenter; text: btRow.parent.icon; color: Theme.text; font.family: "Symbols Nerd Font Mono"; font.pixelSize: 11; renderType: Text.NativeRendering }
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: btRow.parent.label; color: Theme.text; font.pixelSize: 11; font.underline: bh.hovered; renderType: Text.NativeRendering }
+                }
                 HoverHandler { id: bh; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: parent.clicked() }
                 ToolTip.visible: bh.hovered && tip !== ""
@@ -438,7 +446,7 @@ Item {
             BarItem { label: "≡"; tip: "Details (as ls -l)"; on: fb.view === "details"; onClicked: fb.setView("details") }
             BarItem { label: "▦"; tip: "Tiles"; on: fb.view === "tiles"; onClicked: fb.setView("tiles") }
             BarItem { id: sortItem; label: "Sort: " + ({ name: "name", size: "size", date: "date", type: "type" })[fb.sortBy] + (fb.desc ? " ↓" : " ↑"); onClicked: sortMenu.popup(sortItem, 0, sortItem.height + 2) }
-            BarItem { label: " first"; tip: "Folders first"; on: fb.foldersFirst; onClicked: fb.save("folders_first", !fb.foldersFirst) }
+            BarItem { icon: ""; label: "first"; tip: "Folders first"; on: fb.foldersFirst; onClicked: fb.save("folders_first", !fb.foldersFirst) }
             BarItem { label: ".hidden"; tip: "Show hidden files"; on: fb.showHidden; onClicked: fb.save("hidden", !fb.mine.hidden) }
         }
     }

@@ -77,6 +77,13 @@ T.ComboBox {
 
     popup: T.Popup {
         y: control.height + 2
+        // (On whole pixels, plus the nudge: the combo can sit at a fraction
+        // of one in a layout, and native text smears there at 130%.)
+        onAboutToShow: {
+            const p = control.mapToItem(null, 0, control.height + 2)
+            x = Math.round(p.x) - p.x + 0.001
+            y = control.height + 2 + Math.round(p.y) - p.y + 0.001
+        }
         width: Math.max(control.width, 160)
         implicitHeight: Math.min(contentItem.implicitHeight + 8, 320)
         padding: 4
