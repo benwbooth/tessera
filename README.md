@@ -163,7 +163,9 @@ defmacro unless cond:expr *body
   (or F1) opens the whole guide as a page, with contents and find.
 - It takes what fits a shell from Clojure: `.method obj` calls, `->`/`->>`
   chaining, `doto`, `:key` getters, `{a b} = $d`, `fn ($% * 2)`, `#_` and
-  the core sequence functions.
+  the core sequence functions. And from Hy: `.tsh` files import as modules
+  (from Python too), `require` brings in a module's macros, `let` scopes
+  names to a block, and `py "…"` is Python as written.
 - The input editor highlights tessh and checks it as you type (`tessh
   --check`). Enter indents after `def`, `if` and the like, and an `else` goes
   back to its `if`.

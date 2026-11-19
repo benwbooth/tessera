@@ -306,6 +306,23 @@ variable). `{1 2 3}` is a set, `()` an empty tuple, and `(1, 2)` a tuple.
   update_in`. Function first, collection last; lists, except endless
   `iterate`/`repeatedly`. `last` hides the program of that name (`\last` runs it).
 
+### From Hy
+
+- `import name` also finds `name.tsh` (and a package's `__init__.tsh`) on
+  sys.path, through a meta-path finder placed before Python's path finder;
+  the first folder with the name decides, and a `.py` module or package there
+  is Python's. `""` (the folder you're in) is on the path, and a script's own
+  folder is put first. Python code tessh runs imports tessh modules too.
+- `require module [name…]` imports the module while compiling and copies its
+  macros (all, or the ones named) and, with no names, its `defop` operators
+  into this namespace's compiler state. It compiles to `pass`.
+- `let a=1 b=(f $a) …` with a block, or a form after the bindings: each name
+  gets a fresh hygiene mark in the block (bound in order), so outside it the
+  same name is untouched. Its value is the block's last form's.
+- `py "code"`: the string parsed as Python, as an expression if it is one,
+  else as statements (common indentation removed). Single or triple quotes:
+  an interpolating string is an error.
+
 ## 6. Shell operators
 
 | Written | Meaning |

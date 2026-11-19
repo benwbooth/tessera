@@ -154,6 +154,11 @@ fn run(args: Vec<String>) -> i32 {
                             return 1;
                         }
                     };
+                    // (The script's folder first on the path, as Python does.)
+                    let dir = std::path::Path::new(a).canonicalize().ok().and_then(|p| p.parent().map(|d| d.to_string_lossy().to_string()));
+                    if let (Some(d), Ok(path)) = (dir, py.import("sys").and_then(|s| s.getattr("path"))) {
+                        let _ = path.call_method1("insert", (0, d));
+                    }
                     (None, runner::run_file(py, a, &ns), a.to_string())
                 };
                 let _ = ns_argv;

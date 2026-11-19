@@ -6,7 +6,7 @@ use crate::compiler::{CompileError, Compiler, Ctx, State};
 use crate::forms::Form;
 use crate::reader::{char_cols, read_at, ReadError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyDict, PyList, PyModule};
 use std::sync::Mutex;
 
 pub enum TesshError {
@@ -70,12 +70,70 @@ pub fn init(py: Python<'_>) -> PyResult<()> {
             path.call_method1("append", (site,))?;
         }
     }
-    crate::runtime::module(py)?;
+    let m = crate::runtime::module(py)?;
+    m.add_function(wrap_pyfunction!(run_module, &m)?)?;
+    // (`import name` finds name.tsh too, from tessh and from Python it runs;
+    // the folder you're in is on the path, as for `python -c`.)
+    let path = py.import("sys")?.getattr("path")?;
+    if !path.contains("")? {
+        path.call_method1("insert", (0, ""))?;
+    }
+    PyModule::from_code(py, &std::ffi::CString::new(FINDER).unwrap(), c"<tessh import>", c"__tessh_import__")?;
     let fm = crate::pyforms::module(py)?;
     py.import("sys")?.getattr("modules")?.set_item("__tessh_forms__", fm)?;
     let signal = py.import("signal")?;
     signal.getattr("signal")?.call1((signal.getattr("SIGINT")?, signal.getattr("default_int_handler")?))?;
     Ok(())
+}
+
+const FINDER: &str = r#"
+import importlib.abc, importlib.machinery, importlib.util, os, sys
+
+class TesshLoader(importlib.abc.Loader):
+    def __init__(self, path):
+        self.path = path
+    def create_module(self, spec):
+        return None
+    def exec_module(self, module):
+        sys.modules["__tessh__"].run_module(self.path, module.__dict__)
+
+class TesshFinder(importlib.abc.MetaPathFinder):
+    """name.tsh (or name/__init__.tsh) on the path. The first folder with
+    the name decides: a Python module or package there is Python's."""
+    def find_spec(self, name, path, target=None):
+        base = name.rpartition(".")[2]
+        for d in (path if path is not None else sys.path):
+            d = d or "."
+            if not isinstance(d, str) or not os.path.isdir(d):
+                continue
+            if any(os.path.isfile(os.path.join(d, base + s)) for s in importlib.machinery.all_suffixes()) or os.path.isfile(os.path.join(d, base, "__init__.py")):
+                return None
+            f = os.path.join(d, base + ".tsh")
+            if os.path.isfile(f):
+                return importlib.util.spec_from_file_location(name, f, loader=TesshLoader(f))
+            pkg = os.path.join(d, base, "__init__.tsh")
+            if os.path.isfile(pkg):
+                return importlib.util.spec_from_file_location(name, pkg, loader=TesshLoader(pkg), submodule_search_locations=[os.path.join(d, base)])
+        return None
+
+if not any(type(f).__name__ == "TesshFinder" for f in sys.meta_path):
+    # (Before the path finder, which would take a folder for a namespace package.)
+    at = next((i for i, f in enumerate(sys.meta_path) if getattr(f, "__name__", "") == "PathFinder"), len(sys.meta_path))
+    sys.meta_path.insert(at, TesshFinder())
+"#;
+
+/// A .tsh module being imported: run in the module's namespace.
+#[pyfunction]
+fn run_module(py: Python<'_>, path: String, ns: Bound<'_, PyDict>) -> PyResult<()> {
+    install(py, &ns)?;
+    ns.set_item("__file__", &path)?;
+    run_file(py, &path, &ns).map_err(|e| match e {
+        TesshError::Py(e) => e,
+        other => match other.position() {
+            Some((l, c, _, m)) => pyo3::exceptions::PySyntaxError::new_err(format!("{path}:{l}:{}: {m}", c + 1)),
+            None => other.into_pyerr(py),
+        },
+    })
 }
 
 pub fn new_namespace<'py>(py: Python<'py>, name: &str, argv: Vec<String>) -> PyResult<Bound<'py, PyDict>> {

@@ -286,11 +286,12 @@ fn macro_errors_have_positions() {
 }
 
 /// Every example in the guide (doc/guide.md) runs, and prints what the
-/// `output` block under it shows. (`tessh no-run`: checked, not run.)
+/// `output` block under it shows. (`tessh no-run`: checked, not run;
+/// `tessh no-check`: run, not checked first.)
 #[test]
 fn guide_examples() {
     use crate::runner::{check, new_namespace, run_source, tests::capture_fd1, tests::LOCK, TesshError};
-    let mut blocks: Vec<(usize, String, bool, Option<String>)> = Vec::new();
+    let mut blocks: Vec<(usize, String, bool, bool, Option<String>)> = Vec::new();
     let lines: Vec<&str> = crate::help::GUIDE.lines().collect();
     let mut i = 0;
     let fence = |i: &mut usize| {
@@ -308,6 +309,7 @@ fn guide_examples() {
         if let Some(info) = lines[i].strip_prefix("```tessh") {
             let line = i + 1;
             let run = !info.contains("no-run");
+            let checked = !info.contains("no-check");
             let code = fence(&mut i);
             let mut j = i;
             while j < lines.len() && lines[j].trim().is_empty() {
@@ -319,7 +321,7 @@ fn guide_examples() {
             } else {
                 None
             };
-            blocks.push((line, code, run, out));
+            blocks.push((line, code, run, checked, out));
         } else {
             i += 1;
         }
@@ -339,8 +341,10 @@ fn guide_examples() {
     let mut failed = Vec::new();
     Python::attach(|py| {
         let home = std::env::current_dir().unwrap();
-        for (line, code, run, want) in &blocks {
-            let errs = check(py, code, "<guide>");
+        for (line, code, run, checked, want) in &blocks {
+            // (no-check: it runs, but checking alone can't, as a require of a
+            // module it writes first.)
+            let errs = if *checked { check(py, code, "<guide>") } else { vec![] };
             if !errs.is_empty() {
                 failed.push(format!("guide.md:{line}: check: {errs:?}\n{code}"));
                 continue;

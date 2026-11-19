@@ -1579,6 +1579,141 @@ print $d
 {'a': {'b': [10, 20]}}
 ```
 
+# From Hy
+
+## Modules
+<!-- help: modules module .tsh import-tsh packages package __init__.tsh -->
+
+`import name` finds `name.tsh` as well as Python's modules: a tessh file is
+a module, and a folder with an `__init__.tsh` a package. The folder you're
+in is on the path, and a script's own folder comes first.
+
+```tessh
+echo 'def hello who = "hello, $who"' > greeting.tsh
+echo 'answer = 42' >> greeting.tsh
+import greeting
+print (greeting.hello Ann) $greeting.answer
+from greeting import hello
+print (hello Bo)
+```
+
+```output
+hello, Ann 42
+hello, Bo
+```
+
+Python code that tessh runs imports tessh modules the same way.
+
+```tessh
+echo 'import greeting2' > helper.py
+echo 'VALUE = greeting2.hello("python")' >> helper.py
+echo 'def hello who = "hi from tessh, $who"' > greeting2.tsh
+import helper
+print $helper.VALUE
+```
+
+```output
+hi from tessh, python
+```
+
+(Where a folder has both `name.py` and `name.tsh`, Python's is imported.)
+
+## Require
+<!-- help: require macros-from defmacro-import -->
+
+`require module` brings in that module's macros (and `defop` operators) for
+the code after it, imported while the code compiles. `require module name…`
+takes only those macros.
+
+```tessh no-check
+py """
+open("loud.tsh", "w").write('''
+defmacro loudly *body
+  quasi
+    print "--"
+    ~@body
+    print "--"
+''')
+"""
+require loud
+loudly
+  print inside
+```
+
+```output
+--
+inside
+--
+```
+
+## Let
+<!-- help: let scope scoped block-scope local -->
+
+`let name=value …` then a block (or a form on the same line) makes names
+that only that block sees, each bound in order, so a later one can use an
+earlier one. The value is the block's last form's. Outside it, a name of
+the same name is untouched.
+
+```tessh
+x = outside
+r = let x=2 y=($x * 10)
+  $x + $y
+print $r $x
+print (let a=5 ($a * $a))
+```
+
+```output
+22 outside
+25
+```
+
+Assigning to a `let` name in its block changes the block's own.
+
+```tessh
+let total=0
+  for n in [1 2 3]
+    total += $n
+  print total $total
+print ("total" in (globals))
+```
+
+```output
+total 6
+False
+```
+
+## Python inline
+<!-- help: py python inline-python embed raw-python -->
+
+`py "code"` is Python as written: an expression's value, or statements
+(defining functions, classes, …) when it's more. Use single or triple
+quotes, so tessh doesn't read `$` or `{…}` in it, and indent a triple-quoted
+block as you like. Names are shared with the tessh around it.
+
+```tessh
+xs = [3 1 2]
+print (py "sorted(xs, reverse=True)")
+print (py "{k: v for k, v in zip('ab', xs)}")
+```
+
+```output
+[3, 2, 1]
+{'a': 3, 'b': 1}
+```
+
+```tessh
+py '''
+import re
+def words(s):
+    return re.findall(r"\w+", s)
+'''
+print (words "one, two; three")
+```
+
+```output
+['one', 'two', 'three']
+```
+
 # Macros
 
 ## Macros

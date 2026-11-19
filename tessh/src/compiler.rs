@@ -51,8 +51,8 @@ const ASSIGN_OPS: &[(&str, &str)] = &[("=", ""), ("+=", "Add"), ("-=", "Sub"), (
 const WORD_OPS: &[&str] = &["and", "or", "not", "in", "is"];
 const SPACED_REDIRS: &[&str] = &[">", ">>", "<", "1>", "1>>", "2>", "2>>", "&>", "&>>"];
 const CONTINUATIONS: &[&str] = &["elif", "else", "except", "except*", "finally"];
-pub const BLOCK_SPECIALS: &[&str] = &["def", "class", "if", "while", "for", "try", "with", "match", "defmacro", "quasi", "do", "async", "fn", "lambda"];
-const OTHER_SPECIALS: &[&str] = &["return", "yield", "await", "raise", "assert", "del", "pass", "break", "continue", "global", "nonlocal", "import", "from", "quote", "defop", "->", "->>", "some->", "some->>", "as->", "doto", "elif", "else", "except", "except*", "finally", "case"];
+pub const BLOCK_SPECIALS: &[&str] = &["def", "class", "if", "while", "for", "try", "with", "match", "defmacro", "quasi", "do", "async", "fn", "lambda", "let"];
+const OTHER_SPECIALS: &[&str] = &["return", "yield", "await", "raise", "assert", "del", "pass", "break", "continue", "global", "nonlocal", "import", "from", "quote", "defop", "->", "->>", "some->", "some->>", "as->", "doto", "py", "require", "elif", "else", "except", "except*", "finally", "case"];
 
 fn binop(n: &str) -> Option<&'static str> {
     BINOPS.iter().find(|(o, _)| *o == n).map(|(_, a)| *a)
@@ -1500,6 +1500,113 @@ impl<'py, 's> Compiler<'py, 's> {
         self.compile_body(&lines, ctx)
     }
 
+    /// `py "code"`: Python as it is: an expression's value, or statements.
+    fn sf_py(&mut self, items: &[Form]) -> R<Res<'py>> {
+        let head = &items[0];
+        let code = match items.get(1).map(|x| &x.kind) {
+            Some(Kind::Str { value, kind }) if *kind != 'b' && items.len() == 2 => value.clone(),
+            Some(Kind::IStr(_)) => return err("py takes Python as a plain string: use single quotes (Python has its own {…})", items.get(1)),
+            _ => return err("py \"Python code\"", Some(head)),
+        };
+        let code = dedent(&code);
+        let line = head.pos.map(|p| p.line).unwrap_or(1);
+        let parse = self.ast.getattr("parse")?;
+        let bump = |n: &Obj<'py>| -> R<()> {
+            self.ast.getattr("increment_lineno")?.call1((n, line.saturating_sub(1)))?;
+            Ok(())
+        };
+        let kw = |mode: &str| -> R<Bound<'py, PyDict>> {
+            let d = PyDict::new(self.py);
+            d.set_item("mode", mode)?;
+            Ok(d)
+        };
+        if let Ok(t) = parse.call((code.trim(),), Some(&kw("eval")?)) {
+            let body = t.getattr("body")?;
+            bump(&body)?;
+            return Ok(Res::e(body));
+        }
+        let t = match parse.call((code.as_str(),), Some(&kw("exec")?)) {
+            Ok(t) => t,
+            Err(e) => return err(format!("py: {}", e.value(self.py)), Some(head)),
+        };
+        let mut stmts = vec![];
+        for s in t.getattr("body")?.try_iter()? {
+            let s = s?;
+            bump(&s)?;
+            stmts.push(s);
+        }
+        Ok(Res::s(stmts, self.cnone()?))
+    }
+
+    /// `let a=1 b=(f $a)` then a block (or the rest of the line): names that
+    /// only the block sees. Bound in order, so a later one can use an earlier.
+    fn sf_let(&mut self, items: &[Form], children: &[Form], ctx: Ctx) -> R<Res<'py>> {
+        let head = &items[0];
+        self.st.marks += 1;
+        let mark = self.st.marks;
+        let mut names: Vec<String> = vec![];
+        let rename = |f: Form, names: &[String]| -> Form {
+            f.map(&mut |x| match &x.kind {
+                Kind::Sym { name, marks } if marks.is_empty() && names.iter().any(|n| n == name || name.strip_prefix('*') == Some(n.as_str())) => Form::sym_at(name, &[mark], x.pos),
+                _ => x,
+            })
+        };
+        let mut lines = vec![];
+        let mut k = 1;
+        while let Some(Kind::KwArg { name, value }) = items.get(k).map(|x| &x.kind) {
+            let v = rename((**value).clone(), &names);
+            names.push(name.clone());
+            let eq = Form::new(Kind::Op { name: "=".into(), tick: false }, items[k].pos);
+            lines.push(Form::line(vec![Form::sym_at(name, &[mark], items[k].pos), eq, v], vec![], items[k].pos));
+            k += 1;
+        }
+        if names.is_empty() {
+            return err("let name=value … then the block that sees them", Some(head));
+        }
+        if k < items.len() {
+            lines.push(rename(Form::line(items[k..].to_vec(), vec![], items[k].pos), &names));
+        }
+        for c in children {
+            lines.push(rename(c.clone(), &names));
+        }
+        if lines.len() == names.len() {
+            return err("let needs a block (or a form after its names)", Some(head));
+        }
+        self.compile_body(&lines, ctx)
+    }
+
+    /// `require mod` (or `require mod name…`): that module's macros (and
+    /// operators), here, while this compiles. The module is imported now.
+    fn sf_require(&mut self, items: &[Form]) -> R<Res<'py>> {
+        let head = &items[0];
+        let Some(module) = items.get(1).and_then(|x| x.sym_name()).filter(|n| is_dotted(n)) else { return err("require module [macro …]", Some(head)) };
+        let want: Vec<String> = items[2..].iter().filter_map(|x| x.sym_name().map(String::from)).collect();
+        let m = match self.py.import("importlib")?.getattr("import_module")?.call1((module,)) {
+            Ok(m) => m,
+            Err(e) => return err(format!("require {module}: {}", e.value(self.py)), Some(head)),
+        };
+        let Ok(st) = m.getattr("__tessh_state__") else { return err(format!("{module} isn't a tessh module (no macros)"), Some(head)) };
+        let sb = st.cast_into::<crate::runner::StateBox>().map_err(|e| PyErr::from(e))?;
+        let sb = sb.borrow();
+        let theirs = sb.st.lock().unwrap();
+        for w in &want {
+            if !theirs.macros.contains_key(w) {
+                return err(format!("{module} has no macro {w}"), Some(head));
+            }
+        }
+        for (n, mac) in theirs.macros.iter() {
+            if want.is_empty() || want.contains(n) {
+                self.st.macros.insert(n.clone(), Macro { name: mac.name.clone(), func: mac.func.clone_ref(self.py), params: mac.params.clone() });
+            }
+        }
+        if want.is_empty() {
+            for (n, op) in theirs.ops.iter() {
+                self.st.ops.insert(n.clone(), op.clone());
+            }
+        }
+        Ok(Res::s(vec![self.pass()?], self.cnone()?))
+    }
+
     /// `{a b c=0 **rest} = value`: names from a dict's keys (or an object's
     /// attributes).
     fn destructure(&mut self, ks: &[Form], g: &Form, value: Res<'py>) -> R<Res<'py>> {
@@ -2394,6 +2501,9 @@ impl<'py, 's> Compiler<'py, 's> {
             "defmacro" => self.sf_defmacro(items, children),
             "defop" => self.sf_defop(items),
             "->" | "->>" | "some->" | "some->>" | "as->" | "doto" => self.sf_thread(n, items, children, ctx),
+            "py" => self.sf_py(items),
+            "let" => self.sf_let(items, children, ctx),
+            "require" => self.sf_require(items),
             _ => err(format!("'{n}' isn't handled"), Some(head)),
         }
     }
@@ -3434,6 +3544,13 @@ fn takes_cont(c: &Compiler, u: &Unit, cont: &str) -> bool {
         },
         _ => false,
     }
+}
+
+/// Python code from an indented string: its common indentation off.
+fn dedent(code: &str) -> String {
+    let code = code.strip_prefix('\n').unwrap_or(code);
+    let ind = code.lines().filter(|l| !l.trim().is_empty()).map(|l| l.len() - l.trim_start().len()).min().unwrap_or(0);
+    code.lines().map(|l| if l.len() >= ind { &l[ind..] } else { l.trim_start() }).collect::<Vec<_>>().join("\n")
 }
 
 /// `.name` (a method) or `.-name` (a field), as a call's head.
