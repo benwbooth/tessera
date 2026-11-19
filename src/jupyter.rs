@@ -1118,7 +1118,8 @@ impl Kernel {
         };
         self.send_shell(
             "execute_request",
-            json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": true, "stop_on_error": true}),
+            // (tessera_tty: this side runs a tessh kernel's programs in the pane's terminal.)
+            json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": true, "stop_on_error": true, "tessera_tty": true}),
             cell,
         )
     }

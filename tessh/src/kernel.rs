@@ -283,6 +283,8 @@ struct StdinBridge {
     reply: Mutex<Option<mpsc::Receiver<String>>>,
 }
 
+/// The cell's frontend runs programs in its terminal (execute_request's tessera_tty).
+static TTY_OK: AtomicBool = AtomicBool::new(false);
 static STDIN: StdinBridge = StdinBridge { allowed: AtomicBool::new(false), ids: Mutex::new(Vec::new()), req: Mutex::new(None), reply: Mutex::new(None) };
 
 #[pyfunction]
@@ -311,7 +313,9 @@ fn kernel_input(py: Python<'_>, prompt: &str) -> PyResult<String> {
 /// carrying `tessera_tty` {command, cwd}; the reply is its exit status. None
 /// when this cell can't ask (no stdin).
 fn kernel_tty(py: Python<'_>, command: &str, cwd: &str) -> PyResult<Option<i32>> {
-    if !STDIN.allowed.load(Ordering::SeqCst) {
+    // (Only a Tessera that says it runs them: an older one would take the
+    // request for input() and never answer.)
+    if !STDIN.allowed.load(Ordering::SeqCst) || !TTY_OK.load(Ordering::SeqCst) {
         return Ok(None);
     }
     drain(py);
@@ -343,6 +347,7 @@ fn execute(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
     let silent = msg.content["silent"].as_bool().unwrap_or(false);
     let store = msg.content["store_history"].as_bool().unwrap_or(true) && !silent;
     STDIN.allowed.store(msg.content["allow_stdin"].as_bool().unwrap_or(false), Ordering::SeqCst);
+    TTY_OK.store(msg.content["tessera_tty"].as_bool().unwrap_or(false), Ordering::SeqCst);
     *STDIN.ids.lock().unwrap() = msg.ids.clone();
     let count = COUNT.load(Ordering::SeqCst);
     if !silent {
