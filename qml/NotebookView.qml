@@ -983,7 +983,9 @@ FocusScope {
     Timer {
         interval: 300; repeat: true
         running: nb.ttyRun !== null && nb.ttyRun.tid > 0
-        onTriggered: { const t = nb.termCells().find(x => x.id === nb.ttyRun.tid); if (t && !t.done) nb.ttyText(t) }
+        // (Its end too: the terminal's word that it finished can come while
+        // the notebook isn't listening, and the cell would spin on.)
+        onTriggered: { const t = nb.termCells().find(x => x.id === nb.ttyRun.tid); if (t) { if (t.done) nb.finishTty(t); else nb.ttyText(t) } }
     }
     function finishTty(t) {
         ttyText(t)
