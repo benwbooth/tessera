@@ -112,6 +112,8 @@ pub struct Session {
     wake: (UnixStream, UnixStream),
     pending_command: String,
     command_buf: Option<Vec<u8>>,
+    /// Shell integration's reports of what each command runs with.
+    execs: crate::cells::ExecScan,
     cell_image: Option<Vec<u8>>,
     exited: bool,
     last_cursor_row: Option<u16>,
@@ -332,6 +334,7 @@ pub fn session_open(
         },
         pending_command: String::new(),
         command_buf: None,
+        execs: crate::cells::ExecScan::default(),
         cell_image: None,
         exited: false,
         last_cursor_row: None,
@@ -730,6 +733,8 @@ impl Session {
         const END: &[u8] = b"\x1b]133;D";
         let find = |hay: &[u8], pat: &[u8]| hay.windows(pat.len()).position(|w| w == pat);
         const CMD: &[u8] = b"\x1b]1337;TesseraCommand=";
+        self.execs.feed(data);
+        let base = data.as_ptr() as usize;
         let mut rest = data;
         loop {
             // A command-line report cut off by the last read: finish it.
@@ -833,7 +838,9 @@ impl Session {
                     self.cmd_out = Some(Vec::new());
                     let cmd = std::mem::take(&mut self.pending_command);
                     let cwd = self.pwd();
+                    let exec = self.execs.take_at(rest.as_ptr() as usize - base + s);
                     let id = self.cells.start(cmd, cwd);
+                    self.cells.set_exec(id, exec);
                     self.events.push(json!({"type": "cell", "id": id, "done": false}));
                     rest = &rest[s + end..];
                 }
@@ -853,8 +860,11 @@ impl Session {
     }
 
     /// A cell's output: "html" (colors kept), "text", or "image" (base64 of
-    /// the picture it printed).
+    /// the picture it printed); "exec": what it ran with (JSON).
     pub fn cell_output(&self, id: u64, format: &str) -> String {
+        if format == "exec" {
+            return self.cells.exec_json(id);
+        }
         let Some(c) = self.cells.get(id) else { return String::new() };
         match format {
             "image" => {

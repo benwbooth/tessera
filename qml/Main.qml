@@ -2441,7 +2441,8 @@ ApplicationWindow {
             win.saveLayoutNow()
             win.saveSnapshots()
             // (The window's whole content for Preferences, so open popups show too.)
-            const target = controller.prefsPage() !== "" ? prefs.contentItem : rootLayout
+            // (TESSERA_TEST_SHOT_ALL: with popups too.)
+            const target = controller.prefsPage() !== "" ? prefs.contentItem : controller.testEnv("SHOT_ALL") !== "" ? win.Overlay.overlay.parent : rootLayout
             const ok = target.grabToImage(function(r) {
                 r.saveToFile(controller.screenshotPath())
                 Qt.quit()

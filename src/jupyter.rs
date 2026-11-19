@@ -1039,6 +1039,12 @@ impl Kernel {
                             s2(json!({"type": "count", "cell": cell, "count": c["execution_count"]}));
                         }
                     }
+                    // (tessh: a program a cell runs and what with.)
+                    "tessera_exec" => {
+                        if let Some(cell) = cell {
+                            s2(json!({"type": "exec", "cell": cell, "exec": c}));
+                        }
+                    }
                     "clear_output" => {
                         if let Some(cell) = cell {
                             s2(json!({"type": "clear", "cell": cell, "wait": c["wait"].as_bool().unwrap_or(false)}));

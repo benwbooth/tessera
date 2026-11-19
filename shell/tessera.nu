@@ -34,6 +34,8 @@ $env.config = ($env.config | upsert hooks.pre_execution (
     ($env.config.hooks.pre_execution? | default []) | append {||
         let line = (commandline)
         $env.__TESSERA_RUNNING = "1"
+        let ex = ([($env.USER? | default ""), $line, (^env | str trim)] | str join (char nul) | encode base64 | str replace -a "\n" "")
+        print -n $"\e]1337;TesseraExec=($ex)\a"
         print -n $"\e]1337;TesseraCommand=($line | encode base64 | str replace -a "\n" "")\a\e]133;C\a"
     }
 ))

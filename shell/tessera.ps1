@@ -46,7 +46,9 @@ if (-not $global:__TesseraLoaded) {
                 $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($line))
                 $e = [char]27
                 $a = [char]7
-                [Console]::Write("$e]1337;TesseraCommand=$b$a$e]133;C$a")
+                $envs = (Get-ChildItem env: | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join "`0"
+                $x = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$([Environment]::UserName)`0$line`0$envs"))
+                [Console]::Write("$e]1337;TesseraExec=$x$a$e]1337;TesseraCommand=$b$a$e]133;C$a")
                 $global:__TesseraRunning = $true
             }
         }

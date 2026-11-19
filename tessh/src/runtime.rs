@@ -21,6 +21,48 @@ pub static PASS_THROUGH: AtomicBool = AtomicBool::new(false);
 /// notebook's pane terminal, so a terminal app gets one). Given the shell
 /// command and the folder, it gives the exit status, or None to run it here.
 pub static TTY_HOOK: std::sync::OnceLock<fn(Python<'_>, &str, &str) -> PyResult<Option<i32>>> = std::sync::OnceLock::new();
+/// Told of each program (or pipeline) run, before it runs: {command, argv,
+/// cwd, user, env} (the kernel: the notebook's card shows what it ran with).
+pub static EXEC_HOOK: std::sync::OnceLock<fn(serde_json::Value)> = std::sync::OnceLock::new();
+
+/// The user tessh runs as.
+pub fn user_name() -> String {
+    let uid = unsafe { libc::getuid() };
+    let pw = unsafe { libc::getpwuid(uid) };
+    if pw.is_null() {
+        return std::env::var("USER").unwrap_or_else(|_| uid.to_string());
+    }
+    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }.to_string_lossy().to_string()
+}
+
+/// The environment programs get, NAME=value, sorted.
+pub fn env_list() -> Vec<String> {
+    let mut env: Vec<String> = std::env::vars_os().map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy())).collect();
+    env.sort();
+    env
+}
+
+/// What a pipeline runs with, for EXEC_HOOK.
+fn exec_record(cmds: &[Stage]) -> serde_json::Value {
+    let line = cmds
+        .iter()
+        .map(|c| {
+            let mut w: Vec<String> = c.words.iter().map(|w| sh_quote(w)).collect();
+            for (op, t) in &c.redirs {
+                w.push(match t {
+                    Some(t) => format!("{op} {}", sh_quote(t)),
+                    None => op.clone(),
+                });
+            }
+            w.join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    serde_json::json!({"command": line, "argv": cmds.iter().map(|c| c.words.clone()).collect::<Vec<_>>(),
+                       "cwd": cwd, "user": user_name(), "env": env_list()})
+}
+
 /// The environment when the hook was set: what differs is passed along.
 pub static HOOK_ENV: std::sync::OnceLock<std::collections::HashMap<String, String>> = std::sync::OnceLock::new();
 static OLDPWD: Mutex<Option<String>> = Mutex::new(None);
@@ -683,6 +725,9 @@ fn sh_quote(s: &str) -> String {
 /// Run a chain of programs connected by pipes.
 fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: bool, bg: bool) -> PyResult<Py<PyAny>> {
     flush_python(py);
+    if let Some(hook) = EXEC_HOOK.get() {
+        hook(exec_record(cmds));
+    }
     // (No terminal here: programs whose output is shown run in the one there
     // is, so whichever is a terminal app gets it.)
     if let Some(hook) = TTY_HOOK.get() {

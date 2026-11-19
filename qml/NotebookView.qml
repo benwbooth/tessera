@@ -281,6 +281,12 @@ FocusScope {
                 if (e.wait) cells.setProperty(i, "clearPending", true)
                 else cells.setProperty(i, "outputs", "[]")
             } else if (e.type === "output") addOutput(i, e.output)
+            else if (e.type === "exec") {
+                // (A program a tessh cell runs, and what with: its details.)
+                let xs = []
+                try { xs = JSON.parse(cells.get(i).execs) } catch (x) {}
+                cells.setProperty(i, "execs", JSON.stringify(xs.concat([e.exec]).slice(-50)))
+            }
             else if (e.type === "done") {
                 if (asking[e.cell]) setAsking(e.cell, null)
                 cells.setProperty(i, "running", false)
@@ -332,7 +338,7 @@ FocusScope {
         return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
                  type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
                  started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
-                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "", viewLang: "" }
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "", viewLang: "", execs: "[]" }
     }
     function insertCell(at, type, edit) {
         at = Math.max(0, Math.min(cells.count, at))
@@ -426,6 +432,7 @@ FocusScope {
         if (c.tid > 0) retire(c.tid)
         cells.setProperty(i, "tid", 0)
         cells.setProperty(i, "outputs", "[]")
+        cells.setProperty(i, "execs", "[]")
         cells.setProperty(i, "running", true)
         cells.setProperty(i, "failed", false)
         cells.setProperty(i, "status", 0)
@@ -893,6 +900,12 @@ FocusScope {
         cells.setProperty(i, "ended", t.done ? t.started + t.duration : 0)
         cells.setProperty(i, "tkind", t.kind)
         cells.setProperty(i, "tsize", t.size)
+        // (What it ran with, from shell integration: kept with the card.)
+        if (c.execs === "[]") {
+            let x = null
+            try { x = JSON.parse(view.cellOutput(t.id, "exec") || "null") } catch (e) {}
+            if (x && (x.user || (x.env && x.env.length))) cells.setProperty(i, "execs", JSON.stringify([x]))
+        }
         if (t.done && c.mine && c.count < 0) cells.setProperty(i, "count", ++execCount)
     }
     function syncTerm() {
@@ -1093,6 +1106,7 @@ FocusScope {
             if (tm.ran_in) x.ranIn = tm.ran_in
             if (tm.view) x.viewPath = tm.view
             if (tm.view_lang) x.viewLang = tm.view_lang
+            if (Array.isArray(tm.exec) && tm.exec.length) x.execs = JSON.stringify(tm.exec)
             if (x.type === "code") {
                 x.outputs = JSON.stringify((c.outputs || []).map(normalOutput))
                 x.count = c.execution_count === null || c.execution_count === undefined ? -1 : c.execution_count
@@ -1346,6 +1360,8 @@ FocusScope {
                 }
                 if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
                 if (c.ranIn !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { ran_in: c.ranIn })
+                // (What each program ran with: command line, folder, user, environment.)
+                if (c.execs !== "[]") { try { meta.tessera = Object.assign({}, meta.tessera || {}, { exec: JSON.parse(c.execs) }) } catch (e) {} }
                 if (c.viewPath !== "") { meta.tessera = Object.assign({}, meta.tessera || {}, c.viewLang !== "" ? { view: c.viewPath, view_lang: c.viewLang } : { view: c.viewPath }); outs = [] }
                 cell.execution_count = c.count >= 0 ? c.count : (c.tid > 0 && !kept ? ++n : null)
                 if (c.hideOutput) meta.jupyter = Object.assign({}, meta.jupyter || {}, { outputs_hidden: true })
@@ -1781,6 +1797,7 @@ FocusScope {
             required property string ranIn     // what ran it, as it was then (a shell's name, a kernel's)
             required property string viewPath  // a file card: the file it shows
             required property string viewLang  // and the language picked for it ("": by its name, "-": none)
+            required property string execs     // what its programs ran with: [{command, line, argv, cwd, user, env}]
             readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
@@ -2054,6 +2071,7 @@ FocusScope {
                                onTriggered: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = nb.saveFolder(cell.viewPath); fileSaveDialog.open() } }
                 SlimMenuItem { text: "Discard changes"; visible: header.fileView !== null && header.fileView.editing; enabled: header.fileView !== null && header.fileView.dirty; onTriggered: header.fileView.reload() }
                 SlimMenuItem { text: header.fileView && header.fileView.dirty ? "Done, discarding the changes" : "Done editing"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.stopEdit() }
+                SlimMenuItem { text: "\u24d8 Details (command line, environment)"; visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.execs !== "[]"); onTriggered: nb.showExec(cell.index) }
                 SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
                 SlimMenuItem { text: "Run the cells above"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.runAbove(cell.index) }
                 SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; visible: cell.viewPath === ""; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
@@ -2684,6 +2702,175 @@ FocusScope {
                     Text { x: 8; anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: 0.001; text: modelData[1]; color: Theme.text; font.pixelSize: 12; renderType: Text.NativeRendering }
                     HoverHandler { id: th; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: typePop.pick(modelData[0]) }
+                }
+            }
+        }
+    }
+
+    // ---- a card's details: what its programs ran with ----
+    // Command line (typed, and as run), folder, user and environment: a shell
+    // card's from shell integration, a tessh card's from its kernel, one per
+    // program it ran.
+    function execRecords(i) {
+        const c = cells.get(i)
+        let xs = []
+        try { xs = JSON.parse(c.execs) } catch (e) {}
+        if (xs.length === 0 && c.tid > 0 && view) {
+            try { const x = JSON.parse(view.cellOutput(c.tid, "exec") || "null"); if (x) xs = [x] } catch (e) {}
+        }
+        if (xs.length === 0 && c.tid > 0) xs = [{ command: c.source, cwd: c.cwd }]
+        return xs
+    }
+    // (Test hook: TESSERA_TEST_NB_DETAILS=<n>[,ms]: the nth card's details (1 the first, -1 the last) at 14 s (or ms).)
+    Timer {
+        readonly property var arg: nb.controller ? nb.controller.testEnv("NB_DETAILS").split(",") : [""]
+        interval: arg.length > 1 ? +arg[1] : 14000
+        running: arg[0] !== ""
+        onTriggered: { const n = +arg[0]; nb.showExec(n > 0 ? n - 1 : cells.count + n) }
+    }
+    function showExec(i) {
+        if (i < 0 || i >= cells.count) return
+        execPop.records = execRecords(i)
+        execPop.sel = Math.max(0, execPop.records.length - 1)
+        execPop.open()
+        if (controller && controller.testEnv("NB_DETAILS") !== "") console.log("nb details: card " + i + " " + JSON.stringify(execPop.rec).slice(0, 200))
+    }
+    Popup {
+        id: execPop
+        parent: nb
+        property var records: []
+        property int sel: 0
+        readonly property var rec: records[sel] || ({})
+        // (The words as run: the shell's expansion, or tessh's argv.)
+        readonly property string ran: rec.argv ? rec.command : (rec.line || rec.command || "")
+        readonly property var envs: {
+            const f = envFilter.text.toLowerCase()
+            const all = (rec.env || []).map(e => { const k = e.indexOf("="); return { k: e.substring(0, k), v: e.substring(k + 1) } })
+            return f === "" ? all : all.filter(x => (x.k + "=" + x.v).toLowerCase().indexOf(f) >= 0)
+        }
+        x: Math.round((nb.width - width) / 2)
+        y: 40
+        width: Math.min(nb.width - 32, 820)
+        height: Math.min(nb.height - 60, implicitHeight)
+        padding: 10
+        topPadding: 10.001   // (off the half pixel: 130% scale smears native text there)
+        modal: false
+        focus: true
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        onOpened: envFilter.text = ""
+        contentItem: ColumnLayout {
+            spacing: 6
+            RowLayout {
+                Layout.fillWidth: true
+                Text { text: "Details"; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                Chip { base: Theme.panel; label: "Close"; onClicked: execPop.close() }
+            }
+            // (A tessh cell that ran several programs: one at a time.)
+            Flow {
+                Layout.fillWidth: true
+                visible: execPop.records.length > 1
+                spacing: 4
+                Repeater {
+                    model: execPop.records
+                    delegate: Chip {
+                        required property var modelData
+                        required property int index
+                        base: index === execPop.sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : Theme.panel
+                        label: (index + 1) + ". " + ((modelData.argv && modelData.argv[0] && modelData.argv[0][0]) || (modelData.command || "").split(" ")[0])
+                        tip: modelData.command || ""
+                        onClicked: execPop.sel = index
+                    }
+                }
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 3
+                columnSpacing: 8
+                rowSpacing: 4
+                Text { text: "Command line"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                TextEdit {
+                    objectName: "execLine"; text: execPop.ran
+                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                    topPadding: 3.001; Layout.fillWidth: true
+                }
+                Chip { base: Theme.panel; label: "Copy"; Layout.alignment: Qt.AlignTop; onClicked: nb.copyText(execPop.ran) }
+                Text { text: "Typed"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001; visible: typed.visible }
+                TextEdit {
+                    id: typed; visible: !execPop.rec.argv && !!execPop.rec.line && execPop.rec.line !== execPop.rec.command; text: execPop.rec.command || ""
+                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                    topPadding: 3.001; Layout.fillWidth: true
+                }
+                Item { visible: typed.visible; width: 1; height: 1 }
+                Text { text: "Folder"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                TextEdit {
+                    text: execPop.rec.cwd || "—"
+                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                    topPadding: 3.001; Layout.fillWidth: true
+                }
+                Chip { base: Theme.panel; label: "Copy"; Layout.alignment: Qt.AlignTop; onClicked: nb.copyText(execPop.rec.cwd || "") }
+                Text { text: "User"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                TextEdit {
+                    text: execPop.rec.user || "—"
+                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                    topPadding: 3.001; Layout.fillWidth: true
+                }
+                Item { width: 1; height: 1 }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Text { text: "Environment" + (execPop.rec.env ? " (" + execPop.rec.env.length + ")" : ": not reported (this shell's integration is older)"); color: Theme.textDim; font.pixelSize: 12 }
+                TextField {
+                    id: envFilter
+                    visible: !!execPop.rec.env
+                    Layout.preferredWidth: 240
+                    placeholderText: "Filter"
+                    color: Theme.text
+                    font.pixelSize: 12
+                    background: Rectangle { radius: 5; color: Theme.bg; border.color: envFilter.activeFocus ? Theme.accent : Theme.divider }
+                    Keys.onEscapePressed: execPop.close()
+                }
+                Item { Layout.fillWidth: true }
+                Chip { base: Theme.panel; label: "Copy all"; visible: !!execPop.rec.env; onClicked: nb.copyText(execPop.envs.map(x => x.k + "=" + x.v).join("\n") + "\n") }
+            }
+            ListView {
+                id: envList
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(contentHeight, Math.max(120, nb.height - 340))
+                visible: !!execPop.rec.env
+                clip: true
+                model: execPop.envs
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
+                MomentumWheel { flick: envList }
+                delegate: Row {
+                    required property var modelData
+                    width: envList.width - 12
+                    spacing: 8
+                    Text {
+                        topPadding: 2.001
+                        width: Math.min(240, envList.width * 0.3)
+                        text: modelData.k
+                        elide: Text.ElideRight
+                        color: nb.ansi(4, "#61afef")
+                        font.family: nb.fontFamily
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+                    TextEdit {
+                        topPadding: 2.001
+                        width: parent.width - Math.min(240, envList.width * 0.3) - 8
+                        text: modelData.v
+                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
+                        textFormat: TextEdit.PlainText
+                        color: Theme.text; selectionColor: Theme.accent
+                        font.family: nb.fontFamily
+                        font.pixelSize: 12
+                    }
                 }
             }
         }

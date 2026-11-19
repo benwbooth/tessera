@@ -27,6 +27,9 @@ __tessera_preexec() {
     __tessera_running=1
     # The command line (OSC 1337 TesseraCommand, base64), then the mark: in
     # that order, so the notebook pairs each command with its output.
+    # What it runs with first (OSC 1337 TesseraExec, base64): the user, the
+    # line as zsh expanded it (aliases), and the environment.
+    printf '\e]1337;TesseraExec=%s\a' "$({ print -rn -- "$USERNAME"; printf '\0%s\0' "$3"; command env -0 2>/dev/null || command env; } | base64 | tr -d '\n')"
     printf '\e]1337;TesseraCommand=%s\a' "$(print -rn -- "$1" | base64 | tr -d '\n')"
     printf '\e]133;C\a'
 }

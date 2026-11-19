@@ -31,6 +31,14 @@ def _tessera_out(s):
 def _tessera_precommand(cmd, **kw):
     _tessera_running[0] = True
     line = _tessera_b64.b64encode(cmd.rstrip("\n").encode()).decode()
+    # What it runs with (OSC 1337 TesseraExec): user, line, environment.
+    try:
+        import getpass as _gp
+        _env = "\0".join(k + "=" + str(v) for k, v in _tessera_os.environ.items())
+        _ex = _tessera_b64.b64encode((_gp.getuser() + "\0" + cmd.rstrip("\n") + "\0" + _env).encode()).decode()
+        _tessera_out("\x1b]1337;TesseraExec=" + _ex + "\x07")
+    except Exception:
+        pass
     _tessera_out("\x1b]1337;TesseraCommand=" + line + "\x07\x1b]133;C\x07")
 
 

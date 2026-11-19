@@ -28,6 +28,9 @@ __tessera_preexec() {
         __tessera_running=1
         # The command line (OSC 1337 TesseraCommand, base64), then the mark.
         local line; line="$(HISTTIMEFORMAT= history 1 | sed 's/^ *[0-9]* *//')"
+        # What it runs with (OSC 1337 TesseraExec, base64): the user, the
+        # command bash is running, and the environment.
+        printf '\e]1337;TesseraExec=%s\a' "$({ printf '%s\0%s\0' "${USER:-$LOGNAME}" "$BASH_COMMAND"; command env -0 2>/dev/null || command env; } | base64 | tr -d '\n')"
         printf '\e]1337;TesseraCommand=%s\a' "$(printf '%s' "$line" | base64 | tr -d '\n')"
         printf '\e]133;C\a'
     fi

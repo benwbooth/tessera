@@ -583,6 +583,8 @@ pub fn run(conn_file: &str) -> i32 {
         let b = py.import("builtins")?;
         b.setattr("input", wrap_pyfunction!(kernel_input, py)?)?;
         let _ = runtime::TTY_HOOK.set(kernel_tty);
+        // (Each program a cell runs, and what with: the card's details.)
+        let _ = runtime::EXEC_HOOK.set(|v| publish("tessera_exec", v));
         runtime::set_display(wrap_pyfunction!(display_hook, py)?.into_any().unbind());
         let sys = py.import("sys")?;
         for s in ["stdout", "stderr"] {

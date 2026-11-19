@@ -25,6 +25,8 @@ function __tessera_preexec --on-event fish_preexec
     __tessera_apply
     set -g __tessera_running 1
     # The command line first (OSC 1337 TesseraCommand, base64), then the mark.
+    # What it runs with (OSC 1337 TesseraExec, base64): user, line, environment.
+    printf '\e]1337;TesseraExec=%s\a' (begin; printf '%s\0%s\0' "$USER" "$argv[1]"; command env -0 2>/dev/null; or command env; end | base64 | string join '')
     printf '\e]1337;TesseraCommand=%s\a' (printf '%s' "$argv[1]" | base64 | string join '')
     printf '\e]133;C\a'
 end

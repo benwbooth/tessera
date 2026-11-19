@@ -580,7 +580,11 @@ pub fn run() -> i32 {
         }
         let _ = rl.add_history_entry(text.as_str());
         use base64::Engine;
-        osc(&format!("1337;TesseraCommand={}", base64::engine::general_purpose::STANDARD.encode(&text)));
+        let b64 = base64::engine::general_purpose::STANDARD;
+        // (What it runs with: user, line, environment, NUL-separated.)
+        let exec = format!("{}\0{}\0{}", crate::runtime::user_name(), text, crate::runtime::env_list().join("\0"));
+        osc(&format!("1337;TesseraExec={}", b64.encode(&exec)));
+        osc(&format!("1337;TesseraCommand={}", b64.encode(&text)));
         osc("133;C");
         let exit = Python::attach(|py| -> Option<i32> {
             let r = runner::run_source(py, &text, ns.bind(py), "<stdin>", true);

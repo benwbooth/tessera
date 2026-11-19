@@ -23,6 +23,137 @@ pub struct Cell {
     /// It switched to the alternate screen: a terminal app (vim, less, htop),
     /// not a program printing lines.
     pub screen: bool,
+    /// What it ran with (shell integration's TesseraExec): its user, the
+    /// command line as the shell expanded it, its environment.
+    pub exec: Option<Exec>,
+}
+
+/// What a command ran with, as the shell reported it just before it ran.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Exec {
+    pub user: String,
+    /// The command line after the shell's expansion (zsh: aliases expanded).
+    pub line: String,
+    /// NAME=value, as `env` lists them.
+    pub env: Vec<String>,
+}
+
+impl Exec {
+    /// The report's payload: base64 of user NUL line NUL env (`env -0`'s
+    /// NUL-separated list, or `env`'s lines where there's no -0).
+    pub fn parse(b64: &[u8]) -> Option<Exec> {
+        use base64::Engine;
+        let clean: Vec<u8> = b64.iter().filter(|c| !c.is_ascii_whitespace()).copied().collect();
+        let raw = base64::engine::general_purpose::STANDARD.decode(clean).ok()?;
+        let text = String::from_utf8_lossy(&raw);
+        let mut parts = text.splitn(3, '\0');
+        let user = parts.next()?.trim().to_string();
+        let line = parts.next().unwrap_or("").trim_end_matches('\n').to_string();
+        let rest = parts.next().unwrap_or("");
+        let sep = if rest.contains('\0') { '\0' } else { '\n' };
+        let mut env: Vec<String> = rest.split(sep).filter(|e| e.contains('=')).map(|e| e.to_string()).collect();
+        env.sort();
+        Some(Exec { user, line, env })
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        json!({"user": self.user, "line": self.line, "env": self.env})
+    }
+
+    pub fn from_json(v: &serde_json::Value) -> Option<Exec> {
+        let o = v.as_object()?;
+        Some(Exec {
+            user: o.get("user").and_then(|u| u.as_str()).unwrap_or("").to_string(),
+            line: o.get("line").and_then(|u| u.as_str()).unwrap_or("").to_string(),
+            env: o.get("env").and_then(|e| e.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
+        })
+    }
+
+    /// A local shell's, read from /proc when its integration didn't say
+    /// (its environment as it started, and its user).
+    pub fn of_process(pid: u32) -> Option<Exec> {
+        if pid == 0 {
+            return None;
+        }
+        let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+        let mut env: Vec<String> = environ.split(|&b| b == 0).filter(|e| e.contains(&b'=')).map(|e| String::from_utf8_lossy(e).into_owned()).collect();
+        env.sort();
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+        let uid = status.lines().find_map(|l| l.strip_prefix("Uid:")).and_then(|l| l.split_whitespace().next()).unwrap_or("");
+        let user = std::fs::read_to_string("/etc/passwd")
+            .ok()
+            .and_then(|p| p.lines().find_map(|l| {
+                let f: Vec<&str> = l.split(':').collect();
+                (f.len() > 2 && f[2] == uid).then(|| f[0].to_string())
+            }))
+            .unwrap_or_else(|| uid.to_string());
+        Some(Exec { user, line: String::new(), env })
+    }
+}
+
+/// Finds shell integration's TesseraExec reports in the output, each with
+/// where it ended, so the command that starts after it gets it (even with
+/// several commands in one read).
+#[derive(Default)]
+pub struct ExecScan {
+    buf: Option<Vec<u8>>,
+    /// This read's: (offset just past it, the report).
+    ready: Vec<(usize, Exec)>,
+    /// The last one from an earlier read not yet taken.
+    carried: Option<Exec>,
+}
+
+impl ExecScan {
+    pub fn feed(&mut self, data: &[u8]) {
+        const PAT: &[u8] = b"\x1b]1337;TesseraExec=";
+        if let Some((_, e)) = self.ready.pop() {
+            self.carried = Some(e);
+        }
+        self.ready.clear();
+        let find = |hay: &[u8], pat: &[u8]| hay.windows(pat.len()).position(|w| w == pat);
+        let mut at = 0;
+        loop {
+            let rest = &data[at..];
+            if let Some(buf) = self.buf.as_mut() {
+                match rest.iter().position(|&b| b == 7 || b == 0x1b) {
+                    Some(e) => {
+                        buf.extend_from_slice(&rest[..e]);
+                        let b = self.buf.take().unwrap();
+                        if let Some(x) = Exec::parse(&b) {
+                            self.ready.push((at + e, x));
+                        }
+                        at += e;
+                        continue;
+                    }
+                    None => {
+                        if buf.len() + rest.len() <= 4 << 20 {
+                            buf.extend_from_slice(rest);
+                        } else {
+                            self.buf = None;
+                        }
+                        return;
+                    }
+                }
+            }
+            let Some(i) = find(rest, PAT) else { return };
+            self.buf = Some(Vec::new());
+            at += i + PAT.len();
+        }
+    }
+
+    /// The report for a command starting at `pos` in this read: the last
+    /// one before it.
+    pub fn take_at(&mut self, pos: usize) -> Option<Exec> {
+        match self.ready.iter().rposition(|(o, _)| *o <= pos) {
+            Some(k) => {
+                let e = self.ready.remove(k).1;
+                self.ready.drain(..k);
+                self.carried = None;
+                Some(e)
+            }
+            None => self.carried.take(),
+        }
+    }
 }
 
 /// Output that switches to the alternate screen (after `before`, the bytes
@@ -71,6 +202,7 @@ impl Cells {
             image: None,
             truncated: false,
             screen: false,
+            exec: None,
         });
         while self.list.len() > MAX_CELLS {
             self.list.pop_front();
@@ -117,6 +249,21 @@ impl Cells {
         Some(c.id)
     }
 
+    pub fn set_exec(&mut self, id: u64, exec: Option<Exec>) {
+        if let Some(c) = self.list.iter_mut().find(|c| c.id == id) {
+            c.exec = exec;
+        }
+    }
+
+    /// What cell `id` ran with: {command, cwd, user, line, env} ("" if no such cell).
+    pub fn exec_json(&self, id: u64) -> String {
+        let Some(c) = self.get(id) else { return String::new() };
+        let mut v = c.exec.as_ref().map(|e| e.to_json()).unwrap_or_else(|| json!({}));
+        v["command"] = json!(c.command);
+        v["cwd"] = json!(c.cwd);
+        v.to_string()
+    }
+
     pub fn get(&self, id: u64) -> Option<&Cell> {
         self.list.iter().find(|c| c.id == id)
     }
@@ -154,7 +301,7 @@ fn cell_line(c: &Cell) -> String {
     let b = base64::engine::general_purpose::STANDARD;
     json!({"id": c.id, "command": c.command, "cwd": c.cwd, "started": c.started, "duration": c.duration_ms,
            "status": c.status, "kind": c.kind, "truncated": c.truncated, "raw": b.encode(&c.raw),
-           "image": c.image.as_ref().map(|i| b.encode(i))})
+           "image": c.image.as_ref().map(|i| b.encode(i)), "exec": c.exec.as_ref().map(|e| e.to_json())})
     .to_string()
 }
 
@@ -176,6 +323,7 @@ fn line_cell(l: &str) -> Option<Cell> {
         image: v["image"].as_str().and_then(|i| b.decode(i).ok()),
         truncated: v["truncated"].as_bool().unwrap_or(false),
         screen: false,
+        exec: Exec::from_json(&v["exec"]),
     })
     .map(|mut c| {
         c.screen = enters_alt_screen(&[], &c.raw);
@@ -510,6 +658,32 @@ mod tests {
     }
 
     #[test]
+    fn exec_reports() {
+        use base64::Engine;
+        let b = base64::engine::general_purpose::STANDARD;
+        let one = b.encode(b"ben\0ls -la /tmp\0HOME=/home/ben\0PATH=/bin\0");
+        let two = b.encode(b"root\0id\0A=1\nB=2\n");
+        let mut s = ExecScan::default();
+        let data = format!("\x1b]1337;TesseraExec={one}\x07\x1b]133;C\x07out\x1b]133;D;0\x07\x1b]1337;TesseraExec={two}\x07\x1b]133;C\x07");
+        s.feed(data.as_bytes());
+        let c1 = data.find("\x1b]133;C").unwrap();
+        let c2 = data.rfind("\x1b]133;C").unwrap();
+        let e1 = s.take_at(c1).unwrap();
+        assert_eq!((e1.user.as_str(), e1.line.as_str()), ("ben", "ls -la /tmp"));
+        assert_eq!(e1.env, vec!["HOME=/home/ben", "PATH=/bin"]);
+        let e2 = s.take_at(c2).unwrap();
+        assert_eq!((e2.user.as_str(), e2.env.clone()), ("root", vec!["A=1".to_string(), "B=2".to_string()]));
+        // (Cut across reads.)
+        let data = format!("\x1b]1337;TesseraExec={one}\x07");
+        let (a, z) = data.split_at(20);
+        s.feed(a.as_bytes());
+        s.feed(z.as_bytes());
+        s.feed(b"\x1b]133;C\x07");
+        assert_eq!(s.take_at(0).unwrap().line, "ls -la /tmp");
+        assert!(s.take_at(0).is_none());
+    }
+
+    #[test]
     fn cells_and_html() {
         let mut c = Cells::default();
         let id = c.start("ls".into(), "/tmp".into());
@@ -562,6 +736,7 @@ pub struct Recorder {
     osc7_buf: Option<Vec<u8>>,
     /// The shell's pid, for its folder when OSC 7 hasn't said.
     pid: u32,
+    execs: ExecScan,
 }
 
 impl Recorder {
@@ -570,7 +745,7 @@ impl Recorder {
         // (Carrying on after an upgrade, or a session taken over: the ids go
         // on from the kept ones.)
         cells.next = load_text(session).lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()?["id"].as_u64()).max().unwrap_or(0);
-        Recorder { session: session.to_string(), cells, pending_command: String::new(), command_buf: None, cmd_out: None, cmd_outer: Vec::new(), cwd: String::new(), osc7_buf: None, pid }
+        Recorder { session: session.to_string(), cells, pending_command: String::new(), command_buf: None, cmd_out: None, cmd_outer: Vec::new(), cwd: String::new(), osc7_buf: None, pid, execs: ExecScan::default() }
     }
 
     /// Takes `from`'s cells and notebook (a session that's gone, its screen
@@ -615,6 +790,7 @@ impl Recorder {
         const OSC7: &[u8] = b"\x1b]7;";
         let find = |hay: &[u8], pat: &[u8]| hay.windows(pat.len()).position(|w| w == pat);
         let mut starts = Vec::new();
+        self.execs.feed(data);
         // (OSC 7 anywhere: the folder, as the window's terminal tracks it.)
         {
             let mut rest = data;
@@ -745,8 +921,11 @@ impl Recorder {
                     self.cmd_out = Some(Vec::new());
                     let cmd = std::mem::take(&mut self.pending_command);
                     let cwd = self.folder();
+                    let at = rest.as_ptr() as usize - base + s;
+                    let exec = self.execs.take_at(at).or_else(|| Exec::of_process(self.pid));
                     let id = self.cells.start(cmd, cwd);
-                    starts.push((rest.as_ptr() as usize - base + s, id));
+                    self.cells.set_exec(id, exec);
+                    starts.push((at, id));
                     rest = &rest[s + end..];
                 }
                 None => return starts,
