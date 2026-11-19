@@ -18,6 +18,7 @@ Item {
     property string hostError: ""
     // (A saved remote pane's screen, shown when its shell there is gone.)
     property string restoreSnapshot: ""
+    property bool closingWithWindow: false  // the window closes: its notebooks' kernels stay
     function connectHost() { hostError = ""; controller.connectHost(sshHost) }
     Component.onCompleted: {
         if (sshHost === "") hostUp = true
@@ -486,6 +487,7 @@ Item {
         path: pane.docPath
         storeKey: term.sessionId
         sshHost: pane.sshHost
+        keepKernels: pane.closingWithWindow
         shellPid: pane.shellPid
         fontFamily: term.fontFamily
         markdownStyle: pane.markdownStyle

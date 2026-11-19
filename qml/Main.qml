@@ -813,6 +813,7 @@ ApplicationWindow {
     }
 
     function finishClose() {
+        for (const p of allPanes()) p.closingWithWindow = true
         for (const p of allPanes()) if (p.docPath !== "" && p.docDirty) p.saveDoc()
         // Closed sessions waiting for Undo end now.
         for (const e of closedStack) { if (e.timer) e.timer.stop(); for (const id of e.ids) controller.killSession(id) }
