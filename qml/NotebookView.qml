@@ -2432,13 +2432,15 @@ FocusScope {
                 TapHandler { onDoubleTapped: { nb.setHeight(cell.cid, 0); if (cell.expanded) nb.expandedId = "" } }
             }
         }
+        // (Not while a card is expanded: it fills the notebook, and this under
+        // it pushed its header, with Restore, off the top.)
         footer: Item {
             width: list.width
-            height: cells.count > 0 ? 40 : 0
+            height: cells.count > 0 && nb.expandedId === "" ? 40 : 0
             Row {
                 anchors.centerIn: parent
                 spacing: 8
-                visible: cells.count > 0
+                visible: cells.count > 0 && nb.expandedId === ""
                 Chip { base: Theme.bg; label: "+ Code"; tip: "Add a code cell at the end"; onClicked: nb.insertCell(cells.count, "code") }
                 Chip { base: Theme.bg; label: "+ Markdown"; tip: "Add a Markdown cell at the end"; onClicked: nb.insertCell(cells.count, "markdown") }
             }
