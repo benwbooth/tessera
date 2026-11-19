@@ -81,6 +81,8 @@ fn main() {
         // when missing) and print the local socket that reaches it.
         "connect" => {
             let host = std::env::args().skip_while(|a| a != "connect").nth(1).unwrap_or_default();
+            // (From the command line: installing when missing is what it's for.)
+            std::env::set_var("TESSERA_INSTALL_TESSERAD", "1");
             match remote::connect(&host) {
                 Ok(_) => {
                     println!("{}", remote::local_socket(&host).display());

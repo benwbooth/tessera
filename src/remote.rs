@@ -53,6 +53,25 @@ pub fn connect_ready(host: &str) -> std::io::Result<UnixStream> {
     UnixStream::connect(paths(host).0).map_err(|e| std::io::Error::new(e.kind(), format!("not connected to {host} yet ({e})")))
 }
 
+/// Hosts where tesserad may be installed this run (the user said so).
+static INSTALL_OK: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
+
+/// tesserad may be copied to `host` (asked, and the user said yes).
+pub fn allow_install(host: &str) {
+    INSTALL_OK.lock().unwrap().insert(host.to_string());
+}
+
+/// Whether tesserad may be installed on `host`: allowed this run, or
+/// answered once for good (settings' ssh_hosts), or TESSERA_INSTALL_TESSERAD
+/// (tesserad connect, tests).
+fn install_allowed(host: &str) -> bool {
+    INSTALL_OK.lock().unwrap().contains(host) || std::env::var_os("TESSERA_INSTALL_TESSERAD").is_some() || crate::settings::load().ssh_hosts[host].as_str() == Some("tesserad")
+}
+
+/// The error a connection gives when tesserad isn't on the host and nobody
+/// has said to install it: "tesserad-missing: <os> <arch>".
+pub const MISSING: &str = "tesserad-missing:";
+
 static CHECKED: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
 
 /// One setup per host at a time (two panes opening together share it).
@@ -183,6 +202,8 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
     // (step 4).
     let mut updated = false;
     match start_remote(ctl, host, false)? {
+        // (Not without asking: the window asks, then allows it.)
+        Started::Missing { os, arch } if !install_allowed(host) => return Err(fail(host, format!("{MISSING} {os} {arch}"))),
         Started::Missing { os, arch } => deploy(ctl, host, &os, &arch)?,
         Started::Socket(_, Some((path, sum, os, arch))) => match update(ctl, host, &path, &sum, &os, &arch) {
             Ok(u) => updated = u,
@@ -771,6 +792,7 @@ mod tests {
         let rsock = scratch.join("r").join("tessera-test.sock");
         std::fs::create_dir_all(rsock.parent().unwrap()).unwrap();
         std::env::set_var("XDG_RUNTIME_DIR", &scratch);
+        std::env::set_var("TESSERA_INSTALL_TESSERAD", "1");
         std::env::set_var(
             "TESSERA_TEST_SSH_ENV",
             format!("HOME={h} XDG_STATE_HOME={h}/state PATH=/run/current-system/sw/bin:/usr/bin:/bin TESSERA_REMOTE_SOCKET={s}", h = home.display(), s = rsock.display()),

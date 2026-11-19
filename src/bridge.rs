@@ -486,6 +486,10 @@ pub mod ffi {
         /// `host`'s home folder (its tesserad's HOME), for paths there.
         #[qinvokable]
         fn host_home(self: &Controller, host: &QString) -> QString;
+        /// The user said to install tesserad on `host` (it had none): the next
+        /// connect_host does.
+        #[qinvokable]
+        fn allow_tesserad_install(self: &Controller, host: &QString);
         /// The last error setting up the SSH connection to `host` ("" if none).
         #[qinvokable]
         fn host_error(self: &Controller, host: &QString) -> QString;
@@ -1049,6 +1053,10 @@ impl ffi::Controller {
         // (Asked once a host: the prompt bar wants it often. "" until it's
         // connected: no ~ for now.)
         qs(&crate::client::host_home(&host.to_string()))
+    }
+
+    fn allow_tesserad_install(&self, host: &ffi::QString) {
+        crate::remote::allow_install(&host.to_string());
     }
 
     fn host_error(&self, host: &ffi::QString) -> ffi::QString {

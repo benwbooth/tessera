@@ -19,9 +19,35 @@ Item {
     // (A saved remote pane's screen, shown when its shell there is gone.)
     property string restoreSnapshot: ""
     property bool closingWithWindow: false  // the window closes: its notebooks' kernels stay
-    function connectHost() { hostError = ""; controller.connectHost(sshHost) }
+    function connectHost() { hostError = ""; askInstall = ""; controller.connectHost(sshHost) }
+    // The host has no tesserad and nobody has said to install it: asked here
+    // ("<os> <arch>" while asking). Install: it's copied there and the pane
+    // goes on. Plain SSH: the pane runs ssh to the host from here, as a
+    // terminal does without Tessera there (no notebook kernels or files
+    // there, nothing kept when the connection drops).
+    property string askInstall: ""
+    property bool rememberAnswer: true
+    function hostChoice() { try { return (JSON.parse(controller.settings()).ssh_hosts || {})[sshHost] || "" } catch (e) { return "" } }
+    function answerInstall(install) {
+        if (rememberAnswer) {
+            let m = {}
+            try { m = JSON.parse(controller.settings()).ssh_hosts || {} } catch (e) {}
+            m[sshHost] = install ? "tesserad" : "ssh"
+            controller.setSetting("ssh_hosts", JSON.stringify(m))
+        }
+        if (install) { controller.allowTesseradInstall(sshHost); connectHost(); return }
+        usePlainSsh()
+    }
+    function usePlainSsh() {
+        const h = sshHost
+        askInstall = ""
+        commandOverride = "ssh " + h
+        sshHost = ""
+        hostUp = true
+    }
     Component.onCompleted: {
         if (sshHost === "") hostUp = true
+        else if (controller && hostChoice() === "ssh") usePlainSsh()
         else if (controller) connectHost()
     }
     onControllerChanged: if (sshHost !== "" && !hostUp && controller && hostError === "") connectHost()
@@ -30,6 +56,13 @@ Item {
         enabled: pane.sshHost !== "" && !pane.hostUp
         function onHostConnected(h, err) {
             if (h !== pane.sshHost) return
+            if (err.startsWith("tesserad-missing:")) {
+                pane.askInstall = err.substring(17).trim()
+                // (Test hook: TESSERA_TEST_TESSERAD_ANSWER=install|ssh.)
+                const a = pane.controller.testEnv("TESSERAD_ANSWER")
+                if (a !== "") Qt.callLater(pane.answerInstall, a === "install")
+                return
+            }
             if (err !== "") { pane.hostError = err; return }
             // (Reattaching: when the shell there has ended, a new one starts
             // under the saved screen.)
@@ -454,11 +487,39 @@ Item {
                 renderType: Text.NativeRendering
                 color: Theme.dark ? "#e6e6e6" : "#222"
                 font.pointSize: 11
-                text: pane.hostError === "" ? "Connecting to " + pane.sshHost + "\u2026" : "Couldn't connect to " + pane.sshHost
+                text: pane.askInstall !== "" ? "Install tesserad on " + pane.sshHost + "?"
+                    : pane.hostError === "" ? "Connecting to " + pane.sshHost + "\u2026" : "Couldn't connect to " + pane.sshHost
+            }
+            Text {
+                width: parent.width
+                height: visible ? contentHeight : 0
+                visible: pane.askInstall !== ""
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                renderType: Text.NativeRendering
+                color: Theme.dark ? "#c8c8c8" : "#444"
+                text: pane.sshHost + " (" + pane.askInstall + ") doesn't have tesserad, Tessera's backend. Installed there "
+                    + (pane.askInstall.startsWith("Windows") ? "(in %LOCALAPPDATA%\\Tessera\\bin)" : "(in ~/.local/bin)")
+                    + ", its shells, notebook kernels and files run there, and keep running when this window closes or the connection drops."
+                    + " Without it, this pane is an ordinary ssh session from here."
+            }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: pane.askInstall !== ""
+                spacing: 10
+                Button { text: "Install tesserad"; onClicked: pane.answerInstall(true) }
+                Button { text: "Use Plain SSH"; onClicked: pane.answerInstall(false) }
+            }
+            CheckBox {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: pane.askInstall !== ""
+                text: "Remember for " + pane.sshHost
+                checked: pane.rememberAnswer
+                onToggled: pane.rememberAnswer = checked
             }
             TextEdit {
                 width: parent.width
-                visible: pane.hostError !== ""
+                visible: pane.hostError !== "" && pane.askInstall === ""
                 readOnly: true
                 selectByMouse: true
                 wrapMode: Text.Wrap

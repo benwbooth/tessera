@@ -82,6 +82,9 @@ pub struct Settings {
     // -- The notebook's file browser (ls cards), as last set: {view, sort,
     // desc, folders_first, hidden}.
     pub file_browser: serde_json::Value,
+    // -- SSH hosts without tesserad, as answered: {host: "tesserad"
+    // (install it there) | "ssh" (plain ssh from here)}.
+    pub ssh_hosts: serde_json::Value,
     // -- Pointer: Ctrl+click opens URLs and files.
     pub ctrl_click_opens: bool,
     // -- Snippets (Edit > Snippets): text sent as if typed.
@@ -131,6 +134,7 @@ impl Default for Settings {
             prompt_layout: Vec::new(),
             prompt_styles: serde_json::json!({}),
             file_browser: serde_json::json!({}),
+            ssh_hosts: serde_json::json!({}),
             ctrl_click_opens: true,
             snippets: vec![Snippet { title: "Git status".into(), text: "git status\\n".into() }],
             default_profile: "Default".into(),
