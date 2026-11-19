@@ -207,6 +207,46 @@ pub fn read_lines(path: &str, start: usize, count: usize) -> String {
     out
 }
 
+// ---- editing a file (a file card's editor) ------------------------------------
+
+/// A file whole, to edit: {"text" (Windows line ends as \n), "crlf", "error"}.
+/// (Up to 20 MB: past that it's too big to edit here.)
+pub fn read_for_edit(path: &str) -> String {
+    const MAX: u64 = 20 << 20;
+    match std::fs::metadata(path) {
+        Ok(m) if m.len() > MAX => return json!({"error": format!("It's too big to edit here ({} MB; up to 20 MB).", m.len() >> 20)}).to_string(),
+        Err(e) => return json!({"error": e.to_string()}).to_string(),
+        _ => {}
+    }
+    match std::fs::read(path) {
+        Ok(b) => {
+            if b.contains(&0) {
+                return json!({"error": "It's a binary file."}).to_string();
+            }
+            let t = String::from_utf8_lossy(&b);
+            let crlf = t.contains("\r\n");
+            json!({"text": if crlf { t.replace("\r\n", "\n") } else { t.into_owned() }, "crlf": crlf}).to_string()
+        }
+        Err(e) => json!({"error": e.to_string()}).to_string(),
+    }
+}
+
+/// Write an edited file back, in place (its permissions, owner and links kept),
+/// with the line ends it had. "" when done, else what went wrong.
+pub fn save_edited(path: &str, text: &str, crlf: bool) -> String {
+    let body = if crlf { text.replace('\n', "\r\n") } else { text.to_string() };
+    match std::fs::OpenOptions::new().write(true).truncate(true).create(true).open(path) {
+        Ok(mut f) => {
+            use std::io::Write;
+            match f.write_all(body.as_bytes()).and_then(|_| f.flush()) {
+                Ok(()) => String::new(),
+                Err(e) => e.to_string(),
+            }
+        }
+        Err(e) => e.to_string(),
+    }
+}
+
 /// Whether a file reads as text: by its kind, else (no telling kind) its
 /// first bytes: no NULs, and UTF-8.
 fn is_text(p: &Path, kind: &str, size: u64) -> bool {
@@ -442,6 +482,22 @@ mod tests {
             v = serde_json::from_str(&super::line_index(&c)).unwrap();
         }
         assert_eq!(super::read_lines(&c, 0, 2), "a\nb");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+
+    #[test]
+    fn edits_keep_line_ends() {
+        let d = std::env::temp_dir().join(format!("tessera-edit-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("w.txt");
+        std::fs::write(&f, "a\r\nb\r\n").unwrap();
+        let p = f.to_string_lossy().to_string();
+        let v: serde_json::Value = serde_json::from_str(&super::read_for_edit(&p)).unwrap();
+        assert_eq!(v["text"], "a\nb\n");
+        assert_eq!(v["crlf"], true);
+        assert_eq!(super::save_edited(&p, "a\nc\n", true), "");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "a\r\nc\r\n");
         let _ = std::fs::remove_dir_all(d);
     }
 

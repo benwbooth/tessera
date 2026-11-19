@@ -1742,6 +1742,7 @@ ApplicationWindow {
             const spec = controller.testEnv("KEYS")
             const [target, list] = spec.split(":")
             if (target === "away") rootLayout.forceActiveFocus()   // (somewhere that doesn't keep Shift+Tab)
+            else if (target === "keep") {}                          // (wherever the keys are)
             else if (activePane) { if (target === "term") { activePane.preferEditor = false; activePane.view.forceActiveFocus() } else activePane.compose.focusEditor() }
             keys = list.split(",")
             keyStep.start()

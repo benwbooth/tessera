@@ -470,6 +470,7 @@ Item {
     NotebookView {
         id: notebook
         z: 15
+        editorKeys: pane.editorKeys
         shellName: pane.shellName
         anchors.fill: term
         visible: pane.viewMode === "notebook" && !term.fullScreen && !(pane.runningLong && !notebook.ownRun)

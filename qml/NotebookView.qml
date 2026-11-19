@@ -1032,6 +1032,20 @@ FocusScope {
     // (A pane's notebook's kernels stay, in tesserad, as long as its session:
     // the window closing doesn't end them. A file's go with it.)
     Component.onDestruction: { if (controller) { if (path === "" && dirty) keep(); if (path !== "") { controller.jupyterStop(key); stopLangKernels() } } }
+    property string editorKeys: "emacs"   // the input editor's (Emacs, VS Code, vi): file cards edit with them
+    property int saveAsCell: -1
+    FileDialog {
+        id: fileSaveDialog
+        title: "Save the file as"
+        fileMode: FileDialog.SaveFile
+        onAccepted: {
+            const p = decodeURIComponent(String(selectedFile).replace(/^file:\/\//, ""))
+            const i = nb.saveAsCell
+            const it = list.itemAtIndex(i)
+            // (The card's viewer does it: it has the text.)
+            if (it) for (let k = 0; k < it.children.length; ++k) { const c = it.children[k]; if (c.objectName === "cardBody" && c.viewer) c.viewer.saveAs(p) }
+        }
+    }
     FileDialog {
         id: saveDialog
         title: "Save as Jupyter Notebook"
@@ -1050,6 +1064,10 @@ FocusScope {
     Timer { interval: 16000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_END") !== ""; onTriggered: list.positionViewAtEnd() }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
+    // (Test hook: TESSERA_TEST_EDIT_FILE: the last card edited at 12 s, saved at 20 s.)
+    function lastViewer() { const it = list.itemAtIndex(cells.count - 1); if (it) for (let k = 0; k < it.children.length; ++k) { const c = it.children[k]; if (c.objectName === "cardBody") return c.viewer } return null }
+    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("EDIT_FILE") !== ""; onTriggered: { const v = nb.lastViewer(); if (v) v.startEdit() } }
+    Timer { interval: 20000; running: nb.controller !== null && nb.controller.testEnv("EDIT_FILE") !== ""; onTriggered: { const v = nb.lastViewer(); if (v) console.log("edit test: saved " + v.save() + " dirty " + v.dirty) } }
     // (Test hook: TESSERA_TEST_NB_SCROLL_TOP=<ms>: to the top then.)
     Timer { interval: Number(nb.controller ? nb.controller.testEnv("NB_SCROLL_TOP") || 0 : 0); running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_TOP") !== ""; onTriggered: { nb.sticking = false; list.positionViewAtBeginning() } }
     Timer { interval: 3000; running: nb.visible && nb.controller !== null && nb.controller.testEnv("NB_EXPORT") !== ""; onTriggered: nb.writeTo(nb.controller.testEnv("NB_EXPORT")) }
@@ -1437,6 +1455,48 @@ FocusScope {
                     color: Theme.textDim
                     font.pixelSize: 10
                 }
+                // (A file card, editing: save, save as, read again, done; ● unsaved.)
+                readonly property var fileView: cell.viewPath !== "" && loader.item && loader.item.editing !== undefined ? loader.item : null
+                Chip {
+                    visible: header.fileView !== null && !header.fileView.editing
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: "✎ Edit"
+                    tip: "Edit the file (your editor keys: " + nb.editorKeys + ")"
+                    onClicked: header.fileView.startEdit()
+                }
+                Chip {
+                    visible: header.fileView !== null && header.fileView.editing
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: (header.fileView && header.fileView.dirty ? "● " : "") + "Save"
+                    tip: "Save (Ctrl+S)"
+                    onClicked: header.fileView.save()
+                }
+                Chip {
+                    visible: header.fileView !== null && header.fileView.editing
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: "Save as…"
+                    onClicked: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = "file://" + cell.viewPath.replace(/\/[^\/]*$/, ""); fileSaveDialog.open() }
+                }
+                Chip {
+                    visible: header.fileView !== null && header.fileView.editing
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: "Reload"
+                    tip: header.fileView && header.fileView.dirty ? "Read it again (your changes go)" : "Read it again"
+                    onClicked: header.fileView.reload()
+                }
+                Chip {
+                    visible: header.fileView !== null && header.fileView.editing
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: "Done"
+                    tip: header.fileView && header.fileView.dirty ? "Save or Reload first: there are changes" : "Back to viewing"
+                    enabled: !(header.fileView && header.fileView.dirty)
+                    onClicked: header.fileView.stopEdit()
+                }
                 // (A file card: the language it's highlighted as, to change.)
                 Chip {
                     id: typeChip
@@ -1575,6 +1635,8 @@ FocusScope {
             }
             Item {
                 id: body
+                objectName: "cardBody"
+                readonly property var viewer: loader.item
                 visible: cell.hasOutput && !cell.hideOutput
                 anchors.top: editorBox.visible ? editorBox.bottom : header.bottom
                 anchors.topMargin: editorBox.visible ? 6 : 0
@@ -2082,6 +2144,9 @@ FocusScope {
             controller: nb.controller
             path: src.viewPath
             langOverride: src.viewLang
+            editorKeys: nb.editorKeys
+            // (Saved under another name: the card shows that file now.)
+            onSavedAs: (p) => { const i = nb.indexOf(src.cid); if (i >= 0) { cells.setProperty(i, "viewPath", p); cells.setProperty(i, "source", p); nb.touch() } }
             fontFamily: nb.fontFamily
             pointSize: nb.outputPointSize
             themeData: nb.themeData

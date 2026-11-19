@@ -532,6 +532,11 @@ pub mod ffi {
         /// A CSV/TSV file as a table (tables.rs): read in the background
         /// ({"columns", "numeric", "rows", "done"}), a page of it by a spec,
         /// and let go.
+        /// A file whole, to edit ({"text", "crlf", "error"}), and saved back.
+        #[qinvokable]
+        fn file_read_for_edit(self: &Controller, path: &QString) -> QString;
+        #[qinvokable]
+        fn file_save_edited(self: &Controller, path: &QString, text: &QString, crlf: bool) -> QString;
         #[qinvokable]
         fn table_open(self: &Controller, path: &QString) -> QString;
         #[qinvokable]
@@ -962,6 +967,14 @@ impl ffi::Controller {
         crate::client::release_kernel(&key);
         let (host, k) = crate::client::split_key(&key);
         let _ = crate::client::rpc(&host, "kernel.stop", serde_json::json!({"key": k}));
+    }
+
+    fn file_read_for_edit(&self, path: &ffi::QString) -> ffi::QString {
+        qs(&crate::files::read_for_edit(&local_path(path)))
+    }
+
+    fn file_save_edited(&self, path: &ffi::QString, text: &ffi::QString, crlf: bool) -> ffi::QString {
+        qs(&crate::files::save_edited(&local_path(path), &text.to_string(), crlf))
     }
 
     fn table_open(&self, path: &ffi::QString) -> ffi::QString {
