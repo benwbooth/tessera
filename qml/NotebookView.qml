@@ -61,6 +61,40 @@ FocusScope {
 
     // ---- kernel -------------------------------------------------------------------
     property var kernels: []            // [{name, display, language}]
+    // tessh's indentation (as in the pane's editor): the lines that take a
+    // block, and where an else, elif, except or finally goes.
+    readonly property var tesshBlocks: ["def", "class", "if", "elif", "else", "while", "for", "try", "except", "except*", "finally", "with", "match", "case", "defmacro", "quasi", "do", "async", "fn", "lambda"]
+    readonly property var tesshOpeners: ({ "if": ["elif", "else"], "elif": ["elif", "else"], "for": ["else"], "while": ["else"], "try": ["except", "finally"], "except": ["except", "else", "finally"], "else": ["finally"] })
+    function tesshHead(line) {
+        const w = line.trim().split(/\s+/)
+        let h = w[0] || ""
+        if (w.length > 2 && /^(=|\+=|-=)$/.test(w[1])) h = w[2]
+        if (h === "async" && w.length > 1) h = w[1]
+        return h
+    }
+    function tesshOpens(line) {
+        const t = line.trim(), w = t.split(/\s+/), h = tesshHead(line)
+        if (t === "" || t[0] === "#") return false
+        if (/[([{]$/.test(t)) return true
+        if ((h === "def" || h === "class") && w.indexOf("=") > 0) return false
+        if ((h === "fn" || h === "lambda") && w.length > 2) return false
+        if ((h === "quasi" || h === "do") && w.length > 1) return false
+        if (h === "if" && w.indexOf("then") > 0) return false
+        return tesshBlocks.indexOf(h) >= 0
+    }
+    function tesshAlign(above, word, ind) {
+        const lines = above.split("\n")
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const l = lines[i]
+            if (l.trim() === "") continue
+            const li = l.length - l.replace(/^ +/, "").length
+            if (li > ind) continue
+            const ok = tesshOpeners[tesshHead(l)]
+            if (ok && ok.indexOf(word) >= 0) return li
+            if (li < ind && li === 0) break
+        }
+        return ind
+    }
     property string kernelName: "tessera-shell"
     property string kernelState: ""     // "", starting, idle, busy, dead
     property string kernelMessage: ""
@@ -2054,12 +2088,22 @@ FocusScope {
             }
             property bool shiftRight: false
             property double shiftAt: 0
-            // A new line, indented like this one (more after a ":").
+            // A new line, indented like this one (more after a ":"; in tessh,
+            // after a block's head, and an else goes back to its if).
             function newline() {
+                if (lang === "tessh") {
+                    const s0 = edit.text.lastIndexOf("\n", edit.cursorPosition - 1) + 1
+                    const m = /^( +)(else|elif|except\*?|finally)\b/.exec(edit.text.slice(s0, edit.cursorPosition))
+                    if (m) {
+                        const want = nb.tesshAlign(edit.text.slice(0, Math.max(0, s0 - 1)), m[2], m[1].length)
+                        if (want < m[1].length) edit.remove(s0, s0 + m[1].length - want)
+                    }
+                }
                 const before = edit.text.slice(0, edit.cursorPosition)
                 const line = before.slice(before.lastIndexOf("\n") + 1)
                 let ind = indentOf(line)
                 if (lang === "python" && /:\s*$/.test(line)) ind += "    "
+                if (lang === "tessh" && nb.tesshOpens(line)) ind += "  "
                 edit.remove(edit.selectionStart, edit.selectionEnd)
                 edit.insert(edit.cursorPosition, "\n" + ind)
             }

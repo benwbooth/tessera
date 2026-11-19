@@ -12,7 +12,7 @@ path = "src/main.rs"
 # tesserad, the backend (shells, kernels, cells, Nix), is its own crate: no
 # Qt, so it builds static. `cargo build` here builds both.
 [workspace]
-members = [".", "tesserad", "tessh"]
+members = [".", "tesserad", "tessh", "tree-sitter-tessh"]
 default-members = [".", "tesserad"]
 
 [dependencies]
@@ -52,6 +52,7 @@ tree-sitter-python = "0.25.0"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-rust = "0.24.2"
 tree-sitter-sequel = "0.3.13"
+tree-sitter-tessh = { path = "tree-sitter-tessh" }
 tree-sitter-toml-ng = "0.7.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-yaml = "0.7.2"

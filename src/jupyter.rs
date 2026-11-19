@@ -415,6 +415,18 @@ pub fn specs() -> Vec<Spec> {
             }
         }
     }
+    // tessh, Tessera's shell language: the one next to Tessera (or on PATH),
+    // else from Tessera's flake.
+    if !out.iter().any(|s| s.name == "tessh") {
+        let argv = match crate::syntax::tessh_program() {
+            Some(p) => vec![p.to_string_lossy().to_string(), "--kernel".into(), "-f".into(), CF.into()],
+            None if on_path("nix") => ["nix", "shell", "--quiet", "github:benwbooth/tessera#tessh", "-c", "tessh", "--kernel", "-f", CF].map(String::from).to_vec(),
+            None => vec![],
+        };
+        if !argv.is_empty() {
+            out.push(Spec { name: "tessh".into(), display: "tessh".into(), language: "tessh".into(), argv, env: HashMap::new(), interrupt_message: false });
+        }
+    }
     *CACHE.lock().unwrap() = Some((Instant::now(), out.clone()));
     out
 }
@@ -487,7 +499,7 @@ pub fn write_apply(pid: u32, set: Vec<(String, String)>, unset: Vec<String>, cd:
     if let Some(d) = &cd {
         let _ = std::fs::write(dir.join(format!("{pid}.cwd")), d);
     }
-    if matches!(shell.as_str(), "nu" | "xonsh") {
+    if matches!(shell.as_str(), "nu" | "xonsh" | "tessh") {
         let mut a: Value = std::fs::read_to_string(&apply).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({"set": {}, "unset": []}));
         for (k, v) in &set {
             a["set"][k] = json!(v);
@@ -1259,6 +1271,13 @@ fn sync_code(language: &str, set: &[(&String, &String)], unset: &[&String], cd: 
             }
             out.push("del _tessera_os".into());
         }
+        "tessh" => {
+            // (Base64 JSON, applied by tessh's runtime: no quoting to get wrong.)
+            use base64::Engine;
+            let m: serde_json::Map<String, Value> = set.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+            let a = json!({"set": m, "unset": unset, "cd": cd});
+            out.push(format!("__tessh__.apply_env '{}'", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(a.to_string())));
+        }
         "r" => {
             for (k, v) in set {
                 out.push(format!("Sys.setenv({} = {})", js(k), js(v)));
@@ -1473,6 +1492,11 @@ fn look_at(k: &Arc<Kernel>, what: &str) -> Option<Box<dyn FnOnce() -> Option<(Ha
     let code = match k.spec.language.to_ascii_lowercase().as_str() {
         "bash" | "zsh" | "sh" => format!("command env -0 > {} 2>/dev/null; printf '%s' \"$PWD\" > {}", sh_quote(&e), sh_quote(&w)),
         "xonsh" => format!("import os as _t\nopen({e:?}, 'w').write(''.join(f'{{a}}={{b}}\\0' for a, b in _t.environ.items()))\nopen({w:?}, 'w').write(_t.getcwd())\ndel _t"),
+        "tessh" => {
+            use base64::Engine;
+            let b = |s: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s);
+            format!("__tessh__.dump_env '{}' '{}'", b(&e), b(&w))
+        }
         "powershell" => format!(
             "[IO.File]::WriteAllText({e:?}, ((Get-ChildItem env: | ForEach-Object {{ \"$($_.Name)=$($_.Value)`0\" }}) -join ''))\n[IO.File]::WriteAllText({w:?}, (Get-Location).Path)"
         ),

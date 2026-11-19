@@ -119,7 +119,7 @@ Item {
     property var commandHistory: []
     property var controller: null
     // REPLs the editor also serves (the shell needs its integration's prompt marks).
-    readonly property var replPrograms: ["python", "python3", "ipython", "bpython", "node", "deno", "bun"]
+    readonly property var replPrograms: ["python", "python3", "ipython", "bpython", "node", "deno", "bun", "tessh"]
     readonly property string replLang: {
         const j = pane.job.replace(/^.*\//, "")
         return replPrograms.some(r => j === r || j.startsWith("python")) && controller ? controller.languageFor(j) : ""

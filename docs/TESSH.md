@@ -50,7 +50,8 @@ Spaces separate words. Brackets `( ) [ ] { }` and quotes always end a word.
 
 | Written | Means |
 |---|---|
-| `hello`, `-la`, `*.py`, `foo.txt`, `g++` | a **bareword**. In argument position it's the string `"hello"` |
+| `hello`, `-a`, `--all`, `--color=auto`, `*.py`, `foo.txt`, `g++` | a **bareword**. In argument position it's the string `"hello"` |
+| `/`, `/etc/hosts`, `.`, `..`, `./run.sh`, `../x`, `~/src` | paths are barewords too |
 | `42`, `-7`, `0x1f`, `1_000`, `2.5e3`, `3j` | a number (anything Python reads as a number literal) |
 | `"text $name $(expr) ${expr:fmt}"` | a string with interpolation and the usual `\n \t \\ \" \$` escapes |
 | `'text'` | a raw string: no escapes, no interpolation |
@@ -62,7 +63,7 @@ Spaces separate words. Brackets `( ) [ ] { }` and quotes always end a word.
 | `True` `False` `None` | Python's constants |
 | `name=value` | a keyword argument (when `name` is an identifier and the `=` is glued) |
 | `*$xs`, `**$kw` | splat arguments into a call |
-| `^name` | run the program `name` even when a Python name `name` exists |
+| `\name` | run the program `name` even when a Python function `name` exists (`\cat` is the program, not a `cat` you defined) |
 | `~`, `~/x` | your home folder (at the start of a word) |
 | `:name` | a symbol literal (for macros) |
 | `:(form)` | a quasiquoted form (for macros, see §7) |
@@ -96,6 +97,11 @@ is `subprocess.run [ls -la] check=True`.
 
 - A line alone with one bareword is a call or a command: `ls`, `pwd`, `exit`.
   Any other single item on a line is its value: `$x`, `42`, `(f $y)`.
+- An indented line that is an argument and has one item is that item (so a
+  bareword there is a word, `-it`, not a command); with several items it is a
+  form.
+- Commas separate only when a space, a closing bracket or the end follows them:
+  `[1, 2]` is a list, but `cut -f1,3` passes `-f1,3`.
 - `elif`, `else`, `except` and `finally` lines continue the `if`, `for`,
   `while` or `try` above them at the same indentation.
 - Lines continue inside open brackets and after a trailing `\`.
@@ -181,10 +187,10 @@ From the loosest binding to the tightest:
 
 | Operators | Notes |
 |---|---|
-| `\|` | pipe (§6) |
 | `\|\|` `or` | short-circuit or |
 | `&&` `and` | short-circuit and |
-| `not` | prefix |
+| `not` `!` | prefix |
+| `\|` | pipe (§6); as in a shell, `a \| b && c` is `(a \| b) && c` |
 | `==` `!=` `<` `>` `<=` `>=` `in` `not in` `is` `is not` | comparisons, chained as in Python (`1 < $x < 5`) |
 | `` `f` `` and user-defined symbolic operators | left associative by default (§8) |
 | `^` `&` | bitwise xor and and (bitwise or: `\|` with a value on its right, §6) |
@@ -243,8 +249,9 @@ else
 finally
   …
 match $cmd                   # case patterns: literals, names, _, [a b *rest],
-  case [go dir]              # {key: p}, Class a b / Class x=p, p | q, p as n,
-    print $dir               # and guards: case [n] if $n > 0
+  case [go $dir]             # barewords match strings, $name captures; also
+    print $dir               # {key: p}, (Class p) / Class x=p, Mod.CONST, p | q,
+                             # p as $n, [a *$rest], guards: case [$n] if $n > 0
   case _
     print "?"
 
@@ -257,6 +264,10 @@ import os sys ; import numpy as np ; from os.path import join exists
 do                           # several forms as one; value of the last
   …
 ```
+
+Where Python expects a class or a name (the type after `except`, class bases,
+`import`, `global`, decorators) a bareword is the name. Elsewhere a bareword is
+a string, so pass a class as a value with `$`: `isinstance $x $int`.
 
 Comprehensions are written as in Python, inside brackets:
 `[$x * 2 for x in $xs if $x > 1]`, `{$k: $v for [k v] in $pairs}`,
@@ -330,10 +341,17 @@ unless ($x > 3)
   it, `~x` inserts a value, `~(expr)` inserts an expression's value, `~@xs`
   splices a list, and `$~x` makes a variable reference from the symbol in `x`. A macro-time `int`, `str` and so on becomes a literal.
 - `quote form` and `:name` give a form without evaluating it.
-- Forms are `tessh.forms` objects: `Sym`, `Var`, `Op`, `Str`, `Num`, `Word`,
-  `Group` (`()`, `[]`, `{}`) and `Line`. The helper `var sym` makes `$sym`,
-  `sym "text"` makes a symbol, and `capture name` makes a symbol in the
-  *user's* context (on purpose unhygienic, for anaphoric macros).
+- Macros get forms as `Form` objects. `$f.kind` is the form's kind: `Sym`,
+  `Var`, `Num`, `Str`, `IStr`, `Word`, `Op`, `Group`, `Line`, `Attr`, `Index`,
+  `KwArg`, `Splat` and the like. The fields are `name`, `items` (and indexing,
+  `len`), `children`, `value`, `inner` (the form inside a `$`, `~` or `.attr`),
+  `op` and `bracket`. `str form` shows a form as tessh. The constructors are
+  `Sym`, `Var`, `Line`, `Group`, `Op`, `Attr`, `KwArg` and `Splat` in
+  `__tessh_forms__`. Plain values a macro returns (numbers, strings, lists,
+  dicts) become literals.
+- The helper `var sym` makes `$sym`, `sym "text"` makes a symbol, and
+  `capture name` makes a symbol in the *user's* context (on purpose
+  unhygienic, for anaphoric macros).
 - `gensym "hint"` gives a fresh symbol, though hygiene makes it rarely needed.
 - `macroexpand form` shows an expansion.
 
@@ -355,7 +373,9 @@ defop <> 6 left concat           # a symbolic operator: precedence, associativit
 print ([1] <> [2] <> [3])
 ```
 
-Precedence levels run from 1 (`|`) to 13 (`**`); backtick operators sit at 6.
+Precedence levels run from 1 (`||`) to 13 (`**`): 1 `||`, 2 `&&`, 3 `not`, 4 `|`, 5
+comparisons, 6 backtick and custom, 7 `^`, 8 `&`, 9 shifts, 10 `+ -`, 11 `* /`,
+12 prefix, 13 `**`.
 Associativity is `left`, `right` or `none`.
 
 ## 9. Environment, folders and jobs
@@ -391,9 +411,14 @@ and tessh warns when it isn't met.
 
 ## 11. Running it
 
-- `tessh` starts the REPL. A line runs as soon as it's complete. A line whose
-  head takes a block (`def`, `if`, `for`, …, or a macro) keeps reading until a
-  blank line. The REPL emits shell-integration marks: OSC 133 for prompts and
+- `tessh` starts the REPL. A line runs as soon as it's complete, and open
+  brackets or strings run on to the next line. A line whose head takes a block
+  (`def`, `if`, `for`, `x = if …`, or a macro) indents the next line and keeps
+  reading until a blank line. Enter keeps the indentation. An `else`, `elif`,
+  `except` or `finally` typed deeper than its `if` or `try` moves back to it
+  on Enter, and Enter again goes on. Backspace in the leading spaces removes
+  a level, and Alt+Enter is a new line whatever the input. Input is
+  highlighted as it's typed, and Tab completes names, programs and paths. The REPL emits shell-integration marks: OSC 133 for prompts and
   commands, OSC 7 for the folder, and Tessera's command line and environment
   files. Folder and exports handed over from Tessera's other kernels are
   applied before each prompt.
@@ -403,8 +428,17 @@ and tessh warns when it isn't met.
   definitions. It prints `line:col: message` per problem and exits 1 if there
   are any. `--check --json` prints `[{"line", "col", "end_col", "message"}]`.
 - `tessh --py file.tsh` prints the Python it compiles to.
-- `python -m tessh.kernel -f conn.json` is the Jupyter kernel (kernelspec
-  `tessh`). In Tessera it's in the input editor's language list as **tessh**.
+- `tessh --kernel -f conn.json` is the Jupyter kernel. In Tessera it's the
+  **tessh** kernel: a notebook's language, or a language picked in the input
+  editor. Folders and exported variables go between it and the pane's shell
+  as they do with the other kernels. Output, its own and that of the programs
+  it runs, shows as it comes. Values show with their rich representations:
+  `_repr_html_`, images, `_repr_mimebundle_`, and matplotlib figures as PNGs.
+  `display x` shows a value partway through a cell, and `input` asks the
+  notebook.
+- Errors point at tessh lines. The compiler gives every Python node its tessh
+  line and column, so Python's tracebacks show the tessh source with carets
+  under the right columns, in a script, at the REPL or in a cell.
 
 ## 12. Grammar summary
 
@@ -413,15 +447,28 @@ file      := line*
 line      := INDENT? item* ('#' comment)? NEWLINE  (children: more-indented lines)
 item      := term | OP | REDIR
 term      := atom postfix*
-atom      := NUMBER | STRING | WORD | '$' NAME | '$?' | '^' WORD | ':' NAME
+atom      := NUMBER | STRING | WORD | '$' NAME | '$?' | '\' WORD | ':' NAME
            | ':(' form ')' | '`' NAME '`' | NAME '=' term | '*' term | '**' term
            | '(' items ')' | '[' items ']' | '{' items '}'
 postfix   := '.' NAME | '[' items ']'          (glued, after a variable or bracket)
 WORD      := (wordchar | '$' NAME | '${' expr '}' | '$(' form ')')+
 ```
 
-The reader (`tessh/reader.py`) is built with the parsy parser-combinator
-library: one parser for the characters of a line's items, and one for the
-layout, which runs over the list of lines and makes blocks from their
-indentation. The tree-sitter grammar (`tree-sitter-tessh/`) is the same
-language, made flat for highlighting.
+## 13. Implementation
+
+tessh is a Rust program (`tessh/`) that embeds Python with PyO3:
+
+- `reader.rs`: the grammar, written with chumsky (a Rust parser-combinator
+  library). It reads logical lines: indentation, then items, with groups and
+  strings that may span lines and `${…}` read on their own. Blocks are made
+  from the lines' indentation.
+- `compiler.rs`: forms to Python's AST, built as Python `ast` objects with
+  tessh positions, then compiled and run one top-level form at a time.
+- `pyforms.rs`: forms as Python objects for macros, and quasi templates.
+- `runtime.rs`: the `__tessh__` module: commands, pipes, redirections, job
+  control, globs, the environment and the builtins.
+- `repl.rs` (rustyline) and `kernel.rs` (the Jupyter protocol on zeromq).
+
+`tree-sitter-tessh/` is the same language made flat, for highlighting and
+syntax errors in Tessera's editors. Tessera runs `tessh --check --json` when
+typing pauses, for what the flat grammar can't see.

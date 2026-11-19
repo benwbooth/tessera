@@ -64,7 +64,7 @@ pub fn shell_name(pid: u32) -> String {
 }
 
 pub fn is_shell(name: &str) -> bool {
-    matches!(name, "bash" | "zsh" | "fish" | "nu" | "xonsh" | "pwsh" | "sh" | "dash" | "ksh" | "mksh" | "tcsh" | "csh" | "elvish")
+    matches!(name, "bash" | "zsh" | "fish" | "nu" | "xonsh" | "pwsh" | "sh" | "dash" | "ksh" | "mksh" | "tcsh" | "csh" | "elvish" | "tessh")
 }
 
 fn parent(pid: u32) -> u32 {

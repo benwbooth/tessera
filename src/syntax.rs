@@ -33,6 +33,7 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("html", "HTML"),
     ("css", "CSS"),
     ("markdown", "Markdown"),
+    ("tessh", "tessh"),
 ];
 
 fn make(name: &str) -> Option<Lang> {
@@ -59,6 +60,7 @@ fn make(name: &str) -> Option<Lang> {
         "html" => (tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.into()),
         "css" => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.into()),
         "markdown" => (tree_sitter_md::LANGUAGE.into(), tree_sitter_md::HIGHLIGHT_QUERY_BLOCK.into()),
+        "tessh" => (tree_sitter_tessh::LANGUAGE.into(), tree_sitter_tessh::HIGHLIGHTS_QUERY.into()),
         // Anything else: Helix's grammar for it, if there is one.
         other => (crate::grammars::load(other)?, crate::grammars::highlights(other)),
     };
@@ -106,6 +108,8 @@ pub fn language_for(program: &str) -> &'static str {
         "rust"
     } else if matches!(p, "gore" | "yaegi") {
         "go"
+    } else if p == "tessh" {
+        "tessh"
     } else if p == "cling" {
         "cpp"
     } else if matches!(p, "jshell") {
@@ -316,6 +320,9 @@ pub fn has_errors(lang_name: &str, text: &str) -> bool {
 /// [[start, length, message]] in UTF-16 units; [] when it parses (or the
 /// shell isn't there).
 pub fn shell_check(shell: &str, text: &str) -> String {
+    if shell.rsplit('/').next() == Some("tessh") {
+        return tessh_check(text);
+    }
     let sh = match shell.rsplit('/').next().unwrap_or(shell) {
         s @ ("zsh" | "bash" | "fish" | "sh" | "dash" | "ksh") => s.to_string(),
         _ => "bash".to_string(),
@@ -360,6 +367,53 @@ pub fn shell_check(shell: &str, text: &str) -> String {
         found.push(serde_json::json!([starts.get(i).copied().unwrap_or(0), lines.get(i).map(|l| l.encode_utf16().count()).unwrap_or(0).max(1), msg]));
     }
     serde_json::Value::Array(found).to_string()
+}
+
+/// tessh's own check (`tessh --check --json`): the reader, the compiler and
+/// macros, so it finds what the flat tree-sitter grammar can't (indentation,
+/// a misplaced else, a bad parameter). [[start, length, message]] in UTF-16.
+pub fn tessh_check(text: &str) -> String {
+    let Some(prog) = tessh_program() else { return "[]".into() };
+    let out = std::process::Command::new(prog)
+        .args(["--check", "--json"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut c| {
+            use std::io::Write;
+            if let Some(mut i) = c.stdin.take() {
+                let _ = i.write_all(text.as_bytes());
+            }
+            c.wait_with_output()
+        });
+    let Ok(out) = out else { return "[]".into() };
+    let Ok(v) = serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout) else { return "[]".into() };
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut found = Vec::new();
+    for e in v {
+        let line = e["line"].as_u64().unwrap_or(1).max(1) as usize;
+        let (col, end) = (e["col"].as_u64().unwrap_or(0) as usize, e["end_col"].as_u64().unwrap_or(0) as usize);
+        // (Columns in characters: to UTF-16 units from the line's start.)
+        let start: usize = lines.iter().take(line - 1).map(|l| l.encode_utf16().count() + 1).sum();
+        let l = lines.get(line - 1).copied().unwrap_or("");
+        let u16_at = |c: usize| l.chars().take(c).map(char::len_utf16).sum::<usize>();
+        let (a, b) = (u16_at(col), u16_at(end.max(col + 1)));
+        found.push(serde_json::json!([start + a, (b - a).max(1), e["message"]]));
+    }
+    serde_json::Value::Array(found).to_string()
+}
+
+/// The tessh program: next to Tessera's own, else on PATH.
+pub fn tessh_program() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    for p in [dir.join("tessh"), dir.join("../libexec/tessera/tessh")] {
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("tessh")).find(|f| f.is_file()))
 }
 
 #[cfg(test)]

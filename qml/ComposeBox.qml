@@ -228,13 +228,55 @@ Rectangle {
         while (i < edit.text.length && (edit.text[i] === " " || edit.text[i] === "\t")) i++
         return edit.text.substring(a, i)
     }
+    // tessh: the lines that take an indented block (def, if, for, a block
+    // after x = if …), and where an else, elif, except or finally goes: back
+    // to its if or try.
+    readonly property var tesshBlocks: ["def", "class", "if", "elif", "else", "while", "for", "try", "except", "except*", "finally", "with", "match", "case", "defmacro", "quasi", "do", "async", "fn", "lambda"]
+    readonly property var tesshOpeners: ({ "if": ["elif", "else"], "elif": ["elif", "else"], "for": ["else"], "while": ["else"], "try": ["except", "finally"], "except": ["except", "else", "finally"], "else": ["finally"] })
+    function tesshHead(line) {
+        const w = line.trim().split(/\s+/)
+        let h = w[0] || ""
+        if (w.length > 2 && /^(=|\+=|-=)$/.test(w[1])) h = w[2]
+        if (h === "async" && w.length > 1) h = w[1]
+        return h
+    }
+    function tesshOpens(line) {
+        const t = line.trim(), w = t.split(/\s+/), h = tesshHead(line)
+        if (t === "" || t[0] === "#") return false
+        if (/[([{]$/.test(t)) return true
+        if ((h === "def" || h === "class") && w.indexOf("=") > 0) return false
+        if ((h === "fn" || h === "lambda") && w.length > 2) return false
+        if ((h === "quasi" || h === "do") && w.length > 1) return false
+        if (h === "if" && w.indexOf("then") > 0) return false
+        return tesshBlocks.indexOf(h) >= 0
+    }
+    // The indentation an else (elif, except, finally) at `ind` belongs at,
+    // from the lines above (or ind when there's no if or try for it).
+    function tesshAlign(above, word, ind) {
+        const lines = above.split("\n")
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const l = lines[i]
+            if (l.trim() === "") continue
+            const li = l.length - l.replace(/^ +/, "").length
+            if (li > ind) continue
+            const ok = tesshOpeners[tesshHead(l)]
+            if (ok && ok.indexOf(word) >= 0) return li
+            if (li < ind && li === 0) break
+        }
+        return ind
+    }
     // A new line keeping the indentation, one deeper after an opener
     // (do, then, {, (, :, ...); between a bracket pair the closer moves down.
     function newline() {
-        const p = edit.cursorPosition
+        let p = edit.cursorPosition
+        if (lang === "tessh") {
+            tesshOutdent()
+            p = edit.cursorPosition
+        }
         const before = edit.text.substring(lineStart(p), p).replace(/\s+$/, "")
         let ind = indentOf(p)
         const opens = lang === "python" ? /[:([{]$/.test(before)
+                    : lang === "tessh" ? tesshOpens(before)
                     : /(\b(do|then|else|in)|[{(\[]|\|\||&&|\||\\)$/.test(before)
         const deeper = opens ? ind + indentUnit : ind
         const next = edit.text[p]
@@ -245,10 +287,24 @@ Rectangle {
         }
         insert("\n" + deeper)
     }
+    // tessh: an else (elif, except, finally) first on its line goes back to
+    // its if or try.
+    function tesshOutdent() {
+        const p = edit.cursorPosition, a = lineStart(p)
+        const m = /^( +)(else|elif|except\*?|finally)\b/.exec(edit.text.substring(a, lineEnd(p)))
+        if (!m) return
+        const want = tesshAlign(edit.text.substring(0, Math.max(0, a - 1)), m[2], m[1].length)
+        if (want < m[1].length) edit.remove(a, a + m[1].length - want)
+    }
     // Typing a closing word or bracket as the first thing on a line moves the
     // line back out a level.
     function maybeOutdent() {
         if (lang === "python") return
+        if (lang === "tessh") {
+            const p = edit.cursorPosition
+            if (/^ +(else|elif|except|finally)$/.test(edit.text.substring(lineStart(p), p))) tesshOutdent()
+            return
+        }
         const p = edit.cursorPosition, a = lineStart(p)
         const line = edit.text.substring(a, p)
         if (!/^\s+(done|fi|esac|else|elif|\}|\))$/.test(line)) return
@@ -1254,6 +1310,11 @@ Rectangle {
         if (box.lang === "bash") {
             r.errors = []
             if (withErrors && edit.text.trim() !== "") { try { r.errors = JSON.parse(controller.shellSyntax(box.shellName, edit.text)) } catch (e) {} }
+        }
+        // (tessh: its own check too, `tessh --check`, when typing pauses:
+        // indentation, a misplaced else, macros.)
+        if (box.lang === "tessh" && withErrors && edit.text.trim() !== "") {
+            try { r.errors = r.errors.concat(JSON.parse(controller.shellSyntax("tessh", edit.text))) } catch (e) {}
         }
         if (!withErrors) r.errors = []
         problem = r.errors.length > 0 ? r.errors[0][2] : ""

@@ -55,6 +55,7 @@ fn runners(lang: &str) -> &'static [Runner] {
         "powershell" => &[r!("pwsh", "pwsh -c", Inline, "powershell")],
         "fish" => &[r!("fish", "fish -c", Inline, "fish")],
         "nu" => &[r!("nu", "nu -c", Inline, "nushell")],
+        "tessh" => &[r!("tessh", "tessh -c", Inline, "")],
         "tcl" => &[r!("tclsh", "tclsh", Stdin, "tcl")],
         "awk" => &[r!("awk", "awk", Inline, "gawk")],
         "jq" => &[r!("jq", "jq -n", Inline, "jq")],
@@ -179,7 +180,7 @@ pub fn normalize(name: &str) -> String {
 /// Every language a snippet runs in (runners' own names, not their aliases),
 /// for the notebook's picker: each with its name to show.
 const RUN_LANGS: &[&str] = &[
-    "python", "javascript", "typescript", "ruby", "perl", "lua", "php", "r", "julia", "elixir", "erlang", "groovy",
+    "tessh", "python", "javascript", "typescript", "ruby", "perl", "lua", "php", "r", "julia", "elixir", "erlang", "groovy",
     "tcl", "awk", "jq", "nix", "octave", "sql", "rust", "go", "c", "cpp", "java", "kotlin", "scala", "clojure",
     "haskell", "ocaml", "racket", "scheme", "common-lisp", "dart", "swift", "zig", "nim", "crystal", "d", "v", "fsharp",
     "c-sharp", "prolog", "fortran", "fennel", "forth", "hare", "janet", "koka", "lean", "luau", "odin", "pascal",
