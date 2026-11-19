@@ -66,7 +66,9 @@ Item {
     // ---- editing: the whole file in an editor, the input editor's keys ------
     property string editorKeys: "emacs"
     property bool editing: false
+    readonly property bool viNormal: ek.viNormal
     property bool dirty: false
+    property string savedText: ""       // (what's in the file: changed from it is unsaved)
     property bool crlf: false
     property string editError: ""
     signal savedAs(string path)
@@ -75,7 +77,8 @@ Item {
         let r = {}
         try { r = JSON.parse(controller.fileReadForEdit(path)) } catch (e) {}
         if (r.error) { editError = r.error; return false }
-        editor.text = r.text || ""
+        savedText = r.text || ""
+        editor.text = savedText
         crlf = !!r.crlf
         dirty = false
         ek.viNormal = editorKeys === "vi"
@@ -89,7 +92,7 @@ Item {
         if (!editing) return true
         const err = controller.fileSaveEdited(path, editor.text, crlf)
         editError = err
-        if (err === "") { dirty = false; rev++ }
+        if (err === "") { savedText = editor.text; dirty = false; rev++ }
         return err === ""
     }
     function saveAs(p) {
@@ -97,6 +100,7 @@ Item {
         const err = controller.fileSaveEdited(p, editor.text, crlf)
         editError = err
         if (err !== "") return false
+        savedText = editor.text
         dirty = false
         savedAs(p)
         return true
@@ -264,19 +268,33 @@ Item {
             font.pointSize: fv.pointSize
             tabStopDistance: 4 * fm.advanceWidth(" ")
             renderType: Text.NativeRendering
-            onTextChanged: if (fv.editing) { fv.dirty = true; edHlTimer.restart() }
+            onTextChanged: if (fv.editing) { fv.dirty = text !== fv.savedText; edHlTimer.restart() }
             onCursorRectangleChanged: editFlick.ensureVisible(cursorRectangle)
             // (Ctrl+S saves; the rest is the input editor's keys.)
             Keys.onPressed: (e) => {
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_S) { fv.save(); e.accepted = true; return }
                 e.accepted = ek.handle(e)
             }
-            // A block cursor in vi's normal mode, a bar otherwise.
+            // A block cursor, as the input editor's: the letter under it in
+            // the background color (a hollow box when it isn't typing; a little
+            // lighter in vi's insert mode).
             cursorDelegate: Rectangle {
-                width: ek.keys === "vi" && ek.viNormal ? Math.max(2, fm.advanceWidth("m")) : 2
+                id: cur
+                readonly property string under: { const c = editor.text[editor.cursorPosition]; return c === undefined || c === "\n" || c === "\u2029" ? "" : c }
+                width: Math.max(2, fm.advanceWidth(under !== "" ? under : " "))
                 height: fm.height
-                color: Theme.accent
-                opacity: ek.keys === "vi" && ek.viNormal ? 0.55 : 1
+                color: editor.activeFocus ? Theme.text : "transparent"
+                border.width: editor.activeFocus ? 0 : 1
+                border.color: Theme.text
+                opacity: ek.keys === "vi" && !ek.viNormal && editor.activeFocus ? 0.85 : 1
+                Text {
+                    anchors.fill: parent
+                    text: cur.under
+                    font: editor.font
+                    color: Theme.bg
+                    renderType: Text.NativeRendering
+                    visible: editor.activeFocus
+                }
             }
         }
     }
@@ -312,7 +330,7 @@ Item {
     }
     // vi's mode, and what went wrong saving.
     Text {
-        visible: fv.editing && (fv.editError !== "" || ek.keys === "vi")
+        visible: fv.editing && fv.editError !== ""
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 6

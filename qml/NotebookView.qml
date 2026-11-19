@@ -1040,6 +1040,7 @@ FocusScope {
     // the window closing doesn't end them. A file's go with it.)
     Component.onDestruction: { if (controller) { if (path === "" && dirty) keep(); if (path !== "") { controller.jupyterStop(key); stopLangKernels() } } }
     property string editorKeys: "emacs"   // the input editor's (Emacs, VS Code, vi): file cards edit with them
+    signal editorKeysPicked(string keys)  // (picked on a file card: for the input editor too)
     property int saveAsCell: -1
     FileDialog {
         id: fileSaveDialog
@@ -1454,7 +1455,7 @@ FocusScope {
                     font.underline: srcHover.hovered && !cell.editing
                     renderType: Text.NativeRendering
                     HoverHandler { id: srcHover; cursorShape: Qt.IBeamCursor }
-                    TapHandler { onTapped: nb.focusCell(cell.index, true) }
+                    TapHandler { onTapped: if (cell.viewPath === "") nb.focusCell(cell.index, true) }
                 }
                 // (The folder it ran in, always, whole unless there's no room.)
                 Text { topPadding: 0.001; visible: cell.cwd !== ""; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: Math.max(120, header.width * 0.4) }
@@ -1475,37 +1476,24 @@ FocusScope {
                     tip: "Edit the file (your editor keys: " + nb.editorKeys + ")"
                     onClicked: header.fileView.startEdit()
                 }
+                // (Editing: the keys it edits with, in sight (vi's mode too), ●
+                // when there are changes; a click picks other keys. Saving and
+                // the rest are in the ⋯ menu.)
                 Chip {
+                    id: keysChip
                     visible: header.fileView !== null && header.fileView.editing
                     base: cell.color
                     Layout.minimumWidth: implicitWidth
-                    label: (header.fileView && header.fileView.dirty ? "● " : "") + "Save"
-                    tip: "Save (Ctrl+S)"
-                    onClicked: header.fileView.save()
+                    label: (header.fileView && header.fileView.dirty ? "● " : "") + ({ emacs: "Emacs", vscode: "VS Code", vi: "vi" })[nb.editorKeys]
+                           + (nb.editorKeys === "vi" && header.fileView ? (header.fileView.viNormal ? " · NORMAL" : " · INSERT") : "") + " ▾"
+                    tip: "Editing keys (" + (header.fileView && header.fileView.dirty ? "unsaved changes; " : "") + "save from ⋯)"
+                    onClicked: keysMenu.popup(keysChip, 0, keysChip.height + 2)
                 }
-                Chip {
-                    visible: header.fileView !== null && header.fileView.editing
-                    base: cell.color
-                    Layout.minimumWidth: implicitWidth
-                    label: "Save as…"
-                    onClicked: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = "file://" + cell.viewPath.replace(/\/[^\/]*$/, ""); fileSaveDialog.open() }
-                }
-                Chip {
-                    visible: header.fileView !== null && header.fileView.editing
-                    base: cell.color
-                    Layout.minimumWidth: implicitWidth
-                    label: "Reload"
-                    tip: header.fileView && header.fileView.dirty ? "Read it again (your changes go)" : "Read it again"
-                    onClicked: header.fileView.reload()
-                }
-                Chip {
-                    visible: header.fileView !== null && header.fileView.editing
-                    base: cell.color
-                    Layout.minimumWidth: implicitWidth
-                    label: "Done"
-                    tip: header.fileView && header.fileView.dirty ? "Save or Reload first: there are changes" : "Back to viewing"
-                    enabled: !(header.fileView && header.fileView.dirty)
-                    onClicked: header.fileView.stopEdit()
+                SlimMenu {
+                    id: keysMenu
+                    SlimMenuItem { text: "Emacs"; checkable: true; checked: nb.editorKeys === "emacs"; onTriggered: nb.editorKeysPicked("emacs") }
+                    SlimMenuItem { text: "VS Code"; checkable: true; checked: nb.editorKeys === "vscode"; onTriggered: nb.editorKeysPicked("vscode") }
+                    SlimMenuItem { text: "vi"; checkable: true; checked: nb.editorKeys === "vi"; onTriggered: nb.editorKeysPicked("vi") }
                 }
                 // (A file card: the language it's highlighted as, to change.)
                 Chip {
@@ -1570,9 +1558,16 @@ FocusScope {
             }
             SlimMenu {
                 id: moreMenu
-                SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; onTriggered: nb.focusCell(cell.index, true) }
-                SlimMenuItem { text: "Run the cells above"; visible: cell.code; onTriggered: nb.runAbove(cell.index) }
-                SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
+                // (A file card: the file's own; a cell: its code.)
+                SlimMenuItem { text: "Edit the file"; visible: header.fileView !== null && !header.fileView.editing; onTriggered: header.fileView.startEdit() }
+                SlimMenuItem { text: "Save\tCtrl+S"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.save() }
+                SlimMenuItem { text: "Save as…"; visible: header.fileView !== null && header.fileView.editing
+                               onTriggered: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = "file://" + cell.viewPath.replace(/\/[^\/]*$/, ""); fileSaveDialog.open() } }
+                SlimMenuItem { text: "Discard changes"; visible: header.fileView !== null && header.fileView.editing; enabled: header.fileView !== null && header.fileView.dirty; onTriggered: header.fileView.reload() }
+                SlimMenuItem { text: header.fileView && header.fileView.dirty ? "Done, discarding the changes" : "Done editing"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.stopEdit() }
+                SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
+                SlimMenuItem { text: "Run the cells above"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.runAbove(cell.index) }
+                SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; visible: cell.viewPath === ""; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
                 SlimMenuItem { text: cell.hideOutput ? "Show the output" : "Hide the output"; visible: cell.hasOutput; onTriggered: { cells.setProperty(cell.index, "hideOutput", !cell.hideOutput); nb.touch() } }
                 SlimMenuItem { text: "Move up"; enabled: cell.index > 0; onTriggered: nb.moveCell(cell.index, -1) }
                 SlimMenuItem { text: "Move down"; enabled: cell.index < cells.count - 1; onTriggered: nb.moveCell(cell.index, 1) }
