@@ -120,6 +120,51 @@ and paging, streaming so a file of any size opens at once. In the card:
 A remote pane's files are read, edited and saved on that host, through its
 tesserad.
 
+## tessh
+
+tessh is Tessera's own shell language. You write it like a shell, and underneath
+it is Python: every line compiles to Python, so the whole language and every
+Python package work in it. Indentation gives it structure, like a Lisp whose
+lines take the place of parentheses. It has Python's infix operators, the shell
+operators (`|`, `&&`, `||`, `>`, `2>&1`, `&`), and hygienic macros.
+
+```tessh
+ls -la ~/src | grep tessera          # a name that isn't Python's runs a program
+name = world
+print hello $name                    # barewords are strings, $ is a variable
+
+def fib n
+  if $n < 2
+    $n                               # the last form is the value (implicit return)
+  else
+    fib ($n - 1) + fib ($n - 2)      # calls bind tighter than operators
+
+branch = git rev-parse --abbrev-ref HEAD    # output captured as a string
+if git diff --quiet
+  print clean
+
+defmacro unless cond:expr *body
+  quasi
+    if (not ~cond)
+      ~@body
+```
+
+- It runs in a pane (`tessh`, a REPL with auto-indent, highlighting and
+  completion), as scripts (`tessh file.tsh`, `#!/usr/bin/env tessh`), and as
+  a notebook kernel (**tessh** in the kernel or language list). The folder and
+  exported variables go between it and the pane's shell as with the other
+  kernels.
+- The input editor highlights tessh and checks it as you type (`tessh
+  --check`). Enter indents after `def`, `if` and the like, and an `else` goes
+  back to its `if`.
+- Python's tracebacks point at tessh lines. `tessh --py file.tsh` shows the
+  Python it compiles to.
+- A `# /// script` block (PEP 723) names PyPI packages, and uv installs them.
+- `\cat` runs the program even when a Python `cat` exists.
+
+The language is described in [docs/TESSH.md](docs/TESSH.md). tessh is built with
+Tessera (`nix run github:benwbooth/tessera#tessh` on its own).
+
 ## tesserad
 
 `tesserad` is Tessera's backend, like tmux's server: it owns every shell,

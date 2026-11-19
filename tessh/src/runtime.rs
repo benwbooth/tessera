@@ -522,6 +522,16 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
         if job_control || bg {
             command.process_group(pgid);
         }
+        // (What tessh ignores, Ctrl+Z, Ctrl+C at the prompt, SIGPIPE, the
+        // program mustn't: ignored signals carry across exec.)
+        unsafe {
+            command.pre_exec(|| {
+                for s in [libc::SIGTSTP, libc::SIGTTOU, libc::SIGTTIN, libc::SIGINT, libc::SIGQUIT, libc::SIGPIPE, libc::SIGXFSZ] {
+                    libc::signal(s, libc::SIG_DFL);
+                }
+                Ok(())
+            });
+        }
         drop(out);
         match command.spawn() {
             Ok(mut ch) => {

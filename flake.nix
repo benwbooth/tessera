@@ -77,13 +77,40 @@
               platforms = pkgs.lib.platforms.linux;
             };
           };
+          # tessh, Tessera's shell language: a Rust program that embeds Python
+          # (PyO3), with the packages the Nix Python kernel has.
+          tesshPython = pkgs.python3;
+          tesshPackages = pkgs.python3.withPackages (p: with p; [ numpy pandas matplotlib ]);
+          tesshWrap = bin: ''
+            wrapProgram ${bin} \
+              --prefix PYTHONPATH : ${tesshPackages}/${tesshPython.sitePackages} \
+              --suffix PATH : ${pkgs.uv}/bin
+          '';
+          tessh = pkgs.rustPlatform.buildRustPackage {
+            pname = "tessh";
+            version = (pkgs.lib.importTOML ./tessh/Cargo.toml).package.version;
+            inherit src;
+            cargoLock.lockFile = ./Cargo.lock;
+            cargoBuildFlags = [ "-p" "tessh" ];
+            nativeBuildInputs = [ tesshPython pkgs.makeWrapper ];
+            buildInputs = [ tesshPython ];
+            doCheck = false;
+            env.PYO3_PYTHON = "${tesshPython}/bin/python3";
+            postInstall = tesshWrap "$out/bin/tessh";
+            meta = {
+              description = "tessh: a shell language that compiles to Python (indentation, infix and shell operators, hygienic macros)";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "tessh";
+              platforms = pkgs.lib.platforms.unix;
+            };
+          };
           tessera = pkgs.rustPlatform.buildRustPackage {
             pname = "tessera";
             version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
             inherit src;
             cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = [ pkgs.pkg-config pkgs.zig_0_15 pkgs.qt6.wrapQtAppsHook pkgs.qt6.qtbase ];
-            buildInputs = qtFor pkgs ++ [ qtEnv pkgs.libGL ];
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.zig_0_15 pkgs.qt6.wrapQtAppsHook pkgs.qt6.qtbase tesshPython pkgs.makeWrapper ];
+            buildInputs = qtFor pkgs ++ [ qtEnv pkgs.libGL tesshPython ];
             dontUseZigBuild = true;
             dontUseZigInstall = true;
             dontUseZigCheck = true;
@@ -91,11 +118,18 @@
             env = ghosttyEnv // {
               # cxx-qt wants every Qt module under one prefix.
               QMAKE = "${qtEnv}/bin/qmake";
+              PYO3_PYTHON = "${tesshPython}/bin/python3";
             };
             preBuild = ''
               # (Qt's setup hook sets QMAKE to qtbase's alone.)
               export QMAKE=${qtEnv}/bin/qmake
             '' + ghosttyPreBuild;
+            # (tessh, built with it: a plain program, not a Qt one.)
+            dontWrapQtApps = true;
+            postFixup = ''
+              wrapQtApp $out/bin/tessera
+              ${tesshWrap "$out/bin/tessh"}
+            '';
             postInstall = ''
               # The static tesserad, for SSH hosts without one (remote.rs).
               install -Dm755 ${tesseradStatic}/bin/tesserad $out/libexec/tessera/tesserad-${pkgs.stdenv.hostPlatform.uname.processor}-linux
@@ -113,10 +147,11 @@
             };
           };
         in
-        { default = tessera; inherit tessera; tesserad-static = tesseradStatic; });
+        { default = tessera; inherit tessera tessh; tesserad-static = tesseradStatic; });
 
       apps = forAll (pkgs: {
         default = { type = "app"; program = "${self.packages.${pkgs.system}.default}/bin/tessera"; };
+        tessh = { type = "app"; program = "${self.packages.${pkgs.system}.tessh}/bin/tessh"; };
       });
 
       # `nix develop`: Rust, the same Qt, and Zig 0.15 for libghostty-vt.
@@ -137,7 +172,7 @@
         in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec ];
+            packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec pkgs.python3 ];
             QMAKE = "${qtEnv}/bin/qmake";
             TESSERA_MUSL_TARGET = muslTarget;
             "CARGO_TARGET_${muslVar}_LINKER" = "${muslCc}cc";

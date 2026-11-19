@@ -13,7 +13,7 @@ path = "src/main.rs"
 # Qt, so it builds static. `cargo build` here builds both.
 [workspace]
 members = [".", "tesserad", "tessh", "tree-sitter-tessh"]
-default-members = [".", "tesserad"]
+default-members = [".", "tesserad", "tessh"]
 
 [dependencies]
 anyhow = "1.0.104"
