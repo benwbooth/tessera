@@ -1468,19 +1468,32 @@ FocusScope {
                 }
                 // (A file card, editing: save, save as, read again, done; ● unsaved.)
                 readonly property var fileView: cell.viewPath !== "" && loader.item && loader.item.editing !== undefined ? loader.item : null
-                // (Edit, and while editing Done: with changes, it saves them
-                // first; Discard changes is in ⋯. The keys button comes next to it.)
+                // (Edit; while editing, Save (written, back to viewing) and
+                // Discard (the changes dropped, back to viewing). Ctrl+S saves and
+                // stays. The keys button comes next.)
                 Chip {
-                    visible: header.fileView !== null
+                    visible: header.fileView !== null && !header.fileView.editing
                     base: cell.color
                     Layout.minimumWidth: implicitWidth
-                    label: !(header.fileView && header.fileView.editing) ? "✎ Edit" : header.fileView.dirty ? "✓ Save & done" : "✓ Done"
-                    tip: !(header.fileView && header.fileView.editing) ? "Edit the file" : header.fileView.dirty ? "Save the changes and go back to viewing" : "Back to viewing"
-                    onClicked: {
-                        const v = header.fileView
-                        if (!v.editing) v.startEdit()
-                        else if (!v.dirty || v.save()) v.stopEdit()
-                    }
+                    label: "✎ Edit"
+                    tip: "Edit the file"
+                    onClicked: header.fileView.startEdit()
+                }
+                Chip {
+                    visible: header.fileView !== null && header.fileView.editing
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: "✓ Save"
+                    tip: "Save the file and go back to viewing (Ctrl+S saves and stays)"
+                    onClicked: { const v = header.fileView; if (v.save()) v.stopEdit() }
+                }
+                Chip {
+                    visible: header.fileView !== null && header.fileView.editing
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: "✕ Discard"
+                    tip: header.fileView && header.fileView.dirty ? "Drop the changes and go back to viewing" : "Back to viewing"
+                    onClicked: header.fileView.stopEdit()
                 }
                 // (Editing: the keys it edits with, in sight (vi's mode too), ●
                 // when there are changes; a click picks other keys. Saving and
