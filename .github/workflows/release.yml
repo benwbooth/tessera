@@ -105,7 +105,10 @@ jobs:
   windows:
     needs: [version, tesserad]
     if: needs.version.outputs.skip != 'true'
-    runs-on: windows-latest
+    # Visual Studio 2022's image, not windows-latest (Visual Studio 2026): Zig
+    # builds Ghostty's library with MSVC's C++ library, and 2026's wants
+    # clang 22, newer than Zig 0.15's.
+    runs-on: windows-2022
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
