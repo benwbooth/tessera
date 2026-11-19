@@ -283,6 +283,9 @@ struct StdinBridge {
     reply: Mutex<Option<mpsc::Receiver<String>>>,
 }
 
+/// The running cell started a program (EXEC_HOOK told the notebook): if not,
+/// the cell's own folder, user and environment are sent when it ends.
+static RAN_PROGRAM: AtomicBool = AtomicBool::new(false);
 /// The cell's frontend runs programs in its terminal (execute_request's tessera_tty).
 static TTY_OK: AtomicBool = AtomicBool::new(false);
 /// Tessera started this kernel (its connection file is in Tessera's kernels
@@ -361,9 +364,14 @@ fn execute(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
         publish("execute_input", json!({"code": code, "execution_count": count}));
     }
     let filename = format!("<cell {count}>");
+    RAN_PROGRAM.store(false, Ordering::SeqCst);
     let r = runner::run_source(py, &code, ns, &filename, !silent);
     show_figures(py);
     drain(py);
+    if !silent && !RAN_PROGRAM.load(Ordering::SeqCst) {
+        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        publish("tessera_exec", json!({"cell": true, "command": code, "cwd": cwd, "user": runtime::user_name(), "env": runtime::env_list()}));
+    }
     if store {
         COUNT.fetch_add(1, Ordering::SeqCst);
     }
@@ -584,7 +592,10 @@ pub fn run(conn_file: &str) -> i32 {
         b.setattr("input", wrap_pyfunction!(kernel_input, py)?)?;
         let _ = runtime::TTY_HOOK.set(kernel_tty);
         // (Each program a cell runs, and what with: the card's details.)
-        let _ = runtime::EXEC_HOOK.set(|v| publish("tessera_exec", v));
+        let _ = runtime::EXEC_HOOK.set(|v| {
+            RAN_PROGRAM.store(true, Ordering::SeqCst);
+            publish("tessera_exec", v)
+        });
         runtime::set_display(wrap_pyfunction!(display_hook, py)?.into_any().unbind());
         let sys = py.import("sys")?;
         for s in ["stdout", "stderr"] {

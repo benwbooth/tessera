@@ -975,7 +975,9 @@ FocusScope {
     property bool shown: true               // (the pane shows the notebook)
     // A terminal app's card: most of the notebook, at least 300 px.
     Timer { id: restoreFollow; interval: 120; onTriggered: nb.followLive() }
-    readonly property int liveHeight: Math.max(300, Math.round(list.height * 0.7))
+    // (A terminal app's card: a regular card, 25 rows; less if the notebook
+    // is smaller. Expand for more.)
+    readonly property int liveHeight: Math.min(Math.round((outputRow > 0 ? outputRow : 18) * 25 + 12), Math.max(200, list.height - 60))
     readonly property bool liveWanted: view !== null && view.fullScreen && shown
     property int liveIndex: -1
     property Item liveBox: null            // the card's place for it (set by the card)
@@ -1994,6 +1996,10 @@ FocusScope {
                     tip: "Show the output as…"
                     onClicked: kindMenu.popup(kindChip, 0, kindChip.height + 2)
                 }
+                // (What it ran with: command line, folder, user, environment.)
+                Chip { visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.ended > 0 || cell.running || cell.execs !== "[]")
+                       base: cell.color; label: "\u24d8"; tip: "Details: the command line as run, folder, user and environment"
+                       Layout.minimumWidth: implicitWidth; onClicked: nb.showExec(cell.index) }
                 Chip { visible: cell.hasOutput; base: cell.color; label: "Copy"; tip: "Copy the output"; Layout.minimumWidth: implicitWidth
                        onClicked: { const c = cells.get(cell.index)
                                     // (A file card's text: read now, then copied.)
@@ -2078,7 +2084,7 @@ FocusScope {
                                onTriggered: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = nb.saveFolder(cell.viewPath); fileSaveDialog.open() } }
                 SlimMenuItem { text: "Discard changes"; visible: header.fileView !== null && header.fileView.editing; enabled: header.fileView !== null && header.fileView.dirty; onTriggered: header.fileView.reload() }
                 SlimMenuItem { text: header.fileView && header.fileView.dirty ? "Done, discarding the changes" : "Done editing"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.stopEdit() }
-                SlimMenuItem { text: "\u24d8 Details (command line, environment)"; visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.execs !== "[]"); onTriggered: nb.showExec(cell.index) }
+                SlimMenuItem { text: "\u24d8 Details (command line, environment)"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.showExec(cell.index) }
                 SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
                 SlimMenuItem { text: "Run the cells above"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.runAbove(cell.index) }
                 SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; visible: cell.viewPath === ""; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
@@ -2726,7 +2732,8 @@ FocusScope {
         if (xs.length === 0 && c.tid > 0 && view) {
             try { const x = JSON.parse(view.cellOutput(c.tid, "exec") || "null"); if (x) xs = [x] } catch (e) {}
         }
-        if (xs.length === 0 && c.tid > 0) xs = [{ command: c.source, cwd: c.cwd }]
+        // (Not reported: what the card itself knows.)
+        if (xs.length === 0) xs = [{ command: c.source, cwd: c.cwd, missing: c.tid > 0 ? "shell" : "kernel" }]
         return xs
     }
     // (Test hook: TESSERA_TEST_NB_DETAILS=<n>[,ms]: the nth card's details (1 the first, -1 the last) at 14 s (or ms).)
@@ -2740,7 +2747,23 @@ FocusScope {
         if (i < 0 || i >= cells.count) return
         execPop.records = execRecords(i)
         execPop.sel = Math.max(0, execPop.records.length - 1)
+        execPop.note = ""
         execPop.open()
+        // (A shell that didn't report it, here on this computer: its process's
+        // user and environment, as it started.)
+        const r = execPop.records[0]
+        if (r.missing === "shell" || (cells.get(i).tid > 0 && !r.env)) {
+            if (sshHost === "" && shellPid > 0) {
+                const want = execPop.records
+                Async.call(controller, k => controller.processExec(k, shellPid), json => {
+                    let x = null
+                    try { x = JSON.parse(json || "null") } catch (e) {}
+                    if (!x || execPop.records !== want) return
+                    execPop.records = [Object.assign({}, r, { user: x.user, env: x.env })]
+                    execPop.note = "This shell's integration is from before it reported each command's: this is the shell's own environment as it started (open a new tab or run exec $SHELL for each command's own)."
+                })
+            } else execPop.note = "This shell's integration is from before it reported each command's environment: open a new tab (or run exec $SHELL) to get it."
+        } else if (r.missing === "kernel") execPop.note = "This kernel didn't report the programs it ran (it's from before it did): restart the kernel."
         if (controller && controller.testEnv("NB_DETAILS") !== "") console.log("nb details: card " + i + " " + JSON.stringify(execPop.rec).slice(0, 200))
     }
     Popup {
@@ -2748,6 +2771,7 @@ FocusScope {
         parent: nb
         property var records: []
         property int sel: 0
+        property string note: ""
         readonly property var rec: records[sel] || ({})
         // (The words as run: the shell's expansion, or tessh's argv.)
         readonly property string ran: rec.argv ? rec.command : (rec.line || rec.command || "")
@@ -2784,18 +2808,27 @@ FocusScope {
                         required property var modelData
                         required property int index
                         base: index === execPop.sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : Theme.panel
-                        label: (index + 1) + ". " + ((modelData.argv && modelData.argv[0] && modelData.argv[0][0]) || (modelData.command || "").split(" ")[0])
+                        label: (index + 1) + ". " + (modelData.cell ? "the cell" : (modelData.argv && modelData.argv[0] && modelData.argv[0][0]) || (modelData.command || "").split(" ")[0])
                         tip: modelData.command || ""
                         onClicked: execPop.sel = index
                     }
                 }
+            }
+            Text {
+                visible: execPop.note !== ""
+                Layout.fillWidth: true
+                text: execPop.note
+                wrapMode: Text.Wrap
+                color: Theme.textDim
+                font.pixelSize: 12
+                font.italic: true
             }
             GridLayout {
                 Layout.fillWidth: true
                 columns: 3
                 columnSpacing: 8
                 rowSpacing: 4
-                Text { text: "Command line"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                Text { text: execPop.rec.cell ? "Code (no programs)" : "Command line"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
                 TextEdit {
                     objectName: "execLine"; text: execPop.ran
                     readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
@@ -2831,7 +2864,7 @@ FocusScope {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 6
-                Text { text: "Environment" + (execPop.rec.env ? " (" + execPop.rec.env.length + ")" : ": not reported (this shell's integration is older)"); color: Theme.textDim; font.pixelSize: 12 }
+                Text { text: "Environment" + (execPop.rec.env ? " (" + execPop.rec.env.length + ")" : ": not reported"); color: Theme.textDim; font.pixelSize: 12 }
                 TextField {
                     id: envFilter
                     visible: !!execPop.rec.env

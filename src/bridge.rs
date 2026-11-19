@@ -555,6 +555,9 @@ pub mod ffi {
         fn jupyter_input(self: &Controller, key: &QString, value: &QString);
         #[qinvokable]
         fn jupyter_execute(self: &Controller, reply: &QString, key: &QString, cell: &QString, code: &QString);
+        /// A local process's user and environment (cells::Exec as JSON, "" if gone).
+        #[qinvokable]
+        fn process_exec(self: &Controller, reply: &QString, pid: i32);
         #[qinvokable]
         fn jupyter_complete(self: &Controller, key: &QString, request: &QString, code: &QString, pos: i32);
         #[qinvokable]
@@ -1149,6 +1152,10 @@ impl ffi::Controller {
     }
 
     /// Answers `reply` with whether the kernel took it (true/false).
+    fn process_exec(&self, reply: &ffi::QString, pid: i32) {
+        self.answer(reply, false, move || crate::cells::Exec::of_process(pid.max(0) as u32).map(|e| e.to_json().to_string()).unwrap_or_default());
+    }
+
     fn jupyter_execute(&self, reply: &ffi::QString, key: &ffi::QString, cell: &ffi::QString, code: &ffi::QString) {
         let (host, k) = crate::client::split_key(&key.to_string());
         let (cell, code) = (cell.to_string(), code.to_string());
