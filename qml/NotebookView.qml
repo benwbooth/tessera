@@ -329,6 +329,13 @@ FocusScope {
     property var fileViews: ({})        // cid -> an ls card's own view, sort, ... (FileBrowser)
     property var aiKinds: ({})          // cid -> what the AI made of it
     property var heights: ({})          // cid -> output height the user dragged to
+    // cid -> the output's last natural height, changed in place (no
+    // notifications): a card made again (scrolled back into the list's
+    // buffer) starts at it while its output loads in the background,
+    // instead of small and then growing. (Small-then-growing in a narrow
+    // pane pushed other cards out of the buffer, which were then made
+    // again small, and so on without end.)
+    property var seenH: ({})
     // The tessh guide, in a tab of its own (Main's openGuide).
     function openGuide() { Window.window.openGuide() }
     property string expandedId: ""      // the cell filling the window, if any
@@ -2312,7 +2319,13 @@ FocusScope {
                 width: parent.width - 20
                 // Its natural size up to 460 px, or what it was dragged to, or the
                 // whole window when expanded.
-                readonly property real natural: loader.item ? loader.item.implicitHeight : 0
+                readonly property real itemH: loader.item ? loader.item.implicitHeight : 0
+                // (Its first moments: no smaller than it last was, while what
+                // it shows loads; after that, whatever it is.)
+                property bool fresh: true
+                Timer { running: body.fresh; interval: 1500; onTriggered: body.fresh = false }
+                readonly property real natural: fresh ? Math.max(itemH, nb.seenH[cell.cid] || 0) : itemH
+                onItemHChanged: if (!fresh || itemH >= (nb.seenH[cell.cid] || 0)) nb.seenH[cell.cid] = itemH
                 height: !wanted ? 0 : cell.expanded ? Math.max(80, list.height - list.topMargin - list.bottomMargin - header.height - 12 - (cell.editing ? editorBox.height + 8 : 0))
                       // (A terminal app running in it: room for it, whatever
                       // size the card was dragged to before.)

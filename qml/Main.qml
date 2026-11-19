@@ -211,10 +211,14 @@ ApplicationWindow {
             // (SplitView skips what isn't visible), so they're sized here, to
             // the tab as it is now, sharing it as they were. Shown, it's
             // ready to draw at once, with nothing laid out again.)
-            onWidthChanged: if (!visible) hiddenFit.restart()
-            onHeightChanged: if (!visible) hiddenFit.restart()
-            Timer { id: hiddenFit; interval: 150; onTriggered: if (!tabItem.visible) win.fitTree(rootSplit, tabItem.width, tabItem.height) }
-            function fitSoon() { hiddenFit.restart() }
+            // (Just restored, shown or not: its panes keep their saved shares
+            // of the tab as the window comes to its size.)
+            onWidthChanged: if (!visible || restoring) hiddenFit.restart()
+            onHeightChanged: if (!visible || restoring) hiddenFit.restart()
+            property bool restoring: false
+            Timer { id: hiddenFit; interval: 150; onTriggered: if (!tabItem.visible || tabItem.restoring) win.fitTree(rootSplit, tabItem.width, tabItem.height) }
+            Timer { id: restored; interval: 3000; onTriggered: tabItem.restoring = false }
+            function fitSoon() { restoring = true; restored.restart(); hiddenFit.restart() }
             Loader {
                 id: pageLoader
                 anchors.fill: parent
@@ -874,7 +878,16 @@ ApplicationWindow {
     // `recreate`: a pane whose shell is gone comes back as a new shell in its
     // folder, under its saved screen (startup after a reboot).
     function buildSavedTree(t, node, alive, recreate) {
-        function build(n, host) {
+        // (Each item's share of its split as saved, scaled to the room it has
+        // now: a window smaller than the one it was saved from squeezes them
+        // all alike, not the last to its minimum.)
+        function shares(kids, horiz, room) {
+            const want = kids.map(c => Math.max(1, (horiz ? c.w : c.h) || 1))
+            const total = want.reduce((a, b) => a + b, 0)
+            const free = room - (kids.length - 1)   // (the 1 px handles)
+            return want.map(x => Math.max(1, Math.round(free * x / total)))
+        }
+        function build(n, host, W, H) {
             if (n.t === "pane") {
                 const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "", sshHost: n.host || "" }
                 // (Another host's: whether it's still running there is known
@@ -892,29 +905,35 @@ ApplicationWindow {
                     }
                 }
                 const p = makePane(host, props)
-                p.prefW = n.w; p.prefH = n.h
+                p.prefW = W; p.prefH = H
                 return p
             }
             const s = splitComp.createObject(null, { orientation: n.t === "h" ? Qt.Horizontal : Qt.Vertical })
             s.host = host
-            s.prefW = n.w; s.prefH = n.h
-            for (const c of n.c) {
-                const it = build(c, s)
+            s.prefW = W; s.prefH = H
+            const horiz = n.t === "h"
+            const sh = shares(n.c, horiz, horiz ? W : H)
+            n.c.forEach((c, i) => {
+                const it = build(c, s, horiz ? sh[i] : W, horiz ? H : sh[i])
                 if (it) s.addItem(it)
-            }
+            })
             if (s.count === 0) { s.destroy(); return null }
             if (s.count === 1) { const only = s.takeItem(0); only.host = host; s.destroy(); return only }
             return s
         }
+        // (The size it was saved at; the tab's own once it has it: fitSoon.)
+        const W = node.w || t.width || 800, H = node.h || t.height || 600
         if (node.t === "pane") {
-            const it = build(node, t.root)
+            const it = build(node, t.root, W, H)
             if (it) t.root.addItem(it)
         } else {
             t.root.orientation = node.t === "h" ? Qt.Horizontal : Qt.Vertical
-            for (const c of node.c) {
-                const it = build(c, t.root)
+            const horiz = node.t === "h"
+            const sh = shares(node.c, horiz, horiz ? W : H)
+            node.c.forEach((c, i) => {
+                const it = build(c, t.root, horiz ? sh[i] : W, horiz ? H : sh[i])
                 if (it) { it.host = t.root; t.root.addItem(it) }
-            }
+            })
         }
     }
 
