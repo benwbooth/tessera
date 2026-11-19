@@ -307,6 +307,29 @@ fn kernel_input(py: Python<'_>, prompt: &str) -> PyResult<String> {
     }
 }
 
+/// A program that needs a terminal, run in the notebook's: an input request
+/// carrying `tessera_tty` {command, cwd}; the reply is its exit status. None
+/// when this cell can't ask (no stdin).
+fn kernel_tty(py: Python<'_>, command: &str, cwd: &str, keep: bool) -> PyResult<Option<i32>> {
+    if !STDIN.allowed.load(Ordering::SeqCst) {
+        return Ok(None);
+    }
+    drain(py);
+    let parent = PARENT.lock().unwrap().clone();
+    let ids = STDIN.ids.lock().unwrap().clone();
+    if let Some(tx) = STDIN.req.lock().unwrap().as_ref() {
+        let _ = tx.send((ids, parent, json!({"prompt": "", "password": false, "tessera_tty": {"command": command, "cwd": cwd, "keep": keep}})));
+    }
+    loop {
+        let got = py.detach(|| STDIN.reply.lock().unwrap().as_ref().map(|rx| rx.recv_timeout(std::time::Duration::from_millis(50))));
+        match got {
+            Some(Ok(v)) => return Ok(Some(v.trim().parse().unwrap_or(1))),
+            Some(Err(mpsc::RecvTimeoutError::Timeout)) => py.check_signals()?,
+            _ => return Ok(None),
+        }
+    }
+}
+
 // ---- running cells ----------------------------------------------------------------------
 
 enum Job {
@@ -546,6 +569,7 @@ pub fn run(conn_file: &str) -> i32 {
         ns.set_item("display", d)?;
         let b = py.import("builtins")?;
         b.setattr("input", wrap_pyfunction!(kernel_input, py)?)?;
+        let _ = runtime::TTY_HOOK.set(kernel_tty);
         runtime::set_display(wrap_pyfunction!(display_hook, py)?.into_any().unbind());
         let sys = py.import("sys")?;
         for s in ["stdout", "stderr"] {

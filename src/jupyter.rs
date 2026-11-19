@@ -993,7 +993,7 @@ impl Kernel {
                 }
                 *k.asking.lock().unwrap() = k.signer.header_of(&parts);
                 let cell = k.pending.lock().unwrap().get(&parent).cloned().unwrap_or_default();
-                sink(json!({"type": "input", "cell": cell, "prompt": c["prompt"], "password": c["password"].as_bool().unwrap_or(false)}));
+                sink(json!({"type": "input", "cell": cell, "prompt": c["prompt"], "password": c["password"].as_bool().unwrap_or(false), "tty": c["tessera_tty"]}));
             }
         });
     }

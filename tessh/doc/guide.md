@@ -1782,6 +1782,11 @@ shows with its richest form: HTML, Markdown, images, matplotlib figures.
 `display x` shows a value partway through, and `input` asks in the card.
 The folder and exported variables go back and forth with the pane's shell.
 
+A program that needs a terminal (an editor, a pager, `htop`, a REPL or a
+shell started bare, `ssh host`) runs in the pane's terminal, shown in the
+cell's card while it runs; the cell goes on when it exits, with its status
+in `$?`. `TESSH_TTY="prog …"` adds programs to that list.
+
 ```tessh no-run
 import pandas as pd
 df = pd.DataFrame {a: [1 2 3] b: [4 5 6]}

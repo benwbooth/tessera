@@ -385,3 +385,14 @@ fn help_topics() {
     assert!(crate::help::lookup("").unwrap().contains("`help macros`"));
     assert!(crate::help::lookup("zzqx").is_none());
 }
+
+#[test]
+fn programs_needing_a_terminal() {
+    let w = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
+    for yes in ["vim x", "less f", "sudo vim /etc/x", "env A=1 htop", "python", "python3 -q", "ssh host", "ssh -p 22 host", "docker run -it img", "bash"] {
+        assert!(crate::runtime::needs_tty(&w(yes)), "{yes}");
+    }
+    for no in ["ls", "python x.py", "ssh host uptime", "docker ps", "bash -c true", "git status", "grep vim x"] {
+        assert!(!crate::runtime::needs_tty(&w(no)), "{no}");
+    }
+}

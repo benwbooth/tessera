@@ -256,6 +256,7 @@ FocusScope {
         setAsking(cid, null)
     }
     function kernelEvent(e, fromKey) {
+        if (e.type === "input" && e.tty) { runTty(e.cell, e.tty, fromKey || key); return }
         if (e.type === "input") { setAsking(e.cell, { prompt: e.prompt || "", password: !!e.password, key: fromKey || key }); return }
         if (e.type === "status") {
             kernelState = e.state
@@ -453,6 +454,7 @@ FocusScope {
     function runAbove(n) { for (let i = 0; i < n; ++i) if (cells.get(i).type === "code") run(i) }
     function interrupt() {
         if (viaShell) { if (view) view.sendText("\x03"); return }
+        if (ttyRun && view) view.sendText("\x03")
         controller.jupyterInterrupt(key)
     }
     function clearOutputs() {
@@ -808,6 +810,30 @@ FocusScope {
         if (retired.indexOf(tid) < 0) retired = retired.concat([tid])
         const m = Object.assign({}, linked); delete m[tid]; linked = m
     }
+    // A program a tessh cell runs that needs a terminal (vim, less, a REPL):
+    // the kernel hands it here, it runs in this pane's terminal, which shows
+    // in the cell's card while it runs (as a full-screen program's does), and
+    // its exit status goes back. {cid, key, tid (its terminal cell), full}
+    property var ttyRun: null
+    function runTty(cid, tty, k) {
+        if (!view) { controller.jupyterInput(k, "127"); return }
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        const cmd = (tty.cwd && tty.cwd !== shellDir ? "cd " + q(tty.cwd) + " && " : "") + tty.command
+        ttyRun = { cid: cid, key: k, tid: 0, full: tty.keep === false }
+        view.sendText(cmd + "\r")
+        findLive()
+        Qt.callLater(followLive)
+    }
+    function finishTty(t) {
+        const r = ttyRun
+        ttyRun = null
+        // (What a program that isn't full screen printed stays in the card.)
+        const i = indexOf(r.cid)
+        const text = r.full ? "" : view.cellOutput(t.id, "text")
+        if (i >= 0 && text.trim() !== "") addOutput(i, { output_type: "stream", name: "stdout", text: text.replace(/\n*$/, "\n") })
+        controller.jupyterInput(r.key, String(t.status))
+    }
+    Connections { target: nb.view; function onFullScreenChanged() { if (nb.ttyRun && nb.view.fullScreen) nb.ttyRun = Object.assign({}, nb.ttyRun, { full: true }) } }
     function shellRun(cid, code) {
         if (!view) return
         shellWaiting = shellWaiting.concat([cid])
@@ -847,6 +873,8 @@ FocusScope {
         let added = false
         for (const t of ts) {
             if (linked[t.id] !== undefined || retired.indexOf(t.id) >= 0 || t.id <= fileStart) continue
+            // (A tessh cell's program: shown in that cell, no card of its own.)
+            if (ttyRun && ttyRun.tid === 0) { ttyRun = Object.assign({}, ttyRun, { tid: t.id }); retire(t.id); continue }
             // (Nothing typed and nothing shown: a shell starting up, no card.)
             if (nb.blankTerm(t)) { retire(t.id); continue }
             let at = -1
@@ -866,6 +894,7 @@ FocusScope {
             fromTerm(at, t)
             touch()
         }
+        if (ttyRun && ttyRun.tid > 0 && byId[ttyRun.tid] && byId[ttyRun.tid].done) finishTty(byId[ttyRun.tid])
         updateOwnRun()
         if (added) follow()
     }
@@ -888,11 +917,12 @@ FocusScope {
     // into liveHost (TerminalPane's termSlot), which sits over that card's
     // output, at its size; Expand makes it the window's.
     property bool shown: true               // (the pane shows the notebook)
-    readonly property bool liveWanted: view !== null && view.fullScreen && shown
+    readonly property bool liveWanted: view !== null && (view.fullScreen || ttyRun !== null) && shown
     property int liveIndex: -1
     property Item liveBox: null            // the card's place for it (set by the card)
     readonly property Item liveSlot: liveWanted && liveIndex >= 0 ? liveHost : null
     function findLive() {
+        if (ttyRun) { liveIndex = indexOf(ttyRun.cid); return }
         let n = -1
         for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).running) { n = i; break }
         liveIndex = n
