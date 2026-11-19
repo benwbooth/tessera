@@ -1621,7 +1621,7 @@ FocusScope {
                 SlimMenuItem { text: "Edit the file"; visible: header.fileView !== null && !header.fileView.editing; onTriggered: header.fileView.startEdit() }
                 SlimMenuItem { text: "Save\tCtrl+S"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.save() }
                 SlimMenuItem { text: "Save as…"; visible: header.fileView !== null && header.fileView.editing
-                               onTriggered: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = "file://" + cell.viewPath.replace(/\/[^\/]*$/, ""); fileSaveDialog.open() } }
+                               onTriggered: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = nb.saveFolder(cell.viewPath); fileSaveDialog.open() } }
                 SlimMenuItem { text: "Discard changes"; visible: header.fileView !== null && header.fileView.editing; enabled: header.fileView !== null && header.fileView.dirty; onTriggered: header.fileView.reload() }
                 SlimMenuItem { text: header.fileView && header.fileView.dirty ? "Done, discarding the changes" : "Done editing"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.stopEdit() }
                 SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
@@ -2087,6 +2087,10 @@ FocusScope {
     // ---- ls and cd: the folder, to browse (FileBrowser.qml) ----
     // A path in the pane's shell's world: on another host, "ssh://<host>/...",
     // which the controller reads there.
+    // Where Save as… starts for a card's file: its folder, or home for
+    // another host's file (the dialog shows this computer's folders; the
+    // copy is saved here).
+    function saveFolder(p) { return p.startsWith("ssh://") ? "file://" + (controller ? controller.homeDir() : "") : "file://" + p.replace(/\/[^\/]*$/, "") }
     function onHost(p) { return sshHost === "" || p.startsWith("ssh://") ? p : "ssh://" + encodeURIComponent(sshHost) + p }
     function localPath(p) { let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x }
     function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
@@ -2194,7 +2198,7 @@ FocusScope {
         CsvTable {
             readonly property var src: parent
             anchors.fill: parent
-            onSaveAsRequested: { nb.saveAsCell = nb.indexOf(src.cid); fileSaveDialog.currentFolder = "file://" + src.viewPath.replace(/\/[^\/]*$/, ""); fileSaveDialog.open() }
+            onSaveAsRequested: { nb.saveAsCell = nb.indexOf(src.cid); fileSaveDialog.currentFolder = nb.saveFolder(src.viewPath); fileSaveDialog.open() }
             controller: nb.controller
             path: src.viewPath
             fontFamily: nb.fontFamily
