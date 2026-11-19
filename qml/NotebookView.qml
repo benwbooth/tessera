@@ -1671,8 +1671,11 @@ FocusScope {
         id: banner
         anchors.top: bar.bottom
         width: parent.width
-        visible: bannerText.text !== ""
-        height: visible ? bannerText.implicitHeight + 14 : 0
+        // (Not `visible ?`: that's false in a tab in the background too, and
+        // the notebook mustn't change height there.)
+        readonly property bool wanted: bannerText.text !== ""
+        visible: wanted
+        height: wanted ? bannerText.implicitHeight + 14 : 0
         z: 2
         color: nb.kernelState === "dead" || nb.loadError !== "" || nb.saveError !== "" ? Theme.mix(Theme.panel, nb.ansi(1, "#e06c75"), 0.18) : Theme.mix(Theme.panel, Theme.accent, 0.12)
         Text { topPadding: 0.001;
@@ -1812,8 +1815,12 @@ FocusScope {
             readonly property bool plainMd: !code && !editing
             width: list.width - 12
             // (One card expanded: it's the only one, filling the notebook.)
-            visible: nb.expandedId === "" || expanded
-            height: !visible ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
+            // (Its own say, not `visible`, which a tab in the background turns
+            // off too: its cards mustn't fold to nothing there, or every one is
+            // laid out again and the list rebuilt when the tab comes back.)
+            readonly property bool wanted: nb.expandedId === "" || expanded
+            visible: wanted
+            height: !wanted ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
                      + (hasOutput ? (hideOutput ? 22 : body.height + 12) : 4) + (ask ? askBox.height + 6 : 0))
             radius: 8
             color: plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
@@ -2090,7 +2097,7 @@ FocusScope {
                 anchors.top: header.bottom
                 x: 10
                 width: parent.width - 20
-                height: visible ? editorLoader.height + 2 : 0
+                height: cell.editing ? editorLoader.height + 2 : 0
                 radius: 6
                 color: Theme.field
                 border.color: editorLoader.item && editorLoader.item.hasFocus ? Theme.accent : Theme.divider
@@ -2111,7 +2118,7 @@ FocusScope {
                 x: 4
                 y: 4
                 width: parent.width - 8
-                height: visible ? Math.max(24, mdView.implicitHeight) : 0
+                height: cell.plainMd ? Math.max(24, mdView.implicitHeight) : 0
                 Loader {
                     id: mdView
                     active: cell.plainMd
@@ -2136,7 +2143,7 @@ FocusScope {
             // ---- the output, in its own scrolling pane ----
             Text { topPadding: 0.001;
                 visible: cell.hasOutput && cell.hideOutput
-                anchors.top: editorBox.visible ? editorBox.bottom : header.bottom
+                anchors.top: cell.editing ? editorBox.bottom : header.bottom
                 x: 12
                 text: "… output hidden (O shows it)"
                 color: Theme.textDim
@@ -2151,15 +2158,16 @@ FocusScope {
                 readonly property var viewer: loader.item
                 // (The card a full-screen program runs in: its terminal here.)
                 readonly property bool live: nb.liveWanted && cell.index === nb.liveIndex
-                visible: (cell.hasOutput || live) && !cell.hideOutput
-                anchors.top: editorBox.visible ? editorBox.bottom : header.bottom
-                anchors.topMargin: editorBox.visible ? 6 : 0
+                readonly property bool wanted: (cell.hasOutput || live) && !cell.hideOutput
+                visible: wanted
+                anchors.top: cell.editing ? editorBox.bottom : header.bottom
+                anchors.topMargin: cell.editing ? 6 : 0
                 x: 10
                 width: parent.width - 20
                 // Its natural size up to 460 px, or what it was dragged to, or the
                 // whole window when expanded.
                 readonly property real natural: loader.item ? loader.item.implicitHeight : 0
-                height: !visible ? 0 : cell.expanded ? Math.max(80, list.height - list.topMargin - list.bottomMargin - header.height - 12 - (cell.editing ? editorBox.height + 8 : 0))
+                height: !wanted ? 0 : cell.expanded ? Math.max(80, list.height - list.topMargin - list.bottomMargin - header.height - 12 - (cell.editing ? editorBox.height + 8 : 0))
                       // (A terminal app running in it: room for it, whatever
                       // size the card was dragged to before.)
                       : live ? Math.max(nb.heights[cell.cid] || 0, nb.liveHeight)
@@ -2209,11 +2217,11 @@ FocusScope {
             Row {
                 id: askBox
                 visible: cell.ask !== null
-                anchors.top: body.visible ? body.bottom : header.bottom
+                anchors.top: body.wanted ? body.bottom : header.bottom
                 anchors.topMargin: 4
                 x: 12
                 width: parent.width - 24
-                height: visible ? 26 : 0
+                height: cell.ask !== null ? 26 : 0
                 spacing: 6
                 Text {
                     id: askPrompt

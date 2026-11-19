@@ -527,7 +527,8 @@ Item {
         id: editBar
         visible: fv.editing && fv.toolsShown && !fv.inTerm
         width: parent.width
-        height: visible ? implicitHeight + 4 : 0
+        // (Not `visible ?`: a tab in the background has it false too.)
+        height: fv.editing && fv.toolsShown && !fv.inTerm ? implicitHeight + 4 : 0
         spacing: 4
         topPadding: 2
         leftPadding: 4

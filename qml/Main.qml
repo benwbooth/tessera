@@ -192,7 +192,7 @@ ApplicationWindow {
                 : prof.tab_title !== "" ? prof.tab_title
                 // What's running in it (vim, htop, ssh...); at a prompt, the
                 // shell's own title or the folder.
-                : lastPane && lastPane.docPath !== "" ? lastPane.docPath.replace(/^.*\//, "") + (lastPane.docDirty ? " \u2022" : "")
+                : lastPane && lastPane.docPath ? lastPane.docPath.replace(/^.*\//, "") + (lastPane.docDirty ? " \u2022" : "")
                 : lastPane && lastPane.job !== "" ? lastPane.job
                 // (At a prompt, the folder, the same whichever shell: shells'
                 // own titles differ, fish's shortens the path.)
@@ -207,6 +207,14 @@ ApplicationWindow {
                 tab: tabItem
                 visible: tabItem.page === ""
             }
+            // (A tab in the background: its split doesn't lay out its panes
+            // (SplitView skips what isn't visible), so they're sized here, to
+            // the tab as it is now, sharing it as they were. Shown, it's
+            // ready to draw at once, with nothing laid out again.)
+            onWidthChanged: if (!visible) hiddenFit.restart()
+            onHeightChanged: if (!visible) hiddenFit.restart()
+            Timer { id: hiddenFit; interval: 150; onTriggered: if (!tabItem.visible) win.fitTree(rootSplit, tabItem.width, tabItem.height) }
+            function fitSoon() { hiddenFit.restart() }
             Loader {
                 id: pageLoader
                 anchors.fill: parent
@@ -519,6 +527,7 @@ ApplicationWindow {
             t.customTitle = opts.layout.title || ""
         } else if (opts.layout) {
             buildSavedTree(t, opts.layout.root, opts.alive, !!opts.recreate)
+            t.fitSoon()
             if (opts.layout.title) t.customTitle = opts.layout.title
             if (opts.layout.color) t.tabColor = opts.layout.color
             if (t.root.count === 0) { t.destroy(); return null }
@@ -904,6 +913,30 @@ ApplicationWindow {
                 const it = build(c, t.root)
                 if (it) { it.host = t.root; t.root.addItem(it) }
             }
+        }
+    }
+
+    // A pane tree sized by hand to w × h, each split's items sharing it in
+    // proportion to their preferred sizes (for a tab in the background,
+    // whose SplitViews don't lay out).
+    function fitTree(it, w, h) {
+        if (!it || w <= 0 || h <= 0) return
+        if (!it.isRoot) { it.width = w; it.height = h }   // (the root fills its tab already)
+        if (it.orientation === undefined || it.itemAt === undefined) return
+        const n = it.count
+        if (n === 0) return
+        const horiz = it.orientation === Qt.Horizontal
+        const kids = []
+        for (let i = 0; i < n; ++i) kids.push(it.itemAt(i))
+        const want = kids.map(c => horiz ? (c.prefW > 0 ? c.prefW : c.width) : (c.prefH > 0 ? c.prefH : c.height))
+        const total = want.reduce((a, b) => a + Math.max(1, b), 0)
+        const room = (horiz ? w : h) - (n - 1)   // (the 1 px handles)
+        let used = 0
+        for (let i = 0; i < n; ++i) {
+            const share = i === n - 1 ? room - used : Math.round(room * Math.max(1, want[i]) / total)
+            used += share
+            if (horiz) { if (n > 1) kids[i].prefW = share; fitTree(kids[i], share, h) }
+            else { if (n > 1) kids[i].prefH = share; fitTree(kids[i], w, share) }
         }
     }
 

@@ -303,9 +303,9 @@ Item {
                 readonly property bool sel: fb.selected === e.path
                 readonly property int c: Math.floor(index / Math.max(1, fb.grid.rows))
                 readonly property int r: index % Math.max(1, fb.grid.rows)
-                x: fb.view === "details" ? 0 : fb.view === "tiles" ? (index % fb.tileCols) * (fb.tileW + 8) : fb.colX[c]
+                x: fb.view === "details" ? 0 : fb.view === "tiles" ? (index % fb.tileCols) * (fb.tileW + 8) : (fb.colX[c] || 0)
                 y: fb.view === "details" ? index * fb.row : fb.view === "tiles" ? Math.floor(index / fb.tileCols) * (fb.tileW + 24) : r * fb.row
-                width: fb.view === "details" ? body.width : fb.view === "tiles" ? fb.tileW : fb.grid.widths[c] - fb.cw
+                width: fb.view === "details" ? body.width : fb.view === "tiles" ? fb.tileW : Math.max(0, (fb.grid.widths[c] || 0) - fb.cw)
                 height: fb.view === "tiles" ? fb.tileW + 20 : fb.row
                 radius: 3
                 color: sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : eh.hovered ? Theme.mix(Theme.bg, Theme.fg, 0.07) : "transparent"
