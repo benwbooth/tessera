@@ -288,6 +288,16 @@ fn spawn_daemon(scoped: bool) -> std::io::Result<()> {
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        // Started over SSH: out of the session's job, which Windows' sshd
+        // ends with the connection (where the job lets it go; else in it).
+        if std::env::var_os("TESSERA_REMOTE").is_some() {
+            const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+            cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB);
+            if cmd.spawn().is_ok() {
+                return Ok(());
+            }
+            cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        }
     }
     cmd.spawn()?;
     Ok(())

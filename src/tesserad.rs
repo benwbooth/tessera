@@ -31,6 +31,7 @@ mod history;
 mod images;
 mod jupyter;
 mod launchers;
+mod mux;
 mod lsp;
 mod net;
 mod nixcmds;
@@ -86,6 +87,14 @@ fn main() {
                     eprintln!("tesserad: {host}: {e}");
                     std::process::exit(1);
                 }
+            }
+        }
+        // Many connections to tesserad over stdin/stdout, as text lines (the
+        // window's way in when an sshd won't forward a Unix socket).
+        "mux" => {
+            if let Err(e) = mux::run() {
+                eprintln!("tesserad: {e}");
+                std::process::exit(1);
             }
         }
         "start" => match client::ensure_daemon() {

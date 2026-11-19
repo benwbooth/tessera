@@ -24,6 +24,7 @@ mod prompt;
 mod prompt_widgets;
 mod proto;
 mod record;
+mod mux;
 mod remote;
 mod rpc;
 mod settings;

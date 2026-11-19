@@ -316,9 +316,19 @@ pub fn start(key: &str, spec: &str, cwd: &str, pid: u32, sink: Sink) {
 impl Kernel {
     fn spawn_loop(self: &Arc<Self>, cwd: &str) -> Result<(), String> {
         let fifo = self.dir.join("in");
-        let c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
-        if unsafe { libc::mkfifo(c.as_ptr(), 0o600) } != 0 {
-            return Err("Couldn't make its pipe.".into());
+        // (Fed through a named pipe: a Unix host's. On Windows, the notebook
+        // runs shells in the pane's own shell, or in Jupyter kernels.)
+        #[cfg(unix)]
+        {
+            let c = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+            if unsafe { libc::mkfifo(c.as_ptr(), 0o600) } != 0 {
+                return Err("Couldn't make its pipe.".into());
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = &fifo;
+            return Err("Tessera's shell kernels need a Unix host (Linux or macOS); here, run it in the pane's shell.".into());
         }
         let script = loop_script(&self.shell, &self.dir);
         let mut cmd = Command::new(&self.prog);
@@ -570,15 +580,19 @@ impl Kernel {
         }
         let kids = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).unwrap_or_default();
         for k in kids.split_whitespace().filter_map(|x| x.parse::<i32>().ok()) {
+            #[cfg(unix)]
             unsafe {
                 libc::kill(k, libc::SIGINT);
             }
+            #[cfg(not(unix))]
+            let _ = k;
         }
     }
 
     fn stop(&self) {
         *self.feed.lock().unwrap() = None;
         if let Some(mut c) = self.child.lock().unwrap().take() {
+            #[cfg(unix)]
             unsafe {
                 libc::kill(-(c.id() as i32), libc::SIGTERM);
             }

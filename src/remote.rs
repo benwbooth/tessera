@@ -189,8 +189,48 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
     };
     // 3. The local socket, forwarded to it. (A forward from before reaches
     // it again once tesserad there is up at the same socket: kept. One that
-    // still doesn't answer is dropped and made again.)
-    if !answers(local) {
+    // still doesn't answer is dropped and made again.) Where the sshd won't
+    // forward a Unix socket (Windows', or AllowStreamLocalForwarding no):
+    // `tesserad mux` there, over one SSH channel.
+    let windows = which.as_ref().is_some_and(|w| platform(&w.2, &w.3).is_some_and(|p| p.0 == "windows"));
+    let force_mux = windows || std::env::var_os("TESSERA_TEST_FORCE_MUX").is_some();
+    if !answers(local) && (force_mux || forward(host, ctl, local, &remote_sock).is_err()) {
+        let path = which.as_ref().map(|w| w.0.clone()).ok_or_else(|| fail(host, format!("tesserad on {host} can't be reached: its socket isn't forwarded, and its path isn't known")))?;
+        let mut c = ssh(ctl, host);
+        c.arg("--").arg(if windows { windows_command(&format!("& {} mux", ps_quote(&path))) } else { format!("{}TESSERA_REMOTE=1 {} mux --socket {}", remote_env(), shell_words::quote(&path), shell_words::quote(&remote_sock)) });
+        c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        let child = c.spawn()?;
+        #[cfg(unix)]
+        crate::mux::tunnel(child, local).map_err(|e| fail(host, format!("Couldn't reach tesserad on {host}: {e}")))?;
+        #[cfg(not(unix))]
+        {
+            drop(child);
+            return Err(fail(host, format!("{host} can't forward tesserad's socket, and this window can't carry it another way yet")));
+        }
+        let start = Instant::now();
+        while !answers(local) {
+            if start.elapsed() > Duration::from_secs(10) {
+                return Err(fail(host, format!("tesserad on {host} doesn't answer through its connection")));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    // 4. A tesserad Tessera put there that isn't this build's: the new one
+    // copied over and swapped in (in place: its shells carry on; with
+    // kernels running, once they're done).
+    if let Some((path, sum, os, arch)) = which {
+        if let Err(e) = update(ctl, host, local, &path, &sum, &os, &arch) {
+            eprintln!("tessera: {host}: tesserad not updated: {e}");
+        }
+    }
+    Ok(())
+}
+
+/// The local socket forwarded to tesserad's on the host (ssh -O forward on
+/// the shared connection); an error when the sshd won't, or it doesn't
+/// answer.
+fn forward(host: &str, ctl: &Path, local: &Path, remote_sock: &str) -> std::io::Result<()> {
+    {
         let _ = Command::new("ssh")
             .arg("-S")
             .arg(ctl)
@@ -217,18 +257,10 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
         // it, and drops the cancelled forward's file a moment later.)
         let start = Instant::now();
         while !answers(local) {
-            if start.elapsed() > Duration::from_secs(10) {
+            if start.elapsed() > Duration::from_secs(5) {
                 return Err(fail(host, format!("tesserad on {host} doesn't answer through the forwarded socket {}", local.display())));
             }
             std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-    // 4. A tesserad Tessera put there that isn't this build's: the new one
-    // copied over and swapped in (in place: its shells carry on; with
-    // kernels running, once they're done).
-    if let Some((path, sum, os, arch)) = which {
-        if let Err(e) = update(ctl, host, local, &path, &sum, &os, &arch) {
-            eprintln!("tessera: {host}: tesserad not updated: {e}");
         }
     }
     Ok(())
@@ -253,21 +285,69 @@ fn start_script() -> String {
 fn start_remote(ctl: &Path, host: &str) -> std::io::Result<Started> {
     // (sh -c: whatever the login shell there is, fish or nu included.)
     let out = ssh(ctl, host).arg("--").arg(format!("{}sh -c {}", remote_env(), shell_words::quote(&start_script()))).output()?;
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    // Windows: cmd.exe or PowerShell has no sh (WSL's, if any, isn't the
+    // host's own): PowerShell's version of it.
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    let out = if out.status.code() != Some(0) && out.status.code() != Some(127) && (err.contains("not recognized") || err.contains("CommandNotFound") || err.contains("is not recognised")) {
+        ssh(ctl, host).arg("--").arg(windows_command(&windows_start_script())).output()?
+    } else {
+        out
+    };
+    let text = String::from_utf8_lossy(&out.stdout).replace('\r', "").trim().to_string();
     match out.status.code() {
         Some(0) if !text.is_empty() => {
+            // TESSERAD <path, spaces and all> <sum> <size> <os> <arch>
             let which = text.lines().find_map(|l| {
-                let w: Vec<&str> = l.strip_prefix("TESSERAD ")?.split_whitespace().collect();
-                (w.len() >= 5).then(|| (w[0].to_string(), format!("{} {}", w[1], w[2]), w[3].to_string(), w[4].to_string()))
+                let w: Vec<&str> = l.strip_prefix("TESSERAD ")?.rsplitn(5, ' ').collect();
+                (w.len() == 5).then(|| (w[4].to_string(), format!("{} {}", w[3], w[2]), w[1].to_string(), w[0].to_string()))
             });
             Ok(Started::Socket(text.lines().last().unwrap_or("").to_string(), which))
         }
         Some(127) => {
-            let mut it = text.split_whitespace();
+            let mut it = text.lines().last().unwrap_or("").split_whitespace();
             Ok(Started::Missing { os: it.next().unwrap_or("").to_string(), arch: it.next().unwrap_or("").to_string() })
         }
         _ => Err(fail(host, format!("Couldn't start tesserad on {host}: {}", String::from_utf8_lossy(&out.stderr).trim()))),
     }
+}
+
+/// A PowerShell script as a command line any Windows shell (cmd.exe,
+/// PowerShell) runs as it is: -EncodedCommand (UTF-16, base64), so nothing
+/// in it needs quoting for either.
+fn windows_command(script: &str) -> String {
+    use base64::Engine;
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    format!("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}", base64::engine::general_purpose::STANDARD.encode(utf16))
+}
+
+/// A string for PowerShell, in single quotes.
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// Where Tessera puts tesserad on Windows.
+const WINDOWS_DIR: &str = "(Join-Path $env:LOCALAPPDATA 'Tessera\\bin')";
+
+/// start_script, for Windows: tesserad from PATH or Tessera's folder, its
+/// SHA-256 (no cksum there), started (out of the SSH session's job: it
+/// stays when the connection ends).
+fn windows_start_script() -> String {
+    format!(
+        r#"$ErrorActionPreference = 'Stop'
+$dir = {WINDOWS_DIR}
+$t = $null
+$c = Get-Command tesserad -ErrorAction SilentlyContinue
+if ($c) {{ $t = $c.Source }} elseif (Test-Path (Join-Path $dir 'tesserad.exe')) {{ $t = Join-Path $dir 'tesserad.exe' }}
+$arch = $env:PROCESSOR_ARCHITECTURE
+if (-not $t) {{ "Windows $arch"; exit 127 }}
+$h = (Get-FileHash -Algorithm SHA256 -LiteralPath $t).Hash.ToLower()
+$n = (Get-Item -LiteralPath $t).Length
+"TESSERAD $t sha256:$h $n Windows $arch"
+$env:TESSERA_REMOTE = '1'
+& $t start
+exit $LASTEXITCODE
+"#
+    )
 }
 
 /// scp through the host's shared connection, and the host as scp names it.
@@ -341,6 +421,14 @@ pub fn download(host: &str, path: &str, dir: &Path) -> Result<PathBuf, String> {
     Ok(to)
 }
 
+/// "sha256:<hex> <size>" for a file here (what Windows hosts report).
+fn local_sha256(p: &Path) -> Option<String> {
+    use sha2::Digest;
+    let b = std::fs::read(p).ok()?;
+    let h = sha2::Sha256::digest(&b);
+    Some(format!("sha256:{} {}", h.iter().map(|x| format!("{x:02x}")).collect::<String>(), b.len()))
+}
+
 /// `cksum`'s "crc size" for a file here.
 fn local_cksum(p: &Path) -> Option<String> {
     let f = std::fs::File::open(p).ok()?;
@@ -353,15 +441,23 @@ fn local_cksum(p: &Path) -> Option<String> {
 fn update(ctl: &Path, host: &str, local: &Path, path: &str, sum: &str, os: &str, arch: &str) -> std::io::Result<()> {
     use crate::proto::*;
     let Ok(bin) = build_for(os, arch) else { return Ok(()) };
-    if local_cksum(&bin).as_deref() == Some(sum) {
+    let same = if sum.starts_with("sha256:") { local_sha256(&bin).as_deref() == Some(sum) } else { local_cksum(&bin).as_deref() == Some(sum) };
+    if same {
         return Ok(());
     }
     // (Only one Tessera copied there itself: not a tesserad installed another way.)
-    let dir = deploy_dir(ctl, host)?;
-    if path != format!("{dir}/tesserad") {
+    let windows = platform(os, arch).is_some_and(|p| p.0 == "windows");
+    let dir = deploy_dir(ctl, host, windows)?;
+    let ours = if windows { path.eq_ignore_ascii_case(&format!("{dir}\\tesserad.exe")) } else { path == format!("{dir}/tesserad") };
+    if !ours {
         return Ok(());
     }
     deploy(ctl, host, os, arch)?;
+    // (Windows can't swap a running build in place: the new one is there for
+    // the next start, once this one has no shells left.)
+    if windows {
+        return Ok(());
+    }
     let mut s = UnixStream::connect(local)?;
     let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
     write_json(&mut s, T_UPGRADE, &serde_json::json!({"exe": path}))?;
@@ -376,12 +472,14 @@ fn update(ctl: &Path, host: &str, local: &Path, path: &str, sum: &str, os: &str,
 
 /// Where Tessera puts tesserad on `host`: ~/.local/bin, or ~ when that
 /// can't be written.
-fn deploy_dir(ctl: &Path, host: &str) -> std::io::Result<String> {
-    let out = ssh(ctl, host)
-        .arg("--")
-        .arg(format!(r#"{}sh -c 'mkdir -p "$HOME/.local/bin" 2>/dev/null; if [ -w "$HOME/.local/bin" ]; then echo "$HOME/.local/bin"; else echo "$HOME"; fi'"#, remote_env()))
-        .output()?;
-    let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+fn deploy_dir(ctl: &Path, host: &str, windows: bool) -> std::io::Result<String> {
+    let cmd = if windows {
+        windows_command(&format!("$d = {WINDOWS_DIR}; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d"))
+    } else {
+        format!(r#"{}sh -c 'mkdir -p "$HOME/.local/bin" 2>/dev/null; if [ -w "$HOME/.local/bin" ]; then echo "$HOME/.local/bin"; else echo "$HOME"; fi'"#, remote_env())
+    };
+    let out = ssh(ctl, host).arg("--").arg(cmd).output()?;
+    let dir = String::from_utf8_lossy(&out.stdout).replace('\r', "").trim().to_string();
     if dir.is_empty() {
         return Err(fail(host, format!("Couldn't find a folder for tesserad on {host}")));
     }
@@ -392,15 +490,29 @@ fn deploy_dir(ctl: &Path, host: &str) -> std::io::Result<String> {
 fn deploy(ctl: &Path, host: &str, os: &str, arch: &str) -> std::io::Result<()> {
     // (This computer's build for the host's platform, else the release's.)
     let bin = build_for(os, arch).map_err(|e| fail(host, format!("{host} ({os} {arch}) has no tesserad, and {e}.")))?;
-    let dir = deploy_dir(ctl, host)?;
-    let tmp = format!("{dir}/.tesserad.{}", std::process::id());
+    let windows = platform(os, arch).is_some_and(|p| p.0 == "windows");
+    let dir = deploy_dir(ctl, host, windows)?;
+    // (scp takes Windows paths with forward slashes.)
+    let tmp = if windows { format!("{}/tesserad.new.{}.exe", dir.replace('\\', "/"), std::process::id()) } else { format!("{dir}/.tesserad.{}", std::process::id()) };
     let (mut scp, target) = scp_to(ctl, host);
     scp.arg(&bin).arg(format!("{target}:{tmp}"));
     let st = scp.stdin(Stdio::null()).output()?;
     if !st.status.success() {
         return Err(fail(host, format!("Couldn't copy tesserad to {host}: {}", String::from_utf8_lossy(&st.stderr).trim())));
     }
-    let mv = ssh(ctl, host).arg("--").arg(format!("chmod 755 {q} && mv -f {q} {d}/tesserad", q = shell_words::quote(&tmp), d = shell_words::quote(&dir))).output()?;
+    let mv = if windows {
+        // (A running tesserad.exe can't be replaced, but it can be renamed:
+        // it carries on as the old file, and the new one starts next time.)
+        let exe = format!("{dir}\\tesserad.exe");
+        let script = format!(
+            "$e = {e}; $o = {e} + '.old'; Remove-Item -LiteralPath $o -Force -ErrorAction SilentlyContinue; if (Test-Path -LiteralPath $e) {{ Rename-Item -LiteralPath $e -NewName 'tesserad.exe.old' }}; Move-Item -Force -LiteralPath {t} -Destination $e",
+            e = ps_quote(&exe),
+            t = ps_quote(&tmp)
+        );
+        ssh(ctl, host).arg("--").arg(windows_command(&script)).output()?
+    } else {
+        ssh(ctl, host).arg("--").arg(format!("chmod 755 {q} && mv -f {q} {d}/tesserad", q = shell_words::quote(&tmp), d = shell_words::quote(&dir))).output()?
+    };
     if !mv.status.success() {
         return Err(fail(host, format!("Couldn't install tesserad on {host}: {}", String::from_utf8_lossy(&mv.stderr).trim())));
     }
@@ -589,11 +701,25 @@ mod tests {
     /// answers through the forwarded socket; a second connection finds it
     /// running. Its home and state are a scratch folder's.
     /// cargo test -p tesserad -- --ignored ssh_localhost
+    /// The same, through `tesserad mux` (as for a host whose sshd won't
+    /// forward a Unix socket: Windows').
+    /// cargo test -p tesserad -- --ignored ssh_localhost
+    #[test]
+    #[ignore]
+    fn ssh_localhost_through_mux() {
+        std::env::set_var("TESSERA_TEST_FORCE_MUX", "1");
+        ssh_localhost("mux");
+    }
+
     #[test]
     #[ignore]
     fn ssh_localhost_deploys_and_attaches() {
+        ssh_localhost("fwd");
+    }
+
+    fn ssh_localhost(tag: &str) {
         use crate::proto::*;
-        let scratch = std::env::temp_dir().join(format!("tsr-{}", std::process::id()));
+        let scratch = std::env::temp_dir().join(format!("tsr-{tag}-{}", std::process::id()));
         let home = scratch.join("home");
         std::fs::create_dir_all(&home).unwrap();
         let rsock = scratch.join("r").join("tessera-test.sock");
@@ -680,6 +806,25 @@ mod tests {
         assert!(runs_on(&d.join("w"), "windows", "x86_64"));
         assert!(!runs_on(&d.join("w"), "windows", "aarch64"));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The PowerShell sent to Windows hosts, written out for a parser to
+    /// check (TESSERA_DUMP_PS=<folder>); and its command line decodes back.
+    #[test]
+    fn windows_scripts() {
+        use base64::Engine;
+        let s = windows_start_script();
+        assert!(s.contains("Get-FileHash") && s.contains("& $t start"));
+        let cmd = windows_command(&s);
+        let b64 = cmd.rsplit(' ').next().unwrap();
+        let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        let back = String::from_utf16(&raw.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>()).unwrap();
+        assert_eq!(back, s);
+        assert_eq!(ps_quote("C:\\Users\\O'Neil"), "'C:\\Users\\O''Neil'");
+        if let Some(d) = std::env::var_os("TESSERA_DUMP_PS") {
+            std::fs::write(std::path::Path::new(&d).join("start.ps1"), &s).unwrap();
+            std::fs::write(std::path::Path::new(&d).join("dir.ps1"), format!("$d = {WINDOWS_DIR}; New-Item -ItemType Directory -Force -Path $d | Out-Null; $d")).unwrap();
+        }
     }
 
     #[test]
