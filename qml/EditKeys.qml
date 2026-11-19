@@ -217,32 +217,9 @@ QtObject {
         return false
     }
 
-    // "/" or "?" searching: the next match from the cursor, wrapping.
-    function search(pat, back) {
-        if (pat === "") pat = exc.lastSearch
-        if (pat === "") return "E35: No previous regular expression"
-        exc.lastSearch = pat
-        searchBack = back
-        return searchNext(false)
-    }
-    property bool searchBack: false
-    function searchNext(reverse) {
-        if (exc.lastSearch === "") return "E35: No previous regular expression"
-        let re
-        try { re = exc.regex(exc.lastSearch) } catch (x) { return "E383: Invalid search string" }
-        const g = new RegExp(re.source, re.flags + "g")
-        const t = edit.text, p = edit.cursorPosition
-        const all = []
-        let m
-        while ((m = g.exec(t)) !== null && all.length < 200000) { all.push(m.index); if (m[0] === "") g.lastIndex++ }
-        if (all.length === 0) return "E486: Pattern not found: " + exc.lastSearch
-        const back = searchBack !== reverse
-        let i = back ? all.length - 1 - all.slice().reverse().findIndex(x => x < p) : all.findIndex(x => x > p)
-        let wrapped = false
-        if (i < 0 || i >= all.length) { i = back ? all.length - 1 : 0; wrapped = true }
-        edit.cursorPosition = all[i]
-        return wrapped ? (back ? "search hit TOP, continuing at BOTTOM" : "search hit BOTTOM, continuing at TOP") : ""
-    }
+    // "/" or "?" searching (ExCommands').
+    function search(pat, back) { return exc.search(pat, back) }
+    function searchNext(reverse) { return exc.searchNext(reverse) }
     signal message(string text)
 
     function viKey(e) {

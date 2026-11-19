@@ -263,6 +263,33 @@ QtObject {
         if (r.a < 0 || r.b >= ln.length) throw "E16: Invalid range"
     }
 
+    // ---- "/" and "?": the next match from the cursor, wrapping ---------------
+    property bool searchBack: false
+    function search(pat, back) {
+        if (pat === "") pat = lastSearch
+        if (pat === "") return "E35: No previous regular expression"
+        lastSearch = pat
+        searchBack = back
+        return searchNext(false)
+    }
+    function searchNext(reverse) {
+        if (lastSearch === "") return "E35: No previous regular expression"
+        let re
+        try { re = regex(lastSearch) } catch (x) { return "E383: Invalid search string" }
+        const g = new RegExp(re.source, re.flags + "g")
+        const t = edit.text, p = edit.cursorPosition
+        const all = []
+        let m
+        while ((m = g.exec(t)) !== null && all.length < 200000) { all.push(m.index); if (m[0] === "") g.lastIndex++ }
+        if (all.length === 0) return "E486: Pattern not found: " + lastSearch
+        const back = searchBack !== reverse
+        let i = back ? all.length - 1 - all.slice().reverse().findIndex(x => x < p) : all.findIndex(x => x > p)
+        let wrapped = false
+        if (i < 0 || i >= all.length) { i = back ? all.length - 1 : 0; wrapped = true }
+        edit.cursorPosition = all[i]
+        return wrapped ? (back ? "search hit TOP, continuing at BOTTOM" : "search hit BOTTOM, continuing at TOP") : ""
+    }
+
     // ---- messages -----------------------------------------------------------
     property bool error: false
     function lines(n) { return n + (n === 1 ? " line" : " lines") }
@@ -709,6 +736,8 @@ QtObject {
         ["read", "r", "r {file} — put a file's lines after the line"],
         ["pwd", "pw", "the file's folder"]
     ]
+    // (An owner's own meanings: name -> its help, or null to leave it out.)
+    property var helpFor: ({})
     // The ones the command line's word could be: [{name, short, help}], best first.
     function completions(line) {
         // (Only while typing the command's name, after any range: past it,
@@ -718,7 +747,10 @@ QtObject {
         const head = m[1], word = m[2]
         const w = word.toLowerCase()
         const out = []
-        for (const c of commandList) {
+        for (const c0 of commandList) {
+            const o = helpFor[c0[0]]
+            if (o === null) continue
+            const c = o !== undefined ? [c0[0], c0[1], o] : c0
             if (c[0].startsWith(w) || (w.length >= c[1].length && c[0].startsWith(w)) || (w !== "" && c[1].startsWith(w)))
                 out.push({ name: c[0], short: c[1], help: c[2], head: head })
         }

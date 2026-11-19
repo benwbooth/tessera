@@ -116,7 +116,24 @@ Rectangle {
     // ---- editing ----------------------------------------------------------
     property int histIndex: -1         // -1: the draft, else into history
     property string draft: ""
-    property string killRing: ""
+    // vi's ":" commands on what's being written (ExCommands.qml), sharing the
+    // yanked text. :w / :x / :wq run it, :q clears it.
+    readonly property ExCommands ex: ExCommands {
+        id: cex
+        edit: edit
+        indentUnit: box.indentUnit
+        keyHandler: (e) => box.keys === "vi" ? box.viKey(e) : false
+        viKeys: box
+        onWrite: (p, force) => { if (p !== "") exLine.show("Not here: :w {file} (this runs the command)", true); else Qt.callLater(box.submit) }
+        onQuit: (force) => { edit.text = ""; box.viNormal = false }
+        onEditFile: (p, force) => exLine.show("Not here: :e (this is the command being written)", true)
+        onSetOption: (name, value) => {}
+        helpFor: ({ write: "run the command", update: "run the command", wq: "run the command", xit: "run the command", exit: "run the command",
+                    wall: "run the command", wqall: "run the command", xall: "run the command",
+                    quit: "clear the editor", qall: "clear the editor", close: "clear the editor",
+                    saveas: null, edit: null, read: null, file: null, pwd: null })
+    }
+    property alias killRing: cex.killRing
     property bool viNormal: false
     property string viPending: ""      // an operator waiting for its motion (d, c, y, g, r)
 
@@ -513,9 +530,13 @@ Rectangle {
         const p = edit.cursorPosition
         const t = edit.text
         if (e.key === Qt.Key_Escape) { viPending = ""; return true }
-        if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_R) { edit.redo(); return true }
+        if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_R) { cex.redo(); return true }
         if (viPending === "r") { if (ch && p < t.length) { edit.remove(p, p + 1); edit.insert(p, ch); edit.cursorPosition = p } viPending = ""; return true }
         if (viPending === "g") { viPending = ""; if (ch === "g") edit.cursorPosition = 0; return true }
+        // (: opens the command line, / and ? search, n and N go on.)
+        if (ch === ":" && viPending === "") { exLine.open(":", edit.selectedText !== "" ? "'<,'>" : ""); return true }
+        if ((ch === "/" || ch === "?") && viPending === "") { exLine.open(ch, ""); return true }
+        if ((ch === "n" || ch === "N") && viPending === "") { const r = cex.searchNext(ch === "N"); if (r !== "") exLine.show(r, r.startsWith("E")); return true }
         // Motions: where `ch` moves from p (or -1 when it isn't one).
         function motion(c) {
             switch (c) {
@@ -561,7 +582,7 @@ Rectangle {
         case "s": if (p < lineEnd(p)) kill(p, p + 1); viNormal = false; return true
         case "p": edit.insert(Math.min(t.length, p + 1), killRing); return true
         case "P": insert(killRing); return true
-        case "u": edit.undo(); return true
+        case "u": cex.undo(); return true
         case "~": if (p < t.length) { const c = t[p]; edit.remove(p, p + 1); edit.insert(p, c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()); edit.cursorPosition = p + 1 } return true
         case "G": edit.cursorPosition = t.length; return true
         case "j": historyStep(1); return true
@@ -728,6 +749,7 @@ Rectangle {
                 if (e.key === Qt.Key_Shift) shiftSide = 0
             }
             Keys.onPressed: (e) => {
+                exLine.dismiss()
                 if (e.key !== Qt.Key_Up && e.key !== Qt.Key_Down) box.fromHistory = false
                 if (e.key === Qt.Key_Shift && !e.isAutoRepeat) { shiftSide = shiftSideOf(e); shiftAt = Date.now() }
                 else shiftSide = 0
@@ -766,6 +788,26 @@ Rectangle {
                 e.accepted = done
             }
         }
+    }
+
+    // (Test hook: TESSERA_TEST_COMPOSE_EX="cmd;;cmd" runs those : commands on
+    // the editor's text at 6 s, then opens the line with TESSERA_TEST_EX_OPEN.)
+    Timer { interval: 6000; running: box.controller !== null && box.controller.testEnv("COMPOSE_EX") !== ""
+            onTriggered: {
+                for (const c of box.controller.testEnv("COMPOSE_EX").split(";;")) { const out = cex.run(c); console.log("compose ex test: :" + c + " -> " + JSON.stringify(out) + "  now " + JSON.stringify(edit.text)) }
+                if (box.controller.testEnv("EX_OPEN") !== "") { edit.forceActiveFocus(); exLine.open(":", box.controller.testEnv("EX_OPEN")) }
+            } }
+    // vi's command line, just above the editor (its choices above it).
+    ExLine {
+        id: exLine
+        z: 30
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.top
+        ex: cex
+        font: edit.font
+        errorColor: box.themeData && box.themeData.ansi && box.themeData.ansi[1] ? box.themeData.ansi[1] : "#e06c75"
+        onClosed: edit.forceActiveFocus()
     }
 
     // The AI's suggestion: the rest of the command, greyed, after the cursor.

@@ -20,7 +20,7 @@ Item {
     property var themeData: ({})
     // (How tall it would like to be: all its lines, up to `maxHeight`.)
     property real maxHeight: 460
-    implicitHeight: inTerm ? maxHeight : editing ? Math.min(maxHeight, editBar.height + Math.max(3, editor.lineCount) * fm.lineSpacing + 14)
+    implicitHeight: inTerm ? maxHeight : editing ? Math.min(maxHeight, Math.max(exLine.kind !== "" || exLine.message.indexOf("\n") >= 0 ? 230 : 0, editBar.height + Math.max(3, editor.lineCount) * fm.lineSpacing + 14 + (exLine.visible ? exLine.height : 0)))
                   : lines === 0 ? 40 : Math.min(maxHeight, lines * fm.lineSpacing + 14)
 
     readonly property int block: 500
@@ -122,28 +122,8 @@ Item {
         return true
     }
     // ---- vi's command line: ":" commands, "/" and "?" searches ----------------
-    property string cmdKind: ""          // ":", "/", "?" while it's open
-    property string exMessage: ""
-    property bool exError: false
-    property int exHistoryAt: -1
-    function openCommandLine(kind, initial) {
-        cmdKind = kind
-        exMessage = ""
-        exHistoryAt = -1
-        cmdField.text = initial
-        cmdField.forceActiveFocus()
-        cmdField.cursorPosition = initial.length
-    }
-    function closeCommandLine() { cmdKind = ""; editor.forceActiveFocus() }
-    function showExMessage(t, err) { exMessage = t; exError = !!err; exMessageTimer.restart() }
-    function runCommandLine() {
-        const kind = cmdKind, line = cmdField.text
-        closeCommandLine()
-        if (kind === "/" || kind === "?") { const r = ek.search(line, kind === "?"); if (r !== "") showExMessage(r, r.startsWith("E")); return }
-        const out = ek.ex.run(line)
-        if (out !== "") showExMessage(out, ek.ex.error)
-    }
-    Timer { id: exMessageTimer; interval: 6000; onTriggered: if (fv.exMessage.indexOf("\n") < 0) fv.exMessage = "" }
+    function openCommandLine(kind, initial) { exLine.open(kind, initial) }
+    function showExMessage(t, err) { exLine.show(t, err) }
     Connections {
         target: ek.ex
         function onWrite(p, force) {
@@ -560,7 +540,7 @@ Item {
             onCursorRectangleChanged: editFlick.ensureVisible(cursorRectangle)
             // (Ctrl+S saves; the rest is the input editor's keys.)
             Keys.onPressed: (e) => {
-                if (fv.exMessage !== "") fv.exMessage = ""       // (a key: what a command said goes)
+                exLine.dismiss()       // (a key: what a command said goes)
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_S) { fv.save(); e.accepted = true; return }
                 // (Undo and redo through the : commands' own, so one of theirs is one step.)
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_Z) { if (e.modifiers & Qt.ShiftModifier) ek.ex.redo(); else ek.ex.undo(); e.accepted = true; return }
@@ -639,126 +619,19 @@ Item {
             try { const r = JSON.parse(fv.controller.syntax(fv.lang, editor.text)); r.errors = []; edHl.analysis = JSON.stringify(r) } catch (e) {}
         }
     }
-    // The command line, at the bottom of the editor, with the commands it
-    // could be (and what each does) above it while typing one.
-    Rectangle {
-        id: cmdBar
-        visible: fv.editing && !fv.inTerm && (fv.cmdKind !== "" || fv.exMessage !== "")
+    // vi's command line, at the bottom of the editor (ExLine.qml).
+    ExLine {
+        id: exLine
+        visible: fv.editing && !fv.inTerm && (kind !== "" || message !== "")
         z: 6
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: fv.cmdKind !== "" ? 24 : Math.min(fv.height * 0.6, msgText.implicitHeight + 10)
-        color: Theme.mix(Theme.bg, Theme.fg, 0.08)
-        border.color: Theme.divider
-        Text {
-            id: cmdPrefix
-            visible: fv.cmdKind !== ""
-            x: 8.001
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: 0.001
-            text: fv.cmdKind
-            color: Theme.accent
-            font: editor.font
-            renderType: Text.NativeRendering
-        }
-        TextInput {
-            id: cmdField
-            visible: fv.cmdKind !== ""
-            anchors.left: cmdPrefix.right
-            anchors.leftMargin: 2
-            anchors.right: parent.right
-            anchors.rightMargin: 8
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: 0.001
-            font: editor.font
-            color: Theme.text
-            selectionColor: Theme.accent
-            clip: true
-            renderType: Text.NativeRendering
-            property int pick: 0
-            readonly property var choices: fv.cmdKind === ":" ? ek.ex.completions(text) : []
-            onTextChanged: pick = 0
-            function complete() {
-                const c = choices[Math.min(pick, choices.length - 1)]
-                if (!c) return
-                text = c.head + c.name + (["<", ">", "=", "#"].indexOf(c.name) >= 0 ? "" : " ")
-                cursorPosition = text.length
-            }
-            Keys.onPressed: (e) => {
-                if (e.key === Qt.Key_Escape || (e.key === Qt.Key_Backspace && text === "")) { fv.closeCommandLine(); e.accepted = true; return }
-                if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { fv.runCommandLine(); e.accepted = true; return }
-                if (e.key === Qt.Key_Tab && choices.length) { complete(); e.accepted = true; return }
-                if ((e.key === Qt.Key_Down || e.key === Qt.Key_Up) && choices.length > 1 && fv.exHistoryAt < 0) {
-                    pick = (pick + (e.key === Qt.Key_Down ? 1 : choices.length - 1)) % choices.length
-                    e.accepted = true
-                    return
-                }
-                // (↑/↓: the commands run before.)
-                if (e.key === Qt.Key_Up || e.key === Qt.Key_Down) {
-                    const h = ek.ex.history
-                    if (h.length === 0) { e.accepted = true; return }
-                    let i = fv.exHistoryAt < 0 ? h.length : fv.exHistoryAt
-                    i = Math.max(0, Math.min(h.length, i + (e.key === Qt.Key_Up ? -1 : 1)))
-                    fv.exHistoryAt = i
-                    text = i < h.length ? h[i] : ""
-                    e.accepted = true
-                }
-            }
-        }
-        Text {
-            id: msgText
-            visible: fv.cmdKind === "" && fv.exMessage !== ""
-            x: 8.001
-            y: 5.001
-            width: parent.width - 16
-            text: fv.exMessage
-            color: fv.exError ? fv.ansi(1, "#e06c75") : Theme.text
-            font: editor.font
-            wrapMode: Text.WrapAnywhere
-            renderType: Text.NativeRendering
-            MouseArea { anchors.fill: parent; onClicked: { fv.exMessage = ""; editor.forceActiveFocus() } }
-        }
-    }
-    Rectangle {
-        id: cmdChoices
-        visible: cmdBar.visible && fv.cmdKind === ":" && cmdField.choices.length > 0 && cmdField.text.trim() !== "" || cmdBar.visible && fv.cmdKind === ":" && cmdField.text === ""
-        z: 6
-        anchors.left: parent.left
-        anchors.leftMargin: 4
-        anchors.bottom: cmdBar.top
-        width: Math.min(parent.width - 8, 620)
-        height: Math.min(choiceList.contentHeight, 8 * 20) + 6
-        radius: 6
-        color: Theme.mix(Theme.bg, Theme.fg, 0.1)
-        border.color: Theme.divider
-        ListView {
-            id: choiceList
-            anchors.fill: parent
-            anchors.margins: 3
-            clip: true
-            model: cmdField.choices
-            currentIndex: cmdField.pick
-            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
-            boundsBehavior: Flickable.StopAtBounds
-            delegate: Rectangle {
-                required property var modelData
-                required property int index
-                width: ListView.view.width
-                height: 20
-                radius: 4
-                color: index === cmdField.pick ? Theme.mix(Theme.bg, Theme.accent, 0.35) : "transparent"
-                Row {
-                    x: 6.001
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: 0.001
-                    spacing: 10
-                    Text { width: 170; text: modelData.name + (modelData.short !== modelData.name ? "  (" + modelData.short + ")" : ""); color: Theme.text; font.family: editor.font.family; font.pointSize: editor.font.pointSize; font.bold: true; elide: Text.ElideRight; renderType: Text.NativeRendering }
-                    Text { text: modelData.help; color: Theme.textDim; font.pixelSize: 11; renderType: Text.NativeRendering }
-                }
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { cmdField.pick = index; cmdField.complete(); cmdField.forceActiveFocus() } }
-            }
-        }
+        ex: ek.ex
+        font: editor.font
+        errorColor: fv.ansi(1, "#e06c75")
+        maxHeight: fv.height * 0.6
+        onClosed: editor.forceActiveFocus()
     }
 
     // vi's mode, and what went wrong saving.
