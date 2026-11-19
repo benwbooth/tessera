@@ -1491,7 +1491,6 @@ dependencies = [
  "image",
  "libc",
  "libghostty-vt",
- "libghostty-vt-sys",
  "libloading",
  "miniz_oxide 0.9.1",
  "portable-pty",
