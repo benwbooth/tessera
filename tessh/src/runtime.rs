@@ -98,6 +98,14 @@ def first(xs):
 def second(xs):
     return next(_it.islice(xs, 1, None), None)
 
+def last(xs):
+    if hasattr(xs, "__getitem__") and hasattr(xs, "__len__"):
+        return xs[-1] if len(xs) else None
+    v = None
+    for v in xs:
+        pass
+    return v
+
 def rest(xs):
     return list(_it.islice(xs, 1, None))
 
@@ -242,7 +250,7 @@ def update_in(d, path, f, *args):
 "#;
 
 /// Clojure-style functions every namespace gets (the prelude's).
-pub const CORE: &[&str] = &["partial", "identity", "constantly", "comp", "complement", "juxt", "inc", "dec", "first", "second", "rest", "butlast", "take", "drop", "take_while", "drop_while", "some", "every", "keep", "mapcat", "frequencies", "group_by", "partition", "partition_all", "partition_by", "interpose", "interleave", "distinct", "flatten", "iterate", "repeatedly", "zipmap", "select_keys", "merge_with", "get_in", "assoc_in", "update_in"];
+pub const CORE: &[&str] = &["partial", "identity", "constantly", "comp", "complement", "juxt", "inc", "dec", "first", "second", "last", "rest", "butlast", "take", "drop", "take_while", "drop_while", "some", "every", "keep", "mapcat", "frequencies", "group_by", "partition", "partition_all", "partition_by", "interpose", "interleave", "distinct", "flatten", "iterate", "repeatedly", "zipmap", "select_keys", "merge_with", "get_in", "assoc_in", "update_in"];
 
 fn prelude(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     static P: pyo3::sync::PyOnceLock<Py<PyModule>> = pyo3::sync::PyOnceLock::new();

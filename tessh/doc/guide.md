@@ -1522,11 +1522,11 @@ done
 Clojure's sequence and map functions, with underscores for its dashes.
 Each takes the function first and the collection last, so they work as
 `->>` steps and pipe stages. They return lists, except `iterate` and
-`repeatedly` without a count, which never end: `take` some. (There's no
-`last`, since that's a program: use `$xs[-1]`.)
+`repeatedly` without a count, which never end: `take` some. (`last` is
+the function: `\last` runs the program of that name.)
 
 ```tessh
-print (first [1 2 3]) (second [1 2 3]) (rest [1 2 3]) (butlast [1 2 3])
+print (first [1 2 3]) (second [1 2 3]) (last [1 2 3]) (rest [1 2 3]) (butlast [1 2 3])
 print (take 3 (iterate $inc 10)) (drop 2 [1 2 3 4]) (take_while (fn ($% < 3)) [1 2 5 1])
 print (frequencies "abca") (distinct [1 2 1 3])
 print (group_by $len [a bb c dd]) (partition 2 [1 2 3 4 5]) (partition_all 2 [1 2 3])
@@ -1535,7 +1535,7 @@ print (flatten [1 [2 [3 4]]]) (mapcat (fn ([$% $%])) [1 2]) (keep (fn (if $% > 1
 ```
 
 ```output
-1 2 [2, 3] [1, 2]
+1 2 3 [2, 3] [1, 2]
 [10, 11, 12] [3, 4] [1, 2]
 {'a': 2, 'b': 1, 'c': 1} [1, 2, 3]
 {1: ['a', 'c'], 2: ['bb', 'dd']} [[1, 2], [3, 4]] [[1, 2], [3]]

@@ -304,7 +304,7 @@ variable). `{1 2 3}` is a set, `()` an empty tuple, and `(1, 2)` a tuple.
   group_by partition partition_all partition_by interpose interleave distinct
   flatten iterate repeatedly zipmap select_keys merge_with get_in assoc_in
   update_in`. Function first, collection last; lists, except endless
-  `iterate`/`repeatedly`. No `last`, which is a program.
+  `iterate`/`repeatedly`. `last` hides the program of that name (`\last` runs it).
 
 ## 6. Shell operators
 
