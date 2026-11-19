@@ -42,7 +42,207 @@ class Output(str):
 
 class _Glob(str):
     pass
+
+def pick(d, keys, defaults, rest):
+    """{a b c=0 **more} = d"""
+    mapping = hasattr(d, "keys") and hasattr(d, "__getitem__")
+    out = []
+    for k in keys:
+        if k in defaults:
+            out.append(d.get(k, defaults[k]) if mapping else getattr(d, k, defaults[k]))
+        else:
+            out.append(d[k] if mapping else getattr(d, k))
+    if rest:
+        out.append({k: v for k, v in (d.items() if mapping else vars(d).items()) if k not in keys})
+    return tuple(out)
+
+# ---- Clojure's core functions, Python-sized -------------------------------------
+
+import functools as _ft, itertools as _it
+
+partial = _ft.partial
+
+def identity(x):
+    return x
+
+def constantly(x):
+    return lambda *a, **k: x
+
+def comp(*fs):
+    """comp f g h: a function doing h, then g, then f."""
+    if not fs:
+        return identity
+    def composed(*a, **k):
+        v = fs[-1](*a, **k)
+        for f in reversed(fs[:-1]):
+            v = f(v)
+        return v
+    return composed
+
+def complement(f):
+    return lambda *a, **k: not f(*a, **k)
+
+def juxt(*fs):
+    """juxt f g: a function returning [f x, g x]."""
+    return lambda *a, **k: [f(*a, **k) for f in fs]
+
+def inc(x):
+    return x + 1
+
+def dec(x):
+    return x - 1
+
+def first(xs):
+    return next(iter(xs), None)
+
+def second(xs):
+    return next(_it.islice(xs, 1, None), None)
+
+def rest(xs):
+    return list(_it.islice(xs, 1, None))
+
+def butlast(xs):
+    return list(xs)[:-1]
+
+def take(n, xs):
+    return list(_it.islice(xs, n))
+
+def drop(n, xs):
+    return list(_it.islice(xs, n, None))
+
+def take_while(pred, xs):
+    return list(_it.takewhile(pred, xs))
+
+def drop_while(pred, xs):
+    return list(_it.dropwhile(pred, xs))
+
+def some(pred, xs):
+    """The first true pred x, else None."""
+    for x in xs:
+        v = pred(x)
+        if v:
+            return v
+    return None
+
+def every(pred, xs):
+    return all(pred(x) for x in xs)
+
+def keep(f, xs):
+    """f of each x, leaving out the Nones."""
+    return [v for v in map(f, xs) if v is not None]
+
+def mapcat(f, *xss):
+    return [y for ys in map(f, *xss) for y in ys]
+
+def frequencies(xs):
+    out = {}
+    for x in xs:
+        out[x] = out.get(x, 0) + 1
+    return out
+
+def group_by(f, xs):
+    out = {}
+    for x in xs:
+        out.setdefault(f(x), []).append(x)
+    return out
+
+def partition(n, xs, step=None, pad=None):
+    """Lists of n (every step); a short last one only with pad."""
+    xs = list(xs)
+    step = step or n
+    out = []
+    for i in range(0, len(xs), step):
+        chunk = xs[i:i + n]
+        if len(chunk) < n:
+            if pad is None:
+                break
+            chunk = (chunk + list(pad))[:n]
+        out.append(chunk)
+    return out
+
+def partition_all(n, xs, step=None):
+    xs = list(xs)
+    return [xs[i:i + n] for i in range(0, len(xs), step or n)]
+
+def partition_by(f, xs):
+    return [list(g) for _, g in _it.groupby(xs, f)]
+
+def interpose(sep, xs):
+    out = []
+    for i, x in enumerate(xs):
+        if i:
+            out.append(sep)
+        out.append(x)
+    return out
+
+def interleave(*xss):
+    return [x for xs in zip(*xss) for x in xs]
+
+def distinct(xs):
+    return list(dict.fromkeys(xs))
+
+def flatten(xs):
+    """Nested lists and tuples as one list."""
+    out = []
+    for x in xs:
+        if isinstance(x, (list, tuple)):
+            out.extend(flatten(x))
+        else:
+            out.append(x)
+    return out
+
+def iterate(f, x):
+    """x, f x, f (f x), … (endless: take some)."""
+    while True:
+        yield x
+        x = f(x)
+
+def repeatedly(f, n=None):
+    """f called n times (endless without n)."""
+    if n is not None:
+        return [f() for _ in range(n)]
+    return (f() for _ in _it.count())
+
+def zipmap(keys, vals):
+    return dict(zip(keys, vals))
+
+def select_keys(d, keys):
+    return {k: d[k] for k in keys if k in d}
+
+def merge_with(f, *ds):
+    out = {}
+    for d in ds:
+        for k, v in d.items():
+            out[k] = f(out[k], v) if k in out else v
+    return out
+
+def get_in(d, path, default=None):
+    """d[a][b][c] for path [a b c], or default where it's missing."""
+    for k in path:
+        try:
+            d = d[k]
+        except (KeyError, IndexError, TypeError):
+            return default
+    return d
+
+def assoc_in(d, path, v):
+    """A copy of d with d[a][b] = v (missing dicts made)."""
+    path = list(path)
+    if not path:
+        return v
+    out = dict(d) if isinstance(d, dict) else list(d) if isinstance(d, list) else {}
+    k = path[0]
+    inner = out[k] if (isinstance(out, dict) and k in out) or (isinstance(out, list) and -len(out) <= k < len(out)) else {}
+    out[k] = assoc_in(inner, path[1:], v)
+    return out
+
+def update_in(d, path, f, *args):
+    """A copy of d with d[a][b] = f d[a][b] args…"""
+    return assoc_in(d, path, f(get_in(d, path), *args))
 "#;
+
+/// Clojure-style functions every namespace gets (the prelude's).
+pub const CORE: &[&str] = &["partial", "identity", "constantly", "comp", "complement", "juxt", "inc", "dec", "first", "second", "rest", "butlast", "take", "drop", "take_while", "drop_while", "some", "every", "keep", "mapcat", "frequencies", "group_by", "partition", "partition_all", "partition_by", "interpose", "interleave", "distinct", "flatten", "iterate", "repeatedly", "zipmap", "select_keys", "merge_with", "get_in", "assoc_in", "update_in"];
 
 fn prelude(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     static P: pyo3::sync::PyOnceLock<Py<PyModule>> = pyo3::sync::PyOnceLock::new();
@@ -1237,6 +1437,10 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         m.add_function(f)?;
     }
     m.add("Output", prelude(py)?.getattr("Output")?)?;
+    m.add("pick", prelude(py)?.getattr("pick")?)?;
+    for n in CORE {
+        m.add(*n, prelude(py)?.getattr(*n)?)?;
+    }
     m.add("env", Py::new(py, Env)?)?;
     for n in COMMAND_BUILTINS {
         m.add(*n, Py::new(py, Builtin { name: n })?)?;
@@ -1249,7 +1453,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help"].iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help"].iter()).chain(CORE.iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }

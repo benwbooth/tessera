@@ -52,7 +52,7 @@ const WORD_OPS: &[&str] = &["and", "or", "not", "in", "is"];
 const SPACED_REDIRS: &[&str] = &[">", ">>", "<", "1>", "1>>", "2>", "2>>", "&>", "&>>"];
 const CONTINUATIONS: &[&str] = &["elif", "else", "except", "except*", "finally"];
 pub const BLOCK_SPECIALS: &[&str] = &["def", "class", "if", "while", "for", "try", "with", "match", "defmacro", "quasi", "do", "async", "fn", "lambda"];
-const OTHER_SPECIALS: &[&str] = &["return", "yield", "await", "raise", "assert", "del", "pass", "break", "continue", "global", "nonlocal", "import", "from", "quote", "defop", "elif", "else", "except", "except*", "finally", "case"];
+const OTHER_SPECIALS: &[&str] = &["return", "yield", "await", "raise", "assert", "del", "pass", "break", "continue", "global", "nonlocal", "import", "from", "quote", "defop", "->", "->>", "some->", "some->>", "as->", "doto", "elif", "else", "except", "except*", "finally", "case"];
 
 fn binop(n: &str) -> Option<&'static str> {
     BINOPS.iter().find(|(o, _)| *o == n).map(|(_, a)| *a)
@@ -728,6 +728,9 @@ impl<'py, 's> Compiler<'py, 's> {
         if let Some(i) = self.assign_index(items) {
             return self.compile_assign(&items[..i], &items[i], &items[i + 1..], children, conts);
         }
+        if let Some(n) = items[0].op_name().filter(|o| *o == "->" || *o == "->>") {
+            return self.special(n, items, children, ctx, conts, decos);
+        }
         if let Some(n) = items[0].sym_name() {
             if is_special(n) && self.binding(n, &[]).is_none() {
                 return self.special(n, items, children, ctx, conts, decos);
@@ -841,7 +844,7 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::Sym { name, .. } => {
                 if self.special_head(head).is_some() {
                     "special"
-                } else if WORD_OPS.contains(&name.as_str()) || ["True", "False", "None", "..."].contains(&name.as_str()) || self.is_known(head) || walrus(items) {
+                } else if WORD_OPS.contains(&name.as_str()) || ["True", "False", "None", "..."].contains(&name.as_str()) || self.is_known(head) || walrus(items) || member(head).is_some() {
                     "expr"
                 } else {
                     "command"
@@ -864,6 +867,9 @@ impl<'py, 's> Compiler<'py, 's> {
             "command" => self.compile_command(items, children, if ctx == Ctx::Value { "capture" } else { "attach" }),
             _ => {
                 if items.len() == 1 && children.is_empty() {
+                    if let Some((m, field)) = member(&items[0]) {
+                        return Ok(Res::e(self.at(self.member_fn(m, field)?, &items[0])));
+                    }
                     if let Kind::Sym { name, .. } = &items[0].kind {
                         if self.is_known(&items[0]) && !["True", "False", "None", "..."].contains(&name.as_str()) {
                             let e = self.rcall("auto", vec![self.name_load(&items[0])?])?;
@@ -1036,6 +1042,14 @@ impl<'py, 's> Compiler<'py, 's> {
             _ => {}
         }
         let head = &items[0];
+        if let Some((m, field)) = member(head) {
+            // (.method args: the input is the object.)
+            let (stmts, args, kws, _) = self.compile_call_args(&items[1..], children)?;
+            let obj = self.attr(self.name("_tessh_in", false)?, m, false)?;
+            let body = if field { obj } else { self.call(obj, args, kws)? };
+            let lam = self.lambda(self.one_arg("_tessh_in")?, body)?;
+            return Ok(Res::s(stmts, self.rcall("call_stage", vec![lam])?));
+        }
         let is_call = (head.sym_name().is_some() && self.is_known(head)) || items.len() > 1 || !children.is_empty();
         if !is_call {
             if !first {
@@ -1370,6 +1384,9 @@ impl<'py, 's> Compiler<'py, 's> {
         if items.len() == 1 && children.is_empty() && head.sym_name().is_some_and(|n| ["True", "False", "None", "..."].contains(&n)) {
             return self.compile_value(head, ctx);
         }
+        if let Some((m, field)) = member(head) {
+            return self.compile_member(m, field, &items[1..], children, head);
+        }
         if head.sym_name().is_some() && !walrus(items) {
             if self.special_head(head).is_some() {
                 return self.compile_items(items, children, ctx, &[], &[]);
@@ -1392,6 +1409,148 @@ impl<'py, 's> Compiler<'py, 's> {
             c = self.rcall("redirect", vec![self.lambda(self.noargs()?, c)?, self.list_node(red)?])?;
         }
         Ok(Res::s(stmts, c))
+    }
+
+    fn one_arg(&self, name: &str) -> R<Obj<'py>> {
+        self.n("arguments", vec![("posonlyargs", self.list(vec![])?), ("args", self.list(vec![self.n("arg", vec![("arg", self.s(name))])?])?), ("kwonlyargs", self.list(vec![])?), ("kw_defaults", self.list(vec![])?), ("defaults", self.list(vec![])?)])
+    }
+
+    /// `.method obj args…` and `.-field obj`, as in Clojure.
+    fn compile_member(&mut self, m: &str, field: bool, rest: &[Form], children: &[Form], head: &Form) -> R<Res<'py>> {
+        if rest.is_empty() && children.is_empty() {
+            return Ok(Res::e(self.at(self.member_fn(m, field)?, head)));
+        }
+        let (stmts, mut args, kws, reds) = self.compile_call_args(rest, children)?;
+        if args.is_empty() || args[0].get_type().name().map(|n| n.to_string() == "Starred").unwrap_or(false) {
+            return err(format!("'{}' needs the object first", show(head)), Some(head));
+        }
+        if !reds.is_empty() {
+            return err("a method call can't redirect: wrap it in a do block", Some(head));
+        }
+        let obj = args.remove(0);
+        let a = self.attr(obj, m, false)?;
+        if field {
+            if !args.is_empty() || !kws.is_empty() {
+                return err(format!("'.-{m}' takes only the object"), Some(head));
+            }
+            return Ok(Res::s(stmts, self.at(a, head)));
+        }
+        Ok(Res::s(stmts, self.at(self.call(a, args, kws)?, head)))
+    }
+
+    /// `.method` as a value: a function calling that method on its first
+    /// argument (`.-field`: reading that field).
+    fn member_fn(&self, m: &str, field: bool) -> R<Obj<'py>> {
+        let o = self.name("_tessh_o", false)?;
+        if field {
+            return self.lambda(self.one_arg("_tessh_o")?, self.attr(o, m, false)?);
+        }
+        let arg = |n: &str| self.n("arg", vec![("arg", self.s(n))]);
+        let args = self.n("arguments", vec![("posonlyargs", self.list(vec![])?), ("args", self.list(vec![arg("_tessh_o")?])?), ("vararg", arg("_tessh_a")?), ("kwonlyargs", self.list(vec![])?), ("kw_defaults", self.list(vec![])?), ("kwarg", arg("_tessh_k")?), ("defaults", self.list(vec![])?)])?;
+        let call = self.call(self.attr(o, m, false)?, vec![self.starred(self.name("_tessh_a", false)?, false)?], vec![self.keyword(None, self.name("_tessh_k", false)?)?])?;
+        self.lambda(args, call)
+    }
+
+    /// ->, ->>, some->, some->>, as->, doto.
+    fn sf_thread(&mut self, n: &str, items: &[Form], children: &[Form], ctx: Ctx) -> R<Res<'py>> {
+        let head = &items[0];
+        let Some(init) = items.get(1) else { return err(format!("{n} value steps…"), Some(head)) };
+        let mut k = 2;
+        let name = if n == "as->" {
+            k = 3;
+            match items.get(2) {
+                Some(x) if x.sym_name().is_some_and(is_ident) => x.clone(),
+                _ => return err("as-> value name steps…", Some(head)),
+            }
+        } else {
+            self.st.marks += 1;
+            Form::sym_at("v", &[self.st.marks], head.pos)
+        };
+        let mut steps: Vec<Form> = items[k.min(items.len())..].to_vec();
+        for c in children {
+            let (ci, cc) = line_parts(c);
+            if !cc.is_empty() {
+                return err(format!("a step of {n} goes on one line"), Some(c));
+            }
+            steps.push(if ci.len() == 1 { ci[0].clone() } else { Form::group('(', ci.to_vec(), c.pos) });
+        }
+        let first = !n.ends_with("->>");
+        if n == "->" || n == "->>" {
+            let mut acc = init.clone();
+            for s in &steps {
+                acc = thread_into(s, acc, first);
+            }
+            return self.compile_value(&acc, ctx);
+        }
+        let pos = head.pos;
+        let var = Form::new(Kind::Var(Box::new(name.clone())), pos);
+        let eq = || Form::new(Kind::Op { name: "=".into(), tick: false }, pos);
+        let mut lines = vec![Form::line(vec![name.clone(), eq(), init.clone()], vec![], pos)];
+        for s in &steps {
+            lines.push(match n {
+                "as->" => Form::line(vec![name.clone(), eq(), s.clone()], vec![], s.pos),
+                "doto" => Form::line(vec![thread_into(s, var.clone(), true)], vec![], s.pos),
+                _ => {
+                    let set = Form::line(vec![name.clone(), eq(), thread_into(s, var.clone(), first)], vec![], s.pos);
+                    Form::line(vec![Form::sym("if"), var.clone(), Form::sym("is"), Form::sym("not"), Form::sym("None")], vec![set], s.pos)
+                }
+            });
+        }
+        lines.push(Form::line(vec![var], vec![], pos));
+        self.compile_body(&lines, ctx)
+    }
+
+    /// `{a b c=0 **rest} = value`: names from a dict's keys (or an object's
+    /// attributes).
+    fn destructure(&mut self, ks: &[Form], g: &Form, value: Res<'py>) -> R<Res<'py>> {
+        let mut targets = vec![];
+        let mut keys = vec![];
+        let mut dkeys = vec![];
+        let mut dvals = vec![];
+        let mut rest = false;
+        for x in ks {
+            match &x.kind {
+                Kind::Comma => {}
+                Kind::Sym { name, marks } if name.strip_prefix("**").is_some_and(is_ident) && !rest => {
+                    targets.push(Form::sym_at(&name[2..], marks, x.pos));
+                    rest = true;
+                }
+                Kind::Sym { name, .. } if is_ident(name) && !rest => {
+                    targets.push(x.clone());
+                    keys.push(name.clone());
+                }
+                Kind::KwArg { name, value } if !rest => {
+                    targets.push(Form::sym_at(name, &[], x.pos));
+                    keys.push(name.clone());
+                    dkeys.push(name.clone());
+                    dvals.push(self.compile_value(value, Ctx::Value)?);
+                }
+                Kind::Splat { value, n: 2 } if value.sym_name().is_some_and(is_ident) && !rest => {
+                    targets.push((**value).clone());
+                    rest = true;
+                }
+                _ => return err("{name …} = takes names, name=default and **rest last", Some(x)),
+            }
+        }
+        if targets.is_empty() {
+            return err("nothing to assign to", Some(g));
+        }
+        let mut rs = vec![value];
+        rs.extend(dvals);
+        let (mut stmts, es) = self.gather_e(rs)?;
+        let kl = self.list_node(keys.iter().map(|k| self.c(k.as_str())).collect::<R<_>>()?)?;
+        let dk = self.list(dkeys.iter().map(|k| self.c(k.as_str())).collect::<R<_>>()?)?;
+        let dict = self.n("Dict", vec![("keys", dk), ("values", self.list(es[1..].to_vec())?)])?;
+        let call = self.rcall("pick", vec![es[0].clone(), kl, dict, self.c(rest)?])?;
+        let mut ts = vec![];
+        for t in &targets {
+            let r = self.make_target(std::slice::from_ref(t), g, false, false)?;
+            stmts.extend(r.stmts);
+            ts.push(self.val(r.expr)?);
+        }
+        let tuple = self.n("Tuple", vec![("elts", self.list(ts)?), ("ctx", self.n0("Store")?)])?;
+        stmts.push(self.at(self.n("Assign", vec![("targets", self.list(vec![tuple])?), ("value", call)])?, g));
+        Ok(Res::s(stmts, self.cnone()?))
     }
 
     /// (statements, args, keywords, redirections)
@@ -2091,6 +2250,11 @@ impl<'py, 's> Compiler<'py, 's> {
         } else {
             self.compile_expr(rhs, Ctx::Value, children)?
         };
+        if let (true, [g]) = (opn == "=", lhs) {
+            if let Kind::Group { open: '{', items: ks } = &g.kind {
+                return self.destructure(ks, g, value);
+            }
+        }
         let target = self.make_target(lhs, op, false, false)?;
         let mut stmts = value.stmts;
         stmts.extend(target.stmts);
@@ -2229,6 +2393,7 @@ impl<'py, 's> Compiler<'py, 's> {
             }
             "defmacro" => self.sf_defmacro(items, children),
             "defop" => self.sf_defop(items),
+            "->" | "->>" | "some->" | "some->>" | "as->" | "doto" => self.sf_thread(n, items, children, ctx),
             _ => err(format!("'{n}' isn't handled"), Some(head)),
         }
     }
@@ -2762,6 +2927,44 @@ impl<'py, 's> Compiler<'py, 's> {
 
     fn sf_fn(&mut self, items: &[Form], children: &[Form]) -> R<Res<'py>> {
         let head = &items[0];
+        if (items.len() > 1 && !matches!(items[1].kind, Kind::Group { open: '[', .. })) || (items.len() == 1 && !children.is_empty()) {
+            // fn body with $% (or $%1 $%2…, and $%& for the rest): the parameters.
+            let (mut most, mut rest) = (0u32, false);
+            let mut scan = |f: Form| {
+                if let Kind::Var(v) = &f.kind {
+                    match v.sym_name() {
+                        Some("%") => most = most.max(1),
+                        Some("%&") => rest = true,
+                        Some(n) if n.len() == 2 && n.starts_with('%') => most = most.max(n[1..].parse().unwrap_or(0)),
+                        _ => {}
+                    }
+                }
+                f
+            };
+            for x in items[1..].iter().chain(children) {
+                x.clone().map(&mut scan);
+            }
+            self.st.marks += 1;
+            let mark = self.st.marks;
+            let mut rename = |f: Form| match &f.kind {
+                Kind::Var(v) => match v.sym_name() {
+                    Some(n) if n.starts_with('%') => {
+                        let p = match n { "%" => "p1".to_string(), "%&" => "rest".to_string(), _ => format!("p{}", &n[1..]) };
+                        Form::new(Kind::Var(Box::new(Form::sym_at(&p, &[mark], v.pos))), f.pos)
+                    }
+                    _ => f,
+                },
+                _ => f,
+            };
+            let mut params: Vec<Form> = (1..=most).map(|i| Form::sym_at(&format!("p{i}"), &[mark], head.pos)).collect();
+            if rest {
+                params.push(Form::sym_at("*rest", &[mark], head.pos));
+            }
+            let mut new_items = vec![head.clone(), Form::group('[', params, head.pos)];
+            new_items.extend(items[1..].iter().map(|x| x.clone().map(&mut rename)));
+            let kids: Vec<Form> = children.iter().map(|x| x.clone().map(&mut rename)).collect();
+            return self.sf_fn(&new_items, &kids);
+        }
         let Some(Kind::Group { open: '[', items: pitems }) = items.get(1).map(|x| &x.kind) else { return err("fn [parameters] body", Some(head)) };
         let params = self.parse_params(pitems)?;
         let body_items = &items[2..];
@@ -3230,6 +3433,31 @@ fn takes_cont(c: &Compiler, u: &Unit, cont: &str) -> bool {
             _ => false,
         },
         _ => false,
+    }
+}
+
+/// `.name` (a method) or `.-name` (a field), as a call's head.
+fn member(f: &Form) -> Option<(&str, bool)> {
+    let n = f.sym_name()?.strip_prefix('.')?;
+    if let Some(field) = n.strip_prefix('-') {
+        return is_ident(field).then_some((field, true));
+    }
+    is_ident(n).then_some((n, false))
+}
+
+/// A threading step with the value put in: first (->) or last (->>).
+fn thread_into(step: &Form, x: Form, first: bool) -> Form {
+    match &step.kind {
+        Kind::Group { open: '(', items } if !items.is_empty() => {
+            let mut v = items.clone();
+            if first {
+                v.insert(1, x);
+            } else {
+                v.push(x);
+            }
+            Form::group('(', v, step.pos)
+        }
+        _ => Form::group('(', vec![step.clone(), x], step.pos),
     }
 }
 

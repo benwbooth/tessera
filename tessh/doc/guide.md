@@ -1272,6 +1272,313 @@ print (nothing)
 None
 ```
 
+# From Clojure
+
+## Methods
+<!-- help: methods method .method dot interop field .-field -->
+
+As in Clojure, a word starting with `.` at the head of a call is a method:
+`.name obj args…` is `$obj.name args…`, the object first.
+
+```tessh
+s = "  Hello  "
+print (.strip $s) (.replace $s l L) (.count $s l)
+print (.upper (.strip $s))
+```
+
+```output
+Hello   HeLLo   2
+HELLO
+```
+
+`.-name obj` reads a field rather than calling it. A method you call for
+what it does stands on its own line.
+
+```tessh
+import datetime
+d = datetime.date 2024 3 9
+print (.-year $d) (.isoformat $d)
+words = [b a c]
+.sort $words
+print $words
+```
+
+```output
+2024 2024-03-09
+['a', 'b', 'c']
+```
+
+Alone in parentheses, `(.name)` is a function that calls the method on its
+first argument, and `(.-name)` one that reads the field. (A bare `.name`
+as an argument is a word, since `.bashrc` is a file.)
+
+```tessh
+up = (.upper)
+print ($up hi) (list (map (.title) [ann bob]))
+print (list (map (.-real) [1 2]))
+```
+
+```output
+HI ['Ann', 'Bob']
+[1, 2]
+```
+
+A `.name` stage in a pipe calls the method on what came in.
+
+```tessh
+echo " a,b,c " | .strip | .split "," | print
+```
+
+```output
+['a', 'b', 'c']
+```
+
+## Threading
+<!-- help: threading thread -> ->> chain chaining pipeline-value -->
+
+`-> value step…` puts the value in as each step's first argument: `(f a)`
+becomes `(f value a)`, and a bare step `f` or `.name` becomes `(f value)`.
+`->>` puts it in last. So methods chain with `->`, and functions that take
+the collection last chain with `->>`.
+
+```tessh
+s = "  Hello World  "
+print (-> $s .strip .lower (.replace world there) (.split " "))
+print (->> [3 1 2] sorted (map $inc) list)
+```
+
+```output
+['hello', 'there']
+[2, 3, 4]
+```
+
+Steps can go on indented lines.
+
+```tessh
+r = ->> (range 10)
+  filter (fn ($% % 2))
+  map (fn ($% * $%))
+  sum
+print $r
+```
+
+```output
+165
+```
+
+Mix them by nesting a `->>` step inside `->`. (A `.name` step under `->>`
+gets the value as its last argument, not as the object.)
+
+```tessh
+print (-> "a-b" (.split "-") (->> (map $str.upper)) list)
+```
+
+```output
+['A', 'B']
+```
+
+`some->` and `some->>` stop at the first `None`: the value is `None` and
+the later steps don't run.
+
+```tessh
+cfg = {db: {host: "h1"}}
+print (some-> $cfg (.get db) (.get host) .upper)
+print (some-> $cfg (.get web) (.get host) .upper)
+```
+
+```output
+H1
+None
+```
+
+`as-> value name step…` names the value, so it can go anywhere in a step;
+each step's result becomes the name's new value.
+
+```tessh
+print (as-> [3 1 2] xs (sorted $xs) ($xs + [9]) (len $xs))
+```
+
+```output
+4
+```
+
+## Doto
+<!-- help: doto builder -->
+
+`doto obj step…` calls each step with the object first, then gives back the
+object itself. Steps can go on indented lines.
+
+```tessh
+xs = doto []
+  .append 1
+  .append 2
+  .extend [3 4]
+print $xs
+```
+
+```output
+[1, 2, 3, 4]
+```
+
+## Keywords
+<!-- help: keywords keyword :name getter getters -->
+
+`:name` used as a function gets `name`: the item from a dict (`None`, or the
+second argument, when it's missing) or the attribute from anything else.
+That makes it a ready-made `key=` and `map` function.
+
+```tessh
+p = {name: Ann age: 31}
+print (:name $p) (:town $p) (:town $p Oslo)
+people = [{name: Bo age: 40} $p]
+print (list (map :name $people)) (:name (max $people key=:age))
+```
+
+```output
+Ann None Oslo
+['Bo', 'Ann'] Bo
+```
+
+```tessh
+import datetime
+print (:year (datetime.date 2024 1 2))
+```
+
+```output
+2024
+```
+
+(A `:name` is still a symbol, the form a macro gets: see `help forms`.)
+
+## Destructuring
+<!-- help: destructuring destructure keys {} pick -->
+
+`{a b} = value` takes names out of a dict by key, or out of an object by
+attribute. `name=default` is for a key that may be missing, and `**rest`
+(last) gets the other keys. A missing key without a default is a `KeyError`.
+
+```tessh
+p = {name: Ann age: 31 town: Oslo}
+{name age} = $p
+print $name $age
+{name job=none **more} = $p
+print $job $more
+import datetime
+{year month} = datetime.date 2024 5 1
+print $year $month
+```
+
+```output
+Ann 31
+none {'age': 31, 'town': 'Oslo'}
+2024 5
+```
+
+## Short functions
+<!-- help: short-fn % $% $%1 $%& anonymous -->
+
+`fn body` without a parameter list makes its parameters from `$%` (or
+`$%1`), `$%2`… and `$%&` for the rest, like Clojure's `#(…)`. A body that
+starts with a list goes in parentheses, since `fn [` starts a parameter
+list. Don't nest short functions.
+
+```tessh
+print (list (map (fn ($% * 10)) [1 2 3]))
+add = fn ($%1 + $%2)
+print ($add 2 3)
+count = fn (len $%&)
+print ($count a b c)
+```
+
+```output
+[10, 20, 30]
+5
+3
+```
+
+## Discard
+<!-- help: discard #_ comment-out -->
+
+`#_` drops the form after it, in a line or in brackets. First on a line it
+drops the whole line with its indented block.
+
+```tessh
+print 1 #_ 2 3 #_(4 5) 6
+print [a #_[b c] d]
+#_ print not this
+  print nor this
+print done
+```
+
+```output
+1 3 6
+['a', 'd']
+done
+```
+
+## Core functions
+<!-- help: core seq sequences first second rest take drop frequencies group_by partition comp juxt partial get_in assoc_in update_in -->
+
+Clojure's sequence and map functions, with underscores for its dashes.
+Each takes the function first and the collection last, so they work as
+`->>` steps and pipe stages. They return lists, except `iterate` and
+`repeatedly` without a count, which never end: `take` some. (There's no
+`last`, since that's a program: use `$xs[-1]`.)
+
+```tessh
+print (first [1 2 3]) (second [1 2 3]) (rest [1 2 3]) (butlast [1 2 3])
+print (take 3 (iterate $inc 10)) (drop 2 [1 2 3 4]) (take_while (fn ($% < 3)) [1 2 5 1])
+print (frequencies "abca") (distinct [1 2 1 3])
+print (group_by $len [a bb c dd]) (partition 2 [1 2 3 4 5]) (partition_all 2 [1 2 3])
+print (partition_by (fn ($% > 0)) [1 2 -1 3]) (interpose "," [a b c]) (interleave [1 2] [a b])
+print (flatten [1 [2 [3 4]]]) (mapcat (fn ([$% $%])) [1 2]) (keep (fn (if $% > 1 then $% else None)) [1 2 3])
+```
+
+```output
+1 2 [2, 3] [1, 2]
+[10, 11, 12] [3, 4] [1, 2]
+{'a': 2, 'b': 1, 'c': 1} [1, 2, 3]
+{1: ['a', 'c'], 2: ['bb', 'dd']} [[1, 2], [3, 4]] [[1, 2], [3]]
+[[1, 2], [-1], [3]] ['a', ',', 'b', ',', 'c'] [1, 'a', 2, 'b']
+[1, 2, 3, 4] [1, 1, 2, 2] [2, 3]
+```
+
+`comp`, `juxt`, `complement`, `partial`, `constantly`, `identity`, `inc`,
+`dec`, `some` (the first true result) and `every`:
+
+```tessh
+print ((comp $str $inc) 1) ((juxt $min $max) [3 1 2]) ((complement $bool) 0)
+print ((partial $pow 2) 10) ((constantly 7) 1 2) (identity x) (inc 1) (dec 1)
+print (some (fn (if $% > 1 then $% * 10 else None)) [1 2 3]) (every (fn ($% > 0)) [1 2])
+print (repeatedly (constantly x) 3)
+```
+
+```output
+2 [1, 3] True
+1024 7 x 2 0
+20 True
+['x', 'x', 'x']
+```
+
+`get_in`, `assoc_in` and `update_in` reach into nested data by a path.
+`assoc_in` and `update_in` return a changed copy and leave the original
+alone. Also `zipmap`, `select_keys` and `merge_with`.
+
+```tessh
+d = {a: {b: [10 20]}}
+print (get_in $d [a b 1]) (get_in $d [a z] none)
+print (assoc_in $d [a c] 5) (update_in $d [a b] $len)
+print (zipmap [x y] [1 2]) (select_keys {x: 1 y: 2} [y]) (merge_with $max {a: 1} {a: 5 b: 2})
+print $d
+```
+
+```output
+20 none
+{'a': {'b': [10, 20], 'c': 5}} {'a': {'b': 2}}
+{'x': 1, 'y': 2} {'y': 2} {'a': 5, 'b': 2}
+{'a': {'b': [10, 20]}}
+```
+
 # Macros
 
 ## Macros

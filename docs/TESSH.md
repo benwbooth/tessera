@@ -280,6 +280,32 @@ comma-separated part is an expression, as in `[$a + 1, 2]`). `{a: 1 b: 2}` is
 `{"a": 1, "b": 2}` (barewords as keys are strings; `{$k: 1}` uses the
 variable). `{1 2 3}` is a set, `()` an empty tuple, and `(1, 2)` a tuple.
 
+### From Clojure
+
+- `.name obj args…` calls a method (`$obj.name args…`) and `.-name obj` reads
+  a field, only at a call's head or a pipe stage's (where the input is the
+  object). `(.name)` and `(.-name)` alone are functions of the object. A bare
+  `.name` argument stays a word (`ls .config`).
+- `-> x (f a) g` is `(g (f x a))`, and `->> x (f a) g` is `(g (f a x))`. Steps
+  may be indented lines. `some->` and `some->>` stop at `None`. `as-> x n step…`
+  rebinds `n` to each step's result. `doto obj step…` calls each step with the
+  object first and returns the object.
+- `:name` (a Sym form) called on a value is `x.get("name", default)` for a
+  Mapping, else `getattr(x, "name", default)`; `default` is None.
+- `{a b c=0 **rest} = value` assigns from keys (attributes for a non-mapping);
+  a missing key without a default raises KeyError.
+- `fn body` without `[params]`: parameters from `$%`/`$%1`…`$%9` and `$%&`
+  (varargs), hygienic. Not nestable.
+- `#_` drops the next form; first on a line, the line and its block. (`#__…`
+  is still a comment.)
+- Core functions, installed in every namespace (a name you define wins):
+  `partial identity constantly comp complement juxt inc dec first second rest
+  butlast take drop take_while drop_while some every keep mapcat frequencies
+  group_by partition partition_all partition_by interpose interleave distinct
+  flatten iterate repeatedly zipmap select_keys merge_with get_in assoc_in
+  update_in`. Function first, collection last; lists, except endless
+  `iterate`/`repeatedly`. No `last`, which is a program.
+
 ## 6. Shell operators
 
 | Written | Meaning |

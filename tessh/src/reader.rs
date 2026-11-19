@@ -75,7 +75,9 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
         .repeated()
         .at_least(1)
         .labelled("space");
-    let comment = just('#').then(none_of("\n").repeated()).ignored();
+    // (`#_` isn't a comment: it drops the next form.)
+    let discard = just("#_").then(just('_').not()).ignored();
+    let comment = discard.clone().not().ignore_then(just('#')).then(none_of("\n").repeated()).ignored();
     let gws = choice((one_of(" \t\r\n").ignored(), just('\\').then(just('\n')).ignored(), comment))
         .repeated()
         .at_least(1);
@@ -165,6 +167,8 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
     let dollar = just('$')
         .ignore_then(choice((
             just('?').map_with(|_, e| Form::new(Kind::Status, sp(e.span()))).boxed(),
+            // ($%, $%1…$%9, $%&: a short fn's arguments.)
+            just('%').then(one_of("123456789&").or_not()).to_slice().map_with(|n: &str, e| Form::new(Kind::Var(Box::new(Form::sym_at(n, &[], sp(e.span())))), sp(e.span()))).boxed(),
             paren.clone().map_with(|g, e| Form::new(Kind::Interp { expr: Box::new(g), conv: None, spec: None, braced: false }, sp(e.span()))).boxed(),
             unquote.clone().map_with(|u, e| Form::new(Kind::Var(Box::new(u)), sp(e.span()))).boxed(),
             ident.map_with(|n: &str, e| Form::sym_at(n, &[], sp(e.span()))).map_with(|s, e| Form::new(Kind::Var(Box::new(s)), sp(e.span()))).boxed(),
@@ -340,6 +344,7 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
     let item = choice((
         just(',').map_with(|_, e| Form::new(Kind::Comma, sp(e.span()))).boxed(),
         just(';').map_with(|_, e| Form::new(Kind::Semi, sp(e.span()))).boxed(),
+        discard.clone().map_with(|_, e| Form::sym_at("#_", &[], sp(e.span()))).boxed(),
         tick_op,
         unquote.clone().then_ignore(delim_ahead.clone()).boxed(),
         term,
@@ -695,7 +700,7 @@ fn unclosed(text: &str) -> Option<usize> {
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
-        if c == b'#' && (i == 0 || b" \t\n([{".contains(&b[i - 1])) {
+        if c == b'#' && (i == 0 || b" \t\n([{".contains(&b[i - 1])) && !(b.get(i + 1) == Some(&b'_') && b.get(i + 2) != Some(&b'_')) {
             while i < b.len() && b[i] != b'\n' {
                 i += 1;
             }
@@ -821,8 +826,16 @@ pub fn read_at(text: &str, first_line: u32) -> Result<Vec<Form>, ReadError> {
                     return Err(err(&lines[*i], "this line's indentation doesn't match any line above it"));
                 }
             }
-            let pos = span_of(&l.items[0].pos, &l.items[l.items.len() - 1].pos);
-            out.push(Form::line(l.items.clone(), kids, pos));
+            // (`#_` first on a line drops the line and its block.)
+            if l.items[0].is_sym("#_") {
+                continue;
+            }
+            let items = discard(l.items.clone());
+            if items.is_empty() {
+                continue;
+            }
+            let pos = span_of(&items[0].pos, &items[items.len() - 1].pos);
+            out.push(Form::line(items, kids, pos));
         }
         Ok(out)
     }
@@ -837,6 +850,23 @@ pub fn read_at(text: &str, first_line: u32) -> Result<Vec<Form>, ReadError> {
         out.push(to_line_cols(f, &idx, first_line, 0));
     }
     Ok(out)
+}
+
+/// Drops each `#_` and the form after it (in brackets too).
+fn discard(items: Vec<Form>) -> Vec<Form> {
+    let mut out = vec![];
+    let mut it = items.into_iter();
+    while let Some(f) = it.next() {
+        if f.is_sym("#_") {
+            it.next();
+            continue;
+        }
+        out.push(match f.kind {
+            Kind::Group { open, items } => Form::new(Kind::Group { open, items: discard(items) }, f.pos),
+            k => Form::new(k, f.pos),
+        });
+    }
+    out
 }
 
 /// Does the text stop in the middle (an open bracket or string, or a trailing

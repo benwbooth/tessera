@@ -120,6 +120,25 @@ impl PyForm {
         self.f.marks().to_vec()
     }
 
+    /// `:name x`: a symbol as a getter, as Clojure's keywords: x["name"] for a
+    /// mapping, else x.name; `default` (None) when it's missing.
+    #[pyo3(signature = (x, default=None))]
+    fn __call__(&self, py: Python<'_>, x: Bound<'_, PyAny>, default: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        let Kind::Sym { name, .. } = &self.f.kind else {
+            return Err(PyTypeError::new_err(format!("a {} form can't be called (only a symbol, :name)", self.f.type_name())));
+        };
+        let default = default.unwrap_or_else(|| py.None());
+        let mapping = py.import("collections.abc")?.getattr("Mapping")?;
+        if x.is_instance(&mapping)? {
+            return Ok(x.call_method1("get", (name.as_str(), default))?.unbind());
+        }
+        Ok(match x.getattr(name.as_str()) {
+            Ok(v) => v.unbind(),
+            Err(e) if e.is_instance_of::<pyo3::exceptions::PyAttributeError>(py) => default,
+            Err(e) => return Err(e),
+        })
+    }
+
     fn __len__(&self) -> usize {
         match &self.f.kind {
             Kind::Line { items, .. } | Kind::Group { items, .. } => items.len(),
