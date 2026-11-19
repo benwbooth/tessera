@@ -325,6 +325,14 @@ Item {
                 const r = line[i]
                 const rw = runWidth(r)
                 if (w + rw <= room || isCap(r.t)) { cur.push(r); w += rw; continue }
+                // (Blank, as Starship's $fill padding: cut to what fits, never a
+                // line of its own.)
+                if (r.t.trim() === "") {
+                    let n = r.t.length
+                    while (n > 0 && w + runWidth(r, r.t.substring(0, n)) > room) n--
+                    if (n > 0) { cur.push(Object.assign({}, r, { t: r.t.substring(0, n) })); w += runWidth(r, r.t.substring(0, n)) }
+                    continue
+                }
                 // (The pill it's in: its caps, to close it here and open it on the next line.)
                 let open = null, close = null
                 if (r.bg) {
@@ -347,6 +355,8 @@ Item {
                         cut = 1
                         while (cut < rest.length && runWidth(r, rest.substring(0, cut + 1)) <= left) cut++
                     }
+                    // (Only spaces past the break: they're dropped, not wrapped.)
+                    if (cut > 0 && cut < rest.length && rest.substring(cut).trim() === "") rest = rest.substring(0, cut)
                     if (cut >= rest.length) { cur.push(Object.assign({}, r, { t: rest, full: full, off: off })); w += runWidth(r, rest); break }
                     if (cut > 0) cur.push(Object.assign({}, r, { t: rest.substring(0, cut), full: full, off: off }))
                     if (close && cut > 0) cur.push(close)
