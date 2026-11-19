@@ -461,7 +461,11 @@ pub mod ffi {
         // ---- Jupyter notebooks (src/jupyter.rs) ----
         /// The kernels there are: [{name, display, language}].
         #[qinvokable]
-        fn jupyter_kernels(self: &Controller) -> QString;
+        fn jupyter_kernels(self: &Controller, host: &QString) -> QString;
+        /// Another host's kernel list came (jupyter_kernels gave what it had,
+        /// and asked there in the background).
+        #[qsignal]
+        fn kernels_ready(self: Pin<&mut Controller>, host: QString);
         /// The kernels running now (every notebook's), JSON (jupyter::running).
         #[qinvokable]
         fn jupyter_running(self: &Controller) -> QString;
@@ -858,8 +862,38 @@ impl ffi::Controller {
         qs(&crate::client::rpc("", "kernel.running", serde_json::json!({})).unwrap_or_else(|_| serde_json::json!([])).to_string())
     }
 
-    fn jupyter_kernels(&self) -> ffi::QString {
-        qs(&crate::client::rpc("", "kernel.specs", serde_json::json!({})).unwrap_or_else(|_| serde_json::json!([])).to_string())
+    fn jupyter_kernels(&self, host: &ffi::QString) -> ffi::QString {
+        let host = host.to_string();
+        if host.is_empty() {
+            return qs(&crate::client::rpc("", "kernel.specs", serde_json::json!({})).unwrap_or_else(|_| serde_json::json!([])).to_string());
+        }
+        // (Another host's: looking for its kernels can take a while there,
+        // so never on this thread. What it said last, and asked again.)
+        type Cache = std::sync::Mutex<std::collections::HashMap<String, (serde_json::Value, bool)>>;
+        static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+        let cache = CACHE.get_or_init(Default::default);
+        let mut c = cache.lock().unwrap();
+        let entry = c.entry(host.clone()).or_insert((serde_json::json!([]), false));
+        let have = entry.0.to_string();
+        if !entry.1 {
+            entry.1 = true;
+            let qt = self.qt_thread();
+            std::thread::spawn(move || {
+                let got = crate::client::rpc(&host, "kernel.specs", serde_json::json!({}));
+                let cache = CACHE.get().unwrap();
+                let mut c = cache.lock().unwrap();
+                let e = c.entry(host.clone()).or_insert((serde_json::json!([]), false));
+                e.1 = false;
+                if let Ok(v) = got {
+                    let changed = e.0 != v;
+                    e.0 = v;
+                    if changed {
+                        let _ = qt.queue(move |c| c.kernels_ready(qs(&host)));
+                    }
+                }
+            });
+        }
+        qs(&have)
     }
 
     fn jupyter_start(self: Pin<&mut Self>, key: &ffi::QString, spec: &ffi::QString, cwd: &ffi::QString, pid: i32, session: &ffi::QString) {

@@ -42,6 +42,17 @@ fn paths(host: &str) -> (PathBuf, PathBuf) {
     (base.join(format!("{tag}.sock")), base.join(format!("{tag}.ctl")))
 }
 
+/// The local socket forwarded to `host`'s tesserad.
+pub fn local_socket(host: &str) -> PathBuf {
+    paths(host).0
+}
+
+/// A connection through `host`'s forwarded socket when it's set up already;
+/// an error (at once) otherwise.
+pub fn connect_ready(host: &str) -> std::io::Result<UnixStream> {
+    UnixStream::connect(paths(host).0).map_err(|e| std::io::Error::new(e.kind(), format!("not connected to {host} yet ({e})")))
+}
+
 /// One setup per host at a time (two panes opening together share it).
 fn lock(host: &str) -> std::sync::Arc<Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>>> = OnceLock::new();
@@ -67,17 +78,26 @@ fn fail(host: &str, msg: String) -> std::io::Error {
 /// (and tesserad started or deployed there) when it isn't yet.
 pub fn connect(host: &str) -> std::io::Result<UnixStream> {
     let (local, ctl) = paths(host);
-    if let Ok(s) = UnixStream::connect(&local) {
-        return Ok(s);
+    if answers(&local) {
+        return UnixStream::connect(&local);
     }
     let l = lock(host);
     let _g = l.lock().unwrap();
-    if let Ok(s) = UnixStream::connect(&local) {
-        return Ok(s);
+    if answers(&local) {
+        return UnixStream::connect(&local);
     }
     setup(host, &local, &ctl)?;
     errors().lock().unwrap().remove(host);
     UnixStream::connect(&local)
+}
+
+/// Whether tesserad answers through the forwarded socket. (A forward can be
+/// up with nothing at its far end: tesserad there ended, its folder gone.)
+fn answers(local: &Path) -> bool {
+    use crate::proto::*;
+    let Ok(mut s) = UnixStream::connect(local) else { return false };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+    write_json(&mut s, T_VERSION, &()).is_ok() && matches!(read_frame(&mut s), Ok((T_VERSION_REPLY, _)))
 }
 
 /// `host` is `user@host`, an alias from ~/.ssh/config, and maybe options
@@ -156,7 +176,18 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
             }
         }
     };
-    // 3. The local socket, forwarded to it.
+    // 3. The local socket, forwarded to it (a stale forward of it dropped
+    // first).
+    let _ = Command::new("ssh")
+        .arg("-S")
+        .arg(ctl)
+        .args(["-O", "cancel", "-L"])
+        .arg(format!("{}:{}", local.display(), remote_sock))
+        .args(host_args(host))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
     let _ = std::fs::remove_file(local);
     let fwd = Command::new("ssh")
         .arg("-S")

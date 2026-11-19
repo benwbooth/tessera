@@ -6,12 +6,15 @@ use crate::proto::*;
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
-/// A connection to `host`'s tesserad ("" for this computer's).
+/// A connection to `host`'s tesserad ("" for this computer's, started if
+/// it isn't running). Another host's only once it's connected
+/// (remote::connect, in the background: SSH can take a while, or ask for a
+/// password); never set up here, so the window's thread never waits on it.
 pub fn connect_to(host: &str) -> std::io::Result<UnixStream> {
     if host.is_empty() {
         connect()
     } else {
-        crate::remote::connect(host)
+        crate::remote::connect_ready(host)
     }
 }
 
@@ -288,13 +291,13 @@ fn connect_for(id: &str) -> std::io::Result<UnixStream> {
     if host.is_empty() {
         UnixStream::connect(socket_path())
     } else {
-        crate::remote::connect(&host)
+        crate::remote::connect_ready(&host)
     }
 }
 
 pub fn list_sessions(host: &str) -> std::io::Result<Vec<SessionInfo>> {
     // Don't start a daemon just to learn there's nothing to restore.
-    let mut s = if host.is_empty() { UnixStream::connect(socket_path())? } else { crate::remote::connect(host)? };
+    let mut s = if host.is_empty() { UnixStream::connect(socket_path())? } else { crate::remote::connect_ready(host)? };
     write_frame(&mut s, T_LIST, b"")?;
     let (tag, payload) = read_frame(&mut s)?;
     if tag != T_SESSIONS {

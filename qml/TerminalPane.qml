@@ -12,7 +12,9 @@ Item {
     // Where its shell runs: "" here, else an SSH host (its tesserad, set up
     // there when the pane opens; the shell waits for that).
     property alias sshHost: term.host
-    property bool hostUp: sshHost === ""
+    // (Set once the pane knows where it is, not as a binding: the shell
+    // mustn't open before an SSH host has been given.)
+    property bool hostUp: false
     property string hostError: ""
     // (A saved remote pane's screen, shown when its shell there is gone.)
     property string restoreSnapshot: ""
@@ -20,7 +22,11 @@ Item {
     // the prompt's and the editor's environment); 0 for another host's.
     readonly property int localPid: sshHost === "" ? shellPid : 0
     function connectHost() { hostError = ""; controller.connectHost(sshHost) }
-    Component.onCompleted: if (sshHost !== "" && controller) connectHost()
+    Component.onCompleted: {
+        if (sshHost === "") hostUp = true
+        else if (controller) connectHost()
+    }
+    onControllerChanged: if (sshHost !== "" && !hostUp && controller && hostError === "") connectHost()
     Connections {
         target: pane.controller
         enabled: pane.sshHost !== "" && !pane.hostUp
@@ -38,6 +44,7 @@ Item {
                 }
             }
             pane.hostUp = true
+            notebook.listKernels()
         }
     }
     property alias tmuxPane: term.tmuxPane

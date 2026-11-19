@@ -73,7 +73,7 @@ FocusScope {
     function listKernels() {
         let ks = []
         if (view) ks.push({ name: "tessera-shell", display: "This pane's shell", language: "bash" })
-        try { ks = ks.concat(JSON.parse(controller.jupyterKernels())) } catch (e) {}
+        try { ks = ks.concat(JSON.parse(controller.jupyterKernels(sshHost))) } catch (e) {}
         kernels = ks
     }
     function pickKernel(spec) {
@@ -121,6 +121,7 @@ FocusScope {
     }
     Connections {
         target: nb.controller
+        function onKernelsReady(host) { if (host === nb.sshHost) nb.listKernels() }
         function onJupyterEvent(key, json) {
             if (key.startsWith(nb.key + "~")) {
                 let le
@@ -924,6 +925,12 @@ FocusScope {
         if (path === "" && loaded) storeTimer.restart()
     }
     Timer { id: storeTimer; interval: 1500; onTriggered: nb.keep() }
+    // (Quitting: what came since the last save is kept now. Kernels' output
+    // after this is kept by tesserad for the next start.)
+    Connections {
+        target: Qt.application
+        function onAboutToQuit() { if (nb.path === "" && nb.dirty) { storeTimer.stop(); nb.keep() } }
+    }
     function keep() {
         if (!controller || storeKey === "" || path !== "") return
         controller.notebookWrite(sshHost, storeKey, serialize(true))
