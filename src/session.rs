@@ -443,7 +443,7 @@ impl Session {
                                 // as tesserad kept them.
                                 let (id, host) = (id.clone(), host.clone());
                                 let from = self.cells_from.take().unwrap_or_else(|| id.clone());
-                                let kept = crate::client::rpc(&host, "cells.load", json!({"session": id, "from": from}));
+                                let kept = crate::client::rpc_read(&host, "cells.load", json!({"session": id, "from": from}));
                                 if self.cells.restore_text(kept.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("")) {
                                     self.events.push(json!({"type": "cell", "id": 0, "done": true}));
                                 }

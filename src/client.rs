@@ -36,6 +36,31 @@ pub fn rpc_within(host: &str, method: &str, params: Value, wait: Duration) -> Re
     }
 }
 
+/// A request that only reads (a tab's kept cells, its notebook), tried again
+/// for a few seconds when the connection fails or drops: tesserad swapping
+/// itself for a new build ends requests it was in the middle of, and a tab
+/// that asked then came up empty. tesserad's own errors aren't retried.
+pub fn rpc_read(host: &str, method: &str, params: Value) -> Result<Value, String> {
+    let start = Instant::now();
+    loop {
+        let r = (|| -> Result<Result<Value, String>, std::io::Error> {
+            let mut s = connect_to(host)?;
+            s.set_read_timeout(Some(Duration::from_secs(120)))?;
+            write_json(&mut s, T_RPC, &serde_json::json!({"method": method, "params": params.clone()}))?;
+            Ok(match read_frame(&mut s)? {
+                (T_RPC_REPLY, p) => serde_json::from_slice(&p).map_err(|e| e.to_string()),
+                (T_ERROR, p) => Err(serde_json::from_slice::<String>(&p).unwrap_or_default()),
+                (t, _) => Err(format!("tesserad: unexpected reply {t}")),
+            })
+        })();
+        match r {
+            Ok(answer) => return answer,
+            Err(e) if start.elapsed() > Duration::from_secs(8) => return Err(e.to_string()),
+            Err(_) => std::thread::sleep(Duration::from_millis(250)),
+        }
+    }
+}
+
 /// tesserad on this computer, started unless it's running.
 pub fn ensure_daemon() -> std::io::Result<()> {
     connect().map(drop)

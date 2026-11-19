@@ -1027,7 +1027,7 @@ impl ffi::Controller {
     }
 
     fn notebook_read(&self, host: &ffi::QString, session: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc(&host.to_string(), "notebook.read", serde_json::json!({"session": session.to_string()}));
+        let r = crate::client::rpc_read(&host.to_string(), "notebook.read", serde_json::json!({"session": session.to_string()}));
         qs(&r.unwrap_or_else(|e| serde_json::json!({"error": e})).to_string())
     }
 
