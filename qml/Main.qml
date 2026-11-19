@@ -1637,6 +1637,20 @@ ApplicationWindow {
             step++
         }
     }
+    // (Test hook: TESSERA_TEST_TABS=<n> opens n more tabs at 3 s; with
+    // TESSERA_TEST_TAB_MENU, the all-tabs dropdown opens at 8 s.)
+    Timer { interval: 3000; running: controller.testEnv("TABS") !== ""; onTriggered: { for (let i = 0; i < Number(controller.testEnv("TABS")); ++i) newTab({}) } }
+    Timer { interval: 8000; running: controller.testEnv("TAB_MENU") !== ""
+            onTriggered: tabMenuTest.go() }
+    QtObject {
+        id: tabMenuTest
+        function go() {
+            // (The ⌄ is inside the tab strip's Loader: found by its object name.)
+            const find = (it) => { if (!it) return null; if (it.objectName === "tabOverflow") return it; for (let i = 0; i < it.children.length; ++i) { const r = find(it.children[i]); if (r) return r } return null }
+            const b = find(rootLayout)
+            if (b) b.openMenu(); else console.log("tab menu test: no overflow button")
+        }
+    }
     Timer { id: notebookTestTimer; interval: 9000; onTriggered: if (activePane) activePane.viewMode = "notebook" }
     // (Test hook: TESSERA_TEST_TAB=<n> goes to that tab once the window is restored.)
     Timer { id: tabTestTimer; interval: 5000; onTriggered: { currentTab = parseInt(controller.testEnv("TAB")); if (activePane) focusPane(activePane) } }
@@ -1791,16 +1805,45 @@ ApplicationWindow {
             property bool flipped: false
             property real dropX: -1   // where a dragged tab would land
 
+            // More tabs than fit at their narrowest: the strip scrolls (the
+            // wheel, and to keep the current tab in sight), and a ⌄ after it
+            // lists them all.
+            readonly property bool overflow: tabs.length * 90 > box.width - 70
+            Item {
+                id: tabView
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: box.overflow ? Math.max(90, box.width - 70 - 30) : tabRow.width
+                clip: box.overflow
+                property real scroll: 0
+                readonly property real maxScroll: Math.max(0, tabRow.width - width)
+                function scrollTo(v) { scroll = Math.max(0, Math.min(maxScroll, v)) }
+                // (The current tab in sight.)
+                function showCurrent() {
+                    const a = currentTab * tabRow.step, b = a + tabRow.tabWidth
+                    if (a < scroll) scrollTo(a)
+                    else if (b > scroll + width) scrollTo(b - width)
+                }
+                onMaxScrollChanged: scrollTo(scroll)
+                onWidthChanged: Qt.callLater(showCurrent)
+                Connections { target: win; function onCurrentTabChanged() { Qt.callLater(tabView.showCurrent) } }
+                Behavior on scroll { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                WheelHandler {
+                    enabled: box.overflow
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: (ev) => tabView.scrollTo(tabView.scroll - (ev.angleDelta.y !== 0 ? ev.angleDelta.y : ev.angleDelta.x) * 0.8)
+                }
             // Tabs are placed by slot (not a Row) so a dragged tab can follow
             // the pointer while the others slide out of its way.
             Item {
                 id: tabRow
-                anchors.left: parent.left
+                x: -tabView.scroll
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 width: tabs.length > 0 ? (tabs.length - 1) * step + tabWidth : 0
                 readonly property real overlap: 0
-                readonly property real available: box.width - 70
+                readonly property real available: box.overflow ? tabView.width : box.width - 70
                 readonly property real tabWidth: settings.stretch_tabs
                     ? Math.max(90, available / Math.max(1, tabs.length))
                     : Math.max(90, Math.min(200, available / Math.max(1, tabs.length)))
@@ -1880,11 +1923,54 @@ ApplicationWindow {
                     }
                 }
             }
+            }
+            // Every tab, to go to one, when they don't all fit.
+            Rectangle {
+                id: overflowButton
+                objectName: "tabOverflow"
+                function openMenu() { overflowMenu.popup(overflowButton, 0, overflowButton.height + 2) }
+                visible: box.overflow
+                anchors.left: tabView.right
+                anchors.leftMargin: 4
+                anchors.verticalCenter: parent.verticalCenter
+                width: visible ? 24 : 0
+                height: 22
+                radius: 5
+                color: ovHover.hovered || overflowMenu.opened ? Theme.mix(Theme.chrome, Theme.fg, 0.12) : "transparent"
+                Text {
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: 0.001
+                    text: "\u2304"
+                    color: ovHover.hovered ? Theme.text : Theme.textDim
+                    font.pixelSize: 14
+                    font.bold: true
+                    renderType: Text.NativeRendering
+                }
+                HoverHandler { id: ovHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: overflowMenu.popup(overflowButton, 0, overflowButton.height + 2) }
+                ToolTip.visible: ovHover.hovered && !overflowMenu.opened
+                ToolTip.delay: 500
+                ToolTip.text: "All " + tabs.length + " tabs"
+            }
+            SlimMenu {
+                id: overflowMenu
+                Repeater {
+                    model: tabs
+                    delegate: SlimMenuItem {
+                        required property var modelData
+                        required property int index
+                        text: (index + 1) + "   " + ((modelData.lastPane && modelData.lastPane.viewMode === "notebook") ? "\u25a4  " : ">_  ") + modelData.tabTitle
+                        checkable: true
+                        checked: index === currentTab
+                        onTriggered: focusTab(index)
+                    }
+                }
+            }
             // New tab: + opens the default profile; the chevron offers the
             // other profiles, installed shells and ssh hosts.
             SplitButton {
                 id: plus
-                anchors.left: tabRow.right
+                anchors.left: box.overflow ? overflowButton.right : tabView.right
                 anchors.leftMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 mainTip: "New Tab (Ctrl+Shift+T)"
@@ -1909,10 +1995,10 @@ ApplicationWindow {
                 anchors.fill: parent
                 keys: ["application/x-tessera-tab"]
                 function slot(x) {
-                    return Math.max(0, Math.min(tabs.length, Math.round((x - tabRow.x) / tabRow.step)))
+                    return Math.max(0, Math.min(tabs.length, Math.round((x - tabView.x - tabRow.x) / tabRow.step)))
                 }
                 onEntered: (drag) => drag.accept(drag.source ? Qt.CopyAction : Qt.MoveAction)
-                onPositionChanged: (drag) => { box.dropX = tabRow.x + slot(drag.x) * tabRow.step + 3 }
+                onPositionChanged: (drag) => { box.dropX = tabView.x + tabRow.x + slot(drag.x) * tabRow.step + 3 }
                 onExited: box.dropX = -1
                 onDropped: (drop) => {
                     box.dropX = -1
