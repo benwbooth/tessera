@@ -197,7 +197,8 @@ FocusScope {
         controller.jupyterStart(key, kernelName, folder, shellPid, storeKey)
     }
     function stopRunning() {
-        for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).tid <= 0) cells.setProperty(i, "running", false)
+        // (Background jobs go on: they're not the kernel's.)
+        for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).tid <= 0 && cells.get(i).job <= 0) cells.setProperty(i, "running", false)
         queue = []
     }
     function restartKernel() {
@@ -299,7 +300,7 @@ FocusScope {
                 const L = cells.get(i).lang
                 if (L !== "" && ["bash", "zsh", "xonsh", "powershell", "sh"].indexOf(L) >= 0) controller.jupyterExport(langKey(L), shellPid)
                 // (Stopped at an error: the cells waiting after it don't run.)
-                if (e.status === "error") for (let j = 0; j < cells.count; ++j) if (cells.get(j).running && cells.get(j).tid <= 0 && cells.get(j).started > cells.get(i).started) cells.setProperty(j, "running", false)
+                if (e.status === "error") for (let j = 0; j < cells.count; ++j) if (cells.get(j).running && cells.get(j).tid <= 0 && cells.get(j).job <= 0 && cells.get(j).started > cells.get(i).started) cells.setProperty(j, "running", false)
                 touch()
             }
         }
@@ -319,7 +320,7 @@ FocusScope {
     // ---- the cells ----------------------------------------------------------------
     // tid: the terminal's cell (a command the shell ran), its output read from
     // the terminal; otherwise the outputs are Jupyter's (JSON).
-    ListModel { id: cells }
+    ListModel { id: cells; onDataChanged: Qt.callLater(nb.updateJobsRunning); onCountChanged: Qt.callLater(nb.updateJobsRunning) }
     property int current: 0
     property int nextId: 1
     property var kinds: ({})            // cid -> chosen view (the dropdown)
@@ -338,7 +339,7 @@ FocusScope {
         return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
                  type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
                  started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
-                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "", viewLang: "", execs: "[]" }
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "", viewLang: "", execs: "[]", job: 0, jobAt: 0 }
     }
     function insertCell(at, type, edit) {
         at = Math.max(0, Math.min(cells.count, at))
@@ -422,7 +423,7 @@ FocusScope {
     }
 
     // ---- running ------------------------------------------------------------------
-    function run(i) {
+    function run(i, bg) {
         const c = cells.get(i)
         if (!c) return
         if (c.type === "markdown") { if (c.source.trim() !== "") cells.setProperty(i, "editing", false); return }
@@ -433,6 +434,8 @@ FocusScope {
         cells.setProperty(i, "tid", 0)
         cells.setProperty(i, "outputs", "[]")
         cells.setProperty(i, "execs", "[]")
+        cells.setProperty(i, "job", 0)
+        cells.setProperty(i, "jobAt", 0)
         cells.setProperty(i, "running", true)
         cells.setProperty(i, "failed", false)
         cells.setProperty(i, "status", 0)
@@ -446,6 +449,10 @@ FocusScope {
         cells.setProperty(i, "ranIn", c.lang !== "" && !sameLang(c.lang, runsIn) ? ((langKernels[c.lang] && langKernels[c.lang].display) || (langSpec(c.lang) || {}).display || c.lang)
                                      : shellKernel ? (shellName || "shell") : (kernel ? kernel.display : kernelName))
         touch()
+        // (In the background: a line ending in &, or asked for. It runs on its
+        // own, in tesserad, and the notebook carries on.)
+        const bl = bgLang(c)
+        if (bl !== "" && (bg || isBgLine(c.source))) { runJob(i, c.source.trim().replace(/\s*&$/, ""), bl); return }
         // (A cell in another language: that language's kernel.)
         if (c.lang !== "" && !sameLang(c.lang, runsIn)) { runLang(c.cid, c.lang); return }
         if (shellKernel) { shellRun(c.cid, c.source); return }
@@ -469,6 +476,103 @@ FocusScope {
             addOutput(j, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The kernel isn't reachable: restart it."] })
         })
     }
+    // ---- background jobs (src/jobs.rs, in tesserad) ----
+    // A cell run in the background: its card shows the job's output as it
+    // comes, its pid and status, and Stop; the Jobs list has them all.
+    // What runs it: "shell" (the pane's shell), "tessh", or "" (can't).
+    function bgLang(c) {
+        const L = c.lang !== "" ? c.lang : shellKernel ? "shell" : language
+        if (L === "tessh") return "tessh"
+        if (L === "shell" || ["bash", "zsh", "sh", "fish"].indexOf(L) >= 0) return view || L !== "shell" ? "shell" : ""
+        return ""
+    }
+    function isBgLine(src) { const t = src.trim(); return t.indexOf("\n") < 0 && /[^&]&$/.test(t) }
+    function runJob(i, command, lang) {
+        const cid = cells.get(i).cid
+        cells.setProperty(i, "ranIn", (lang === "tessh" ? "tessh" : (shellName || "shell")) + " \u00b7 bg")
+        Async.call(controller, k => controller.jobCall(k, sshHost, "job.start", JSON.stringify({ command: command, lang: lang, cwd: shellDir, pid: shellPid, owner: key, cell: cid })), json => {
+            const j = indexOf(cid)
+            if (j < 0) return
+            let r = {}
+            try { r = JSON.parse(json) } catch (e) {}
+            if (!r.id) {
+                cells.setProperty(j, "running", false)
+                cells.setProperty(j, "failed", true)
+                cells.setProperty(j, "ended", Date.now())
+                addOutput(j, { output_type: "error", ename: "Not started", evalue: r.error || "tesserad didn't answer", traceback: ["Couldn't start it in the background: " + (r.error || "tesserad didn't answer")] })
+                return
+            }
+            cells.setProperty(j, "job", r.id)
+            cells.setProperty(j, "execs", JSON.stringify([r.exec]))
+            touch()
+            refreshJobs()
+        })
+    }
+    function stopJob(i) {
+        const c = cells.get(i)
+        if (c.job > 0) controller.jobCall("", sshHost, "job.stop", JSON.stringify({ id: c.job }))
+    }
+    // (Each running job's new output, every half second; one round at a time.)
+    property bool jobPolling: false
+    property bool jobsRunning: false
+    Timer {
+        interval: 500; repeat: true
+        running: nb.jobsRunning && !nb.jobPolling
+        onTriggered: nb.pollJobs()
+    }
+    function updateJobsRunning() {
+        let r = false
+        for (let i = 0; i < cells.count && !r; ++i) r = cells.get(i).job > 0 && cells.get(i).running
+        jobsRunning = r
+    }
+    function pollJobs() {
+        const want = []
+        for (let i = 0; i < cells.count; ++i) { const c = cells.get(i); if (c.job > 0 && c.running) want.push({ cid: c.cid, id: c.job, from: c.jobAt }) }
+        if (want.length === 0) { jobsRunning = false; return }
+        jobPolling = true
+        let left = want.length
+        for (const w of want) {
+            Async.call(controller, k => controller.jobCall(k, sshHost, "job.output", JSON.stringify({ id: w.id, from: w.from })), json => {
+                if (--left === 0) jobPolling = false
+                const i = indexOf(w.cid)
+                if (i < 0 || cells.get(i).job !== w.id) return
+                let r = {}
+                try { r = JSON.parse(json) } catch (e) { return }
+                if (r.error) return
+                if (r.gone) { cells.setProperty(i, "running", false); cells.setProperty(i, "ended", Date.now()); updateJobsRunning(); touch(); return }
+                for (const o of r.out || []) addOutput(i, { output_type: "stream", name: o[0] === 2 ? "stderr" : "stdout", text: o[1] })
+                if (r.next !== undefined) cells.setProperty(i, "jobAt", r.next)
+                if (!r.running) {
+                    cells.setProperty(i, "running", false)
+                    cells.setProperty(i, "status", r.status || 0)
+                    cells.setProperty(i, "failed", (r.status || 0) !== 0)
+                    cells.setProperty(i, "ended", r.ended || Date.now())
+                    if (cells.get(i).count < 0) cells.setProperty(i, "count", ++execCount)
+                    updateJobsRunning()
+                    refreshJobs()
+                    touch()
+                }
+            })
+        }
+    }
+    // Every job on this host (the Jobs list): [{id, owner, cell, command, pid, started, ended, running, status}].
+    property var hostJobs: []
+    readonly property int jobsActive: hostJobs.filter(j => j.running).length
+    function refreshJobs() {
+        Async.call(controller, k => controller.jobCall(k, sshHost, "job.list", "{}"), json => {
+            let r = []
+            try { r = JSON.parse(json) } catch (e) {}
+            if (Array.isArray(r)) hostJobs = r
+        })
+    }
+    Timer { interval: 2000; repeat: true; running: nb.visible && (nb.jobsActive > 0 || jobsPop.opened); onTriggered: nb.refreshJobs() }
+    function showJobCell(cid) {
+        const i = indexOf(cid)
+        if (i < 0) return
+        current = i
+        list.positionViewAtIndex(i, ListView.Beginning)
+    }
+
     function runAll() { for (let i = 0; i < cells.count; ++i) if (cells.get(i).type === "code") run(i) }
     function runAbove(n) { for (let i = 0; i < n; ++i) if (cells.get(i).type === "code") run(i) }
     function interrupt() {
@@ -746,7 +850,7 @@ FocusScope {
                     cells.setProperty(i, "running", false)
                     addOutput(i, { output_type: "error", ename: "Kernel stopped", evalue: e.message || "", traceback: ["The " + l + " kernel stopped" + (e.message ? ": " + e.message : ".")] })
                 }
-                for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).lang === l && cells.get(i).tid <= 0) cells.setProperty(i, "running", false)
+                for (let i = 0; i < cells.count; ++i) if (cells.get(i).running && cells.get(i).lang === l && cells.get(i).tid <= 0 && cells.get(i).job <= 0) cells.setProperty(i, "running", false)
                 setLang(l, { queue: [] })
             }
         } else if (e.type !== "info" && e.type !== "complete") kernelEvent(e, langKey(l))
@@ -1117,6 +1221,7 @@ FocusScope {
             if (tm.cwd) x.cwd = tm.cwd
             if (!(tm.tid > 0) && tm.started > 1) { x.started = tm.started; x.ended = tm.started + (tm.duration_ms || 0); x.failed = !!tm.failed }
             if (keepTids && !(tm.tid > 0) && tm.cid) { x.cid = tm.cid; if (tm.running) { x.running = true; x.ended = 0 } }
+            if (keepTids && tm.job > 0) { x.job = tm.job; x.jobAt = tm.job_at || 0 }
             if (tm.lang) x.lang = tm.lang
             if (tm.ran_in) x.ranIn = tm.ran_in
             if (tm.view) x.viewPath = tm.view
@@ -1304,7 +1409,7 @@ FocusScope {
         const live = ((r && r.kernels) || []).map(k => k.key)
         for (let i = 0; i < cells.count; ++i) {
             const c = cells.get(i)
-            if (!c.running || c.tid > 0) continue
+            if (!c.running || c.tid > 0 || c.job > 0) continue
             if (live.indexOf(c.lang !== "" ? langKey(c.lang) : key) < 0) cells.setProperty(i, "running", false)
         }
     }
@@ -1372,6 +1477,8 @@ FocusScope {
                     // (Kept with the pane: its id, for the kernel's output that
                     // comes after a restart, and whether it was still running.)
                     if (kept) meta.tessera = Object.assign({}, meta.tessera || {}, { cid: c.cid, running: !!c.running })
+                    // (A background job: which, and how much of its output is in.)
+                    if (kept && c.job > 0) meta.tessera = Object.assign({}, meta.tessera || {}, { job: c.job, job_at: c.jobAt })
                 }
                 if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
                 if (c.ranIn !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { ran_in: c.ranIn })
@@ -1440,7 +1547,7 @@ FocusScope {
         if (path !== "" && path === written) { written = ""; return }
         load()
     }
-    Component.onCompleted: if (controller) load()
+    Component.onCompleted: if (controller) { load(); refreshJobs() }
     onControllerChanged: if (controller && !loaded) load()
     // (A pane's notebook's kernels stay, in tesserad, as long as its session:
     // the window closing doesn't end them. A file's go with it.)
@@ -1632,6 +1739,12 @@ FocusScope {
                 tip: "The kernels running (every notebook's): see, restart or stop them"
                 onClicked: { nb.refreshKernels(); kernelsPop.open() }
             }
+            Tool {
+                visible: nb.hostJobs.length > 0
+                label: (nb.narrow ? "\u29d7 " : "Jobs ") + nb.jobsActive + (nb.hostJobs.length > nb.jobsActive ? "/" + nb.hostJobs.length : "")
+                tip: "Background jobs (running/all): their output, status, Stop"
+                onClicked: { nb.refreshJobs(); jobsPop.open() }
+            }
             Rectangle { width: 1; height: 14; color: Theme.divider }
             Tool { label: nb.narrow ? "+" : "+ Code"; tip: "Add a code cell below (B)"; onClicked: nb.insertCell(nb.current + 1, "code") }
             Tool { label: nb.narrow ? "+M↓" : "+ Markdown"; tip: "Add a Markdown cell below"; onClicked: nb.insertCell(nb.current + 1, "markdown") }
@@ -1816,6 +1929,7 @@ FocusScope {
             required property string viewPath  // a file card: the file it shows
             required property string viewLang  // and the language picked for it ("": by its name, "-": none)
             required property string execs     // what its programs ran with: [{command, line, argv, cwd, user, env}]
+            required property int job          // a background job running it (tesserad's id), or 0
             readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
@@ -1874,7 +1988,7 @@ FocusScope {
                         RotationAnimation on rotation { running: cell.running; from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
                     }
                     HoverHandler { id: statusHover; cursorShape: Qt.PointingHandCursor; onHoveredChanged: if (hovered && cell.failed) nb.askExit(cells.get(cell.index), cell.index) }
-                    TapHandler { onTapped: { nb.current = cell.index; cell.running ? nb.interrupt() : nb.run(cell.index) } }
+                    TapHandler { onTapped: { nb.current = cell.index; cell.running ? (cell.job > 0 ? nb.stopJob(cell.index) : nb.interrupt()) : nb.run(cell.index) } }
                     ToolTip.visible: statusHover.hovered
                     ToolTip.delay: 400
                     // (Done: its exit status, and what it means for the command.)
@@ -2009,6 +2123,13 @@ FocusScope {
                     tip: "Show the output as…"
                     onClicked: kindMenu.popup(kindChip, 0, kindChip.height + 2)
                 }
+                // (A background job: its pid, and Stop while it runs.)
+                Chip { visible: cell.job > 0; base: cell.color
+                       label: "bg" + (cell.running ? " \u00b7 pid " + (((nb.parseList(cell.execs)[0] || {}).pid) || "") : "")
+                       tip: "Running in the background (it goes on when the window closes): see every job"
+                       Layout.minimumWidth: implicitWidth; onClicked: { nb.refreshJobs(); jobsPop.open() } }
+                Chip { visible: cell.job > 0 && cell.running; base: cell.color; label: "\u25a0 Stop"; tip: "Stop it (TERM, then KILL after 3 s)"
+                       Layout.minimumWidth: implicitWidth; onClicked: nb.stopJob(cell.index) }
                 // (What it ran with: command line, folder, user, environment.)
                 Chip { visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.ended > 0 || cell.running || cell.execs !== "[]")
                        base: cell.color; label: "\u24d8"; tip: "Details: the command line as run, folder, user and environment"
@@ -2099,6 +2220,8 @@ FocusScope {
                 SlimMenuItem { text: header.fileView && header.fileView.dirty ? "Done, discarding the changes" : "Done editing"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.stopEdit() }
                 SlimMenuItem { text: "\u24d8 Details (command line, environment)"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.showExec(cell.index) }
                 SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
+                SlimMenuItem { text: "Run in the background"; visible: cell.code && cell.viewPath === "" && !cell.running && nb.bgLang(cells.get(cell.index)) !== ""; onTriggered: nb.run(cell.index, true) }
+                SlimMenuItem { text: "Stop the background job"; visible: cell.job > 0 && cell.running; onTriggered: nb.stopJob(cell.index) }
                 SlimMenuItem { text: "Run the cells above"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.runAbove(cell.index) }
                 SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; visible: cell.viewPath === ""; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
                 SlimMenuItem { text: cell.hideOutput ? "Show the output" : "Hide the output"; visible: cell.hasOutput; onTriggered: { cells.setProperty(cell.index, "hideOutput", !cell.hideOutput); nb.touch() } }
@@ -2734,6 +2857,78 @@ FocusScope {
         }
     }
 
+    function parseList(s) { try { return JSON.parse(s) } catch (e) { return [] } }
+    function ago(ms) {
+        const s = Math.max(0, Math.round(ms / 1000))
+        return s < 60 ? s + " s" : s < 3600 ? Math.floor(s / 60) + " min " + (s % 60) + " s" : Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min"
+    }
+    // ---- every background job on this host ----
+    Popup {
+        id: jobsPop
+        parent: nb
+        x: Math.max(8, nb.width - width - 8)
+        y: 36
+        width: Math.min(nb.width - 16, 640)
+        height: Math.min(nb.height - 50, implicitHeight)
+        padding: 8
+        topPadding: 8.001   // (off the half pixel: 130% scale smears native text there)
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        property real now: Date.now()
+        Timer { interval: 1000; repeat: true; running: jobsPop.opened; onTriggered: jobsPop.now = Date.now() }
+        contentItem: ColumnLayout {
+            spacing: 4
+            RowLayout {
+                Layout.fillWidth: true
+                Text { text: "Background jobs" + (nb.sshHost !== "" ? " on " + nb.sshHost : ""); color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                Chip { base: Theme.panel; label: "Clear finished"; visible: nb.hostJobs.some(j => !j.running)
+                       onClicked: { for (const j of nb.hostJobs) if (!j.running) nb.controller.jobCall("", nb.sshHost, "job.forget", JSON.stringify({ id: j.id })); Qt.callLater(nb.refreshJobs) } }
+            }
+            Text {
+                visible: nb.hostJobs.length === 0
+                text: "None. End a shell or tessh line with & (or \u22ef \u2192 Run in the background) to run it on its own."
+                color: Theme.textDim; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true
+            }
+            ListView {
+                id: jobsList
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(contentHeight, 360)
+                clip: true
+                model: nb.hostJobs.slice().reverse()
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
+                delegate: RowLayout {
+                    required property var modelData
+                    readonly property bool mine: modelData.owner === nb.key && nb.indexOf(modelData.cell) >= 0
+                    width: jobsList.width - 10
+                    height: 28
+                    spacing: 6
+                    Text {
+                        text: modelData.running ? "\u25cf" : modelData.status === 0 ? "\u2713" : "\u2718"
+                        color: modelData.running ? Theme.accent : modelData.status === 0 ? nb.ansi(2, "#98c379") : nb.ansi(1, "#e06c75")
+                        font.pixelSize: 12; font.weight: Font.Bold; topPadding: 0.001
+                    }
+                    Text {
+                        text: modelData.command
+                        color: Theme.text; font.family: nb.fontFamily; font.pixelSize: 12; topPadding: 0.001
+                        elide: Text.ElideRight; Layout.fillWidth: true
+                    }
+                    Text {
+                        text: "pid " + modelData.pid + " \u00b7 " + (modelData.running ? nb.ago(jobsPop.now - modelData.started) : "exit " + modelData.status + " \u00b7 " + nb.ago(modelData.ended - modelData.started))
+                        color: Theme.textDim; font.pixelSize: 11; topPadding: 0.001
+                    }
+                    Chip { base: Theme.panel; label: "Show"; visible: mine; tip: "Go to its card"; onClicked: { nb.showJobCell(modelData.cell); jobsPop.close() } }
+                    Chip { base: Theme.panel; label: "\u24d8"; tip: "What it ran with"
+                           onClicked: Async.call(nb.controller, k => nb.controller.jobCall(k, nb.sshHost, "job.output", JSON.stringify({ id: modelData.id, from: 1e15, exec: true })), json => {
+                               let r = {}
+                               try { r = JSON.parse(json) } catch (e) {}
+                               if (!r.exec) return
+                               execPop.records = [r.exec]; execPop.sel = 0; execPop.note = ""; execPop.open()
+                           }) }
+                    Chip { base: Theme.panel; label: "\u25a0 Stop"; visible: modelData.running; onClicked: { nb.controller.jobCall("", nb.sshHost, "job.stop", JSON.stringify({ id: modelData.id })); Qt.callLater(nb.refreshJobs) } }
+                }
+            }
+        }
+    }
     // ---- a card's details: what its programs ran with ----
     // Command line (typed, and as run), folder, user and environment: a shell
     // card's from shell integration, a tessh card's from its kernel, one per
@@ -2749,6 +2944,8 @@ FocusScope {
         if (xs.length === 0) xs = [{ command: c.source, cwd: c.cwd, missing: c.tid > 0 ? "shell" : "kernel" }]
         return xs
     }
+    // (Test hook: TESSERA_TEST_NB_JOBS=<ms>: the Jobs list opened then.)
+    Timer { interval: nb.controller ? +nb.controller.testEnv("NB_JOBS") || 1 : 1; running: nb.controller !== null && nb.controller.testEnv("NB_JOBS") !== ""; onTriggered: { nb.refreshJobs(); jobsPop.open() } }
     // (Test hook: TESSERA_TEST_NB_DETAILS=<n>[,ms]: the nth card's details (1 the first, -1 the last) at 14 s (or ms).)
     Timer {
         readonly property var arg: nb.controller ? nb.controller.testEnv("NB_DETAILS").split(",") : [""]
