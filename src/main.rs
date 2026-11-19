@@ -69,6 +69,8 @@ fn main() {
                 i += 1;
             }
             "--new-window" => std::env::set_var("TESSERA_NO_RESTORE", "1"),
+            // Local mode for this window (as Preferences › General's).
+            "--local" => std::env::set_var("TESSERA_LOCAL", "1"),
             // An elevated window (Windows): its shells live in their own
             // daemon, which only administrators can reach.
             "--admin" => {
@@ -144,8 +146,30 @@ fn main() {
         kde::remember_window_position();
     }
     bridge::ffi::tessera_set_icon(&QString::from(concat!(env!("CARGO_MANIFEST_DIR"), "/icons/tessera.svg")));
-    // A daemon from an older build: swap the new one in (shells kept).
-    std::env::set_var("TESSERA_DAEMON_STATE", client::sync_daemon());
+    // Local mode: no tesserad; the backend runs in this process, on a
+    // socket of its own (its shells find it there too, through
+    // TESSERA_SOCKET), and ends with the window.
+    // (A window this one opens, New Window or a torn-off tab, shares its
+    // backend while it's open: a torn-off tab's shells are there.)
+    let local = local_mode();
+    let shared = local.as_ref().and_then(|_| std::env::var_os("TESSERA_SOCKET")).map(std::path::PathBuf::from).filter(|p| {
+        p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("tessera-local-")) && net::UnixStream::connect(p).is_ok()
+    });
+    let local = if shared.is_some() { None } else { local };
+    if shared.is_some() {
+        std::env::set_var("TESSERA_DAEMON_STATE", "current");
+    } else if let Some(sock) = &local {
+        std::env::set_var("TESSERA_SOCKET", sock);
+        std::env::set_var("TESSERA_LOCAL", "1");
+        if let Err(e) = daemon::run_in_process(sock.clone()) {
+            eprintln!("tessera: can't start the local backend at {}: {e}", sock.display());
+            std::process::exit(1);
+        }
+        std::env::set_var("TESSERA_DAEMON_STATE", "current");
+    } else {
+        // A daemon from an older build: swap the new one in (shells kept).
+        std::env::set_var("TESSERA_DAEMON_STATE", client::sync_daemon());
+    }
     let mut engine = QQmlApplicationEngine::new();
     if let Some(mut engine) = engine.as_mut() {
         if let Some(qml) = option_env!("TESSERA_QT_QML") {
@@ -159,6 +183,9 @@ fn main() {
     let code = bridge::ffi::tessera_exec();
     // (Notebook saves and kernel stops queued at the end still go out.)
     background::drain(std::time::Duration::from_secs(5));
+    if let Some(sock) = &local {
+        daemon::end_in_process(sock);
+    }
     // (Kernels run on in tesserad, like the shells.)
     if wayland {
         // Qt reads "-session id_key", so an id with "_" in it can't be passed back.
@@ -169,4 +196,20 @@ fn main() {
         }
     }
     std::process::exit(code);
+}
+
+/// Local mode's socket, when this window runs without tesserad: asked for
+/// (--local, TESSERA_LOCAL=1) or set in Preferences (local_mode). Never for
+/// an administrator window (its daemon is locked down on purpose) or one
+/// already pointed at a socket of its own.
+fn local_mode() -> Option<std::path::PathBuf> {
+    if !cfg!(unix) || std::env::var_os("TESSERA_ADMIN").is_some() {
+        return None;
+    }
+    let asked = std::env::var("TESSERA_LOCAL").map(|v| v != "0" && !v.is_empty());
+    if !asked.unwrap_or_else(|_| settings::load().local_mode) {
+        return None;
+    }
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    Some(dir.join(format!("tessera-local-{}.sock", std::process::id())))
 }

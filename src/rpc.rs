@@ -132,6 +132,16 @@ fn running() -> Value {
     Value::Array(all)
 }
 
+/// Stop every kernel (local mode's window is closing: they'd outlive it).
+pub fn stop_all_kernels() {
+    let keys: Vec<String> = running().as_array().into_iter().flatten().filter_map(|k| k["key"].as_str().map(String::from)).collect();
+    for k in keys {
+        crate::shellk::stop(&k);
+        crate::jupyter::stop(&k);
+        forget_key(&k);
+    }
+}
+
 /// Stop every kernel of a notebook (its key, and "key~lang" ones).
 fn stop_tree(key: &str) {
     let prefix = format!("{key}~");

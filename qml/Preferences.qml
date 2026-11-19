@@ -647,6 +647,12 @@ Window {
                                 checked: prefs.settings.restore_sessions
                                 onToggled: (on) => prefs.setG("restore_sessions", on)
                             }
+                            ToggleRow {
+                                label: "Local mode (no tesserad)"
+                                hint: "The window keeps its shells, notebook kernels and cells itself instead of in tesserad, Tessera's backend, so they end when the window closes. SSH hosts still use theirs. Takes effect the next time Tessera opens."
+                                checked: prefs.settings.local_mode === true
+                                onToggled: (on) => prefs.setG("local_mode", on)
+                            }
 
                             SectionTitle { text: "Closing" }
                             ToggleRow { label: "Confirm closing multiple sessions"; checked: prefs.settings.confirm_close_multiple; onToggled: (on) => prefs.setG("confirm_close_multiple", on) }

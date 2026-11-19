@@ -17,6 +17,11 @@ pub struct Settings {
     /// Reopen the shells (and their layout) that were open when the window
     /// closed. Off: closing the window ends them.
     pub restore_sessions: bool,
+    /// Local mode: no tesserad. The window keeps its shells, kernels and
+    /// cells in its own process (on a socket only it serves); they end with
+    /// it. Off (the default): tesserad keeps them running between windows.
+    /// Takes effect the next time Tessera opens (or `tessera --local`).
+    pub local_mode: bool,
     pub confirm_close_multiple: bool,
     pub confirm_quit: bool,
     // -- General > Selection
@@ -103,6 +108,7 @@ impl Default for Settings {
         Self {
             version: 0,
             restore_sessions: true,
+            local_mode: false,
             confirm_close_multiple: true,
             confirm_quit: false,
             copy_on_select: true,

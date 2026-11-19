@@ -123,6 +123,42 @@ pub fn run() -> std::io::Result<()> {
     serve(listener, Arc::default(), path)
 }
 
+/// Local mode: this backend runs inside the window's process (no tesserad).
+/// It never moves to a scope of its own, swaps in another build, or exits
+/// when idle; it ends with the window.
+static IN_PROCESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn in_process() -> bool {
+    IN_PROCESS.load(Ordering::SeqCst)
+}
+
+/// Local mode: serve `path` (only this window's) from a thread of this
+/// process. Returns once it's listening.
+pub fn run_in_process(path: std::path::PathBuf) -> std::io::Result<()> {
+    IN_PROCESS.store(true, Ordering::SeqCst);
+    IDENTITY.get_or_init(exe_identity);
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    std::thread::spawn(move || {
+        if let Err(e) = serve(listener, Arc::default(), path) {
+            eprintln!("tessera: local backend: {e}");
+        }
+    });
+    Ok(())
+}
+
+/// Local mode, the window closing: its kernels and the socket go (its
+/// shells end with the process: their terminals close).
+pub fn end_in_process(path: &std::path::Path) {
+    crate::rpc::stop_all_kernels();
+    let _ = std::fs::remove_file(path);
+}
+
 static REGISTRY: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
 
 /// Session `id` takes over `from`'s cells and notebook (`from` is gone: its
@@ -182,7 +218,9 @@ fn own_scope() {}
 
 fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -> std::io::Result<()> {
     let _ = REGISTRY.set(registry.clone());
-    own_scope();
+    if !in_process() {
+        own_scope();
+    }
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -191,7 +229,8 @@ fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -
 
     // Exit once nothing is left: no shells and nobody connected. The next GUI
     // start launches a fresh daemon (handy after a rebuild, too).
-    {
+    // (Not in local mode: the window is this process.)
+    if !in_process() {
         let registry = registry.clone();
         let path = path.clone();
         std::thread::spawn(move || {
@@ -525,6 +564,11 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
                 exe: String,
             }
             let up: Up = serde_json::from_slice(&payload)?;
+            // (Local mode: exec'ing another build would replace the window.)
+            if in_process() {
+                let _ = up;
+                return write_json(&mut stream, T_UPGRADE_REPLY, &"deferred");
+            }
             #[cfg(unix)]
             {
                 // (Kernels can't be handed over: the swap waits until none
