@@ -1146,6 +1146,19 @@ FocusScope {
         liveHost.width = liveBox.width; liveHost.height = liveBox.height
         liveHost.visible = true
     }
+    // Expand (fill the notebook with card i) or Restore.
+    function toggleExpand(i) {
+        const cid = cells.get(i).cid
+        expandedId = expandedId === cid ? "" : cid
+        cells.setProperty(i, "hideOutput", false)
+        // (Back from expanded, a terminal app's card stays in view.)
+        Qt.callLater(() => { list.positionViewAtIndex(i, expandedId === "" && i === liveIndex ? ListView.Contain : ListView.Beginning); placeLive() })
+        // (The other cards come back and lay out first: then again.)
+        if (expandedId === "" && i === liveIndex) restoreFollow.restart()
+        // (A terminal app's card: the keys go back to it, not to the button
+        // clicked; a :q typed then went nowhere and it ran on.)
+        if (i === liveIndex && liveWanted && view) Qt.callLater(() => view.forceActiveFocus())
+    }
     function followLive() { if (liveIndex >= 0) { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
     property int termRev: 0             // the terminal's cells came back: read outputs again
     Timer { interval: 400; repeat: true; running: nb.visible && nb.ownRunOrAny; onTriggered: nb.tick++ }
@@ -1638,10 +1651,17 @@ FocusScope {
     Timer { interval: 9500; running: nb.controller !== null && nb.controller.testEnv("NB_KERNEL") !== ""
             onTriggered: nb.listKernels(() => { nb.changeKernel(nb.controller.testEnv("NB_KERNEL")); console.log("nb kernel test: " + nb.kernels.length + " in the list, picked " + nb.kernelName + " oneShot " + nb.oneShot) }) }
     Timer { interval: 11000; running: nb.controller !== null && nb.controller.testEnv("NB_CELL") !== ""; onTriggered: nb.submit(nb.controller.testEnv("NB_CELL").replace(/\\n/g, "\n")) }
-    // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s.)
-    Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") !== ""; onTriggered: if (cells.count > 0) nb.expandedId = cells.get(cells.count - 1).cid }
+    // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s, as
+    // its Expand button does, focus taken first as a click takes it.)
+    Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") !== ""; onTriggered: if (cells.count > 0) { list.forceActiveFocus(); nb.toggleExpand(cells.count - 1) } }
+    // (TESSERA_TEST_EXPAND_CYCLE=n: Expand/Restore the last card n times, every 1.5 s from 12 s.)
+    Timer {
+        property int left: nb.controller !== null ? 2 * Number(nb.controller.testEnv("EXPAND_CYCLE") || 0) : 0
+        interval: 12000; repeat: true; running: left > 0
+        onTriggered: { interval = 1500; list.forceActiveFocus(); nb.toggleExpand(cells.count - 1); --left }
+    }
     // (TESSERA_TEST_EXPAND_LAST=restore: and back to its own size at 19 s.)
-    Timer { interval: 19000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") === "restore"; onTriggered: { nb.expandedId = ""; if (cells.count - 1 === nb.liveIndex) restoreFollow.restart() } }
+    Timer { interval: 19000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") === "restore"; onTriggered: if (nb.expandedId !== "") { list.forceActiveFocus(); nb.toggleExpand(nb.indexOf(nb.expandedId)) } }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
     // (Test hook: TESSERA_TEST_EDIT_FILE: the last card edited at 12 s, saved at 20 s.)
@@ -1671,6 +1691,12 @@ FocusScope {
     // terminal's rows are this tight).
     // (Each line one terminal row high, at the terminal's font size: output
     // reads as it did in the terminal.)
+    // (A terminal app's card: whole rows, no strip under its last one.)
+    function liveFit(h) {
+        if (!view || outputRow <= 0) return h
+        const pad = 2 * view.padding
+        return Math.floor((h - pad) / outputRow) * outputRow + pad + 1
+    }
     readonly property real outputRow: view && view.cellHeight > 0 ? view.cellHeight : 0
     readonly property real outputPointSize: view && view.fontPointSize > 0 ? view.fontPointSize : 10
     function tight(html) { return "<div style=\"line-height:" + (outputRow > 0 ? Math.round(outputRow) + "px" : "100%") + "\">" + html + "</div>" }
@@ -2180,15 +2206,7 @@ FocusScope {
                     Layout.minimumWidth: implicitWidth
                     label: cell.expanded ? "⤡ Restore" : "⤢ Expand"
                     tip: cell.expanded ? "Back to its own size" : "Fill the window with this output"
-                    onClicked: {
-                        nb.expandedId = cell.expanded ? "" : cell.cid
-                        cells.setProperty(cell.index, "hideOutput", false)
-                        const i = cell.index
-                        // (Back from expanded, a terminal app's card stays in view.)
-                        Qt.callLater(() => { list.positionViewAtIndex(i, nb.expandedId === "" && i === nb.liveIndex ? ListView.Contain : ListView.Beginning); nb.placeLive() })
-                        // (The other cards come back and lay out first: then again.)
-                        if (nb.expandedId === "" && i === nb.liveIndex) restoreFollow.restart()
-                    }
+                    onClicked: nb.toggleExpand(cell.index)
                 }
                 Chip { id: moreChip; base: cell.color; label: "⋯"; tip: "More"; Layout.minimumWidth: implicitWidth
                        onClicked: moreMenu.popup(moreChip, 0, moreChip.height + 2) }
@@ -2350,7 +2368,7 @@ FocusScope {
                 height: !wanted ? 0 : cell.expanded ? Math.max(80, list.height - list.topMargin - list.bottomMargin - header.height - 12 - (cell.editing ? editorBox.height + 8 : 0))
                       // (A terminal app running in it: room for it, whatever
                       // size the card was dragged to before.)
-                      : live ? Math.max(nb.heights[cell.cid] || 0, nb.liveHeight)
+                      : live ? nb.liveFit(Math.max(nb.heights[cell.cid] || 0, nb.liveHeight))
                       : nb.heights[cell.cid] > 0 ? nb.heights[cell.cid]
                       : Math.min(Math.max(natural, 16), 460)
                 clip: true
@@ -2363,6 +2381,11 @@ FocusScope {
                     onWidthChanged: if (visible) Qt.callLater(nb.placeLive)
                     onHeightChanged: if (visible) Qt.callLater(nb.placeLive)
                     Component.onDestruction: if (nb.liveBox === liveBox) nb.liveBox = null
+                    // (A card made again (the list drops and remakes cards as
+                    // Expand/Restore hide and show the others) that shows it
+                    // from the start: no visible change comes, and the
+                    // terminal would stay hidden, black.)
+                    Component.onCompleted: if (visible) { nb.liveBox = liveBox; Qt.callLater(nb.followLive) }
                 }
                 Loader {
                     id: loader
