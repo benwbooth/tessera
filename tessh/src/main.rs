@@ -1,3 +1,170 @@
+//! tessh: a shell language that compiles to Python.
+//!
+//!     tessh                      the REPL
+//!     tessh FILE [ARGS…]         run a script
+//!     tessh -c CODE [ARGS…]      run CODE
+//!     tessh --check [FILE]       check (stdin without FILE); --json for JSON
+//!     tessh --py FILE            print the Python it compiles to
+//!     tessh --kernel -f CONN     the Jupyter kernel
+
+mod compiler;
+mod deps;
 mod forms;
+mod pyforms;
 mod reader;
-fn main() {}
+mod runner;
+mod runtime;
+
+#[cfg(test)]
+mod tests;
+
+use pyo3::prelude::*;
+use std::io::Read;
+
+const USAGE: &str = "tessh                      the REPL
+tessh FILE [ARGS…]         run a script
+tessh -c CODE [ARGS…]      run CODE
+tessh --check [FILE]       check without running (stdin without FILE); --json for JSON
+tessh --py FILE            print the Python it compiles to
+tessh --kernel -f CONN     the Jupyter kernel";
+
+fn exit_code(py: Python<'_>, e: &PyErr) -> Option<i32> {
+    if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) {
+        let code = e.value(py).getattr("code").ok()?;
+        return Some(if code.is_none() { 0 } else { code.extract::<i32>().unwrap_or(1) });
+    }
+    None
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let code = run(args);
+    // (Embedded Python never finalizes: run its atexit work, flush its output.)
+    Python::attach(|py| {
+        if let Ok(a) = py.import("atexit") {
+            let _ = a.call_method0("_run_exitfuncs");
+        }
+        if let Ok(sys) = py.import("sys") {
+            for s in ["stdout", "stderr"] {
+                if let Ok(f) = sys.getattr(s) {
+                    let _ = f.call_method0("flush");
+                }
+            }
+        }
+    });
+    std::process::exit(code);
+}
+
+fn run(args: Vec<String>) -> i32 {
+    let a = args.first().map(String::as_str).unwrap_or("");
+    match a {
+        "-h" | "--help" => {
+            println!("{USAGE}");
+            return 0;
+        }
+        "-V" | "--version" => {
+            println!("tessh {}", env!("CARGO_PKG_VERSION"));
+            return 0;
+        }
+        _ => {}
+    }
+    Python::attach(|py| {
+        if let Err(e) = runner::init(py) {
+            e.print(py);
+            return 1;
+        }
+        match a {
+            "--check" => {
+                let as_json = args.iter().any(|x| x == "--json");
+                let rest: Vec<&String> = args[1..].iter().filter(|x| *x != "--json").collect();
+                let (text, name) = match rest.first() {
+                    Some(f) => match std::fs::read_to_string(f) {
+                        Ok(t) => (t, f.to_string()),
+                        Err(e) => {
+                            eprintln!("tessh: {f}: {e}");
+                            return 2;
+                        }
+                    },
+                    None => {
+                        let mut s = String::new();
+                        let _ = std::io::stdin().read_to_string(&mut s);
+                        (s, "<stdin>".to_string())
+                    }
+                };
+                let problems = runner::check(py, &text, &name);
+                if as_json {
+                    let v: Vec<serde_json::Value> = problems.iter().map(|(l, c, e, m)| serde_json::json!({"line": l, "col": c, "end_col": e, "message": m})).collect();
+                    println!("{}", serde_json::Value::Array(v));
+                } else {
+                    for (l, c, _, m) in &problems {
+                        println!("{name}:{l}:{}: {m}", c + 1);
+                    }
+                }
+                if problems.is_empty() { 0 } else { 1 }
+            }
+            "--py" => {
+                let Some(f) = args.get(1) else {
+                    eprintln!("tessh: --py FILE");
+                    return 2;
+                };
+                let text = std::fs::read_to_string(f).unwrap_or_default();
+                match runner::to_python(py, &text) {
+                    Ok(s) => {
+                        println!("{s}");
+                        0
+                    }
+                    Err(e) => {
+                        runner::report(py, e, f);
+                        1
+                    }
+                }
+            }
+            "" => 0,
+            _ => {
+                let (ns_argv, result, name) = if a == "-c" {
+                    let Some(code) = args.get(1) else {
+                        eprintln!("tessh: -c needs code");
+                        return 2;
+                    };
+                    let mut v = vec!["-c".to_string()];
+                    v.extend(args[2..].iter().cloned());
+                    let ns = match runner::new_namespace(py, "__main__", v) {
+                        Ok(ns) => ns,
+                        Err(e) => {
+                            e.print(py);
+                            return 1;
+                        }
+                    };
+                    (None::<()>, runner::run_source(py, code, &ns, "<string>", false), "<string>".to_string())
+                } else {
+                    let ns = match runner::new_namespace(py, "__main__", args.clone()) {
+                        Ok(ns) => ns,
+                        Err(e) => {
+                            e.print(py);
+                            return 1;
+                        }
+                    };
+                    (None, runner::run_file(py, a, &ns), a.to_string())
+                };
+                let _ = ns_argv;
+                match result {
+                    Ok(()) => runtime::STATUS.load(std::sync::atomic::Ordering::SeqCst),
+                    Err(runner::TesshError::Py(e)) => {
+                        if let Some(c) = exit_code(py, &e) {
+                            return c;
+                        }
+                        if e.is_instance_of::<pyo3::exceptions::PyKeyboardInterrupt>(py) {
+                            return 130;
+                        }
+                        runner::report(py, runner::TesshError::Py(e), &name);
+                        1
+                    }
+                    Err(e) => {
+                        runner::report(py, e, &name);
+                        1
+                    }
+                }
+            }
+        }
+    })
+}
