@@ -349,7 +349,8 @@ QtObject {
         const bang = after.startsWith("!")
         if (bang) after = after.substring(1)
         const arg = after.trim()
-        const is = (short, long) => name.length >= short.length && long.startsWith(name) && name.startsWith(short)
+        // (Not "short"/"long": reserved words to Qt's QML compiler on Windows.)
+        const is = (abbrev, full) => name.length >= abbrev.length && full.startsWith(name) && name.startsWith(abbrev)
         const cl = r.b
         const need = () => checkRange(r)
 
