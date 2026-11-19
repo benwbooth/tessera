@@ -108,6 +108,7 @@ Item {
     signal editorKeysPicked(string keys)
     signal markdownStylePicked(string style)
     property string markdownStyle: "rich"  // Markdown cells: "rich" or "text"
+    property string notebookKernel: "tessh"  // what the notebook runs in until one is picked
     property bool preferEditor: true   // the keys go to the editor (not the terminal) when the pane gets them
     property bool inputEditor: false
     property string editorKeys: "emacs"
@@ -575,6 +576,7 @@ Item {
         fontFamily: term.fontFamily
         markdownStyle: pane.markdownStyle
         onMarkdownStylePicked: (m) => pane.markdownStylePicked(m)
+        defaultKernel: pane.notebookKernel
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onPathPicked: (p) => pane.docPath = p
         onTerminalRequested: { pane.viewMode = "terminal"; term.forceActiveFocus() }

@@ -96,6 +96,36 @@ FocusScope {
         return ind
     }
     property string kernelName: "tessera-shell"
+    // What a pane's notebook (and a new notebook) runs cells in until one is
+    // picked in its own list (Preferences › Notebook kernel; settings'
+    // notebook_kernel): a kernel's name ("tessh", "python3",
+    // "tessera-sh-zsh"), a language ("python", "fish") or "tessera-shell",
+    // the pane's own shell. One it can't find: the pane's shell.
+    property string defaultKernel: "tessh"
+    // (Picked in this notebook's list: kept, whatever the default.)
+    property bool kernelPicked: false
+    function defaultKernelName() {
+        const v = defaultKernel.trim()
+        const shell = view ? "tessera-shell" : (kernels.length ? kernels[0].name : "")
+        if (v === "" || v === "tessera-shell" || v === "shell") return shell
+        const k = kernels.find(x => x.name === v) || langSpec(v)
+        return k ? k.name : shell
+    }
+    onDefaultKernelChanged: {
+        if (!loaded || kernelPicked) return
+        const n = defaultKernelName()
+        if (n !== kernelName) { setKernel(n); touch() }
+    }
+    // (The default kernel only in the list later (tesserad just started,
+    // another host's kernels found): a notebook nothing has run in yet takes it.)
+    function takeDefault() {
+        if (!loaded || kernelPicked || path !== "" || kernelState !== "") return
+        const n = defaultKernelName()
+        if (n !== "" && n !== kernelName) setKernel(n)
+    }
+    onKernelsChanged: takeDefault()
+    onViewChanged: takeDefault()
+    Timer { interval: 2000; repeat: true; running: nb.visible && nb.controller !== null && nb.kernels.length === 0; onTriggered: nb.listKernels() }
     property string kernelState: ""     // "", starting, idle, busy, dead
     property string kernelMessage: ""
     property string language: "bash"
@@ -130,7 +160,12 @@ FocusScope {
         // notebook (or none said) runs in the pane's shell.
         const want = spec && spec.name ? spec.name : ""
         const lang = (spec && spec.language) || (metadata.language_info && metadata.language_info.name) || ""
-        if (want === "" && lang === "" || want === "bash" || lang === "bash" || want === "tessera-shell") {
+        if (want === "" && lang === "") {
+            kernelName = defaultKernelName()
+            language = kernel ? kernel.language : "bash"
+            return
+        }
+        if (want === "bash" || lang === "bash" || want === "tessera-shell") {
             kernelName = view ? "tessera-shell" : (kernels.length ? kernels[0].name : "")
             language = "bash"
             return
@@ -160,6 +195,10 @@ FocusScope {
         startKernel()
     }
     function changeKernel(name) {
+        kernelPicked = true
+        setKernel(name)
+    }
+    function setKernel(name) {
         if (name === kernelName) return
         controller.jupyterStop(key)
         stopRunning()
@@ -170,7 +209,10 @@ FocusScope {
     }
     Connections {
         target: nb.controller
-        function onKernelsReady(host) { if (host === nb.sshHost) nb.listKernels() }
+        function onKernelsReady(host) {
+            if (host !== nb.sshHost) return
+            nb.listKernels()
+        }
         function onJupyterEvent(key, json) {
             if (key.startsWith(nb.key + "~")) {
                 let le
@@ -918,7 +960,12 @@ FocusScope {
         kinds = t.kinds || {}
         fileViews = t.fileViews || {}
         heights = t.heights || {}
-        pickKernel(metadata.kernelspec)
+        // (A pane's notebook runs in the default kernel unless one was picked
+        // in it; one kept from before there was a default, as a shell
+        // notebook, does too.)
+        kernelPicked = !!t.kernel_picked
+        const ks = metadata.kernelspec
+        pickKernel(path === "" && !kernelPicked && (!ks || ks.name === "bash") ? null : ks)
     }
     function load() {
         loaded = false
@@ -1120,6 +1167,7 @@ FocusScope {
         if (Object.keys(heights).length) t.heights = heights
         if (kept && retired.length) t.retired = retired.slice(-500)
         if (kept) t.kernel_key = keyBase
+        if (kernelPicked) t.kernel_picked = true
         if (Object.keys(t).length) md.tessera = t
         return JSON.stringify(sorted({ cells: out, metadata: md, nbformat: 4, nbformat_minor: 5 }), null, 1) + "\n"
     }

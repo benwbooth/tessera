@@ -678,6 +678,23 @@ Window {
                                 }
                                 Item { Layout.fillWidth: true }
                             }
+                            Row2 {
+                                label: "Notebook kernel"
+                                hint: "What a notebook runs commands and cells in until you pick another in its own list. tessh by default; any Jupyter kernel or shell, or the pane's own shell. (Or notebook_kernel in settings.json: a kernel's name or a language.)"
+                                ChoiceBox {
+                                    implicitWidth: 230
+                                    value: prefs.settings.notebook_kernel !== undefined ? prefs.settings.notebook_kernel : "tessh"
+                                    values: {
+                                        let ks = []
+                                        try { ks = JSON.parse(prefs.controller.jupyterKernels("")) } catch (e) {}
+                                        const v = [["tessera-shell", "This pane's shell"]].concat(ks.map(k => [k.name, k.display || k.name]))
+                                        if (!v.some(x => x[0] === value)) v.push([value, value])
+                                        return v
+                                    }
+                                    onChosen: (v) => prefs.setG("notebook_kernel", v)
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
                             ToggleRow {
                                 label: "Prompt above the editor"
                                 hint: "Folder, git, status and more, drawn by Tessera above the editor."

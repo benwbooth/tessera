@@ -151,9 +151,15 @@ defmacro unless cond:expr *body
 
 - It runs in a pane (`tessh`, a REPL with auto-indent, highlighting and
   completion), as scripts (`tessh file.tsh`, `#!/usr/bin/env tessh`), and as
-  a notebook kernel (**tessh** in the kernel or language list). The folder and
+  a notebook kernel. It's what a notebook runs commands and cells in by
+  default (Preferences › General › Notebook kernel, or `notebook_kernel` in
+  the settings, picks another: any kernel, a shell, or the pane's own shell;
+  a notebook's kernel list picks one for that notebook). The folder and
   exported variables go between it and the pane's shell as with the other
   kernels.
+- `help` shows the guide, a topic at a time (`help pipes`, `help macros`):
+  Markdown in a notebook, highlighted in a terminal. `help $obj` is Python's
+  help.
 - The input editor highlights tessh and checks it as you type (`tessh
   --check`). Enter indents after `def`, `if` and the like, and an `else` goes
   back to its `if`.
@@ -162,7 +168,9 @@ defmacro unless cond:expr *body
 - A `# /// script` block (PEP 723) names PyPI packages, and uv installs them.
 - `\cat` runs the program even when a Python `cat` exists.
 
-The language is described in [docs/TESSH.md](docs/TESSH.md). tessh is built with
+The language is described in [docs/TESSH.md](docs/TESSH.md), and the guide,
+with an example for each part of it, is [tessh/doc/guide.md](tessh/doc/guide.md)
+(every example there is run by the tests). tessh is built with
 Tessera (`nix run github:benwbooth/tessera#tessh` on its own).
 
 ## tesserad

@@ -61,6 +61,10 @@ pub struct Settings {
     // -- Notebook: Markdown output as a page ("rich") or as styled
     // monospace text, the way a terminal Markdown viewer shows it ("text").
     pub markdown_style: String,
+    // -- Notebook: what a notebook runs cells in until one is picked in it: a
+    // kernel's name ("tessh", "python3", "tessera-sh-zsh"), a language
+    // ("python", "fish"), or "tessera-shell" (the pane's own shell).
+    pub notebook_kernel: String,
     // -- Tessera's prompt above the editor, and its segments in order ("|"
     // puts the rest on the right).
     pub editor_prompt: bool,
@@ -126,6 +130,7 @@ impl Default for Settings {
             editor_keys: "emacs".into(),
             terminal_editor: String::new(),
             markdown_style: "rich".into(),
+            notebook_kernel: "tessh".into(),
             editor_prompt: true,
             prompt_engine: "auto".into(),
             prompt_config: "own".into(),

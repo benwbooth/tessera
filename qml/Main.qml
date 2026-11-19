@@ -129,6 +129,7 @@ ApplicationWindow {
             controller: controller
             onEditorKeysPicked: (k) => win.setSetting("editor_keys", k)
             markdownStyle: win.settings.markdown_style || "rich"
+            notebookKernel: win.settings.notebook_kernel !== undefined ? win.settings.notebook_kernel : "tessh"
             onMarkdownStylePicked: (m) => win.setSetting("markdown_style", m)
             dimInactive: win.settings.dim_inactive
             dimAmount: win.settings.dim_amount
