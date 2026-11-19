@@ -628,11 +628,6 @@ pub mod ffi {
         /// A desktop notification.
         #[qinvokable]
         fn notify(self: &Controller, title: &QString, body: &QString);
-        /// Install shell integration for "bash", "zsh" or "fish": writes the
-        /// script and adds a line to the shell's startup file. Returns what
-        /// happened (or what to add by hand when the file can't be changed).
-        #[qinvokable]
-        fn install_shell_integration(self: &Controller, shell: &QString) -> QString;
         /// Every theme (built in, then imported) as a JSON array.
         #[qinvokable]
         fn themes(self: &Controller) -> QString;
@@ -1673,10 +1668,6 @@ impl ffi::Controller {
         let _ = std::process::Command::new("notify-send")
             .args(["-a", "Tessera", "-i", icon, &title.to_string(), &body.to_string()])
             .spawn();
-    }
-
-    fn install_shell_integration(&self, shell: &ffi::QString) -> ffi::QString {
-        qs(&crate::shell_integration::install(&shell.to_string()))
     }
 
     fn themes(&self) -> ffi::QString {

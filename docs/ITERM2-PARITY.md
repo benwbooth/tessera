@@ -25,7 +25,7 @@ click in a terminal opens a context menu.
 | Toggle Debug Logging, Retrospective Logs, Performance Stats, Capture GPU Frame | 🔜 | a debug log to a file |
 | Secure Keyboard Entry | ➖ | macOS-only API (Wayland already isolates input) |
 | Make iTerm2 Default Term | 🔜 | as "Set as default terminal" (xdg-terminal-exec) |
-| Install Shell Integration | ✅ | ☰ › Install Shell Integration › bash / zsh / fish (OSC 133 marks + OSC 7 folder); says what to add when the startup file is managed by Nix |
+| Install Shell Integration | n/a | not needed: Tessera loads the integration into every shell it starts (zsh ZDOTDIR, fish vendor_conf.d, bash/nu/xonsh/pwsh startup options) without editing startup files; the menu was removed |
 | Companion Device, Claude Code Integration | ➖ | |
 
 ### Shell

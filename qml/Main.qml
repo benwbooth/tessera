@@ -1204,8 +1204,6 @@ ApplicationWindow {
                 P.MenuItem { icon.name: "go-down"; text: "Next Prompt\tCtrl+Shift+Down"; onTriggered: if (activeView) activeView.jumpToPrompt(1) }
                 P.MenuSeparator {}
                 P.MenuItem { icon.name: "edit-select"; text: "Select Output of Last Command\tCtrl+Shift+L"; onTriggered: if (activeView) activeView.selectLastOutput() }
-                P.MenuSeparator {}
-                P.MenuItem { enabled: false; text: "These need shell integration (\u2630 \u203a Install Shell Integration)" }
             }
             P.MenuSeparator {}
             P.Menu {
@@ -1355,20 +1353,6 @@ ApplicationWindow {
         }
 
         P.MenuSeparator {}
-        P.Menu {
-            id: shellIntegrationMenu
-            title: "Install Shell Integration"
-            icon.name: "run-install"
-            Instantiator {
-                model: ["bash", "zsh", "fish"]
-                delegate: P.MenuItem {
-                    text: modelData
-                    onTriggered: sheet.ask({ title: "Shell Integration", message: controller.installShellIntegration(modelData), infoOnly: true, okText: "OK" })
-                }
-                onObjectAdded: (i, o) => shellIntegrationMenu.insertItem(i, o)
-                onObjectRemoved: (i, o) => shellIntegrationMenu.removeItem(o)
-            }
-        }
         P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
         P.MenuItem { icon.name: "application-exit"; text: "Quit Tessera\tCtrl+Shift+Q"; onTriggered: win.close() }
     }

@@ -1213,7 +1213,7 @@ Window {
                             ToggleRow { label: "Notify when a session ends"; hint: "When it isn't the tab you're looking at."; checked: prefs.prof.notify_exit; onToggled: (on) => prefs.setP("notify_exit", on) }
 
                             SectionTitle { text: "Shell Integration" }
-                            ToggleRow { label: "Show mark indicators"; hint: "A tick in the left margin at each prompt. Needs shell integration (\u2630 \u203a Install Shell Integration)."; checked: prefs.prof.show_marks; onToggled: (on) => prefs.setP("show_marks", on) }
+                            ToggleRow { label: "Show mark indicators"; hint: "A tick in the left margin at each prompt. From the shell integration Tessera loads into its shells."; checked: prefs.prof.show_marks; onToggled: (on) => prefs.setP("show_marks", on) }
                         }
 
                         // ================= Profiles: Session =================
