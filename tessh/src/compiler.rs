@@ -3127,6 +3127,11 @@ impl<'py, 's> Compiler<'py, 's> {
 
     /// One top-level unit as a Python module (show: display its value).
     pub fn unit_module(&mut self, u: &Unit, ctx: Ctx, show_value: bool) -> R<Obj<'py>> {
+        // (Definitions, imports and assignments aren't shown, as in Python.)
+        let items = line_parts(&u.0).0;
+        let quiet = self.assign_index(items).is_some()
+            || items.first().and_then(|h| h.sym_name()).is_some_and(|n| ["def", "class", "async", "import", "from", "defmacro", "defop", "global", "nonlocal", "del", "pass", "for", "while"].contains(&n) || n.starts_with('@'));
+        let show_value = show_value && !quiet;
         let r = self.compile_unit(u, ctx)?;
         let mut body = r.stmts;
         if show_value {

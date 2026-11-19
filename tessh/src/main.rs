@@ -12,6 +12,7 @@ mod deps;
 mod forms;
 mod pyforms;
 mod reader;
+mod repl;
 mod runner;
 mod runtime;
 
@@ -57,6 +58,9 @@ fn main() {
 
 fn run(args: Vec<String>) -> i32 {
     let a = args.first().map(String::as_str).unwrap_or("");
+    if a.is_empty() {
+        return repl::run();
+    }
     match a {
         "-h" | "--help" => {
             println!("{USAGE}");
