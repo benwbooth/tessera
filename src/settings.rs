@@ -56,6 +56,8 @@ pub struct Settings {
     // ("emacs", "vi", "vscode").
     pub input_editor: bool,
     pub editor_keys: String,
+    /// A file card's terminal editor ("" = the shell's $VISUAL or $EDITOR).
+    pub terminal_editor: String,
     // -- Notebook: Markdown output as a page ("rich") or as styled
     // monospace text, the way a terminal Markdown viewer shows it ("text").
     pub markdown_style: String,
@@ -119,6 +121,7 @@ impl Default for Settings {
             undo_close_seconds: 5,
             input_editor: true,
             editor_keys: "emacs".into(),
+            terminal_editor: String::new(),
             markdown_style: "rich".into(),
             editor_prompt: true,
             prompt_engine: "auto".into(),

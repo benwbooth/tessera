@@ -1510,12 +1510,21 @@ FocusScope {
                 // Discard (the changes dropped, back to viewing). Ctrl+S saves and
                 // stays. The keys button comes next.)
                 Chip {
-                    visible: header.fileView !== null && !header.fileView.editing
+                    visible: header.fileView !== null && !header.fileView.editing && !header.fileView.inTerm
                     base: cell.color
                     Layout.minimumWidth: implicitWidth
                     label: "✎ Edit"
-                    tip: "Edit the file"
+                    tip: "Edit the file (in a terminal editor: ⋯)"
                     onClicked: header.fileView.startEdit()
+                }
+                // (The file open in a terminal editor in the card: quit it there, or here.)
+                Chip {
+                    visible: header.fileView !== null && header.fileView.inTerm
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: "✕ Close the editor"
+                    tip: "Close the terminal editor (anything it hasn't saved is lost)"
+                    onClicked: header.fileView.closeTerminal()
                 }
                 Chip {
                     visible: header.fileView !== null && header.fileView.editing
@@ -1618,7 +1627,31 @@ FocusScope {
             SlimMenu {
                 id: moreMenu
                 // (A file card: the file's own; a cell: its code.)
-                SlimMenuItem { text: "Edit the file"; visible: header.fileView !== null && !header.fileView.editing; onTriggered: header.fileView.startEdit() }
+                SlimMenuItem { text: "Edit the file"; visible: header.fileView !== null && !header.fileView.editing && !header.fileView.inTerm; onTriggered: header.fileView.startEdit() }
+                SlimMenuItem { text: "Edit in " + (header.fileView ? nb.termEditorName(header.fileView.termEditor) : ""); visible: header.fileView !== null && !header.fileView.inTerm; onTriggered: header.fileView.openInTerminal() }
+                SlimMenu {
+                    title: "Edit in another terminal editor ▸"
+                    enabled: header.fileView !== null && !header.fileView.inTerm
+                    topPadding: 4.001
+                    Repeater {
+                        model: header.fileView ? header.fileView.termEditors : []
+                        delegate: SlimMenuItem {
+                            required property var modelData
+                            text: modelData[1]
+                            checkable: true
+                            checked: header.fileView !== null && header.fileView.termEditor === modelData[0]
+                            onTriggered: header.fileView.openInTerminal(modelData[0])
+                        }
+                    }
+                }
+                SlimMenuItem { text: "Close the terminal editor"; visible: header.fileView !== null && header.fileView.inTerm; onTriggered: header.fileView.closeTerminal() }
+                SlimMenuItem { text: "Find and replace…\tCtrl+F"; visible: header.fileView !== null && header.fileView.editing; onTriggered: Qt.callLater(header.fileView.showFind) }
+                SlimMenuItem { text: "Go to line…\tCtrl+G"; visible: header.fileView !== null && header.fileView.editing; onTriggered: Qt.callLater(header.fileView.showGoTo) }
+                SlimMenuItem { text: "Undo\tCtrl+Z"; visible: header.fileView !== null && header.fileView.editing; enabled: header.fileView !== null && header.fileView.canUndo; onTriggered: header.fileView.undo() }
+                SlimMenuItem { text: "Redo\tCtrl+Shift+Z"; visible: header.fileView !== null && header.fileView.editing; enabled: header.fileView !== null && header.fileView.canRedo; onTriggered: header.fileView.redo() }
+                SlimMenuItem { text: "Wrap long lines"; checkable: true; checked: header.fileView !== null && header.fileView.wrap; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.wrap = !header.fileView.wrap }
+                SlimMenuItem { text: "Windows line ends (CRLF)"; checkable: true; checked: header.fileView !== null && header.fileView.crlf; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.crlf = !header.fileView.crlf }
+                SlimMenuItem { text: header.fileView && header.fileView.toolsShown ? "Hide the edit bar" : "Show the edit bar"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.toolsShown = !header.fileView.toolsShown }
                 SlimMenuItem { text: "Save\tCtrl+S"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.save() }
                 SlimMenuItem { text: "Save as…"; visible: header.fileView !== null && header.fileView.editing
                                onTriggered: { nb.saveAsCell = cell.index; fileSaveDialog.currentFolder = nb.saveFolder(cell.viewPath); fileSaveDialog.open() } }
@@ -2093,6 +2126,7 @@ FocusScope {
     function saveFolder(p) { return p.startsWith("ssh://") ? "file://" + (controller ? controller.homeDir() : "") : "file://" + p.replace(/\/[^\/]*$/, "") }
     function onHost(p) { return sshHost === "" || p.startsWith("ssh://") ? p : "ssh://" + encodeURIComponent(sshHost) + p }
     function localPath(p) { let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x }
+    function termEditorName(e) { return e === "" ? "your $EDITOR" : ({ vim: "Vim", nvim: "Neovim", "emacs -nw": "Emacs", hx: "Helix", kak: "Kakoune" })[e] || e }
     function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
     Component {
         id: filesView

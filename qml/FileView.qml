@@ -20,10 +20,20 @@ Item {
     property var themeData: ({})
     // (How tall it would like to be: all its lines, up to `maxHeight`.)
     property real maxHeight: 460
-    implicitHeight: editing ? Math.min(maxHeight, Math.max(3, editor.lineCount) * fm.lineSpacing + 14)
+    implicitHeight: inTerm ? maxHeight : editing ? Math.min(maxHeight, editBar.height + Math.max(3, editor.lineCount) * fm.lineSpacing + 14)
                   : lines === 0 ? 40 : Math.min(maxHeight, lines * fm.lineSpacing + 14)
 
     readonly property int block: 500
+    // A scroll bar that shows while it scrolls by the wheel or keys too (they
+    // move it themselves, not by a flick, which is all the plain one shows for).
+    component ActiveBar: ScrollBar {
+        id: sb
+        property bool recent: false
+        active: hovered || pressed || recent
+        minimumSize: 0.05   // (a long file: still a handle to see and grab)
+        onPositionChanged: { recent = true; sbHide.restart() }
+        Timer { id: sbHide; interval: 1200; onTriggered: sb.recent = false }
+    }
     function ansi(n, d) { const a = themeData.ansi || []; return a[n] || d }
     readonly property string name: path.replace(/^.*\//, "")
     readonly property string ext: name.indexOf(".") > 0 ? name.replace(/^.*\./, "").toLowerCase() : ""
@@ -70,6 +80,10 @@ Item {
     property bool dirty: false
     property string savedText: ""       // (what's in the file: changed from it is unsaved)
     property bool crlf: false
+    property bool savedCrlf: false
+    property bool wrap: false
+    function updateDirty() { dirty = editor.text !== savedText || crlf !== savedCrlf }
+    onCrlfChanged: if (editing) updateDirty()
     property string editError: ""
     signal savedAs(string path)
     function startEdit() {
@@ -78,6 +92,7 @@ Item {
         try { r = JSON.parse(controller.fileReadForEdit(path)) } catch (e) {}
         if (r.error) { editError = r.error; return false }
         savedText = r.text || ""
+        savedCrlf = !!r.crlf
         editor.text = savedText
         crlf = !!r.crlf
         dirty = false
@@ -92,7 +107,7 @@ Item {
         if (!editing) return true
         const err = controller.fileSaveEdited(path, editor.text, crlf)
         editError = err
-        if (err === "") { savedText = editor.text; dirty = false; rev++ }
+        if (err === "") { savedText = editor.text; savedCrlf = crlf; dirty = false; rev++ }
         return err === ""
     }
     function saveAs(p) {
@@ -101,10 +116,133 @@ Item {
         editError = err
         if (err !== "") return false
         savedText = editor.text
+        savedCrlf = crlf
         dirty = false
         savedAs(p)
         return true
     }
+    // ---- find, replace, go to a line ---------------------------------------
+    // (Any case unless the search has a capital, as the terminal's find.)
+    property var matches: []            // where the search is found (positions)
+    property int matchAt: -1
+    function findAll() {
+        const q = findField.text
+        if (q === "") { matches = []; matchAt = -1; return }
+        const exact = q !== q.toLowerCase()
+        const t = exact ? editor.text : editor.text.toLowerCase()
+        const n = exact ? q : q.toLowerCase()
+        const out = []
+        for (let i = t.indexOf(n); i >= 0 && out.length < 100000; i = t.indexOf(n, i + Math.max(1, n.length))) out.push(i)
+        matches = out
+        matchAt = out.length ? Math.max(0, out.findIndex(x => x >= editor.cursorPosition - n.length)) : -1
+        if (matchAt < 0 && out.length) matchAt = 0
+    }
+    function showMatch() {
+        if (matchAt < 0 || matchAt >= matches.length) return
+        const a = matches[matchAt]
+        editor.select(a, a + findField.text.length)
+        editFlick.ensureVisible(editor.positionToRectangle(a))
+    }
+    function findStep(dir) {
+        if (matches.length === 0) findAll()
+        if (matches.length === 0) return
+        // (From the cursor: the next one after it, or the one before.)
+        const p = dir > 0 ? editor.selectionEnd : editor.selectionStart
+        let i = dir > 0 ? matches.findIndex(x => x >= p) : matches.length - 1 - matches.slice().reverse().findIndex(x => x < p)
+        if (i < 0 || i >= matches.length) i = dir > 0 ? 0 : matches.length - 1
+        matchAt = i
+        showMatch()
+    }
+    function replaceOne() {
+        const q = findField.text
+        if (q === "") return
+        const sel = editor.selectedText
+        const same = q !== q.toLowerCase() ? sel === q : sel.toLowerCase() === q.toLowerCase()
+        if (same) {
+            const a = editor.selectionStart
+            editor.remove(a, editor.selectionEnd)
+            editor.insert(a, replaceField.text)
+            editor.cursorPosition = a + replaceField.text.length
+        }
+        findAll()
+        findStep(1)
+    }
+    function replaceAll() {
+        const q = findField.text
+        if (q === "") return
+        findAll()
+        // (From the end, so the positions before stay right.)
+        for (let k = matches.length - 1; k >= 0; --k) {
+            editor.remove(matches[k], matches[k] + q.length)
+            editor.insert(matches[k], replaceField.text)
+        }
+        const n = matches.length
+        findAll()
+        editError = ""
+        replaceNote = n + " replaced"
+    }
+    property string replaceNote: ""
+    // The bar of these is hidden till wanted: Ctrl+F, H, G or the card's ⋯.
+    property bool toolsShown: false
+    readonly property bool canUndo: editor.canUndo
+    readonly property bool canRedo: editor.canRedo
+    function undo() { editor.undo() }
+    function redo() { editor.redo() }
+    function showFind() { toolsShown = true; findField.forceActiveFocus(); findField.selectAll() }
+    function showReplace() { toolsShown = true; replaceField.forceActiveFocus(); replaceField.selectAll() }
+    function showGoTo() { toolsShown = true; lineField.forceActiveFocus() }
+
+    // ---- the file in a terminal editor, in a small terminal in the card ----
+    // ("" is the shell's $VISUAL, else $EDITOR, else vi; the pick is kept.)
+    property bool inTerm: false
+    property string termCommand: ""
+    readonly property var termEditors: [["", "Your $EDITOR"], ["vim", "Vim"], ["nvim", "Neovim"], ["emacs -nw", "Emacs"], ["hx", "Helix"], ["micro", "micro"], ["nano", "nano"], ["kak", "Kakoune"]]
+    property string termEditor: { if (!controller) return ""; controller.revision; try { return JSON.parse(controller.settings()).terminal_editor || "" } catch (e) { return "" } }
+    function shq(x) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(x) ? x : "'" + x.replace(/'/g, "'\\''") + "'" }
+    function openInTerminal(ed) {
+        if (ed !== undefined && ed !== termEditor && controller) controller.setSetting("terminal_editor", JSON.stringify(ed))
+        const e = ed !== undefined ? ed : termEditor
+        if (editing && dirty) save()          // (what's typed here first, so it opens that)
+        editing = false
+        termCommand = "exec " + (e !== "" ? e : "${VISUAL:-${EDITOR:-vi}}") + " " + shq(path)
+        inTerm = true
+    }
+    // (Quit the editor, or close it here: back to the file, as it is now.)
+    function closeTerminal() {
+        if (termLoader.item && !termLoader.item.exited) termLoader.item.killSession()
+        inTerm = false
+        load()
+    }
+    function goToLine(n) {
+        const lines = editor.text.split("\n")
+        n = Math.max(1, Math.min(lines.length, n))
+        let p = 0
+        for (let i = 0; i < n - 1; ++i) p += lines[i].length + 1
+        editor.cursorPosition = p
+        editor.forceActiveFocus()
+    }
+    Timer { id: findTimer; interval: 200; onTriggered: if (findField.text !== "") fv.findAll() }
+    // The line numbers when lines wrap: each beside where its line starts.
+    property string wrapNumbers: ""
+    Timer {
+        id: gutterTimer
+        interval: 120
+        onTriggered: {
+            if (!fv.wrap || !fv.editing) return
+            const lines = editor.text.split("\n")
+            let s = "", p = 0, prevY = -1
+            for (let i = 0; i < lines.length; ++i) {
+                const y = editor.positionToRectangle(p).y
+                if (prevY >= 0) { const extra = Math.round((y - prevY) / fm.lineSpacing) - 1; for (let k = 0; k < extra; ++k) s += "\n" }
+                s += (i > 0 ? "\n" : "") + (i + 1)
+                prevY = y
+                p += lines[i].length + 1
+            }
+            fv.wrapNumbers = s
+        }
+    }
+    onWrapChanged: gutterTimer.restart()
+
     // (Done: back to viewing, the file as it is now.)
     function stopEdit() { editing = false; editError = ""; load() }
     function poll() {
@@ -127,7 +265,7 @@ Item {
 
     ListView {
         id: list
-        visible: fv.problem === "" && !fv.editing
+        visible: fv.problem === "" && !fv.editing && !fv.inTerm
         anchors.fill: parent
         clip: true
         model: Math.ceil(fv.lines / fv.block)
@@ -139,8 +277,8 @@ Item {
         // (Long lines: scrolled sideways, as wide as the widest block read.)
         property real widest: width
         contentWidth: widest
-        ScrollBar.vertical: ScrollBar {}
-        ScrollBar.horizontal: ScrollBar {}
+        ScrollBar.vertical: ActiveBar {}
+        ScrollBar.horizontal: ActiveBar {}
         MomentumWheel { flick: list }
         // Paging: PgUp/PgDn a screen, Ctrl+Home/End the ends.
         Keys.onPressed: (e) => {
@@ -221,16 +359,70 @@ Item {
         }
     }
 
+    // ---- the editor's bar: undo, find and replace, go to a line, wrap, line ends ----
+    Flow {
+        id: editBar
+        visible: fv.editing && fv.toolsShown && !fv.inTerm
+        width: parent.width
+        height: visible ? implicitHeight + 4 : 0
+        spacing: 4
+        topPadding: 2
+        leftPadding: 4
+        component BarField: TextField {
+            height: 22
+            font.pixelSize: 11
+            color: Theme.text
+            padding: 2
+            leftPadding: 6
+            background: Rectangle { radius: 4; color: Theme.bg; border.color: parent.activeFocus ? Theme.accent : Theme.divider }
+            Keys.onEscapePressed: editor.forceActiveFocus()
+        }
+        Chip { base: Theme.panel; label: "↶"; tip: "Undo (Ctrl+Z)"; opacity: editor.canUndo ? 1 : 0.4; onClicked: editor.undo() }
+        Chip { base: Theme.panel; label: "↷"; tip: "Redo (Ctrl+Shift+Z)"; opacity: editor.canRedo ? 1 : 0.4; onClicked: editor.redo() }
+        BarField {
+            id: findField
+            width: 150
+            placeholderText: "Find (Ctrl+F)"
+            onTextChanged: { fv.replaceNote = ""; fv.findAll(); fv.showMatch() }
+            onAccepted: fv.findStep(1)
+            Keys.onPressed: (e) => { if (e.key === Qt.Key_F3 || ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && (e.modifiers & Qt.ShiftModifier))) { fv.findStep(e.modifiers & Qt.ShiftModifier ? -1 : 1); e.accepted = true } }
+        }
+        Chip { base: Theme.panel; label: "↑"; tip: "Previous (Shift+F3)"; onClicked: fv.findStep(-1) }
+        Chip { base: Theme.panel; label: "↓"; tip: "Next (F3)"; onClicked: fv.findStep(1) }
+        Text {
+            visible: findField.text !== ""
+            topPadding: 4.001
+            text: fv.replaceNote !== "" ? fv.replaceNote : fv.matches.length === 0 ? "no matches" : (fv.matchAt + 1) + "/" + fv.matches.length
+            color: fv.matches.length === 0 && fv.replaceNote === "" ? fv.ansi(1, "#e06c75") : Theme.textDim
+            font.pixelSize: 11
+            renderType: Text.NativeRendering
+        }
+        BarField { id: replaceField; width: 130; placeholderText: "Replace (Ctrl+H)"; onAccepted: fv.replaceOne() }
+        Chip { base: Theme.panel; label: "Replace"; onClicked: fv.replaceOne() }
+        Chip { base: Theme.panel; label: "All"; tip: "Replace every one"; onClicked: fv.replaceAll() }
+        BarField {
+            id: lineField
+            width: 76
+            placeholderText: "Line (Ctrl+G)"
+            validator: IntValidator { bottom: 1 }
+            onAccepted: { fv.goToLine(parseInt(text)); text = "" }
+        }
+        Chip { base: Theme.panel; label: fv.wrap ? "Wrap ✓" : "Wrap"; tip: "Wrap long lines"; onClicked: fv.wrap = !fv.wrap }
+        Chip { base: Theme.panel; label: fv.crlf ? "CRLF" : "LF"; tip: "Line ends: " + (fv.crlf ? "Windows (CRLF)" : "Unix (LF)") + " — click to switch"; onClicked: fv.crlf = !fv.crlf }
+        Chip { base: Theme.panel; label: "✕"; tip: "Hide these (they're in ⋯ too)"; onClicked: { fv.toolsShown = false; editor.forceActiveFocus() } }
+    }
+
     Flickable {
         id: editFlick
-        visible: fv.editing
+        visible: fv.editing && !fv.inTerm
         anchors.fill: parent
+        anchors.topMargin: editBar.height
         clip: true
-        contentWidth: Math.max(width, fv.gutterWidth + editor.implicitWidth + 24)
+        contentWidth: fv.wrap ? width : Math.max(width, fv.gutterWidth + editor.implicitWidth + 24)
         contentHeight: editor.contentHeight + 12
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {}
-        ScrollBar.horizontal: ScrollBar {}
+        ScrollBar.vertical: ActiveBar {}
+        ScrollBar.horizontal: ActiveBar {}
         MomentumWheel { flick: editFlick }
         function ensureVisible(r) {
             if (contentY > r.y) contentY = r.y
@@ -248,7 +440,9 @@ Item {
                 y: 6.001
                 width: fv.gutterWidth - 16
                 horizontalAlignment: Text.AlignRight
-                text: { let s = ""; for (let i = 1; i <= Math.max(1, editor.lineCount); ++i) s += (i > 1 ? "\n" : "") + i; return s }
+                // (By the file's lines, not the wrapped ones: wrapped, each
+                // number beside where its line starts.)
+                text: { if (fv.wrap) return fv.wrapNumbers; const n = editor.text.split("\n").length; let s = ""; for (let i = 1; i <= Math.max(1, n); ++i) s += (i > 1 ? "\n" : "") + i; return s }
                 color: Theme.textDim
                 font: editor.font
                 renderType: Text.NativeRendering
@@ -259,6 +453,9 @@ Item {
             x: fv.gutterWidth + 8.001
             y: 6.001
             textFormat: TextEdit.PlainText
+            wrapMode: fv.wrap ? TextEdit.Wrap : TextEdit.NoWrap
+            width: fv.wrap ? editFlick.width - fv.gutterWidth - 16 : implicitWidth
+            onWidthChanged: gutterTimer.restart()
             color: Theme.text
             selectByMouse: true
             persistentSelection: true
@@ -268,11 +465,16 @@ Item {
             font.pointSize: fv.pointSize
             tabStopDistance: 4 * fm.advanceWidth(" ")
             renderType: Text.NativeRendering
-            onTextChanged: if (fv.editing) { fv.dirty = text !== fv.savedText; edHlTimer.restart() }
+            onTextChanged: if (fv.editing) { fv.updateDirty(); edHlTimer.restart(); findTimer.restart(); gutterTimer.restart() }
             onCursorRectangleChanged: editFlick.ensureVisible(cursorRectangle)
             // (Ctrl+S saves; the rest is the input editor's keys.)
             Keys.onPressed: (e) => {
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_S) { fv.save(); e.accepted = true; return }
+                // (Find, replace, a line: their fields in the bar; F3 the next match.)
+                if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_F) { if (editor.selectedText !== "" && editor.selectedText.indexOf("\u2029") < 0) findField.text = editor.selectedText; fv.showFind(); e.accepted = true; return }
+                if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_H) { fv.showReplace(); e.accepted = true; return }
+                if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_G) { fv.showGoTo(); e.accepted = true; return }
+                if (e.key === Qt.Key_F3) { fv.findStep(e.modifiers & Qt.ShiftModifier ? -1 : 1); e.accepted = true; return }
                 // (A page of lines at a time; Shift selects as it goes.)
                 if ((e.key === Qt.Key_PageDown || e.key === Qt.Key_PageUp) && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
                     const n = Math.max(1, Math.floor(editFlick.height / fm.lineSpacing) - 1) * (e.key === Qt.Key_PageDown ? 1 : -1)
@@ -355,7 +557,7 @@ Item {
 
     // Nothing to show: why.
     Text {
-        visible: fv.problem !== "" || (fv.counted && fv.lines === 0)
+        visible: !fv.inTerm && (fv.problem !== "" || (fv.counted && fv.lines === 0))
         anchors.centerIn: parent
         text: fv.problem !== "" ? fv.problem : "(empty)"
         color: Theme.textDim
@@ -364,7 +566,7 @@ Item {
     }
     // (Still counting a big one: how far, at the bottom right.)
     Text {
-        visible: !fv.counted && fv.lines > 0
+        visible: !fv.inTerm && !fv.counted && fv.lines > 0
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 6
@@ -373,4 +575,32 @@ Item {
         font.pixelSize: 11
         renderType: Text.NativeRendering
     }
+
+    Loader {
+        id: termLoader
+        active: fv.inTerm
+        anchors.fill: parent
+        sourceComponent: TerminalView {
+            ready: true
+            command: fv.termCommand
+            cwd: fv.path.replace(/\/[^\/]*$/, "") || "/"
+            fontFamily: fv.fontFamily
+            fontPointSize: fv.pointSize
+            themeJson: JSON.stringify(fv.themeData)
+            focus: true
+            Component.onCompleted: forceActiveFocus()
+            onExitedChanged: if (exited) Qt.callLater(fv.closeTerminal)
+        }
+    }
+    Component.onDestruction: if (termLoader.item && !termLoader.item.exited) termLoader.item.killSession()
+    // (Test hooks, from the card showing: TESSERA_TEST_TERM_EDIT=<editor or "-"> opens it in one at
+    // 2 s; TESSERA_TEST_EDIT_FIND=<text> finds it at 4.5 s, while editing.)
+    Timer { interval: 2000; running: fv.controller !== null && fv.path !== "" && fv.controller.testEnv("TERM_EDIT") !== ""
+            onTriggered: { const e = fv.controller.testEnv("TERM_EDIT"); fv.openInTerminal(e === "-" ? undefined : e) } }
+    Timer { interval: 4500; running: fv.controller !== null && fv.path !== "" && fv.controller.testEnv("EDIT_FIND") !== ""
+            onTriggered: { fv.showFind(); findField.text = fv.controller.testEnv("EDIT_FIND"); fv.findStep(1); console.log("find test: " + (fv.matchAt + 1) + "/" + fv.matches.length) } }
+    // (Test hook: TESSERA_TEST_FILE_WHEEL: a wheel turn over the file at 3 s.)
+    Timer { interval: 3000; running: fv.controller !== null && fv.path !== "" && fv.controller.testEnv("FILE_WHEEL") !== ""
+            onTriggered: { const p = fv.mapToItem(null, fv.width / 2, fv.height / 2); for (let i = 0; i < 3; i++) fv.controller.testWheel(p.x, p.y, -120, 0, 0); wheelLog.start() } }
+    Timer { id: wheelLog; interval: 300; onTriggered: { const b = list.ScrollBar.vertical; console.log("file wheel test: contentY " + list.contentY + " bar active " + b.active + " handle " + (b.contentItem ? b.contentItem.opacity : "-")) } }
 }
