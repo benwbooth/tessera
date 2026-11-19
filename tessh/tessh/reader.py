@@ -132,7 +132,7 @@ def postfix_after(f):
     @generate
     def p():
         nonlocal f
-        if not isinstance(f, (Var, Group, Attr, Index)):
+        if not isinstance(f, (Var, Group, Attr, Index, Str, IStr)):
             return f
         while True:
             c = yield peek_char
@@ -297,7 +297,7 @@ def string_lit():
             if c == q:
                 yield string(q)
                 break
-            if c in (None, "\n") and q == "'":
+            if c is None:
                 yield P.fail(f"{quote} to close the string")
         c = yield peek_char
         if c is None:
@@ -325,8 +325,6 @@ def string_lit():
             else:
                 buf.append("\\" + e)
             continue
-        if c == "\n" and len(quote) == 1:
-            yield P.fail(f"{quote} to close the string")
         if c == "$" and not raw and not is_bytes and q == '"':
             d = yield P.peek(regex(r"\$(?:[A-Za-z_?({~])")).optional()
             if d:
@@ -412,7 +410,7 @@ def term():
             continue
         prev = pieces[-1] if pieces else None
         if c in "\"'" or (c in "bBrR" and (prev is None or not isinstance(prev, str) or not prev[-1:].isalnum())):
-            s = yield string_lit.optional()
+            s = yield string_lit.bind(postfix_after).optional()
             if s is not None:
                 pieces.append(s)
                 continue
@@ -659,8 +657,14 @@ def read(text: str, first_line: int = 1) -> list:
     try:
         raw = lines_parser.parse(text)
     except P.ParseError as e:
-        line, col = lines_at.at(e.index)
-        raise ReadError(_message(text, e), line + first_line - 1, col) from None
+        msg = _message(text, e)
+        at = e.index
+        if msg.startswith("missing"):
+            opener = _unclosed(text)
+            if opener is not None:
+                at = opener
+        line, col = lines_at.at(at)
+        raise ReadError(msg, line + first_line - 1, col) from None
     except ReadError as e:
         raise
     raw = _split_semis(raw)
@@ -693,6 +697,35 @@ def _message(text, e: P.ParseError) -> str:
     if "spaces (tabs can't indent)" in ex:
         return "tabs can't indent (use spaces)"
     return f"expected {_expected(e)}" + (f", not '{at}'" if at and at != "\n" else "")
+
+
+def _unclosed(text):
+    """Where the bracket or quote that's never closed opens."""
+    stack = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "#" and (i == 0 or text[i - 1] in " \t\n([{"):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if ch in "\"'":
+            q = text[i:i + 3] if text[i:i + 3] in ('"""', "'''") else ch
+            start = i
+            i += len(q)
+            while i < n and not text.startswith(q, i):
+                i += 2 if text[i] == "\\" and q[0] == '"' else 1
+            if i >= n:
+                return start
+            i += len(q)
+            continue
+        if ch in "([{":
+            stack.append(i)
+        elif ch in ")]}" and stack:
+            stack.pop()
+        i += 1
+    return stack[-1] if stack else None
 
 
 def read_one(text: str) -> Form:

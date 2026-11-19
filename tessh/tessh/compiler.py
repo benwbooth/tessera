@@ -351,10 +351,14 @@ class Compiler:
 
     def _takes_cont(self, unit, cont):
         l, conts, _ = unit
-        head = l.items[0]
+        items = l.items
+        i = self._assign_index(items)
+        if i is not None and i + 1 < len(items):
+            items = items[i + 1:]
+        head = items[0]
         hn = head.name if isinstance(head, Sym) else None
-        if hn == "async" and len(l.items) > 1 and isinstance(l.items[1], Sym):
-            hn = l.items[1].name
+        if hn == "async" and len(items) > 1 and isinstance(items[1], Sym):
+            hn = items[1].name
         last = conts[-1].items[0].name if conts else hn
         if hn == "if":
             return cont in ("elif", "else") and last != "else"
@@ -399,7 +403,7 @@ class Compiler:
             return Res(expr=const(None))
         i = self._assign_index(items)
         if i is not None:
-            return self.compile_assign(items[:i], items[i], items[i + 1:], children, ctx)
+            return self.compile_assign(items[:i], items[i], items[i + 1:], children, ctx, conts)
         head = items[0]
         if isinstance(head, Sym):
             if head.name in SPECIALS and self._binding(Sym(head.name)) is None:
@@ -689,6 +693,15 @@ class Compiler:
                 toks.append(["op", x.name, x])
                 continue
             toks.append(["x", x, None])
+        # (and, or, in, is next to a bareword are words: print it is ready.)
+        def bare(t):
+            return t is not None and t[0] == "x" and isinstance(t[1], Sym) and t[1].name not in ("True", "False", "None", "...")
+        for k, t in enumerate(toks):
+            if t[0] == "op" and isinstance(t[2], Sym) and t[1] in ("and", "or", "in", "is"):
+                prev = toks[k - 1] if k else None
+                nxt = toks[k + 1] if k + 1 < len(toks) else None
+                if bare(prev) or bare(nxt):
+                    toks[k] = ["x", t[2], None]
         # not in, is not
         merged = []
         for t in toks:
@@ -1324,10 +1337,13 @@ class Compiler:
             return Res(inner.stmts, ast.Starred(inner.expr, ctx()))
         raise self.err("can't assign to this", x)
 
-    def compile_assign(self, lhs, op, rhs, children, ctx):
+    def compile_assign(self, lhs, op, rhs, children, ctx, conts=()):
         if not rhs and not children:
             raise self.err(f"nothing after '{op.name}'", op)
-        value = self.compile_expr(rhs, "value", children) if rhs else self.compile_body(children, "value")
+        if conts:
+            value = self.compile_items(rhs, children, "value", conts=conts)
+        else:
+            value = self.compile_expr(rhs, "value", children) if rhs else self.compile_body(children, "value")
         target = self.make_target(lhs, op)
         stmts = value.stmts + target.stmts
         if op.name == "=":
