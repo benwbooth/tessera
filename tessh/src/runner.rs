@@ -117,6 +117,7 @@ pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
             let st = sb.st.lock().unwrap();
             let (items, children) = match &form.kind {
                 crate::forms::Kind::Line { items, children } => (items.clone(), children.clone()),
+                crate::forms::Kind::Group { open: '(', items } => (items.clone(), vec![]),
                 _ => (vec![form.clone()], vec![]),
             };
             let Some(m) = items.first().and_then(|h| h.sym_name()).and_then(|n| st.macros.get(n)) else { return crate::pyforms::to_py(py, form) };

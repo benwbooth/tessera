@@ -716,6 +716,15 @@ impl<'py, 's> Compiler<'py, 's> {
             }
             return Ok(Res::e(self.cnone()?));
         }
+        // (`name: type` and `name: type = value`: an annotated name.)
+        if let Kind::Sym { name, marks } = &items[0].kind {
+            if let Some(stem) = name.strip_suffix(':').filter(|s| is_ident(s)) {
+                if items.len() >= 2 {
+                    let target = Form::new(Kind::Sym { name: stem.to_string(), marks: marks.clone() }, items[0].pos.clone());
+                    return self.compile_annassign(&target, &items[1..], children);
+                }
+            }
+        }
         if let Some(i) = self.assign_index(items) {
             return self.compile_assign(&items[..i], &items[i], &items[i + 1..], children, conts);
         }
@@ -832,7 +841,7 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::Sym { name, .. } => {
                 if self.special_head(head).is_some() {
                     "special"
-                } else if WORD_OPS.contains(&name.as_str()) || ["True", "False", "None", "..."].contains(&name.as_str()) || self.is_known(head) {
+                } else if WORD_OPS.contains(&name.as_str()) || ["True", "False", "None", "..."].contains(&name.as_str()) || self.is_known(head) || walrus(items) {
                     "expr"
                 } else {
                     "command"
@@ -855,8 +864,8 @@ impl<'py, 's> Compiler<'py, 's> {
             "command" => self.compile_command(items, children, if ctx == Ctx::Value { "capture" } else { "attach" }),
             _ => {
                 if items.len() == 1 && children.is_empty() {
-                    if let Kind::Sym { .. } = items[0].kind {
-                        if self.is_known(&items[0]) {
+                    if let Kind::Sym { name, .. } = &items[0].kind {
+                        if self.is_known(&items[0]) && !["True", "False", "None", "..."].contains(&name.as_str()) {
                             let e = self.rcall("auto", vec![self.name_load(&items[0])?])?;
                             return Ok(Res::e(self.at(e, &items[0])));
                         }
@@ -1071,7 +1080,7 @@ impl<'py, 's> Compiler<'py, 's> {
         if items.is_empty() {
             return err("expected an expression", children.first());
         }
-        if items.len() > 1 && (items.iter().any(|x| x.is_op("||") || x.is_op("&&")) || self.pipe_split(items).len() > 1) {
+        if items.len() > 1 && (items.iter().any(|x| x.is_op("||") || x.is_op("&&")) || items[items.len() - 1].is_op("&") || self.pipe_split(items).len() > 1) {
             return self.compile_shell(items, children, ctx);
         }
         if self.special_head(&items[0]).is_some() {
@@ -1357,7 +1366,11 @@ impl<'py, 's> Compiler<'py, 's> {
     fn compile_application(&mut self, items: &[Form], children: &[Form], ctx: Ctx) -> R<Res<'py>> {
         let head = &items[0];
         let mode = if ctx == Ctx::Value { "capture" } else { "attach" };
-        if head.sym_name().is_some() {
+        // (True, False, None, ... alone: the constant.)
+        if items.len() == 1 && children.is_empty() && head.sym_name().is_some_and(|n| ["True", "False", "None", "..."].contains(&n)) {
+            return self.compile_value(head, ctx);
+        }
+        if head.sym_name().is_some() && !walrus(items) {
             if self.special_head(head).is_some() {
                 return self.compile_items(items, children, ctx, &[], &[]);
             }
@@ -2040,6 +2053,30 @@ impl<'py, 's> Compiler<'py, 's> {
             }
             _ => err("can't assign to this", Some(x)),
         }
+    }
+
+    fn compile_annassign(&mut self, target: &Form, rest: &[Form], children: &[Form]) -> R<Res<'py>> {
+        let eq = rest.iter().position(|x| x.is_op("="));
+        let ann = &rest[..eq.unwrap_or(rest.len())];
+        if ann.is_empty() {
+            return err("a type goes after the ':'", Some(target));
+        }
+        let text = ann.iter().map(show).collect::<Vec<_>>().join(" ");
+        let annotation = self.annotation(&Some(text))?;
+        let mut stmts = vec![];
+        let value = match eq {
+            Some(e) => {
+                let v = if rest.len() > e + 1 { self.compile_expr(&rest[e + 1..], Ctx::Value, children)? } else { self.compile_body(children, Ctx::Value)? };
+                stmts.extend(v.stmts);
+                Some(self.val(v.expr)?)
+            }
+            None => None,
+        };
+        let py = self.bind(target)?;
+        let has = value.is_some();
+        let node = self.n("AnnAssign", vec![("target", self.name(&py, true)?), ("annotation", annotation), ("value", value.unwrap_or_else(|| self.none())), ("simple", PyInt::new(self.py, 1).into_any())])?;
+        stmts.push(self.at(node, target));
+        Ok(Res::s(stmts, if has { self.name(&py, false)? } else { self.cnone()? }))
     }
 
     fn compile_assign(&mut self, lhs: &[Form], op: &Form, rhs: &[Form], children: &[Form], conts: &[Form]) -> R<Res<'py>> {
@@ -2819,13 +2856,17 @@ impl<'py, 's> Compiler<'py, 's> {
                 return err("match takes case lines", Some(c));
             }
             let mut pat_items = &ci[1..];
-            let mut guard = self.none();
-            if let Some(g) = pat_items.iter().position(|x| x.is_sym("if")) {
-                let r = self.compile_expr(&pat_items[g + 1..], Ctx::Value, &[])?;
-                guard = self.val(r.expr)?;
+            let g = pat_items.iter().position(|x| x.is_sym("if"));
+            if let Some(g) = g {
                 pat_items = &pat_items[..g];
             }
+            // (The pattern first: the guard sees the names it binds.)
             let pat = self.pattern(pat_items, c)?;
+            let mut guard = self.none();
+            if let Some(g) = g {
+                let r = self.compile_expr(&ci[1 + g + 1..], Ctx::Value, &[])?;
+                guard = self.val(r.expr)?;
+            }
             let body = self.branch(cc, ctx, &t)?;
             cases.push(self.n("match_case", vec![("pattern", pat), ("guard", guard), ("body", self.list(body)?)])?);
         }
@@ -3233,4 +3274,9 @@ fn target_names(t: &Form, out: &mut HashSet<String>) {
         Kind::Splat { value, .. } => target_names(value, out),
         _ => {}
     }
+}
+
+/// `name := …`: an assignment expression, whoever `name` is.
+fn walrus(items: &[Form]) -> bool {
+    items.len() > 2 && matches!(&items[1].kind, Kind::Op { name, .. } if name == ":=")
 }

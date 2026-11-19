@@ -117,6 +117,11 @@ pub fn set_display(f: Py<PyAny>) {
     *DISPLAY.lock().unwrap() = Some(f);
 }
 
+/// The notebook's way to show a value, in the kernel.
+pub fn display_hook(py: Python<'_>) -> Option<Py<PyAny>> {
+    DISPLAY.lock().unwrap().as_ref().map(|d| d.clone_ref(py))
+}
+
 /// Show a value at the REPL (the last form of an input).
 #[pyfunction]
 fn show(py: Python<'_>, v: Bound<'_, PyAny>) -> PyResult<()> {
@@ -1026,7 +1031,7 @@ impl Builtin {
                 let mut d = words.first().cloned().unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into()));
                 if d == "-" {
                     d = OLDPWD.lock().unwrap().clone().or_else(|| std::env::var("OLDPWD").ok()).unwrap_or_else(|| ".".into());
-                    println!("{d}");
+                    py_print(py, &d)?;
                 }
                 chdir(py, &expanduser(&d))?;
                 Ok(none)
@@ -1039,17 +1044,17 @@ impl Builtin {
                 };
                 chdir(py, &d)?;
                 DIRSTACK.lock().unwrap().push(here);
-                print_dirs();
+                print_dirs(py)?;
                 Ok(none)
             }
             "popd" => {
                 let d = DIRSTACK.lock().unwrap().pop().ok_or_else(|| PyIndexError::new_err("popd: the folder stack is empty"))?;
                 chdir(py, &d)?;
-                print_dirs();
+                print_dirs(py)?;
                 Ok(none)
             }
             "dirs" => {
-                print_dirs();
+                print_dirs(py)?;
                 Ok(none)
             }
             "export" => {
@@ -1089,8 +1094,8 @@ impl Builtin {
                 for n in &words {
                     let p = which(n);
                     match &p {
-                        Some(p) => println!("{n}: {p}"),
-                        None => println!("{n}: not found"),
+                        Some(p) => py_print(py, &format!("{n}: {p}"))?,
+                        None => py_print(py, &format!("{n}: not found"))?,
                     }
                     found = found.or(p);
                 }
@@ -1100,8 +1105,10 @@ impl Builtin {
             "jobs" => {
                 let mut jobs = JOBS.lock().unwrap();
                 jobs.retain_mut(|j| j.stopped || !job_done(j, py));
-                for j in jobs.iter() {
-                    println!("[{}] {} {}", j.n, if j.stopped { "stopped" } else { "running" }, j.words);
+                let lines: Vec<String> = jobs.iter().map(|j| format!("[{}] {} {}", j.n, if j.stopped { "stopped" } else { "running" }, j.words)).collect();
+                drop(jobs);
+                for l in lines {
+                    py_print(py, &l)?;
                 }
                 Ok(none)
             }
@@ -1122,12 +1129,18 @@ impl Builtin {
     }
 }
 
-fn print_dirs() {
+fn print_dirs(py: Python<'_>) -> PyResult<()> {
     let here = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let stack = DIRSTACK.lock().unwrap();
     let mut v = vec![here];
-    v.extend(stack.iter().rev().cloned());
-    println!("{}", v.join(" "));
+    v.extend(DIRSTACK.lock().unwrap().iter().rev().cloned());
+    py_print(py, &v.join(" "))
+}
+
+/// A builtin's output, through Python's print: redirections and the
+/// notebook see it.
+fn py_print(py: Python<'_>, s: &str) -> PyResult<()> {
+    py.import("builtins")?.getattr("print")?.call1((s,))?;
+    Ok(())
 }
 
 fn pick_job<'a>(jobs: &'a mut [JobInfo], n: Option<&String>) -> PyResult<&'a mut JobInfo> {
@@ -1228,6 +1241,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     for n in COMMAND_BUILTINS {
         m.add(*n, Py::new(py, Builtin { name: n })?)?;
     }
+    crate::help::add(&m)?;
     py.import("sys")?.getattr("modules")?.set_item("__tessh__", &m)?;
     Ok(m)
 }
@@ -1235,7 +1249,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output"].iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help"].iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }

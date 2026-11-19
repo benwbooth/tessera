@@ -10,6 +10,7 @@
 mod compiler;
 mod deps;
 mod forms;
+mod help;
 mod kernel;
 mod pyforms;
 mod reader;

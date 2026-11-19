@@ -284,3 +284,104 @@ fn macro_errors_have_positions() {
     assert_eq!(e[0].0, 4, "{:?}", e);
     assert!(e[0].3.contains("needs a"), "{:?}", e);
 }
+
+/// Every example in the guide (doc/guide.md) runs, and prints what the
+/// `output` block under it shows. (`tessh no-run`: checked, not run.)
+#[test]
+fn guide_examples() {
+    use crate::runner::{check, new_namespace, run_source, tests::capture_fd1, tests::LOCK, TesshError};
+    let mut blocks: Vec<(usize, String, bool, Option<String>)> = Vec::new();
+    let lines: Vec<&str> = crate::help::GUIDE.lines().collect();
+    let mut i = 0;
+    let fence = |i: &mut usize| {
+        let mut s = String::new();
+        *i += 1;
+        while *i < lines.len() && !lines[*i].starts_with("```") {
+            s.push_str(lines[*i]);
+            s.push('\n');
+            *i += 1;
+        }
+        *i += 1;
+        s
+    };
+    while i < lines.len() {
+        if let Some(info) = lines[i].strip_prefix("```tessh") {
+            let line = i + 1;
+            let run = !info.contains("no-run");
+            let code = fence(&mut i);
+            let mut j = i;
+            while j < lines.len() && lines[j].trim().is_empty() {
+                j += 1;
+            }
+            let out = if j < lines.len() && lines[j] == "```output" {
+                i = j;
+                Some(fence(&mut i))
+            } else {
+                None
+            };
+            blocks.push((line, code, run, out));
+        } else {
+            i += 1;
+        }
+    }
+    assert!(blocks.len() > 50, "{} examples", blocks.len());
+    let addr = |s: &str| {
+        let mut o = String::new();
+        let mut rest = s;
+        while let Some(k) = rest.find("at 0x") {
+            o.push_str(&rest[..k + 3]);
+            o.push_str("ADDR");
+            rest = rest[k + 3..].trim_start_matches(|c: char| c == 'x' || c.is_ascii_hexdigit());
+        }
+        o + rest
+    };
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut failed = Vec::new();
+    Python::attach(|py| {
+        let home = std::env::current_dir().unwrap();
+        for (line, code, run, want) in &blocks {
+            let errs = check(py, code, "<guide>");
+            if !errs.is_empty() {
+                failed.push(format!("guide.md:{line}: check: {errs:?}\n{code}"));
+                continue;
+            }
+            if !run {
+                continue;
+            }
+            let dir = std::env::temp_dir().join(format!("tessh-guide-{}-{line}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::env::set_current_dir(&dir).unwrap();
+            let ns = new_namespace(py, "__main__", vec![]).unwrap();
+            let mut err = None;
+            let out = capture_fd1(py, || {
+                if let Err(e) = run_source(py, code, &ns, "<guide>", false) {
+                    err = Some(match e {
+                        TesshError::Py(e) => format!("{}", e.value(py)),
+                        e => format!("{:?}", e.position()),
+                    });
+                }
+            });
+            std::env::set_current_dir(&home).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            if let Some(e) = err {
+                failed.push(format!("guide.md:{line}: error: {e}\n{code}--- printed:\n{out}"));
+            } else if let Some(w) = want {
+                if addr(&out) != *w {
+                    failed.push(format!("guide.md:{line}: printed\n{out}--- not\n{w}"));
+                }
+            }
+        }
+    });
+    assert!(failed.is_empty(), "{} of {} examples:\n\n{}", failed.len(), blocks.len(), failed.join("\n\n"));
+}
+
+#[test]
+fn help_topics() {
+    let ts = crate::help::topics();
+    assert!(ts.len() > 25);
+    assert!(crate::help::lookup("pipes").unwrap().starts_with("## Pipes"));
+    assert!(crate::help::lookup("|").unwrap().contains("Pipes"));
+    assert!(crate::help::lookup("").unwrap().contains("`help macros`"));
+    assert!(crate::help::lookup("zzqx").is_none());
+}

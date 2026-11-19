@@ -41,7 +41,9 @@ for p in (Path .).glob "*.py"
 ```
 
 It runs as a REPL in a terminal (`tessh`), as a script (`tessh file.tsh`), and
-as a Jupyter kernel in Tessera's notebook mode. `tessh --check` checks a file or
+as a Jupyter kernel in Tessera's notebook mode (the default kernel there). The
+guide, [tessh/doc/guide.md](../tessh/doc/guide.md), has an example for each
+part of the language, and `help TOPIC` shows it from inside tessh. `tessh --check` checks a file or
 stdin without running it.
 
 ## 1. Words and tokens
@@ -171,14 +173,14 @@ A command runs one of two ways, depending on where it appears:
   program's standard output, minus the final newline.
 
 `Output` is a `str` subclass, so `.split()` and the rest work on it. It also has
-`.code`, `.err` and `.ok`, and its truth is the exit status: `if (grep -q x f)`
+`.code`, `.ok` and `.lines`, and its truth is the exit status: `if (grep -q x f)`
 and `make && ./run` behave as in a shell. Every command also sets `$?`.
 
 ```tessh
 branch = git rev-parse --abbrev-ref HEAD
 if git diff --quiet
   print clean
-files = (ls *.py).split
+files = (ls *.py).lines
 ```
 
 ## 4. Infix operators
@@ -197,7 +199,7 @@ From the loosest binding to the tightest:
 | `<<` `>>` | shifts (in expression mode only) |
 | `+` `-` | |
 | `*` `/` `//` `%` `@` | |
-| `-x` `+x` `~x` | prefix (`- $x`, or glued: `-$x`) |
+| `-x` `+x` | prefix (`- $x`, or glued: `-$x`). `~` is the home folder and the macro unquote, so bitwise not is `operator.invert` |
 | `**` | right associative |
 | application | `f a b` |
 | `.attr` `[i]` | glued postfix |

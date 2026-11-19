@@ -206,6 +206,13 @@ impl Completer for TesshHelper {
 
 pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bool, before: &str) -> Vec<String> {
     let mut out = vec![];
+    // (help's topics.)
+    if before.trim() == "help" {
+        let mut ks: Vec<String> = crate::help::topics().into_iter().flat_map(|t| t.keys).filter(|k| k.starts_with(word)).collect();
+        ks.sort();
+        ks.dedup();
+        return ks;
+    }
     let var = before.ends_with('$');
     if word.contains('/') || word.starts_with(['~', '.']) || (!first && !var) {
         let pat = format!("{}*", runtime::expanduser(word));
