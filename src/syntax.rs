@@ -199,6 +199,45 @@ pub fn languages_json() -> String {
     serde_json::to_string(&out).unwrap_or_default()
 }
 
+/// Code as HTML, each highlighted piece in `<span class="t-KIND">` (the
+/// capture's first part: keyword, string, …), escaped.
+pub fn highlight_html(lang_name: &str, text: &str) -> String {
+    let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let Some(l) = lang(lang_name) else { return esc(text) };
+    let mut p = Parser::new();
+    if p.set_language(&l.language).is_err() {
+        return esc(text);
+    }
+    let Some(tree) = p.parse(text, None) else { return esc(text) };
+    // (The innermost capture wins: kinds by byte, later captures over earlier.)
+    let mut kind: Vec<Option<&str>> = vec![None; text.len()];
+    let names = l.query.capture_names();
+    let mut cursor = QueryCursor::new();
+    let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
+    while let Some((m, i)) = caps.next() {
+        let c = m.captures()[*i];
+        let k = names[c.index as usize].split('.').next().unwrap_or("");
+        for b in c.node.start_byte()..c.node.end_byte().min(text.len()) {
+            kind[b] = Some(k);
+        }
+    }
+    let mut out = String::new();
+    let mut i = 0;
+    while i < text.len() {
+        let k = kind[i];
+        let mut j = i + 1;
+        while j < text.len() && (kind[j] == k || !text.is_char_boundary(j)) {
+            j += 1;
+        }
+        match k {
+            Some(k) => out.push_str(&format!("<span class=\"t-{k}\">{}</span>", esc(&text[i..j]))),
+            None => out.push_str(&esc(&text[i..j])),
+        }
+        i = j;
+    }
+    out
+}
+
 /// {"spans": [[start, length, kind]], "errors": [[start, length, message]]}
 pub fn analyze(lang_name: &str, text: &str) -> String {
     let Some(l) = lang(lang_name) else { return json!({"spans": [], "errors": []}).to_string() };

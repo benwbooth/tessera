@@ -384,6 +384,10 @@ pub mod ffi {
         fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32, host: &QString);
         #[qsignal]
         fn starship_ready(self: Pin<&mut Controller>, key: QString, json: QString);
+        /// The answer to a call that ran in the background (src/background.rs;
+        /// qml/Async.qml matches `key` to its callback).
+        #[qsignal]
+        fn async_reply(self: Pin<&mut Controller>, key: QString, json: QString);
         /// The prompt bar's widgets (src/prompt_widgets.rs): every Starship
         /// module (JSON list; [] until Starship is there), the modules the
         /// prompt's format shows, and what clicking a widget offers.
@@ -498,9 +502,9 @@ pub mod ffi {
         fn jupyter_attach(self: Pin<&mut Controller>, key: &QString, session: &QString) -> QString;
         /// A pane's notebook, kept by its host's tesserad with the session.
         #[qinvokable]
-        fn notebook_read(self: &Controller, host: &QString, session: &QString) -> QString;
+        fn notebook_read(self: &Controller, reply: &QString, host: &QString, session: &QString);
         #[qinvokable]
-        fn notebook_write(self: &Controller, host: &QString, session: &QString, text: &QString) -> QString;
+        fn notebook_write(self: &Controller, host: &QString, session: &QString, text: &QString);
         /// Files dropped on another host's pane: copied into `dir` there (scp,
         /// names not taken), in the background: files_uploaded(key, [paths
         /// there], error).
@@ -526,7 +530,7 @@ pub mod ffi {
         fn host_connected(self: Pin<&mut Controller>, host: QString, error: QString);
         /// Bring a kernel up to a shell's environment and folder (src/jupyter.rs sync).
         #[qinvokable]
-        fn jupyter_sync(self: &Controller, key: &QString, pid: i32, cwd: &QString) -> bool;
+        fn jupyter_sync(self: &Controller, key: &QString, pid: i32, cwd: &QString);
         /// After a run in a shell's kernel: its folder and exports back to
         /// the pane's shell (jupyter::export_to_shell).
         #[qinvokable]
@@ -545,11 +549,11 @@ pub mod ffi {
         fn exit_meaning(self: &Controller, command: &QString, status: i32, host: &QString) -> QString;
         /// Answer a kernel's input request (jupyter_event {"type": "input"}).
         #[qinvokable]
-        fn jupyter_input(self: &Controller, key: &QString, value: &QString) -> bool;
+        fn jupyter_input(self: &Controller, key: &QString, value: &QString);
         #[qinvokable]
-        fn jupyter_execute(self: &Controller, key: &QString, cell: &QString, code: &QString) -> bool;
+        fn jupyter_execute(self: &Controller, reply: &QString, key: &QString, cell: &QString, code: &QString);
         #[qinvokable]
-        fn jupyter_complete(self: &Controller, key: &QString, request: &QString, code: &QString, pos: i32) -> bool;
+        fn jupyter_complete(self: &Controller, key: &QString, request: &QString, code: &QString, pos: i32);
         #[qinvokable]
         fn jupyter_interrupt(self: &Controller, key: &QString);
         #[qinvokable]
@@ -600,6 +604,9 @@ pub mod ffi {
         /// Markdown as HTML.
         #[qinvokable]
         fn markdown_html(self: &Controller, text: &QString) -> QString;
+        /// The tessh manual (its guide) as HTML: a <nav> and a <main>.
+        #[qinvokable]
+        fn tessh_manual_html(self: &Controller) -> QString;
         #[qinvokable]
         fn ai_has_key(self: &Controller, provider: &QString) -> bool;
         /// A provider's models, in the background: ai_models_ready(provider, json list or "error: ...").
@@ -714,6 +721,20 @@ use cxx_qt::CxxQtType;
 
 fn qs(s: &str) -> ffi::QString {
     ffi::QString::from(s)
+}
+
+impl ffi::Controller {
+    /// Run `f` in the background (`ordered`: after the calls queued before
+    /// it) and send what it returns back as async_reply(key, ...).
+    fn answer(&self, key: &ffi::QString, ordered: bool, f: impl FnOnce() -> String + Send + 'static) {
+        let key = key.to_string();
+        let qt = self.qt_thread();
+        let job = move || {
+            let r = f();
+            let _ = qt.queue(move |c| c.async_reply(qs(&key), qs(&r)));
+        };
+        if ordered { crate::background::in_order(job) } else { crate::background::spawn(job) }
+    }
 }
 
 impl ffi::Controller {
@@ -1035,17 +1056,18 @@ impl ffi::Controller {
         qs(&crate::client::attach_kernels(&key.to_string(), &session.to_string()).to_string())
     }
 
-    fn notebook_read(&self, host: &ffi::QString, session: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc_read(&host.to_string(), "notebook.read", serde_json::json!({"session": session.to_string()}));
-        qs(&r.unwrap_or_else(|e| serde_json::json!({"error": e})).to_string())
+    // (In order: a read sees the writes queued before it.)
+    fn notebook_read(&self, reply: &ffi::QString, host: &ffi::QString, session: &ffi::QString) {
+        let (host, session) = (host.to_string(), session.to_string());
+        self.answer(reply, true, move || {
+            let r = crate::client::rpc_read(&host, "notebook.read", serde_json::json!({"session": session}));
+            r.unwrap_or_else(|e| serde_json::json!({"error": e})).to_string()
+        });
     }
 
-    fn notebook_write(&self, host: &ffi::QString, session: &ffi::QString, text: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc(&host.to_string(), "notebook.write", serde_json::json!({"session": session.to_string(), "text": text.to_string()}));
-        qs(&match r {
-            Ok(v) => v.as_str().unwrap_or("").to_string(),
-            Err(e) => e,
-        })
+    fn notebook_write(&self, host: &ffi::QString, session: &ffi::QString, text: &ffi::QString) {
+        let (host, session, text) = (host.to_string(), session.to_string(), text.to_string());
+        crate::background::in_order(move || { let _ = crate::client::rpc(&host, "notebook.write", serde_json::json!({"session": session, "text": text})); });
     }
 
     fn upload_files(self: Pin<&mut Self>, key: &ffi::QString, host: &ffi::QString, dir: &ffi::QString, paths: &ffi::QString) {
@@ -1092,14 +1114,18 @@ impl ffi::Controller {
         });
     }
 
-    fn jupyter_input(&self, key: &ffi::QString, value: &ffi::QString) -> bool {
+    // (Kernel calls go in order, after the ones before: a sync lands
+    // before the execute that follows it.)
+    fn jupyter_input(&self, key: &ffi::QString, value: &ffi::QString) {
         let (host, k) = crate::client::split_key(&key.to_string());
-        crate::client::rpc(&host, "kernel.input", serde_json::json!({"key": k, "value": value.to_string()})).ok().and_then(|v| v.as_bool()).unwrap_or(false)
+        let value = value.to_string();
+        crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.input", serde_json::json!({"key": k, "value": value})); });
     }
 
-    fn jupyter_sync(&self, key: &ffi::QString, pid: i32, cwd: &ffi::QString) -> bool {
+    fn jupyter_sync(&self, key: &ffi::QString, pid: i32, cwd: &ffi::QString) {
         let (host, k) = crate::client::split_key(&key.to_string());
-        crate::client::rpc(&host, "kernel.sync", serde_json::json!({"key": k, "pid": pid.max(0), "cwd": local_path(cwd)})).ok().and_then(|v| v.as_bool()).unwrap_or(false)
+        let cwd = local_path(cwd);
+        crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.sync", serde_json::json!({"key": k, "pid": pid.max(0), "cwd": cwd})); });
     }
 
     fn exit_meaning(&self, command: &ffi::QString, status: i32, host: &ffi::QString) -> ffi::QString {
@@ -1118,21 +1144,27 @@ impl ffi::Controller {
     }
 
     fn shell_hand_back(&self, child: i32, parent: i32, host: &ffi::QString) {
-        let _ = crate::client::rpc(&host.to_string(), "shell.hand_back", serde_json::json!({"child": child.max(0), "parent": parent.max(0)}));
+        let host = host.to_string();
+        crate::background::in_order(move || { let _ = crate::client::rpc(&host, "shell.hand_back", serde_json::json!({"child": child.max(0), "parent": parent.max(0)})); });
     }
 
     fn jupyter_export(&self, key: &ffi::QString, pid: i32) {
         // (Tessera's shell kernels hand back by themselves, after each run.)
         let (host, k) = crate::client::split_key(&key.to_string());
-        let _ = crate::client::rpc(&host, "kernel.export", serde_json::json!({"key": k, "pid": pid.max(0)}));
+        crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.export", serde_json::json!({"key": k, "pid": pid.max(0)})); });
     }
 
-    fn jupyter_execute(&self, key: &ffi::QString, cell: &ffi::QString, code: &ffi::QString) -> bool {
+    /// Answers `reply` with whether the kernel took it (true/false).
+    fn jupyter_execute(&self, reply: &ffi::QString, key: &ffi::QString, cell: &ffi::QString, code: &ffi::QString) {
         let (host, k) = crate::client::split_key(&key.to_string());
-        crate::client::rpc(&host, "kernel.execute", serde_json::json!({"key": k, "cell": cell.to_string(), "code": code.to_string()})).ok().and_then(|v| v.as_bool()).unwrap_or(false)
+        let (cell, code) = (cell.to_string(), code.to_string());
+        self.answer(reply, true, move || {
+            let ok = crate::client::rpc(&host, "kernel.execute", serde_json::json!({"key": k, "cell": cell, "code": code})).ok().and_then(|v| v.as_bool()).unwrap_or(false);
+            ok.to_string()
+        });
     }
 
-    fn jupyter_complete(&self, key: &ffi::QString, request: &ffi::QString, code: &ffi::QString, pos: i32) -> bool {
+    fn jupyter_complete(&self, key: &ffi::QString, request: &ffi::QString, code: &ffi::QString, pos: i32) {
         // (The editor counts UTF-16 units; the kernel, code points.)
         let code = code.to_string();
         let mut units = 0usize;
@@ -1145,19 +1177,22 @@ impl ffi::Controller {
             chars += 1;
         }
         let (host, k) = crate::client::split_key(&key.to_string());
-        crate::client::rpc(&host, "kernel.complete", serde_json::json!({"key": k, "request": request.to_string(), "code": code, "pos": chars})).ok().and_then(|v| v.as_bool()).unwrap_or(false)
+        let request = request.to_string();
+        crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.complete", serde_json::json!({"key": k, "request": request, "code": code, "pos": chars})); });
     }
 
     fn jupyter_interrupt(&self, key: &ffi::QString) {
         let (host, k) = crate::client::split_key(&key.to_string());
-        let _ = crate::client::rpc(&host, "kernel.interrupt", serde_json::json!({"key": k}));
+        crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.interrupt", serde_json::json!({"key": k})); });
     }
 
     fn jupyter_stop(&self, key: &ffi::QString) {
         let key = key.to_string();
         crate::client::release_kernel(&key);
-        let (host, k) = crate::client::split_key(&key);
-        let _ = crate::client::rpc(&host, "kernel.stop", serde_json::json!({"key": k}));
+        crate::background::in_order(move || {
+            let (host, k) = crate::client::split_key(&key);
+            let _ = crate::client::rpc(&host, "kernel.stop", serde_json::json!({"key": k}));
+        });
     }
 
     fn file_read_for_edit(&self, path: &ffi::QString) -> ffi::QString {
@@ -1235,6 +1270,10 @@ impl ffi::Controller {
 
     fn markdown_html(&self, text: &ffi::QString) -> ffi::QString {
         qs(&crate::cells::markdown_html(&text.to_string()))
+    }
+
+    fn tessh_manual_html(&self) -> ffi::QString {
+        qs(&crate::cells::tessh_manual_html())
     }
 
     fn history_search(&self, query: &ffi::QString) -> ffi::QString {
@@ -1721,9 +1760,11 @@ impl ffi::Controller {
 
     fn kill_session(&self, id: &ffi::QString) {
         let id = id.to_string();
-        let host = crate::client::host_of(&id);
-        crate::client::kill_session(&id);
-        let _ = crate::client::rpc(&host, "cells.forget", serde_json::json!({"session": id}));
+        crate::background::in_order(move || {
+            let host = crate::client::host_of(&id);
+            crate::client::kill_session(&id);
+            let _ = crate::client::rpc(&host, "cells.forget", serde_json::json!({"session": id}));
+        });
     }
 
     fn notify(&self, title: &ffi::QString, body: &ffi::QString) {

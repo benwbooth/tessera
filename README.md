@@ -159,7 +159,11 @@ defmacro unless cond:expr *body
   kernels.
 - `help` shows the guide, a topic at a time (`help pipes`, `help macros`):
   Markdown in a notebook, highlighted in a terminal. `help $obj` is Python's
-  help.
+  help. With tessh as a notebook's kernel, **Manual** beside the kernel list
+  (or F1) opens the whole guide as a page, with contents and find.
+- It takes what fits a shell from Clojure: `.method obj` calls, `->`/`->>`
+  chaining, `doto`, `:key` getters, `{a b} = $d`, `fn ($% * 2)`, `#_` and
+  the core sequence functions.
 - The input editor highlights tessh and checks it as you type (`tessh
   --check`). Enter indents after `def`, `if` and the like, and an `else` goes
   back to its `if`.

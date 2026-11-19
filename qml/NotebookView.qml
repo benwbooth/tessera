@@ -429,10 +429,12 @@ FocusScope {
         const i = indexOf(cid)
         if (i < 0) return
         if (path === "") controller.jupyterSync(key, shellPid, shellDir)
-        if (!controller.jupyterExecute(key, cid, cells.get(i).source)) {
-            cells.setProperty(i, "running", false)
-            addOutput(i, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The kernel isn't reachable: restart it."] })
-        }
+        Async.call(controller, k => controller.jupyterExecute(k, key, cid, cells.get(i).source), ok => {
+            const j = indexOf(cid)
+            if (ok === true || j < 0) return
+            cells.setProperty(j, "running", false)
+            addOutput(j, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The kernel isn't reachable: restart it."] })
+        })
     }
     function runAll() { for (let i = 0; i < cells.count; ++i) if (cells.get(i).type === "code") run(i) }
     function runAbove(n) { for (let i = 0; i < n; ++i) if (cells.get(i).type === "code") run(i) }
@@ -643,11 +645,13 @@ FocusScope {
         const i = indexOf(cid)
         if (i < 0) return
         controller.jupyterSync(langKey(l), shellPid, shellDir)
-        if (!controller.jupyterExecute(langKey(l), cid, cells.get(i).source)) {
-            cells.setProperty(i, "running", false)
-            addOutput(i, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The " + l + " kernel isn't reachable: run it again to restart it."] })
+        Async.call(controller, k => controller.jupyterExecute(k, langKey(l), cid, cells.get(i).source), ok => {
+            const j = indexOf(cid)
+            if (ok === true || j < 0) return
+            cells.setProperty(j, "running", false)
+            addOutput(j, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The " + l + " kernel isn't reachable: run it again to restart it."] })
             setLang(l, { state: "dead" })
-        }
+        })
     }
     function langEvent(l, e) {
         if (e.type === "status") {
@@ -1239,6 +1243,95 @@ FocusScope {
     }
     Shortcut { sequence: "Ctrl+S"; enabled: nb.visible && nb.activeFocus; context: Qt.WindowShortcut; onActivated: nb.save() }
 
+    Shortcut { sequence: "F1"; enabled: nb.visible && (nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")); context: Qt.WindowShortcut; onActivated: manual.open() }
+    // (Test hook: TESSERA_TEST_NB_MANUAL=<text> opens the manual at 12 s and finds the text.)
+    // (NB_MANUAL_SHOT=<path>: a picture of it 4 s later; the window's screenshot leaves popups out.)
+    Timer { interval: 12000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_MANUAL") !== ""; onTriggered: { manual.open(); manualFind.text = nb.controller.testEnv("NB_MANUAL"); manualShot.start() } }
+    Timer { id: manualShot; interval: 4000; onTriggered: { const p = nb.controller.testEnv("NB_MANUAL_SHOT"); if (p !== "") manual.contentItem.grabToImage(r => r.saveToFile(p)) } }
+
+    // The tessh manual (its guide, built in), as a page: contents on the left,
+    // a find field above.
+    function manualCss() {
+        const c = (x) => String(x), a = themeData.ansi || []
+        const col = (n, d) => c(a[n] || d)
+        return nb.markdownCss(false).replace("max-width:900px", "max-width:none")
+            + "body{margin:0;display:flex;height:100vh;overflow:hidden}"
+            + "nav{width:230px;flex:none;overflow:auto;padding:14px 10px 30px 14px;border-right:1px solid " + c(Theme.divider) + ";font-size:13px;line-height:1.35}"
+            + "nav .title{font-weight:bold;font-size:15px;margin-bottom:10px;color:" + c(Theme.fg) + "}"
+            + "nav a{display:block;color:" + c(Theme.text) + ";text-decoration:none;padding:2px 6px;border-radius:5px}"
+            + "nav a:hover{background:" + c(Theme.field) + "}"
+            + "nav a.part{font-weight:bold;margin-top:10px;color:" + c(Theme.fg) + "}"
+            + "nav .topics a{padding-left:14px;color:" + c(Theme.textDim) + "}"
+            + "main{flex:1;overflow:auto;padding:16px 28px 60px}main>*{max-width:860px}"
+            + "pre.tessh{border-left:3px solid " + c(Theme.accent) + "}"
+            + "pre.output{background:transparent;border:1px dashed " + c(Theme.divider) + ";color:" + c(Theme.textDim) + ";margin-top:-6px}"
+            + "pre.output::before{content:'output';display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:2px}"
+            + ".t-keyword{color:" + col(5, "#c678dd") + "}.t-string{color:" + col(2, "#98c379") + "}"
+            + ".t-number,.t-constant,.t-attribute{color:" + col(3, "#e5c07b") + "}.t-function{color:" + col(4, "#61afef") + "}"
+            + ".t-comment{color:" + col(8, "#5c6370") + ";font-style:italic}.t-operator,.t-property{color:" + col(6, "#56b6c2") + "}"
+            + ".t-variable{color:" + col(1, "#e06c75") + "}.t-punctuation{color:" + c(Theme.textDim) + "}"
+            + "h1:target,h2:target{color:" + c(Theme.accent) + "}"
+    }
+    Popup {
+        id: manual
+        parent: nb
+        x: 14; y: 14
+        width: nb.width - 28
+        height: nb.height - 28
+        padding: 0
+        topPadding: 0.001   // (off the half pixel: 130% scale smears native text there)
+        modal: true
+        dim: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        property bool loaded: false
+        background: Rectangle { radius: 9; color: Theme.bg; border.color: Theme.divider }
+        onOpened: {
+            if (!loaded && nb.controller) {
+                loaded = true
+                manualWeb.loadHtml("<!doctype html><html><head><meta charset='utf-8'><style>" + nb.manualCss() + "</style>"
+                    + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href^=\"#\"]');if(!a)return;e.preventDefault();const t=document.getElementById(a.getAttribute('href').slice(1));if(t)t.scrollIntoView({block:'start'})})</script>"
+                    + "</head><body>" + nb.controller.tesshManualHtml() + "</body></html>", "about:blank")
+            }
+            manualFind.forceActiveFocus()
+        }
+        contentItem: ColumnLayout {
+            spacing: 0
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: 8
+                spacing: 8
+                Text { topPadding: 0.001; leftPadding: 6; text: "tessh manual"; color: Theme.fg; font.pixelSize: 14; font.bold: true; renderType: Text.NativeRendering }
+                Text { topPadding: 0.001; text: "help TOPIC in tessh shows one part"; color: Theme.textDim; font.pixelSize: 12; renderType: Text.NativeRendering; visible: !nb.narrow }
+                Item { Layout.fillWidth: true }
+                TextField {
+                    id: manualFind
+                    Layout.preferredWidth: 220
+                    placeholderText: "Find in the manual"
+                    color: Theme.text
+                    font.pixelSize: 12
+                    background: Rectangle { radius: 6; color: Theme.field; border.color: manualFind.activeFocus ? Theme.accent : Theme.divider }
+                    onTextChanged: manualWeb.findText(text)
+                    Keys.onReturnPressed: (e) => manualWeb.findText(text, (e.modifiers & Qt.ShiftModifier) ? WebEngineView.FindBackward : 0)
+                    Keys.onEscapePressed: manual.close()
+                }
+                Tool { label: "✕"; tip: "Close (Esc)"; onClicked: manual.close() }
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.divider }
+            WebEngineView {
+                id: manualWeb
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.margins: 1
+                backgroundColor: Theme.bg
+                settings.pluginsEnabled: false
+                settings.localContentCanAccessFileUrls: false
+                onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+                onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus && manualFind.text !== "") findText(manualFind.text) }
+            }
+        }
+    }
+
     // (Test hooks: TESSERA_TEST_NB_RUN_ALL runs every cell once it's open,
     // NB_SAVE saves, NB_SCROLL_END scrolls down, NB_EXPORT=<path> saves there.)
     Timer { interval: 1500; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_RUN_ALL") !== ""; onTriggered: nb.runAll() }
@@ -1412,6 +1505,12 @@ FocusScope {
                 ToolTip.visible: hovered && !popup.visible
                 ToolTip.delay: 500
                 ToolTip.text: "What runs the code cells: this pane's shell, or a Jupyter kernel"
+            }
+            Tool {
+                visible: nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")
+                label: nb.narrow ? "?" : "Manual"
+                tip: "The tessh manual: every feature, with examples (F1)"
+                onClicked: manual.open()
             }
             Tool {
                 label: nb.path === "" ? (nb.narrow ? "Save…" : "Save as .ipynb…") : nb.dirty ? "Save" : "Saved"
