@@ -977,7 +977,7 @@ FocusScope {
     Timer { id: restoreFollow; interval: 120; onTriggered: nb.followLive() }
     // (A terminal app's card: a regular card, 25 rows; less if the notebook
     // is smaller. Expand for more.)
-    readonly property int liveHeight: Math.min(Math.round((outputRow > 0 ? outputRow : 18) * 25 + 12), Math.max(200, list.height - 60))
+    readonly property int liveHeight: Math.min(Math.round((outputRow > 0 ? outputRow : 18) * 25 + 12), Math.max(200, list.height - 120))
     readonly property bool liveWanted: view !== null && view.fullScreen && shown
     property int liveIndex: -1
     property Item liveBox: null            // the card's place for it (set by the card)

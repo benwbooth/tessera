@@ -345,7 +345,9 @@ ApplicationWindow {
 
     function paneOf(view) {
         let it = view
-        while (it && it.view !== view) it = it.parent
+        // (A pane, not its notebook, whose view is the same terminal: the
+        // terminal sits in a notebook card while a full-screen program runs.)
+        while (it && !(it.view === view && it.compose !== undefined)) it = it.parent
         return it
     }
 
