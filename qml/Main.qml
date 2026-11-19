@@ -2117,8 +2117,11 @@ ApplicationWindow {
     GridLayout {
         id: rootLayout
         anchors.fill: parent
-        // A thousandth of a pixel keeps text off exact half pixels at 130%.
+        // A thousandth of a pixel keeps text off exact half pixels at 130%,
+        // both ways: on one, each glyph rounds on its own (e/o drop a pixel,
+        // letters squash together).
         anchors.topMargin: 0.001
+        anchors.leftMargin: 0.001
         columns: 1
         rowSpacing: 0
 
