@@ -496,6 +496,8 @@ FocusScope {
             let r = {}
             try { r = JSON.parse(json) } catch (e) {}
             if (!r.id) {
+                // (A tesserad from before jobs: it swaps in the new build once its kernels are done.)
+                if (/no request/.test(r.error || "")) r.error = "tesserad here is an older build, from before background jobs. It upgrades itself once no kernels are running: stop them (Kernels \u2192 Stop all), then run this again."
                 cells.setProperty(j, "running", false)
                 cells.setProperty(j, "failed", true)
                 cells.setProperty(j, "ended", Date.now())
