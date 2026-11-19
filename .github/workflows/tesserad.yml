@@ -1,0 +1,146 @@
+# tesserad, Tessera's backend, for every platform an SSH host may run:
+# Linux (static, musl: any distribution) on x86_64 and aarch64, macOS on
+# Apple Silicon and Intel, Windows on x86_64. The window downloads the one a
+# host needs from a release when it has none of its own to copy there.
+#
+# Run by hand (Actions > tesserad > Run workflow): the files go on the
+# release named by `tag` (default tesserad-dev, a pre-release dev builds
+# fetch from; it's replaced each run). The release workflow calls it with
+# its version's tag.
+name: tesserad
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release to put the files on (made if missing)'
+        required: false
+        default: 'tesserad-dev'
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release to put the files on ("" to keep them as artifacts only)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  ZIG_VERSION: '0.15.2'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: nix build .#tesserad-static
+        run: |
+          nix build -L .#tesserad-static
+          mkdir -p dist
+          install -m755 result/bin/tesserad dist/tesserad-${{ matrix.arch }}-linux
+          file dist/tesserad-${{ matrix.arch }}-linux
+          dist/tesserad-${{ matrix.arch }}-linux version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tesserad-${{ matrix.arch }}-linux
+          path: dist/tesserad-*-linux
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      # (Runs on macOS 11 and later; it links only the system's libraries.)
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build -p tesserad
+        run: |
+          cargo build --release --locked -p tesserad
+          mkdir -p dist
+          install -m755 target/release/tesserad dist/tesserad-${{ matrix.arch }}-macos
+          file dist/tesserad-${{ matrix.arch }}-macos
+          otool -L dist/tesserad-${{ matrix.arch }}-macos
+          dist/tesserad-${{ matrix.arch }}-macos version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tesserad-${{ matrix.arch }}-macos
+          path: dist/tesserad-*-macos
+
+  windows:
+    runs-on: windows-latest
+    env:
+      # (The C runtime linked in, as Zig builds Ghostty's library: one .exe,
+      # nothing to install beside it.)
+      RUSTFLAGS: '-C target-feature=+crt-static'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build -p tesserad
+        shell: bash
+        run: |
+          cargo build --release --locked -p tesserad
+          mkdir -p dist
+          cp target/release/tesserad.exe dist/tesserad-x86_64-windows.exe
+          dist/tesserad-x86_64-windows.exe version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tesserad-x86_64-windows
+          path: dist/tesserad-*-windows.exe
+
+  publish:
+    if: inputs.tag != ''
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tesserad-*
+          path: dist
+          merge-multiple: true
+      - name: Put them on the release
+        run: |
+          ls -la dist
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$TAG" = tesserad-dev ]; then
+              gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title "tesserad (dev builds)" \
+                --notes "tesserad for SSH hosts, built from the latest commit this was run on; Tessera's dev builds fetch it."
+            else
+              gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+            fi
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          if [ "$TAG" = tesserad-dev ]; then
+            gh release edit "$TAG" --notes "tesserad for SSH hosts, built from $GITHUB_SHA; Tessera's dev builds fetch it."
+          fi

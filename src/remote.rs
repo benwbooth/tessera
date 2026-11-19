@@ -352,7 +352,7 @@ fn local_cksum(p: &Path) -> Option<String> {
 
 fn update(ctl: &Path, host: &str, local: &Path, path: &str, sum: &str, os: &str, arch: &str) -> std::io::Result<()> {
     use crate::proto::*;
-    let Some(bin) = static_build(arch) else { return Ok(()) };
+    let Ok(bin) = build_for(os, arch) else { return Ok(()) };
     if local_cksum(&bin).as_deref() == Some(sum) {
         return Ok(());
     }
@@ -390,12 +390,8 @@ fn deploy_dir(ctl: &Path, host: &str) -> std::io::Result<String> {
 
 /// Copy a static tesserad for `arch` to the host: ~/.local/bin, or ~.
 fn deploy(ctl: &Path, host: &str, os: &str, arch: &str) -> std::io::Result<()> {
-    if os != "Linux" {
-        return Err(fail(host, format!("{host} runs {os} {arch}: Tessera has a tesserad to copy there only for Linux. Install tesserad there and connect again.")));
-    }
-    let Some(bin) = static_build(arch) else {
-        return Err(fail(host, format!("{host} has no tesserad, and there's no static build of it for {arch} here to copy (set TESSERA_TESSERAD_STATIC to one).")));
-    };
+    // (This computer's build for the host's platform, else the release's.)
+    let bin = build_for(os, arch).map_err(|e| fail(host, format!("{host} ({os} {arch}) has no tesserad, and {e}.")))?;
     let dir = deploy_dir(ctl, host)?;
     let tmp = format!("{dir}/.tesserad.{}", std::process::id());
     let (mut scp, target) = scp_to(ctl, host);
@@ -411,58 +407,146 @@ fn deploy(ctl: &Path, host: &str, os: &str, arch: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// A tesserad that runs on any Linux with `arch` (uname -m): statically
-/// linked. TESSERA_TESSERAD_STATIC (a file, or a folder of
-/// tesserad-<arch>-linux), the package's own (libexec), or this build's
-/// tesserad when it's static and for that arch.
-pub fn static_build(arch: &str) -> Option<PathBuf> {
-    let arch = match arch {
-        "arm64" => "aarch64",
-        "amd64" => "x86_64",
-        a => a,
+/// The platform a host runs, as tesserad's builds are named: ("linux" |
+/// "macos" | "windows", "x86_64" | "aarch64"), from `uname -sm` (or what
+/// Windows says).
+pub fn platform(os: &str, arch: &str) -> Option<(&'static str, &'static str)> {
+    let os = match os.to_ascii_lowercase().as_str() {
+        "linux" => "linux",
+        "darwin" | "macos" => "macos",
+        o if o.starts_with("windows") || o.starts_with("mingw") || o.starts_with("msys") || o.starts_with("cygwin") => "windows",
+        _ => return None,
     };
-    let name = format!("tesserad-{arch}-linux");
+    let arch = match arch.to_ascii_lowercase().as_str() {
+        "x86_64" | "amd64" | "x64" => "x86_64",
+        "aarch64" | "arm64" => "aarch64",
+        _ => return None,
+    };
+    Some((os, arch))
+}
+
+/// The file name of tesserad's build for a platform.
+pub fn build_name(os: &str, arch: &str) -> String {
+    if os == "windows" { format!("tesserad-{arch}-windows.exe") } else { format!("tesserad-{arch}-{os}") }
+}
+
+/// A tesserad for a host running `os`/`arch` (uname -sm): one of this
+/// computer's (TESSERA_TESSERAD_STATIC, a file or a folder of builds; the
+/// package's own in libexec; this build when it fits), else the one the
+/// release has, downloaded.
+pub fn build_for(os: &str, arch: &str) -> Result<PathBuf, String> {
+    let (os, arch) = platform(os, arch).ok_or_else(|| format!("there's no tesserad for {os} {arch}"))?;
+    let name = build_name(os, arch);
+    if let Some(p) = local_build(os, arch, &name) {
+        return Ok(p);
+    }
+    download_release(os, arch, &name)
+}
+
+fn local_build(os: &str, arch: &str, name: &str) -> Option<PathBuf> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Some(p) = std::env::var_os("TESSERA_TESSERAD_STATIC").map(PathBuf::from) {
         if p.is_dir() {
-            cands.push(p.join(&name));
+            cands.push(p.join(name));
         } else {
             cands.push(p);
         }
     }
     if let Ok(exe) = std::env::current_exe() {
         let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
-        cands.push(dir.join(&name));
-        cands.push(dir.join("../libexec/tessera").join(&name));
-        cands.push(dir.join("tesserad"));
+        cands.push(dir.join(name));
+        cands.push(dir.join("../libexec/tessera").join(name));
+        cands.push(dir.join(if cfg!(windows) { "tesserad.exe" } else { "tesserad" }));
     }
-    if let Some(h) = std::env::var_os("HOME") {
-        cands.push(PathBuf::from(h).join(".cache/tessera").join(&name));
-    }
-    if let Some(p) = cands.into_iter().find(|p| p.is_file() && elf_static_for(p, arch)) {
-        return Some(p);
-    }
-    download_release(arch)
+    cands.into_iter().find(|p| p.is_file() && runs_on(p, os, arch))
 }
 
-/// The release's static tesserad for `arch` (this version's), fetched once
-/// into ~/.cache/tessera: for builds that carry none (a dev build).
-fn download_release(arch: &str) -> Option<PathBuf> {
-    let version = env!("CARGO_PKG_VERSION");
-    let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/tessera");
-    let file = dir.join(format!("tesserad-{version}-{arch}-linux"));
-    if file.is_file() && elf_static_for(&file, arch) {
-        return Some(file);
+/// The release's tesserad for a platform, into ~/.cache/tessera/<tag>/:
+/// this version's release (v<version>), then tesserad-dev (built by hand
+/// from the latest commit). TESSERA_TESSERAD_TAG names another to try first
+/// (a dev build: tesserad-dev). A copy already there is checked for a newer
+/// one (curl -z), so tesserad-dev's stays current.
+fn download_release(os: &str, arch: &str, name: &str) -> Result<PathBuf, String> {
+    let home = PathBuf::from(std::env::var_os("HOME").ok_or("no HOME")?);
+    let mut tags: Vec<String> = Vec::new();
+    if let Ok(t) = std::env::var("TESSERA_TESSERAD_TAG") {
+        tags.push(t);
     }
-    let url = format!("https://github.com/benwbooth/tessera/releases/download/v{version}/tesserad-{arch}-linux");
-    let tmp = dir.join(format!(".tesserad-{}", std::process::id()));
-    let ok = std::fs::create_dir_all(&dir).is_ok()
-        && Command::new("curl").args(["-fsSL", "--max-time", "120", "-o"]).arg(&tmp).arg(&url).stdin(Stdio::null()).status().is_ok_and(|s| s.success());
-    if ok && elf_static_for(&tmp, arch) && std::fs::rename(&tmp, &file).is_ok() {
-        return Some(file);
+    for t in [format!("v{}", env!("CARGO_PKG_VERSION")), "tesserad-dev".to_string()] {
+        if !tags.contains(&t) {
+            tags.push(t);
+        }
     }
-    let _ = std::fs::remove_file(&tmp);
-    None
+    let mut tried = Vec::new();
+    for tag in tags {
+        let dir = home.join(".cache/tessera").join(&tag);
+        let file = dir.join(name);
+        let url = format!("https://github.com/benwbooth/tessera/releases/download/{tag}/{name}");
+        let tmp = dir.join(format!(".{name}.{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut curl = Command::new("curl");
+        curl.args(["-fsSL", "--max-time", "300", "-o"]).arg(&tmp);
+        // (Only when the release's is newer than the copy here.)
+        if file.is_file() {
+            curl.arg("-z").arg(&file);
+        }
+        let got = curl.arg(&url).stdin(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        if got && tmp.is_file() && runs_on(&tmp, os, arch) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+            }
+            let _ = std::fs::rename(&tmp, &file);
+        }
+        let _ = std::fs::remove_file(&tmp);
+        if file.is_file() && runs_on(&file, os, arch) {
+            return Ok(file);
+        }
+        tried.push(url);
+    }
+    Err(format!("there's no {name} here, and none to download ({})", tried.join(", ")))
+}
+
+/// Whether `p` is a tesserad that runs on `os`/`arch`: a static ELF for
+/// Linux (any distribution), a Mach-O for macOS, a PE .exe for Windows.
+fn runs_on(p: &Path, os: &str, arch: &str) -> bool {
+    match os {
+        "linux" => elf_static_for(p, arch),
+        "macos" => macho_for(p, arch),
+        "windows" => pe_for(p, arch),
+        _ => false,
+    }
+}
+
+fn macho_for(p: &Path, arch: &str) -> bool {
+    let Ok(b) = std::fs::read(p) else { return false };
+    if b.len() < 8 || b[..4] != [0xcf, 0xfa, 0xed, 0xfe] {
+        return false;
+    }
+    let cpu = u32::from_le_bytes(b[4..8].try_into().unwrap());
+    cpu == match arch {
+        "x86_64" => 0x0100_0007,
+        "aarch64" => 0x0100_000c,
+        _ => return false,
+    }
+}
+
+fn pe_for(p: &Path, arch: &str) -> bool {
+    let Ok(b) = std::fs::read(p) else { return false };
+    if b.len() < 0x40 || &b[..2] != b"MZ" {
+        return false;
+    }
+    let pe = u32::from_le_bytes(b[0x3c..0x40].try_into().unwrap()) as usize;
+    if b.get(pe..pe + 4) != Some(&b"PE\0\0"[..]) {
+        return false;
+    }
+    let machine = b.get(pe + 4..pe + 6).map(|m| u16::from_le_bytes([m[0], m[1]])).unwrap_or(0);
+    machine == match arch {
+        "x86_64" => 0x8664,
+        "aarch64" => 0xaa64,
+        _ => return false,
+    }
 }
 
 /// Whether `p` is an ELF executable for `arch` with no dynamic loader.
@@ -566,6 +650,36 @@ mod tests {
         let (_, ctl) = super::paths(host);
         let _ = Command::new("ssh").arg("-S").arg(&ctl).args(["-O", "exit", host]).output();
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn platforms_and_their_builds() {
+        assert_eq!(platform("Linux", "x86_64"), Some(("linux", "x86_64")));
+        assert_eq!(platform("Linux", "aarch64"), Some(("linux", "aarch64")));
+        assert_eq!(platform("Darwin", "arm64"), Some(("macos", "aarch64")));
+        assert_eq!(platform("Darwin", "x86_64"), Some(("macos", "x86_64")));
+        assert_eq!(platform("Windows_NT", "AMD64"), Some(("windows", "x86_64")));
+        assert_eq!(platform("FreeBSD", "amd64"), None);
+        assert_eq!(build_name("macos", "aarch64"), "tesserad-aarch64-macos");
+        assert_eq!(build_name("windows", "x86_64"), "tesserad-x86_64-windows.exe");
+        let d = std::env::temp_dir().join(format!("tsr-bin-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        // A Mach-O for arm64, and a PE for x86-64: their headers.
+        let mut macho = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0, 0, 0x01];
+        macho.resize(64, 0);
+        std::fs::write(d.join("m"), &macho).unwrap();
+        assert!(runs_on(&d.join("m"), "macos", "aarch64"));
+        assert!(!runs_on(&d.join("m"), "macos", "x86_64"));
+        assert!(!runs_on(&d.join("m"), "linux", "aarch64"));
+        let mut pe = vec![0u8; 0x100];
+        pe[..2].copy_from_slice(b"MZ");
+        pe[0x3c] = 0x80;
+        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        pe[0x84..0x86].copy_from_slice(&0x8664u16.to_le_bytes());
+        std::fs::write(d.join("w"), &pe).unwrap();
+        assert!(runs_on(&d.join("w"), "windows", "x86_64"));
+        assert!(!runs_on(&d.join("w"), "windows", "aarch64"));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

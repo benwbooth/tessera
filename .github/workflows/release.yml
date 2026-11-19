@@ -1,8 +1,9 @@
 # Release builds: Windows installer and portable zip, macOS dmgs (Apple Silicon
 # and Intel) with a Homebrew cask, an AppImage, a Flatpak bundle and repo,
-# static tesserad builds for Linux (x86_64, aarch64), and a check that the Nix
-# flake builds. Every package carries the static tesserads, which the window
-# copies to SSH hosts that don't have one.
+# tesserad for Linux (static; x86_64, aarch64), macOS and Windows, and a check
+# that the Nix flake builds. Every package carries the static Linux
+# tesserads; the window copies one to an SSH host that has none, and fetches
+# the others from the release.
 #
 # Runs when a GitHub release is published, and attaches every file to it.
 # Pushing a tag like v1.2.3 also cuts the release (with generated notes) and
@@ -89,34 +90,15 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building Tessera $version"
 
-  # tesserad alone, static (musl, from the flake): runs on any Linux of its
-  # architecture.
+  # tesserad for every platform (tesserad.yml): the static Linux ones go in
+  # every package; all of them go on the release, where the window fetches
+  # the one an SSH host needs.
   tesserad:
     needs: version
     if: needs.version.outputs.skip != 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            arch: x86_64
-          - runner: ubuntu-24.04-arm
-            arch: aarch64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      - name: nix build .#tesserad-static
-        run: |
-          nix build -L .#tesserad-static
-          mkdir -p dist
-          install -m755 result/bin/tesserad dist/tesserad-${{ matrix.arch }}-linux
-          file dist/tesserad-${{ matrix.arch }}-linux
-          dist/tesserad-${{ matrix.arch }}-linux version
-      - uses: actions/upload-artifact@v4
-        with:
-          name: tesserad-${{ matrix.arch }}
-          path: dist/tesserad-*-linux
+    uses: ./.github/workflows/tesserad.yml
+    with:
+      tag: ''
 
   windows:
     needs: [version, tesserad]
