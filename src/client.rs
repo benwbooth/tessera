@@ -207,18 +207,41 @@ pub fn connect() -> std::io::Result<UnixStream> {
     if let Ok(s) = UnixStream::connect(&path) {
         return Ok(s);
     }
-    spawn_daemon()?;
-    let start = Instant::now();
-    loop {
-        match UnixStream::connect(&path) {
-            Ok(s) => return Ok(s),
-            Err(e) if start.elapsed() > Duration::from_secs(3) => return Err(e),
-            Err(_) => std::thread::sleep(Duration::from_millis(20)),
+    // (In a scope of its own when it can be; started plainly when that
+    // doesn't come up.)
+    for scoped in [true, false] {
+        if !scoped && scope_runner().is_none() {
+            break;
+        }
+        spawn_daemon(scoped)?;
+        let start = Instant::now();
+        loop {
+            match UnixStream::connect(&path) {
+                Ok(s) => return Ok(s),
+                Err(_) if start.elapsed() > Duration::from_secs(3) => break,
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
         }
     }
+    UnixStream::connect(&path)
 }
 
-fn spawn_daemon() -> std::io::Result<()> {
+/// Where tesserad can run in a systemd scope of its own (Linux with a user
+/// manager): then stopping or restarting whatever started it (a desktop
+/// app's unit, a devloop service, a login session that kills its
+/// processes) doesn't take the shells with it.
+fn scope_runner() -> Option<std::path::PathBuf> {
+    if !cfg!(target_os = "linux") || std::env::var_os("TESSERA_NO_SCOPE").is_some() || std::env::var_os("FLATPAK_ID").is_some() {
+        return None;
+    }
+    let bus = std::path::PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join("bus");
+    if !bus.exists() {
+        return None;
+    }
+    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("systemd-run")).find(|f| f.is_file()))
+}
+
+fn spawn_daemon(scoped: bool) -> std::io::Result<()> {
     let exe = daemon_exe()?;
     let log = log_path();
     let stderr = std::fs::OpenOptions::new()
@@ -227,7 +250,15 @@ fn spawn_daemon() -> std::io::Result<()> {
         .open(&log)
         .map(std::process::Stdio::from)
         .unwrap_or_else(|_| std::process::Stdio::null());
-    let mut cmd = std::process::Command::new(exe);
+    let runner = if scoped { scope_runner() } else { None };
+    let mut cmd = match &runner {
+        Some(run) => {
+            let mut c = std::process::Command::new(run);
+            c.args(["--user", "--scope", "--quiet", "--collect", "--description=Tessera's backend (tesserad)", "--"]).arg(&exe);
+            c
+        }
+        None => std::process::Command::new(&exe),
+    };
     // Shells get the desktop session's environment, not whatever this GUI
     // was started from (a `nix develop` shell under devloop, say: its SHELL
     // is a bash without completion and its build variables would leak in).

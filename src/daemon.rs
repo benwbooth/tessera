@@ -135,8 +135,54 @@ pub fn adopt_cells(id: &str, from: &str) {
     }
 }
 
+/// Out of whatever unit started it (a desktop app's, a devloop service):
+/// into a systemd scope of its own, with its shells and what they run, so
+/// stopping or restarting that unit doesn't end them. (Started by a current
+/// window it's in one already; one from before, or one upgraded in place,
+/// moves itself.)
+#[cfg(target_os = "linux")]
+fn own_scope() {
+    let Ok(cg) = std::fs::read_to_string("/proc/self/cgroup") else { return };
+    if cg.trim_end().rsplit('/').next().is_some_and(|u| u.starts_with("run-") && u.ends_with(".scope")) || std::env::var_os("TESSERA_NO_SCOPE").is_some() {
+        return;
+    }
+    if !std::path::Path::new(&std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_default()).join("bus").exists() {
+        return;
+    }
+    // This process and everything under it.
+    let mut pids = vec![std::process::id()];
+    let mut i = 0;
+    while i < pids.len() {
+        let p = pids[i];
+        for t in std::fs::read_dir(format!("/proc/{p}/task")).into_iter().flatten().flatten() {
+            let kids = std::fs::read_to_string(t.path().join("children")).unwrap_or_default();
+            pids.extend(kids.split_whitespace().filter_map(|x| x.parse::<u32>().ok()));
+        }
+        i += 1;
+    }
+    pids.sort();
+    pids.dedup();
+    let unit = format!("tesserad-{}.scope", std::process::id());
+    let mut args: Vec<String> = ["--user", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", "StartTransientUnit", "ssa(sv)a(sa(sv))", &unit, "fail", "2", "Description", "s", "Tessera's backend (tesserad)", "PIDs", "au"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    args.push(pids.len().to_string());
+    args.extend(pids.iter().map(|p| p.to_string()));
+    args.push("0".into());
+    match std::process::Command::new("busctl").args(&args).stdout(std::process::Stdio::null()).output() {
+        Ok(o) if o.status.success() => eprintln!("tesserad: moved into {unit} with {} processes", pids.len()),
+        Ok(o) => eprintln!("tesserad: couldn't move into a scope of its own: {}", String::from_utf8_lossy(&o.stderr).trim()),
+        Err(e) => eprintln!("tesserad: couldn't move into a scope of its own: {e}"),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn own_scope() {}
+
 fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -> std::io::Result<()> {
     let _ = REGISTRY.set(registry.clone());
+    own_scope();
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
