@@ -1143,10 +1143,6 @@ FocusScope {
     function tightText(t) { return tight("<span style=\"white-space:pre-wrap\">" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</span>") }
     function palette(html) { return html.replace(/var\(--vt-palette-(\d+)\)/g, (m, n) => paletteColor(parseInt(n))) }
     function colored(text) { return controller ? tight(palette(controller.ansiHtml(text))) : "" }
-    function shortDir(p) {
-        const home = controller ? controller.homeDir() : ""
-        return home !== "" && p.startsWith(home) ? "~" + p.slice(home.length) : p
-    }
     function seconds(ms) { ms = Math.max(0, ms); return ms < 1000 ? ms + " ms" : ms < 60000 ? (ms / 1000).toFixed(1) + " s" : Math.floor(ms / 60000) + " m " + Math.round((ms % 60000) / 1000) + " s" }
     function htmlPage(body) {
         const c = (x) => String(x)
@@ -1431,7 +1427,8 @@ FocusScope {
                 visible: !cell.plainMd
                 x: 10
                 width: parent.width - 20
-                height: 26
+                // (Taller when a path in it needs two lines: paths are shown whole.)
+                height: Math.max(26, implicitHeight + 6)
                 spacing: 6
                 // Status; a click runs it (or stops it). (The spinner turns on its
                 // own, so the mark after it is never left at an angle.)
@@ -1482,10 +1479,14 @@ FocusScope {
                 }
                 Text { topPadding: 0.001;
                     Layout.fillWidth: true
-                    text: cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.trim().replace(/\s*\n\s*/g, "  ⏎  ") : "(empty)"
-                    maximumLineCount: 1
-                    wrapMode: Text.NoWrap
-                    elide: Text.ElideRight
+                    // (A file card: its whole path, wrapped if need be, never cut short.)
+                    text: cell.viewPath !== "" ? cell.viewPath
+                        : cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.trim().replace(/\s*\n\s*/g, "  ⏎  ") : "(empty)"
+                    // (A command wraps too, so a path in it shows whole; past six
+                    // lines, the rest is in the cell.)
+                    maximumLineCount: 6
+                    wrapMode: cell.viewPath !== "" ? Text.WrapAnywhere : Text.WrapAtWordBoundaryOrAnywhere
+                    elide: cell.viewPath !== "" ? Text.ElideNone : Text.ElideRight
                     color: cell.editing ? Theme.textDim : Theme.text
                     font.family: nb.fontFamily
                     font.pointSize: 9
@@ -1495,8 +1496,10 @@ FocusScope {
                     HoverHandler { id: srcHover; cursorShape: Qt.IBeamCursor }
                     TapHandler { onTapped: if (cell.viewPath === "") nb.focusCell(cell.index, true) }
                 }
-                // (The folder it ran in, always, whole unless there's no room.)
-                Text { topPadding: 0.001; visible: cell.cwd !== ""; text: nb.shortDir(cell.cwd); color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.maximumWidth: Math.max(120, header.width * 0.4) }
+                // (The folder it ran in, whole: wrapped when there's no room on
+                // one line. A file card's path has its folder already.)
+                Text { topPadding: 0.001; visible: cell.cwd !== "" && cell.viewPath === ""; text: cell.cwd; color: Theme.textDim; font.pixelSize: 10
+                       wrapMode: Text.WrapAnywhere; Layout.maximumWidth: Math.max(120, header.width * 0.4) }
                 Text { topPadding: 0.001;
                     visible: cell.started > 1
                     text: (cell.ended > 0 ? nb.seconds(cell.ended - cell.started) + "  ·  " : "") + Qt.formatTime(new Date(cell.started), "hh:mm")
