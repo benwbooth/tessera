@@ -200,6 +200,19 @@ Item {
     readonly property var remote: path.match(/^ssh:\/\/([^\/]*)(\/.*)$/)
     readonly property string termHost: remote ? decodeURIComponent(remote[1]) : ""
     readonly property string termPath: remote ? remote[2] : path
+    // (There, the terminal opens once the host is connected: until then not
+    // ready, as a pane waits for its host.)
+    property bool termHostUp: false
+    property string termHostError: ""
+    Connections {
+        target: fv.controller
+        enabled: fv.inTerm && fv.termHost !== "" && !fv.termHostUp
+        function onHostConnected(h, err) {
+            if (h !== fv.termHost) return
+            if (err !== "") fv.termHostError = err
+            else fv.termHostUp = true
+        }
+    }
     readonly property var termEditors: [["", "Your $EDITOR"], ["vim", "Vim"], ["nvim", "Neovim"], ["emacs -nw", "Emacs"], ["hx", "Helix"], ["micro", "micro"], ["nano", "nano"], ["kak", "Kakoune"]]
     property string termEditor: { if (!controller) return ""; controller.revision; try { return JSON.parse(controller.settings()).terminal_editor || "" } catch (e) { return "" } }
     function shq(x) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(x) ? x : "'" + x.replace(/'/g, "'\\''") + "'" }
@@ -208,6 +221,9 @@ Item {
         const e = ed !== undefined ? ed : termEditor
         if (editing && dirty) save()          // (what's typed here first, so it opens that)
         editing = false
+        termHostUp = termHost === ""
+        termHostError = ""
+        if (!termHostUp && controller) controller.connectHost(termHost)
         termCommand = "exec " + (e !== "" ? e : "${VISUAL:-${EDITOR:-vi}}") + " " + shq(termPath)
         inTerm = true
     }
@@ -585,9 +601,9 @@ Item {
         active: fv.inTerm
         anchors.fill: parent
         sourceComponent: TerminalView {
-            ready: true
             command: fv.termCommand
             host: fv.termHost
+            ready: fv.termHostUp
             cwd: fv.termPath.replace(/\/[^\/]*$/, "") || "/"
             fontFamily: fv.fontFamily
             fontPointSize: fv.pointSize
@@ -596,6 +612,15 @@ Item {
             Component.onCompleted: forceActiveFocus()
             onExitedChanged: if (exited) Qt.callLater(fv.closeTerminal)
         }
+    }
+    Text {
+        visible: fv.inTerm && !fv.termHostUp
+        anchors.centerIn: parent
+        text: fv.termHostError !== "" ? "Can't reach " + fv.termHost + ": " + fv.termHostError : "Connecting to " + fv.termHost + "\u2026"
+        color: fv.termHostError !== "" ? fv.ansi(1, "#e06c75") : Theme.textDim
+        font.pixelSize: 12
+        topPadding: 0.001
+        renderType: Text.NativeRendering
     }
     Component.onDestruction: if (termLoader.item && !termLoader.item.exited) termLoader.item.killSession()
     // (Test hooks, from the card showing: TESSERA_TEST_TERM_EDIT=<editor or "-"> opens it in one at
