@@ -1019,6 +1019,11 @@ FocusScope {
         if (c === "export" || c === "export -p" || c === "declare -x" || c === "typeset -x") return "env"
         return ""
     }
+    // A tessh cell whose code is an ls (or cd) alone, its view not changed by hand.
+    function tesshFiles(cid, lang, source) {
+        const tessh = lang !== "" ? lang === "tessh" : (kernelName === "tessh" || kernelName.endsWith("-tessh") || language === "tessh")
+        return tessh && (!kinds[cid] || kinds[cid] === "auto") && builtinKind(source) === "files"
+    }
     function shownKind(cid, tkind, command) {
         const chosen = kinds[cid]
         if (chosen && chosen !== "auto") return chosen
@@ -1762,8 +1767,9 @@ FocusScope {
             readonly property bool code: type !== "markdown"
             readonly property bool fromTerm: tid > 0
             readonly property var outs: { try { return JSON.parse(outputs) } catch (e) { return [] } }
-            readonly property string kind: fromTerm ? nb.shownKind(cid, tkind, source) : ""
-            readonly property bool hasOutput: code && (fromTerm || outs.length > 0 || viewPath !== "")
+            // (A tessh cell that's an ls or cd: Tessera's own folder view, as a shell cell's.)
+            readonly property string kind: fromTerm ? nb.shownKind(cid, tkind, source) : nb.tesshFiles(cid, lang, source) ? "files" : ""
+            readonly property bool hasOutput: code && (fromTerm || outs.length > 0 || viewPath !== "" || kind === "files")
             readonly property bool expanded: nb.expandedId === cid
             readonly property bool plainMd: !code && !editing
             width: list.width - 12
@@ -2142,7 +2148,7 @@ FocusScope {
                     property string viewLang: cell.viewLang
                     readonly property string kind: cell.kind
                     sourceComponent: cell.viewPath !== "" ? (nb.isTableFile(cell.viewPath) && cell.viewLang === "" ? tableCardView : fileCardView)
-                                   : !cell.fromTerm ? jupyterOutputs
+                                   : !cell.fromTerm ? (cell.kind === "files" ? filesView : jupyterOutputs)
                                    : cell.kind === "html" ? htmlView
                                    : cell.kind === "markdown" || cell.kind === "mdtext" ? markdownView
                                    : cell.kind === "image" ? imageView
