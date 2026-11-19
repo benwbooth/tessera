@@ -296,6 +296,7 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             json!({"fish": fish.as_ref().ok(), "tldr": tldr.as_ref().ok(), "error": fish.err().or(tldr.err()).map(|e| e.to_string())})
         }
         "complete.counts" => json!({"fish": crate::complete::fish_completion_count(), "tldr": crate::complete::tldr_count()}),
+        "prompt.has_starship" => json!(crate::prompt::has_starship()),
         "prompt.info" => serde_json::from_str(&crate::prompt::info(&s("cwd"), pid())).unwrap_or(Value::Null),
         "prompt.starship" => {
             set_window_config(p);

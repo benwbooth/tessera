@@ -32,7 +32,7 @@ Item {
     property int shellPid: 0
     property string sshHost: ""         // the pane's host: its prompt is drawn there
     property string engine: "auto"     // "auto", "starship", "builtin"
-    readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && controller.hasStarship()))
+    readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && controller.hasStarshipOn(sshHost)))
     signal runRequested(string command)
     signal fixRequested()
 

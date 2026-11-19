@@ -376,6 +376,9 @@ pub mod ffi {
         fn prompt_info(self: &Controller, cwd: &QString, pid: i32, host: &QString) -> QString;
         #[qinvokable]
         fn has_starship(self: &Controller) -> bool;
+        /// Whether Starship is on `host` (the pane's prompt is drawn there).
+        #[qinvokable]
+        fn has_starship_on(self: &Controller, host: &QString) -> bool;
         /// Ask Starship for the prompt (in the background); the answer comes
         /// as starship_ready(key, json) (see prompt::starship).
         #[qinvokable]
@@ -1326,6 +1329,26 @@ impl ffi::Controller {
 
     fn has_starship(&self) -> bool {
         crate::prompt::has_starship()
+    }
+
+    fn has_starship_on(&self, host: &ffi::QString) -> bool {
+        let host = host.to_string();
+        if host.is_empty() {
+            return crate::prompt::has_starship();
+        }
+        // (Asked once a host: it's in every prompt's binding.)
+        static KNOWN: std::sync::Mutex<Option<std::collections::HashMap<String, bool>>> = std::sync::Mutex::new(None);
+        if let Some(v) = KNOWN.lock().unwrap().as_ref().and_then(|m| m.get(&host)) {
+            return *v;
+        }
+        match crate::client::rpc_within(&host, "prompt.has_starship", serde_json::json!({}), std::time::Duration::from_secs(2)) {
+            Ok(v) => {
+                let has = v.as_bool().unwrap_or(false);
+                KNOWN.lock().unwrap().get_or_insert_with(Default::default).insert(host, has);
+                has
+            }
+            Err(_) => false,
+        }
     }
 
     fn request_starship(self: Pin<&mut Self>, key: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, width: i32, pid: i32, host: &ffi::QString) {
