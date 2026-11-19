@@ -210,6 +210,8 @@ signals:
     void selectionChanged();
     void bell();
     void sessionEvent(const QVariantMap& event);
+    // Ctrl+click on a path in another host's pane: ssh://<host>/<path>.
+    void remoteLinkActivated(const QString& link);
     void openFailed(const QString& message);
     void themeJsonChanged();
     void cursorShapeChanged();

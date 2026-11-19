@@ -1139,6 +1139,12 @@ void TerminalItem::mousePressEvent(QMouseEvent* e)
     if (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier) && m_ctrlClickOpens && m_session) {
         const QString link = qs(m_session->link_at(float(e->position().x() * m_dpr), float(e->position().y() * m_dpr),
                                                    uint32_t(m_cw), uint32_t(m_ch), uint32_t(m_pad)));
+        if (link.startsWith(QStringLiteral("ssh://"))) {
+            // (A file on the pane's host: shown by Tessera, read there.)
+            emit remoteLinkActivated(link);
+            e->accept();
+            return;
+        }
         if (!link.isEmpty()) {
             QDesktopServices::openUrl(QUrl(link));
             e->accept();

@@ -1470,7 +1470,10 @@ impl Session {
         let word = word.trim_end_matches(['.', ',', ';', ':']);
         // file:line:col (compilers, grep -n): open the file.
         let plain = word.split(':').next().unwrap_or(word);
-        let home = std::env::var("HOME").unwrap_or_default();
+        // (Another host's shell: the path is the host's, looked for there.)
+        let Backend::Daemon { host, .. } = &self.backend;
+        let host = host.clone();
+        let home = if host.is_empty() { std::env::var("HOME").unwrap_or_default() } else { crate::client::host_home(&host) };
         let path = if let Some(rest) = plain.strip_prefix("~/") {
             std::path::PathBuf::from(&home).join(rest)
         } else if plain.starts_with('/') {
@@ -1480,7 +1483,15 @@ impl Session {
             if base.is_empty() { return String::new() }
             std::path::PathBuf::from(base).join(plain)
         };
-        if !plain.is_empty() && path.exists() {
+        if plain.is_empty() {
+            return String::new();
+        }
+        if !host.is_empty() {
+            let p = path.display().to_string();
+            let there = crate::client::rpc_within(&host, "files", json!({"op": "exists", "path": p}), std::time::Duration::from_secs(2));
+            return if there.ok().as_ref().and_then(|v| v.as_str()) == Some("true") { crate::client::ssh_path(&host, &p) } else { String::new() };
+        }
+        if path.exists() {
             return format!("file://{}", path.display());
         }
         String::new()

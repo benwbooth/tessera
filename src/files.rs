@@ -309,7 +309,7 @@ pub fn list(dir: &str, all: bool) -> String {
     serde_json::Value::Array(out).to_string()
 }
 
-fn unused_name(dir: &Path, base: &str) -> PathBuf {
+pub fn unused_name(dir: &Path, base: &str) -> PathBuf {
     let p = dir.join(base);
     if !p.exists() {
         return p;
@@ -363,8 +363,8 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
             spawn("sh", &["-c", &format!("{agg} {} {} && xdg-open {}", q(path), q(&gif), q(&gif))])
         }
         // (The file manager, with the item selected: FileManager1 over D-Bus.)
-        "reveal" => {
-            let uri = format!("file://{path}");
+        "reveal" | "reveal_uri" => {
+            let uri = if op == "reveal_uri" { path.to_string() } else { format!("file://{path}") };
             let ok = std::process::Command::new("dbus-send")
                 .args(["--session", "--dest=org.freedesktop.FileManager1", "--type=method_call", "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1.ShowItems", &format!("array:string:{uri}"), "string:"])
                 .status()

@@ -279,6 +279,34 @@ fn session_hosts() -> &'static std::sync::Mutex<std::collections::HashMap<String
     H.get_or_init(Default::default)
 }
 
+/// `host`'s home folder (asked once; "" while it can't be reached).
+pub fn host_home(host: &str) -> String {
+    static HOMES: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> = std::sync::Mutex::new(None);
+    if let Some(h) = HOMES.lock().unwrap().as_ref().and_then(|m| m.get(host)) {
+        return h.clone();
+    }
+    let r = rpc_within(host, "host.info", serde_json::json!({}), Duration::from_secs(5));
+    match r.ok().as_ref().and_then(|v| v["home"].as_str()).map(String::from) {
+        Some(h) => {
+            HOMES.lock().unwrap().get_or_insert_with(Default::default).insert(host.to_string(), h.clone());
+            h
+        }
+        None => String::new(),
+    }
+}
+
+/// A path on `host` as the window has it: ssh://<host, URL-encoded><path>.
+pub fn ssh_path(host: &str, path: &str) -> String {
+    let enc: String = host
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    format!("ssh://{enc}{path}")
+}
+
 pub fn set_session_host(id: &str, host: &str) {
     if !host.is_empty() {
         session_hosts().lock().unwrap().insert(id.to_string(), host.to_string());

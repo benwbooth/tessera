@@ -426,7 +426,7 @@ FocusScope {
                         x: 22
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width - x - kbtns.width - 8
-                        Text { width: parent.width; elide: Text.ElideRight; text: modelData.display + (parent.parent.mine ? "" : "  (another notebook)"); color: Theme.text; font.pixelSize: 12 }
+                        Text { width: parent.width; elide: Text.ElideRight; text: modelData.display + (modelData.host ? " on " + modelData.host : "") + (parent.parent.mine ? "" : "  (another notebook)"); color: Theme.text; font.pixelSize: 12 }
                         Text {
                             text: modelData.state + " \u00b7 " + (modelData.rss_kb > 0 ? (modelData.rss_kb / 1024).toFixed(0) + " MB" : "") + " \u00b7 "
                                   + (modelData.seconds < 3600 ? Math.round(modelData.seconds / 60) + " min" : (modelData.seconds / 3600).toFixed(1) + " h")

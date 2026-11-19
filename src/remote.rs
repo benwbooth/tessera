@@ -67,6 +67,11 @@ fn errors() -> &'static Mutex<HashMap<String, String>> {
     E.get_or_init(Default::default)
 }
 
+/// The hosts this window has connected to (and still reaches).
+pub fn connected_hosts() -> Vec<String> {
+    CHECKED.lock().unwrap().iter().filter(|h| UnixStream::connect(paths(h).0).is_ok()).cloned().collect()
+}
+
 pub fn last_error(host: &str) -> String {
     errors().lock().unwrap().get(host).cloned().unwrap_or_default()
 }
@@ -265,6 +270,77 @@ fn start_remote(ctl: &Path, host: &str) -> std::io::Result<Started> {
     }
 }
 
+/// scp through the host's shared connection, and the host as scp names it.
+/// (scp speaks SFTP: remote paths are taken as they are, spaces and all,
+/// not through a shell.)
+fn scp_to(ctl: &Path, host: &str) -> (Command, String) {
+    let mut scp = Command::new("scp");
+    scp.args(["-q", "-o", "ControlMaster=no", "-o"]).arg(format!("ControlPath={}", ctl.display()));
+    // (Options given with the host, a port say, go to scp too; its port flag is -P.)
+    let mut args = host_args(host);
+    let target = args.pop().unwrap_or_default();
+    for a in args.iter_mut() {
+        if a == "-p" {
+            *a = "-P".into();
+        }
+    }
+    scp.args(&args);
+    (scp, target)
+}
+
+/// A copy here of `path` on `host` (for what happens on this desktop:
+/// opening it, a GIF of a recording): ~/.cache/tessera/remote/<host>/<path>,
+/// fetched again each time.
+pub fn fetch(host: &str, path: &str) -> Result<PathBuf, String> {
+    let (_, ctl) = paths(host);
+    connect(host).map_err(|e| e.to_string())?;
+    let safe: String = host.chars().map(|c| if c.is_ascii_alphanumeric() || "@.-_".contains(c) { c } else { '_' }).collect();
+    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("no HOME")?;
+    let local = home.join(".cache/tessera/remote").join(safe).join(path.trim_start_matches('/'));
+    if let Some(d) = local.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let (mut scp, target) = scp_to(&ctl, host);
+    let out = scp.arg("-r").arg(format!("{target}:{path}")).arg(&local).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("Couldn't copy it from {host}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(local)
+}
+
+/// Copy `local` (a file or folder here) into `dir` on `host`, under a name
+/// not taken there: its path there.
+pub fn upload(host: &str, local: &Path, dir: &str) -> Result<String, String> {
+    let (_, ctl) = paths(host);
+    connect(host).map_err(|e| e.to_string())?;
+    let name = local.file_name().map(|n| n.to_string_lossy().to_string()).ok_or("no name")?;
+    let to = crate::client::rpc_within(host, "files", serde_json::json!({"op": "unused_name", "path": dir, "arg": name}), Duration::from_secs(10))?;
+    let to = to.as_str().unwrap_or("").to_string();
+    if to.is_empty() {
+        return Err(format!("No place for {name} in {dir} on {host}"));
+    }
+    let (mut scp, target) = scp_to(&ctl, host);
+    let out = scp.arg("-r").arg(local).arg(format!("{target}:{to}")).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("Couldn't copy {name} to {host}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(to)
+}
+
+/// Copy `path` on `host` into `dir` here, under a name not taken here.
+pub fn download(host: &str, path: &str, dir: &Path) -> Result<PathBuf, String> {
+    let (_, ctl) = paths(host);
+    connect(host).map_err(|e| e.to_string())?;
+    let name = Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).ok_or("no name")?;
+    let to = crate::files::unused_name(dir, &name);
+    let (mut scp, target) = scp_to(&ctl, host);
+    let out = scp.arg("-r").arg(format!("{target}:{path}")).arg(&to).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("Couldn't copy {name} from {host}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(to)
+}
+
 /// `cksum`'s "crc size" for a file here.
 fn local_cksum(p: &Path) -> Option<String> {
     let f = std::fs::File::open(p).ok()?;
@@ -322,19 +398,8 @@ fn deploy(ctl: &Path, host: &str, os: &str, arch: &str) -> std::io::Result<()> {
     };
     let dir = deploy_dir(ctl, host)?;
     let tmp = format!("{dir}/.tesserad.{}", std::process::id());
-    let mut scp = Command::new("scp");
-    scp.args(["-q", "-o", "ControlMaster=no", "-o"]).arg(format!("ControlPath={}", ctl.display()));
-    // (Options given with the host, a port say, go to scp too; its port flag is -P.)
-    let mut args = host_args(host);
-    let target = args.pop().unwrap_or_default();
-    let mut i = 0;
-    while i < args.len() {
-        if args[i] == "-p" {
-            args[i] = "-P".into();
-        }
-        i += 1;
-    }
-    scp.args(&args).arg(&bin).arg(format!("{target}:{tmp}"));
+    let (mut scp, target) = scp_to(ctl, host);
+    scp.arg(&bin).arg(format!("{target}:{tmp}"));
     let st = scp.stdin(Stdio::null()).output()?;
     if !st.status.success() {
         return Err(fail(host, format!("Couldn't copy tesserad to {host}: {}", String::from_utf8_lossy(&st.stderr).trim())));
@@ -377,12 +442,12 @@ pub fn static_build(arch: &str) -> Option<PathBuf> {
     if let Some(p) = cands.into_iter().find(|p| p.is_file() && elf_static_for(p, arch)) {
         return Some(p);
     }
-    download(arch)
+    download_release(arch)
 }
 
 /// The release's static tesserad for `arch` (this version's), fetched once
 /// into ~/.cache/tessera: for builds that carry none (a dev build).
-fn download(arch: &str) -> Option<PathBuf> {
+fn download_release(arch: &str) -> Option<PathBuf> {
     let version = env!("CARGO_PKG_VERSION");
     let dir = PathBuf::from(std::env::var_os("HOME")?).join(".cache/tessera");
     let file = dir.join(format!("tesserad-{version}-{arch}-linux"));
@@ -476,6 +541,25 @@ mod tests {
         let (_, p) = read_frame(&mut l).unwrap();
         let list: Vec<SessionInfo> = serde_json::from_slice(&p).unwrap();
         assert!(list.iter().any(|x| x.id == id && !x.attached), "the shell runs on there, detached");
+        // Files both ways: a file here copied there (a free name the second
+        // time), seen there, and fetched back.
+        let here = scratch.join("dropped.txt");
+        std::fs::write(&here, "from here").unwrap();
+        let there = super::upload(host, &here, home.to_str().unwrap()).unwrap();
+        assert_eq!(there, home.join("dropped.txt").display().to_string());
+        let again = super::upload(host, &here, home.to_str().unwrap()).unwrap();
+        assert_ne!(again, there, "a name not taken");
+        let exists = crate::client::rpc(host, "files", serde_json::json!({"op": "exists", "path": there})).unwrap();
+        assert_eq!(exists.as_str(), Some("true"));
+        let back_dir = scratch.join("back");
+        std::fs::create_dir_all(&back_dir).unwrap();
+        let back = super::download(host, &there, &back_dir).unwrap();
+        assert_eq!(std::fs::read_to_string(back).unwrap(), "from here");
+        // (Its copy under this test's HOME, not the real one's cache.)
+        std::env::set_var("HOME", &scratch);
+        let copy = super::fetch(host, &there).unwrap();
+        assert!(copy.starts_with(&scratch));
+        assert_eq!(std::fs::read_to_string(copy).unwrap(), "from here");
         // (Done: that shell, then tesserad there exits by itself.)
         let mut k = super::connect(host).unwrap();
         write_json(&mut k, T_KILL_ID, &id).unwrap();

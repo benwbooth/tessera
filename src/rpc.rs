@@ -330,6 +330,10 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
                 "read_for_edit" => crate::files::read_for_edit(&path),
                 "save_edited" => crate::files::save_edited(&path, &s("text"), p["crlf"].as_bool().unwrap_or(false)),
                 "read_text" => crate::files::read_text(&path),
+                // (For another host's pane: whether a word in its output names
+                // a file there; a free name for something copied in.)
+                "exists" => json!(std::path::Path::new(&path).exists()).to_string(),
+                "unused_name" => crate::files::unused_name(std::path::Path::new(&path), &s("arg")).display().to_string(),
                 "write_text" => crate::files::write_text(&path, &s("text")),
                 "line_index" => crate::files::line_index(&path),
                 "read_lines" => crate::files::read_lines(&path, n("start") as usize, n("count") as usize),

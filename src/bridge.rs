@@ -476,6 +476,13 @@ pub mod ffi {
         fn notebook_read(self: &Controller, host: &QString, session: &QString) -> QString;
         #[qinvokable]
         fn notebook_write(self: &Controller, host: &QString, session: &QString, text: &QString) -> QString;
+        /// Files dropped on another host's pane: copied into `dir` there (scp,
+        /// names not taken), in the background: files_uploaded(key, [paths
+        /// there], error).
+        #[qinvokable]
+        fn upload_files(self: Pin<&mut Controller>, key: &QString, host: &QString, dir: &QString, paths: &QString);
+        #[qsignal]
+        fn files_uploaded(self: Pin<&mut Controller>, key: QString, paths: QString, error: QString);
         /// `host`'s home folder (its tesserad's HOME), for paths there.
         #[qinvokable]
         fn host_home(self: &Controller, host: &QString) -> QString;
@@ -784,6 +791,56 @@ impl ffi::Controller {
 
     fn file_action(&self, op: &ffi::QString, path: &ffi::QString, arg: &ffi::QString) -> ffi::QString {
         let (op, arg) = (op.to_string(), arg.to_string());
+        // (Another host's file, for this desktop: opened or made a GIF of as
+        // a copy fetched here; revealed in the file manager over sftp:// when
+        // the host is a plain name, else the copy. The rest happen there.)
+        let (host, p) = host_path(&path.to_string());
+        if !host.is_empty() && matches!(op.as_str(), "open" | "gif" | "reveal") {
+            if op == "reveal" && !host.contains(char::is_whitespace) {
+                let uri = format!("sftp://{host}{p}");
+                return qs(&crate::files::action("reveal_uri", &uri, ""));
+            }
+            return qs(&match crate::remote::fetch(&host, &p) {
+                Ok(local) => crate::files::action(&op, &local.to_string_lossy(), &arg),
+                Err(e) => e,
+            });
+        }
+        // (Copied or moved between this computer and a host, or two hosts:
+        // through scp; a move then removes the original.)
+        if matches!(op.as_str(), "copy" | "move") {
+            let (dhost, dpath) = host_path(&arg);
+            if dhost != host {
+                let r: Result<(), String> = (|| {
+                    if host.is_empty() {
+                        crate::remote::upload(&dhost, std::path::Path::new(&p), &dpath)?;
+                    } else if dhost.is_empty() {
+                        crate::remote::download(&host, &p, std::path::Path::new(&dpath))?;
+                    } else {
+                        let tmp = std::env::temp_dir().join(format!("tessera-copy-{}", std::process::id()));
+                        let _ = std::fs::create_dir_all(&tmp);
+                        let here = crate::remote::download(&host, &p, &tmp)?;
+                        let r = crate::remote::upload(&dhost, &here, &dpath);
+                        let _ = std::fs::remove_dir_all(&tmp);
+                        r?;
+                    }
+                    if op == "move" {
+                        let e = if host.is_empty() {
+                            crate::files::action("trash", &p, "")
+                        } else {
+                            let r = crate::client::rpc_within(&host, "files", serde_json::json!({"op": "action", "action": "trash", "path": p, "arg": ""}), std::time::Duration::from_secs(10))?;
+                            r.as_str().unwrap_or("").to_string()
+                        };
+                        if !e.is_empty() {
+                            return Err(e);
+                        }
+                    }
+                    Ok(())
+                })();
+                return qs(&r.err().unwrap_or_default());
+            }
+        }
+        // (A folder on the same host, as a path there.)
+        let arg = if !host.is_empty() && arg.starts_with("ssh://") { host_path(&arg).1 } else { arg };
         on_host(path, "action", serde_json::json!({"action": op, "arg": arg}), |p| crate::files::action(&op, p, &arg))
     }
 
@@ -871,9 +928,39 @@ impl ffi::Controller {
     }
 
     fn jupyter_running(&self) -> ffi::QString {
-        // (Jupyter's kernels and Tessera's shell kernels, in this computer's
-        // tesserad.)
-        qs(&crate::client::rpc("", "kernel.running", serde_json::json!({})).unwrap_or_else(|_| serde_json::json!([])).to_string())
+        // (Jupyter's kernels and Tessera's shell kernels: this computer's
+        // tesserad's, then each connected host's, "host//key" with its
+        // host. A host's list is what it said last, asked again in the
+        // background: this runs on the window's thread, every few seconds.)
+        let mut all: Vec<serde_json::Value> = crate::client::rpc("", "kernel.running", serde_json::json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+        static REMOTE: std::sync::Mutex<Option<std::collections::HashMap<String, Vec<serde_json::Value>>>> = std::sync::Mutex::new(None);
+        static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let hosts = crate::remote::connected_hosts();
+        if !ASKING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let hosts = hosts.clone();
+            std::thread::spawn(move || {
+                let mut got = std::collections::HashMap::new();
+                for h in hosts {
+                    let list = crate::client::rpc_within(&h, "kernel.running", serde_json::json!({}), std::time::Duration::from_secs(5)).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+                    got.insert(h, list);
+                }
+                *REMOTE.lock().unwrap() = Some(got);
+                ASKING.store(false, std::sync::atomic::Ordering::SeqCst);
+            });
+        }
+        if let Some(m) = REMOTE.lock().unwrap().as_ref() {
+            for h in &hosts {
+                for k in m.get(h).into_iter().flatten() {
+                    let mut k = k.clone();
+                    if let Some(key) = k["key"].as_str().map(String::from) {
+                        k["key"] = serde_json::Value::String(format!("{h}//{key}"));
+                    }
+                    k["host"] = serde_json::Value::String(h.clone());
+                    all.push(k);
+                }
+            }
+        }
+        qs(&serde_json::Value::Array(all).to_string())
     }
 
     fn jupyter_kernels(&self, host: &ffi::QString) -> ffi::QString {
@@ -937,9 +1024,31 @@ impl ffi::Controller {
         })
     }
 
+    fn upload_files(self: Pin<&mut Self>, key: &ffi::QString, host: &ffi::QString, dir: &ffi::QString, paths: &ffi::QString) {
+        let qt = self.qt_thread();
+        let (key, host, dir) = (key.to_string(), host.to_string(), dir.to_string());
+        let paths: Vec<String> = serde_json::from_str(&paths.to_string()).unwrap_or_default();
+        std::thread::spawn(move || {
+            let mut done = Vec::new();
+            let mut err = String::new();
+            for p in paths {
+                match crate::remote::upload(&host, std::path::Path::new(&p), &dir) {
+                    Ok(there) => done.push(there),
+                    Err(e) => {
+                        err = e;
+                        break;
+                    }
+                }
+            }
+            let j = serde_json::to_string(&done).unwrap_or_default();
+            let _ = qt.queue(move |c| c.files_uploaded(qs(&key), qs(&j), qs(&err)));
+        });
+    }
+
     fn host_home(&self, host: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc_within(&host.to_string(), "host.info", serde_json::json!({}), std::time::Duration::from_secs(5));
-        qs(r.ok().as_ref().and_then(|v| v["home"].as_str()).unwrap_or("/"))
+        // (Asked once a host: the prompt bar wants it often. "" until it's
+        // connected: no ~ for now.)
+        qs(&crate::client::host_home(&host.to_string()))
     }
 
     fn host_error(&self, host: &ffi::QString) -> ffi::QString {

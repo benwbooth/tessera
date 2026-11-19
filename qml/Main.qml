@@ -1685,13 +1685,16 @@ ApplicationWindow {
         id: termMenu
         // -- what's under the pointer
         // (A file under the pointer: shown in Tessera, FilePreview.)
-        P.MenuItem { icon.name: "document-preview"; text: "View “" + win.shortLabel(contextLink.replace(/^file:\/\//, "")) + "”"
-            visible: contextLink.startsWith("file://")
-            onTriggered: { const p = paneOf(contextView); let f = contextLink.replace(/^file:\/\/[^/]*/, ""); try { f = decodeURIComponent(f) } catch (e) {} if (p) p.viewFile(f) } }
-        P.MenuItem { icon.name: "internet-services"; text: "Open “" + win.shortLabel(contextLink.replace(/^file:\/\//, "")) + "”"
-            visible: contextLink !== ""; onTriggered: Qt.openUrlExternally(contextLink) }
+        // (A path in another host's output is ssh://<host>/<path>: viewed
+        // and opened through that host; its address is the path there.)
+        readonly property string contextPath: contextLink.startsWith("ssh://") ? contextLink.replace(/^ssh:\/\/[^/]*/, "") : contextLink.replace(/^file:\/\//, "")
+        P.MenuItem { icon.name: "document-preview"; text: "View “" + win.shortLabel(termMenu.contextPath) + "”"
+            visible: contextLink.startsWith("file://") || contextLink.startsWith("ssh://")
+            onTriggered: { const p = paneOf(contextView); let f = contextLink.startsWith("ssh://") ? contextLink : contextLink.replace(/^file:\/\/[^/]*/, ""); try { if (!f.startsWith("ssh://")) f = decodeURIComponent(f) } catch (e) {} if (p) p.viewFile(f) } }
+        P.MenuItem { icon.name: "internet-services"; text: "Open “" + win.shortLabel(termMenu.contextPath) + "”"
+            visible: contextLink !== ""; onTriggered: { if (contextLink.startsWith("ssh://")) { const e = controller.fileAction("open", contextLink, ""); if (e !== "") notice(e, []) } else Qt.openUrlExternally(contextLink) } }
         P.MenuItem { icon.name: "edit-copy"; text: "Copy Link Address"; visible: contextLink !== ""
-            onTriggered: { clipHelper.text = contextLink.replace(/^file:\/\//, ""); clipHelper.selectAll(); clipHelper.copy() } }
+            onTriggered: { clipHelper.text = termMenu.contextPath; clipHelper.selectAll(); clipHelper.copy() } }
         P.MenuSeparator { visible: contextLink !== "" }
         // -- the selection
         P.MenuItem { icon.name: "search"; text: "Search the Web for “" + contextSelShort + "”"; visible: contextSelection !== ""

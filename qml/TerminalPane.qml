@@ -183,6 +183,8 @@ Item {
         property bool keepsBacktab: true    // (it decides: the editor at a prompt, else the program)
         id: term
         ready: pane.hostUp
+        // (Ctrl+click on a path in another host's output: Tessera's viewer, read there.)
+        onRemoteLinkActivated: (l) => pane.viewFile(l)
         anchors.top: titleBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -508,11 +510,33 @@ Item {
         z: -1
         onDropped: (drop) => {
             if (!drop.hasUrls) return
-            const q = (s) => /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'"
-            const paths = drop.urls.map(u => { let p = u.toString().replace(/^file:\/\/[^/]*/, ""); try { p = decodeURIComponent(p) } catch (e) {} return q(p) }).join(" ") + " "
+            const local = drop.urls.map(u => { let p = u.toString().replace(/^file:\/\/[^/]*/, ""); try { p = decodeURIComponent(p) } catch (e) {} return p })
             drop.accept(Qt.CopyAction)
-            if (pane.editorOn) { compose.focusEditor(); compose.insert(paths) }
-            else term.sendText(paths)
+            // (Another host's shell: the files go there first, into its
+            // folder, and their paths there are what's typed.)
+            if (pane.sshHost !== "") {
+                const dir = term.pwd !== "" ? term.pwd.replace(/^file:\/\/[^/]*/, "") : pane.procCwd
+                pane.controller.uploadFiles("drop-" + term.sessionId, pane.sshHost, dir, JSON.stringify(local))
+                return
+            }
+            pane.typePaths(local)
+        }
+    }
+    function typePaths(list) {
+        const q = (s) => /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'"
+        const paths = list.map(q).join(" ") + " "
+        if (pane.editorOn) { compose.focusEditor(); compose.insert(paths) }
+        else term.sendText(paths)
+    }
+    Connections {
+        target: pane.controller
+        enabled: pane.sshHost !== ""
+        function onFilesUploaded(key, paths, error) {
+            if (key !== "drop-" + term.sessionId) return
+            let list = []
+            try { list = JSON.parse(paths) } catch (e) {}
+            if (list.length > 0) pane.typePaths(list)
+            if (error !== "") term.showMessage("\r\n\u001b[31m[tessera: " + error + "]\u001b[0m\r\n")
         }
     }
     // The last output's rich view, over the terminal.
