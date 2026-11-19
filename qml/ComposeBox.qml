@@ -32,7 +32,25 @@ Rectangle {
     readonly property var shellNames: ({ zsh: "zsh", bash: "bash", fish: "fish", nu: "nushell", xonsh: "xonsh", pwsh: "PowerShell", elvish: "elvish", ksh: "ksh", dash: "dash", tcsh: "tcsh", sh: "sh" })
     // (The grammar each one is highlighted with.)
     function shellGrammar(s) { return ({ fish: "fish", nu: "nu" })[s] || "bash" }
-    function pickLanguage(id) {
+    // (The last language picked is kept, for every pane and the next start:
+    // the state folder's input-language.json.)
+    property string savedPick: ""
+    property bool pickRestored: false
+    function restorePick() {
+        if (pickRestored || !controller) return
+        pickRestored = true
+        try { savedPick = JSON.parse(JSON.parse(controller.readTextFile(controller.stateFolder() + "/input-language.json")).text || "{}").id || "" } catch (e) { savedPick = "" }
+        if (savedPick !== "") pickLanguage(savedPick, false)
+    }
+    onControllerChanged: restorePick()
+    Component.onCompleted: restorePick()
+    // (A shell picked before the pane's own shell is known: decided again once it is.)
+    onShellNameChanged: if (savedPick.startsWith("shell:") && langOverride === "bash") pickLanguage(savedPick, false)
+    function pickLanguage(id, remember) {
+        if (remember !== false && controller) {
+            savedPick = id
+            controller.writeTextFile(controller.stateFolder() + "/input-language.json", JSON.stringify({ id: id }))
+        }
         if (id.startsWith("shell:")) {
             const sh = id.substring(6)
             // (Chosen, not guessed. Another shell than the pane's: the input
