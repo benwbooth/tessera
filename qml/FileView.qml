@@ -216,6 +216,21 @@ Item {
     readonly property var termEditors: [["", "Your $EDITOR"], ["vim", "Vim"], ["nvim", "Neovim"], ["emacs -nw", "Emacs"], ["hx", "Helix"], ["micro", "micro"], ["nano", "nano"], ["kak", "Kakoune"]]
     property string termEditor: { if (!controller) return ""; controller.revision; try { return JSON.parse(controller.settings()).terminal_editor || "" } catch (e) { return "" } }
     function shq(x) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(x) ? x : "'" + x.replace(/'/g, "'\\''") + "'" }
+    // Nixpkgs' package for each editor: one that isn't installed runs from
+    // there (nix run nixpkgs#<it>), the first time fetched.
+    readonly property var editorPackages: ({ vim: "vim", nvim: "neovim", emacs: "emacs-nox", hx: "helix", micro: "micro", nano: "nano", kak: "kakoune", vi: "vim" })
+    // (A POSIX sh script, so it's the same whatever the user's shell is; the
+    // file is its $1.)
+    function editorScript(e) {
+        if (e === "") return 'exec ${VISUAL:-${EDITOR:-vi}} "$1"'
+        const words = e.split(" "), bin = words[0], args = words.slice(1).join(" ")
+        const pkg = editorPackages[bin] || bin
+        const a = args !== "" ? args + " " : ""
+        return "if command -v " + bin + " >/dev/null 2>&1; then exec " + bin + " " + a + '"$1"; '
+             + "elif command -v nix >/dev/null 2>&1; then echo '" + bin + " isn'\\''t installed: running it from nixpkgs (nix run nixpkgs#" + pkg + ")...'; "
+             + "exec nix run nixpkgs#" + pkg + " -- " + a + '"$1"; '
+             + "else echo '" + bin + " isn'\\''t installed, and there'\\''s no nix to run it with.'; printf 'Press Enter to close. '; read _; fi"
+    }
     function openInTerminal(ed) {
         if (ed !== undefined && ed !== termEditor && controller) controller.setSetting("terminal_editor", JSON.stringify(ed))
         const e = ed !== undefined ? ed : termEditor
@@ -224,7 +239,7 @@ Item {
         termHostUp = termHost === ""
         termHostError = ""
         if (!termHostUp && controller) controller.connectHost(termHost)
-        termCommand = "exec " + (e !== "" ? e : "${VISUAL:-${EDITOR:-vi}}") + " " + shq(termPath)
+        termCommand = "exec sh -c " + shq(editorScript(e)) + " sh " + shq(termPath)
         inTerm = true
     }
     // (Quit the editor, or close it here: back to the file, as it is now.)

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import Tessera
 
 // One tab: flat and full height. The current tab is the terminal's own color
@@ -169,8 +170,16 @@ Item {
         readonly property bool isPath: /^[~\/]/.test(tab.text)
         elide: isPath ? Text.ElideLeft : Text.ElideNone
         renderType: Text.NativeRendering
+        // (Cut short: the whole label on hover.)
+        readonly property bool cut: implicitWidth > width + 0.5
+        ToolTip {
+            visible: title.cut && hover.hovered
+            delay: 500
+            topPadding: 4.001
+            text: tab.text
+        }
         Rectangle {
-            visible: !title.isPath && title.implicitWidth > title.width
+            visible: !title.isPath && title.cut
             anchors.right: parent.right
             width: 18
             height: parent.height
