@@ -1,5 +1,5 @@
 //! One terminal: a libghostty-vt `Terminal` plus where its bytes come from
-//! (a daemon PTY, or a tmux pane through a control-mode gateway).
+//! (a PTY in tesserad, here or on an SSH host).
 //!
 //! Everything here runs on the Qt GUI thread; the C++ view watches `fd()`
 //! with a QSocketNotifier and calls `on_readable`, then `frame` to paint.
@@ -7,7 +7,6 @@
 use crate::bridge::ffi::{Frame, Run};
 use crate::keymap;
 use crate::proto::*;
-use crate::tmux::{self, Gateway, PaneShared};
 use libghostty_vt::{
     fmt::{Format, Formatter, FormatterOptions},
     key, mouse,
@@ -55,7 +54,6 @@ pub use crate::snapshot::scrollback_bytes;
 enum Backend {
     /// A shell in tesserad, this computer's ("" host) or another's over SSH.
     Daemon { stream: UnixStream, reader: FrameReader, id: String, host: String },
-    Tmux { gw: Rc<RefCell<Gateway>>, pane: u32, shared: Rc<RefCell<PaneShared>> },
 }
 
 pub struct Session {
@@ -81,9 +79,6 @@ pub struct Session {
     bell: Rc<Cell<bool>>,
     size: Rc<Cell<(u16, u16, u32, u32)>>,
     events: Vec<Value>,
-    /// Set while this (daemon) session is a tmux control-mode gateway.
-    gateway: Option<Rc<RefCell<Gateway>>>,
-    carry: Vec<u8>,
     /// Shell integration's prompt marks (OSC 133): the last one seen
     /// ('A' prompt, 'B' input, 'C' command running, 'D' done), and the tail
     /// of the last read in case a mark is split across reads.
@@ -201,7 +196,6 @@ impl Default for Options2 {
 
 pub fn session_open(
     attach_id: &str,
-    tmux_pane: &str,
     cwd: &str,
     cols: u16,
     rows: u16,
@@ -214,13 +208,7 @@ pub fn session_open(
     host: &str,
 ) -> Result<Box<Session>, String> {
     let (cols, rows) = (cols.max(2), rows.max(1));
-    let backend = if !tmux_pane.is_empty() {
-        let (key, pane) = tmux_pane.rsplit_once(':').ok_or("bad tmux pane")?;
-        let pane: u32 = pane.trim_start_matches('%').parse().map_err(|_| "bad tmux pane id")?;
-        let gw = tmux::lookup(key).ok_or("tmux connection is gone")?;
-        let shared = gw.borrow().panes.get(&pane).cloned().ok_or("unknown tmux pane")?;
-        Backend::Tmux { gw, pane, shared }
-    } else {
+    let backend = {
         let mut stream = crate::client::connect_to(host).map_err(|e| if host.is_empty() { format!("tesserad: {e}") } else { format!("{host}: {e}") })?;
         if attach_id.is_empty() {
             write_json(&mut stream, T_CREATE, &Create { cols, rows, cwd: cwd.to_string(), command: command.to_string(), term: term_name.to_string(), input: startup_input.to_string(), scrollback })
@@ -232,10 +220,6 @@ pub fn session_open(
         Backend::Daemon { stream, reader: FrameReader::default(), id: attach_id.to_string(), host: host.to_string() }
     };
 
-    let (cols, rows) = match &backend {
-        Backend::Tmux { shared, .. } => shared.borrow().grid,
-        _ => (cols, rows),
-    };
     let mut term = Terminal::new(Options { cols, rows, max_scrollback: scrollback_bytes(if scrollback > 0 { scrollback } else { SCROLLBACK as u32 }) }).map_err(|e| e.to_string())?;
     crate::images::enable(&mut term);
     term.resize(cols, rows, cell_w.max(1), cell_h.max(1)).map_err(|e| e.to_string())?;
@@ -301,7 +285,7 @@ pub fn session_open(
     let mut press = PressEvent::new().map_err(e)?;
     press.set_repeat_interval(Duration::from_millis(500)).map_err(e)?;
 
-    let mut s = Box::new(Session {
+    let s = Box::new(Session {
         backend,
         term,
         rs: RenderState::new().map_err(e)?,
@@ -324,8 +308,6 @@ pub fn session_open(
         bell,
         size,
         events: Vec::new(),
-        gateway: None,
-        carry: Vec::new(),
         mark: 0,
         mark_tail: Vec::new(),
         command_started: None,
@@ -364,10 +346,6 @@ pub fn session_open(
         trigger_row: 0,
         highlights: Vec::new(),
     });
-    // A tmux pane may already have its captured contents waiting.
-    if matches!(s.backend, Backend::Tmux { .. }) {
-        s.on_readable();
-    }
     Ok(s)
 }
 
@@ -403,14 +381,12 @@ impl Session {
     pub fn fd(&self) -> i64 {
         match &self.backend {
             Backend::Daemon { stream, .. } => crate::net::raw(stream),
-            Backend::Tmux { shared, .. } => shared.borrow().wake_fd(),
         }
     }
 
     pub fn id(&self) -> String {
         match &self.backend {
             Backend::Daemon { id, .. } => id.clone(),
-            Backend::Tmux { gw, pane, .. } => format!("{}:%{pane}", gw.borrow().key),
         }
     }
 
@@ -420,7 +396,6 @@ impl Session {
         }
         match &mut self.backend {
             Backend::Daemon { stream, .. } => write_blocking(stream, T_INPUT, bytes),
-            Backend::Tmux { gw, pane, .. } => gw.borrow_mut().send_keys(*pane, bytes),
         }
     }
 
@@ -507,41 +482,10 @@ impl Session {
                     }
                 }
             }
-            Backend::Tmux { shared, .. } => {
-                let (data, grid, closed) = {
-                    let mut sh = shared.borrow_mut();
-                    sh.drain_wake();
-                    let data = std::mem::take(&mut sh.pending);
-                    let grid = if std::mem::take(&mut sh.grid_changed) { Some(sh.grid) } else { None };
-                    (data, grid, sh.closed)
-                };
-                if let Some((c, r)) = grid {
-                    let (_, _, w, h) = self.size.get();
-                    let _ = self.term.resize(c, r, w, h);
-                    self.size.set((c, r, w, h));
-                    self.events.push(json!({"type": "grid", "cols": c, "rows": r}));
-                    sig |= SIG_DIRTY;
-                }
-                if !data.is_empty() {
-                    if let Some(f) = self.log.as_mut() {
-                        let _ = f.write_all(&data);
-                    }
-                    if let Some(r) = self.rec.as_mut() {
-                        r.output(&data);
-                    }
-                    self.term.vt_write(&data);
-                    self.run_triggers();
-                    sig |= SIG_DIRTY;
-                }
-                if closed {
-                    self.exited = true;
-                }
-            }
         }
-        // Replies to queries (DA, DSR, ...) go back to the program — except
-        // in tmux panes, where tmux itself answers its programs.
+        // Replies to queries (DA, DSR, ...) go back to the program.
         let out = std::mem::take(&mut *self.outbox.borrow_mut());
-        if !out.is_empty() && self.gateway.is_none() && matches!(self.backend, Backend::Daemon { .. }) {
+        if !out.is_empty() {
             self.write_input(&out);
         }
         if self.title_changed.replace(false) && self.opts.allow_title {
@@ -557,9 +501,6 @@ impl Session {
         }
         if self.bell.replace(false) {
             self.events.push(json!({"type": "bell"}));
-        }
-        if let Some(gw) = &self.gateway {
-            self.events.append(&mut gw.borrow_mut().events);
         }
         if self.exited {
             sig |= SIG_EXITED;
@@ -893,56 +834,11 @@ impl Session {
     }
 
     fn process_output(&mut self, data: &[u8]) {
-        let transformed;
-        let data = if self.gateway.is_none() {
-            self.scan_marks(data);
-            self.scan_aliases(data);
-            transformed = self.transform_images(data);
-            self.capture_output(&transformed);
-            &transformed[..]
-        } else {
-            data
-        };
-        if let Some(gw) = self.gateway.clone() {
-            let rest = gw.borrow_mut().feed(data);
-            self.events.append(&mut gw.borrow_mut().events);
-            if let Some(rest) = rest {
-                tmux::unregister(&gw.borrow().key);
-                self.gateway = None;
-                self.term.vt_write(b"\r\n[tmux detached]\r\n");
-                self.term.vt_write(&rest);
-            }
-            return;
-        }
-        let mut buf = std::mem::take(&mut self.carry);
-        buf.extend_from_slice(data);
-        if let Some(i) = buf.windows(tmux::DCS_START.len()).position(|w| w == tmux::DCS_START) {
-            self.term.vt_write(&buf[..i]);
-            let rest = buf[i + tmux::DCS_START.len()..].to_vec();
-            self.start_gateway();
-            if !rest.is_empty() {
-                self.process_output(&rest);
-            }
-            return;
-        }
-        // Hold back a trailing partial DCS start so a split read still matches.
-        let keep = (1..tmux::DCS_START.len())
-            .rev()
-            .find(|&k| buf.len() >= k && buf[buf.len() - k..] == tmux::DCS_START[..k])
-            .unwrap_or(0);
-        let cut = buf.len() - keep;
-        self.term.vt_write(&buf[..cut]);
-        self.carry = buf[cut..].to_vec();
-    }
-
-    fn start_gateway(&mut self) {
-        let Backend::Daemon { stream, .. } = &self.backend else { return };
-        let Ok(out) = stream.try_clone() else { return };
-        let (c, r, _, _) = self.size.get();
-        self.term.vt_write(
-            b"\r\n\x1b[2m[tmux control mode: tmux windows open as tabs. Press Esc here to detach.]\x1b[0m\r\n",
-        );
-        self.gateway = Some(tmux::start(out, c, r));
+        self.scan_marks(data);
+        self.scan_aliases(data);
+        let transformed = self.transform_images(data);
+        self.capture_output(&transformed);
+        self.term.vt_write(&transformed);
     }
 
     pub fn take_events(&mut self) -> String {
@@ -955,13 +851,6 @@ impl Session {
         if self.size.get() == (cols, rows, cell_w, cell_h) {
             return;
         }
-        if matches!(self.backend, Backend::Tmux { .. }) {
-            // tmux owns pane sizes; only the cell size changes here.
-            let (c, r, _, _) = self.size.get();
-            self.size.set((c, r, cell_w, cell_h));
-            let _ = self.term.resize(c, r, cell_w, cell_h);
-            return;
-        }
         if let Some(r) = self.rec.as_mut() {
             if (self.size.get().0, self.size.get().1) != (cols, rows) {
                 r.resize(cols, rows);
@@ -969,22 +858,12 @@ impl Session {
         }
         self.size.set((cols, rows, cell_w, cell_h));
         let _ = self.term.resize(cols, rows, cell_w.max(1), cell_h.max(1));
-        if let Some(gw) = &self.gateway {
-            gw.borrow_mut().set_client_size(cols, rows);
-        }
-        if let Backend::Daemon { stream, .. } = &mut self.backend {
-            let payload = serde_json::to_vec(&Resize { cols, rows }).unwrap();
-            write_blocking(stream, T_RESIZE, &payload);
-        }
+        let Backend::Daemon { stream, .. } = &mut self.backend;
+        let payload = serde_json::to_vec(&Resize { cols, rows }).unwrap();
+        write_blocking(stream, T_RESIZE, &payload);
     }
 
     pub fn key_event(&mut self, qt_key: i32, qt_mods: u32, text: &str, release: bool, _native_vk: u32) -> bool {
-        if let Some(gw) = &self.gateway {
-            if !release && qt_key == 0x0100_0000 {
-                gw.borrow_mut().detach();
-            }
-            return true;
-        }
         let printable = !text.is_empty() && text.chars().all(|c| !c.is_control());
         let Some((k, ucp)) = keymap::key(qt_key, qt_mods) else {
             if printable && !release {
@@ -1308,9 +1187,7 @@ impl Session {
         self.highlights.clear();
         self.term.reset();
         self.force_full = true;
-        if self.gateway.is_none() {
-            self.write_input(b"\x0c");
-        }
+        self.write_input(b"\x0c");
     }
 
     pub fn log_to_file(&mut self, path: &str) -> bool {
@@ -1400,9 +1277,7 @@ impl Session {
     /// (the shell redraws its prompt on Ctrl+L).
     pub fn clear_scrollback(&mut self) {
         self.term.vt_write(b"\x1b[H\x1b[2J\x1b[3J");
-        if self.gateway.is_none() {
-            self.write_input(b"\x0c");
-        }
+        self.write_input(b"\x0c");
     }
 
     pub fn clear_selection(&mut self) {
@@ -1424,7 +1299,7 @@ impl Session {
     }
 
     pub fn focus(&mut self, focused: bool) {
-        if self.term.mode(Mode::FOCUS_EVENT).unwrap_or(false) && self.gateway.is_none() {
+        if self.term.mode(Mode::FOCUS_EVENT).unwrap_or(false) {
             self.write_input(if focused { b"\x1b[I" } else { b"\x1b[O" });
         }
     }
@@ -1438,7 +1313,6 @@ impl Session {
                 });
                 write_blocking(stream, T_KILL, b"")
             }
-            Backend::Tmux { gw, pane, .. } => gw.borrow_mut().user_command(&format!("kill-pane -t %{pane}")),
         }
     }
 
@@ -1787,34 +1661,6 @@ impl Session {
             && !keymap::mods(qt_mods).contains(key::Mods::SHIFT)
     }
 
-    pub fn tmux_pane_id(&self) -> i32 {
-        match &self.backend {
-            Backend::Tmux { pane, .. } => *pane as i32,
-            _ => -1,
-        }
-    }
-
-    pub fn tmux_gateway(&self) -> String {
-        match (&self.backend, &self.gateway) {
-            (Backend::Tmux { gw, .. }, _) | (_, Some(gw)) => gw.borrow().key.clone(),
-            _ => String::new(),
-        }
-    }
-
-    pub fn tmux_command(&mut self, command: &str) {
-        let gw = match (&self.backend, &self.gateway) {
-            (Backend::Tmux { gw, .. }, _) | (_, Some(gw)) => gw.clone(),
-            _ => return,
-        };
-        gw.borrow_mut().user_command(command);
-    }
-
-    pub fn tmux_set_grid(&mut self, _cols: u16, _rows: u16, cell_w: u32, cell_h: u32) {
-        let (c, r, _, _) = self.size.get();
-        self.size.set((c, r, cell_w, cell_h));
-        let _ = self.term.resize(c, r, cell_w.max(1), cell_h.max(1));
-    }
-
     /// Fill `out` with the rows that changed. Returns false when nothing did.
     pub fn frame(&mut self, out: &mut Frame, force_full: bool) -> bool {
         out.dirty_rows.clear();
@@ -2059,16 +1905,6 @@ fn format_selection(term: &Terminal<'static, 'static>, sel: &Selection<'_>) -> S
     let opts = FormatterOptions::new().with_format(Format::Plain).with_selection(sel).with_trim(true).with_unwrap(true);
     let Ok(mut f) = Formatter::new(term, opts) else { return String::new() };
     f.format_alloc(None).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        // A daemon session just detaches (the shell keeps running); a gateway
-        // going away ends its tmux tabs.
-        if let Some(gw) = self.gateway.take() {
-            tmux::unregister(&gw.borrow().key);
-        }
-    }
 }
 
 #[cfg(test)]

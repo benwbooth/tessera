@@ -124,7 +124,7 @@
         let qtEnv = qtEnvFor pkgs; in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec pkgs.tmux ];
+            packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec ];
             QMAKE = "${qtEnv}/bin/qmake";
             # Link with this shell's compiler (a system clang links against the
             # system glibc and the binary can't load this nixpkgs' Qt).

@@ -7,7 +7,7 @@ Exec=tessera
 Icon=io.github.benwbooth.Tessera
 Terminal=false
 Categories=System;TerminalEmulator;
-Keywords=terminal;shell;console;command;prompt;tmux;
+Keywords=terminal;shell;console;command;prompt;ssh;notebook;
 StartupWMClass=tessera
 Actions=new-window;
 

@@ -171,13 +171,6 @@ void TerminalItem::setAttachId(const QString& v)
     emit attachIdChanged();
 }
 
-void TerminalItem::setTmuxPane(const QString& v)
-{
-    if (v == m_tmuxPane) return;
-    m_tmuxPane = v;
-    emit tmuxPaneChanged();
-}
-
 void TerminalItem::setCwd(const QString& v)
 {
     if (v == m_cwd) return;
@@ -328,7 +321,6 @@ void TerminalItem::setCopyOnSelect(bool v)
     emit copyOnSelectChanged();
 }
 
-int TerminalItem::tmuxPaneId() const { return m_session ? m_session->tmux_pane_id() : -1; }
 
 void TerminalItem::componentComplete()
 {
@@ -398,12 +390,12 @@ void TerminalItem::open()
     const int cols = qMax(2, int((width() * m_dpr - 2 * m_pad) / m_cw));
     const int rows = qMax(1, int((height() * m_dpr - 2 * m_pad) / m_ch));
     try {
-        const QByteArray a = m_attachId.toUtf8(), t = m_tmuxPane.toUtf8(), c = m_cwd.toUtf8();
+        const QByteArray a = m_attachId.toUtf8(), c = m_cwd.toUtf8();
         const QByteArray cmd = m_command.toUtf8(), term = m_termName.toUtf8(), host = m_host.toUtf8();
         // Startup text only for a new shell, not one being reattached.
-        const QByteArray input = m_attachId.isEmpty() && m_tmuxPane.isEmpty() && !m_startupInput.isEmpty()
+        const QByteArray input = m_attachId.isEmpty() && !m_startupInput.isEmpty()
             ? (m_startupInput + QStringLiteral("\n")).toUtf8() : QByteArray();
-        auto box = tessera::session_open(rs(a), rs(t), rs(c), uint16_t(cols), uint16_t(rows), uint32_t(m_cw),
+        auto box = tessera::session_open(rs(a), rs(c), uint16_t(cols), uint16_t(rows), uint32_t(m_cw),
                                          uint32_t(m_ch), uint32_t(qMax(0, m_scrollback)), rs(cmd), rs(term), rs(input), rs(host));
         m_session = box.into_raw();
         if (!m_themeJson.isEmpty()) {
@@ -426,9 +418,7 @@ void TerminalItem::open()
         return;
     }
     m_sessionId = qs(m_session->id());
-    m_tmuxGateway = qs(m_session->tmux_gateway());
     emit sessionIdChanged();
-    if (!m_tmuxGateway.isEmpty()) emit tmuxGatewayChanged();
     m_notifier = new QSocketNotifier(m_session->fd(), QSocketNotifier::Read, this);
     connect(m_notifier, &QSocketNotifier::activated, this, &TerminalItem::onReadable);
     m_forceFull = true;
@@ -510,14 +500,8 @@ void TerminalItem::handleEvents()
                 emit promptChanged();
             }
         } else {
-            if (type == u"tmuxStart") {
-                m_tmuxGateway = e.value(u"gateway").toString();
-                emit tmuxGatewayChanged();
-            } else if (type == u"tmuxExit") {
-                m_tmuxGateway.clear();
-                emit tmuxGatewayChanged();
-            }
-            emit tmuxEvent(e.toVariantMap());
+            // (The rest, a trigger's notification say, for the window.)
+            emit sessionEvent(e.toVariantMap());
         }
     }
 }
@@ -1465,7 +1449,6 @@ void TerminalItem::restart()
         m_session = nullptr;
     }
     m_attachId.clear();
-    m_tmuxPane.clear();
     m_exited = false;
     emit exitedChanged();
     open();
@@ -1623,7 +1606,7 @@ QString TerminalItem::linkAt(qreal x, qreal y) const
 
 bool TerminalItem::saveSnapshot(const QString& path)
 {
-    if (!m_session || m_tmuxPane.size() > 0) return false;
+    if (!m_session) return false;
     const QByteArray p = path.toUtf8();
     return m_session->save_snapshot(rs(p));
 }
@@ -1662,13 +1645,6 @@ void TerminalItem::sendText(const QString& text)
 void TerminalItem::killSession()
 {
     if (m_session) m_session->kill();
-}
-
-void TerminalItem::tmuxCommand(const QString& command)
-{
-    if (!m_session) return;
-    const QByteArray c = command.toUtf8();
-    m_session->tmux_command(rs(c));
 }
 
 void TerminalItem::selectAll()

@@ -15,7 +15,6 @@ Item {
     property int number: 0               // shown when > 0 (Alt+number selects it)
     property bool current: false
     property bool nextIsCurrent: false   // no divider next to the current tab
-    property bool tmux: false
     property string view: ""             // "notebook" or "terminal": its icon
     property bool activity: false        // new output while in the background
     property bool bell: false
@@ -126,14 +125,14 @@ Item {
     // ---- contents ---------------------------------------------------------
     Text {
         id: glyph
-        visible: tab.number > 0 || tab.tmux
+        visible: tab.number > 0
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         width: 10
         horizontalAlignment: Text.AlignHCenter
-        text: tab.number > 0 ? tab.number : "∷"
-        color: tab.tmux && tab.number === 0 ? Theme.tmux : Theme.textDim
+        text: tab.number
+        color: Theme.textDim
         font.pixelSize: tab.number > 0 ? 10 : 11
         font.weight: Font.Bold
     }

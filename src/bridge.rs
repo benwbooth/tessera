@@ -3,7 +3,7 @@
 //! The terminal view itself is a small C++ QQuickItem (cpp/terminal_item.cpp)
 //! that paints rows with QPainter (native FreeType text) and composites them
 //! as textures. Everything else — the daemon connection, libghostty-vt, input
-//! encoding, tmux control mode — lives in Rust behind the `Session` type.
+//! encoding — lives in Rust behind the `Session` type.
 
 #[cxx_qt::bridge]
 pub mod ffi {
@@ -76,12 +76,10 @@ pub mod ffi {
     extern "Rust" {
         type Session;
 
-        /// Open a session. `attach_id` reattaches to a daemon session,
-        /// `tmux_pane` ("<gateway>:<pane>") binds to a tmux control-mode
-        /// pane; both empty creates a new shell in `cwd`.
+        /// Open a session: `attach_id` reattaches to one in tesserad, empty
+        /// creates a new shell in `cwd` (on `host`: "" here, else over SSH).
         fn session_open(
             attach_id: &str,
-            tmux_pane: &str,
             cwd: &str,
             cols: u16,
             rows: u16,
@@ -139,12 +137,12 @@ pub mod ffi {
         /// The shell is at its prompt (from shell integration's marks).
         fn at_prompt(self: &Session) -> bool;
 
-        /// The fd to watch for readability (daemon socket or tmux wake pipe).
+        /// The fd to watch for readability (its tesserad socket).
         fn fd(self: &Session) -> i64;
         fn id(self: &Session) -> String;
         /// Read whatever is available. Returns SIG_* bits.
         fn on_readable(self: &mut Session) -> u32;
-        /// JSON array of events for QML (title, tmux windows/layouts, ...).
+        /// JSON array of events for QML (title, folder, cells, ...).
         fn take_events(self: &mut Session) -> String;
         fn resize(self: &mut Session, cols: u16, rows: u16, cell_w: u32, cell_h: u32);
         /// Qt key event. Returns true when it was consumed.
@@ -205,14 +203,6 @@ pub mod ffi {
         fn focus(self: &mut Session, focused: bool);
         /// Ends the shell (closing a pane); dropping without this detaches.
         fn kill(self: &mut Session);
-        /// tmux pane id, or -1 when this isn't a tmux pane.
-        fn tmux_pane_id(self: &Session) -> i32;
-        /// Gateway key of the tmux connection this session belongs to (or runs).
-        fn tmux_gateway(self: &Session) -> String;
-        /// Run a tmux command through this session's gateway.
-        fn tmux_command(self: &mut Session, command: &str);
-        /// Set a tmux pane's grid (tmux decides pane sizes, not the view).
-        fn tmux_set_grid(self: &mut Session, cols: u16, rows: u16, cell_w: u32, cell_h: u32);
     }
 
     unsafe extern "C++" {

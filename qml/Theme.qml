@@ -31,7 +31,6 @@ QtObject {
     readonly property color textDim: mix(fg, chrome, 0.42)
     readonly property color divider: mix(chrome, fg, dark ? 0.12 : 0.13)
     readonly property color accent: term.ansi ? term.ansi[4] : "#5aa0ff"
-    readonly property color tmux: term.ansi ? term.ansi[2] : "#57c78a"
     // Preferences window surfaces.
     readonly property color panel: dark ? mix(bg, fg, 0.05) : mix(bg, "#000000", 0.03)
     readonly property color field: dark ? mix(bg, fg, 0.10) : "#ffffff"

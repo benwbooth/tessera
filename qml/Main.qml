@@ -46,7 +46,6 @@ ApplicationWindow {
     property var commandHistory: { try { return JSON.parse(controller.historyAll(5000)) } catch (e) { return [] } }
     property real zoomBase: 11         // the profile's size when zooming started
     readonly property int zoomPercent: fontSize > 0 ? Math.round(100 * fontSize / zoomBase) : 100
-    property var tmuxGateways: ({})    // gateway key -> gateway TerminalView
     property var contextView: null
     property string customTitle: ""    // Window > Edit Window Title
     property string broadcastMode: "off" // "off", "tab" or "all"
@@ -174,9 +173,6 @@ ApplicationWindow {
             anchors.fill: parent
             visible: win.tabs[win.currentTab] === tabItem
             property alias root: rootSplit
-            property string gateway: ""     // tmux connection, for tmux windows
-            property int tmuxWindow: -1
-            property string fixedTitle: ""  // tmux window name
             property string customTitle: "" // Window > Edit Tab Title
             property string launchTitle: "" // what the + menu started (a shell, ssh host)
             property string profile: ""
@@ -189,7 +185,6 @@ ApplicationWindow {
             readonly property var lastPane: titleView ? win.paneOf(titleView) : null
             readonly property var prof: win.profileFor(profile)
             readonly property string tabTitle: customTitle !== "" ? customTitle
-                : fixedTitle !== "" ? fixedTitle
                 : prof.tab_title !== "" ? prof.tab_title
                 // What's running in it (vim, htop, ssh...); at a prompt, the
                 // shell's own title or the folder.
@@ -243,7 +238,7 @@ ApplicationWindow {
             Qt.callLater(closePane, p, false)
         })
         p.view.exitedChanged.connect(function() {
-            if (!p.view.exited || p.view.tmuxPane !== "" || p.taken) return
+            if (!p.view.exited || p.taken) return
             const exitProf = profileFor(p.profileName)
             if (exitProf.notify_exit && (!win.active || tabOf(p) !== tabs[currentTab]))
                 controller.notify("Session ended", (tabOf(p) ? tabOf(p).tabTitle : exitProf.name))
@@ -267,13 +262,13 @@ ApplicationWindow {
         p.view.keyAction.connect(function(name) { runAction(name) })
         p.view.sessionIdChanged.connect(function() {
             const prof = profileFor(p.profileName)
-            if (prof.auto_log && p.view.sessionId !== "" && !p.view.logging && p.view.tmuxPane === "") {
+            if (prof.auto_log && p.view.sessionId !== "" && !p.view.logging) {
                 const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19)
                 const folder = (prof.log_folder || "~/tessera-logs").replace(/\/$/, "")
                 p.view.startLogging(folder + "/" + prof.name.replace(/[^A-Za-z0-9_-]/g, "_") + "-" + stamp + ".log")
             }
         })
-        p.view.tmuxEvent.connect(function(ev) { onTmuxEvent(p.view, ev) })
+        p.view.sessionEvent.connect(function(ev) { onSessionEvent(p.view, ev) })
         p.view.openFailed.connect(function(msg) { console.warn("tessera: " + msg) })
         treeRev++
         return p
@@ -330,12 +325,8 @@ ApplicationWindow {
     function splitPane(p, orientation, profileName) {
         if (!p) return
         if (maximizedPane) toggleMaximize()
-        if (p.view.tmuxPaneId >= 0) {
-            p.view.tmuxCommand((orientation === Qt.Horizontal ? "split-window -h -t %" : "split-window -v -t %") + p.view.tmuxPaneId)
-            return
-        }
         const prof = profileFor(profileName !== undefined ? profileName : p.profileName)
-        // (A split of another host's pane opens there too, as tmux's do.)
+        // (A split of another host's pane opens there too.)
         const props = { profileName: prof.name, cwd: cwdFor(prof, p.view), sshHost: p.sshHost }
         const h = p.host
         if (h.count === 1) h.orientation = orientation
@@ -366,7 +357,6 @@ ApplicationWindow {
         if (!p || !p.host) return
         if (maximizedPane) toggleMaximize()
         if (kill) {
-            if (p.view.tmuxPaneId >= 0) { p.view.tmuxCommand("kill-pane -t %" + p.view.tmuxPaneId); return }
             if (!p.view.exited && settings.undo_close_seconds > 0 && p.view.sessionId !== "")
                 retire({ title: "", color: "", profile: p.profileName, root: serializeNode(p, true) })
             else p.view.killSession()
@@ -495,22 +485,14 @@ ApplicationWindow {
     function newTab(opts) {
         opts = opts || {}
         const active = activeView
-        if (!opts.tmux && active && active.tmuxPaneId >= 0 && !opts.attachId && !opts.layout) {
-            active.tmuxCommand("new-window")
-            return null
-        }
         const prof = profileFor(opts.profile !== undefined ? opts.profile : settings.default_profile)
-        const t = tabComp.createObject(stack, {
-            gateway: opts.gateway || "",
-            tmuxWindow: opts.window !== undefined ? opts.window : -1,
-            profile: prof.name
-        })
+        const t = tabComp.createObject(stack, { profile: prof.name })
         if (opts.layout) {
             buildSavedTree(t, opts.layout.root, opts.alive, !!opts.recreate)
             if (opts.layout.title) t.customTitle = opts.layout.title
             if (opts.layout.color) t.tabColor = opts.layout.color
             if (t.root.count === 0) { t.destroy(); return null }
-        } else if (!opts.tmux) {
+        } else {
             const props = { profileName: prof.name }
             if (opts.command) props.commandOverride = opts.command
             if (opts.title) t.launchTitle = opts.title
@@ -529,18 +511,7 @@ ApplicationWindow {
             t.root.addItem(p)
             focusPane(p)
         }
-        // tmux windows keep tmux's order, right after their gateway's tab.
-        let at = tabs.length
-        if (opts.tmux) {
-            const gwView = tmuxGateways[opts.gateway]
-            let after = -1
-            for (let i = 0; i < tabs.length; ++i) {
-                const o = tabs[i]
-                if (o.gateway === opts.gateway && o.tmuxWindow >= 0 && o.tmuxWindow < opts.window) after = i
-                else if (after < 0 && gwView && panesIn(o.root, []).some(p => p.view === gwView)) after = i
-            }
-            if (after >= 0) at = after + 1
-        }
+        const at = tabs.length
         const cur = tabs[currentTab]
         tabs.splice(at, 0, t)
         tabs = tabs.slice()
@@ -564,11 +535,6 @@ ApplicationWindow {
     }
 
     function closeTab(t) {
-        if (t.tmuxWindow >= 0) {
-            const gw = tmuxGateways[t.gateway]
-            if (gw) gw.tmuxCommand("kill-window -t @" + t.tmuxWindow)
-            return
-        }
         const panes = panesIn(t.root, [])
         const doIt = function() {
             if (settings.undo_close_seconds > 0) retire(serializeTab(t, true))
@@ -615,7 +581,7 @@ ApplicationWindow {
         const busy = []
         let always = false
         for (const p of panes) {
-            if (p.view.tmuxPane !== "" || p.view.exited) continue
+            if (p.view.exited) continue
             const prof = profileFor(p.profileName)
             if (prof.confirm_close === "always") { always = true; continue }
             if (prof.confirm_close !== "jobs") continue
@@ -631,7 +597,6 @@ ApplicationWindow {
 
     function requestClosePane(p) {
         if (!p) return
-        if (p.view.tmuxPaneId >= 0) { closePane(p, true); return }
         confirmJobs([p], function() { closePane(p, true) })
     }
 
@@ -823,7 +788,7 @@ ApplicationWindow {
             saveSnapshots()
         } else {
             controller.saveLastLayout("")
-            for (const p of allPanes()) if (p.view.tmuxPane === "") p.view.killSession()
+            for (const p of allPanes()) p.view.killSession()
         }
     }
 
@@ -846,7 +811,7 @@ ApplicationWindow {
     function serializeWindow(withIds) {
         return { width: win.width, height: win.height, x: win.x, y: win.y,
                  maximized: win.visibility === Window.Maximized, current: currentTab,
-                 tabs: tabs.filter(t => t.tmuxWindow < 0).map(t => serializeTab(t, withIds)) }
+                 tabs: tabs.map(t => serializeTab(t, withIds)) }
     }
 
     // `alive`: session ids that can be reattached (null: start new shells).
@@ -908,7 +873,7 @@ ApplicationWindow {
         if (!settings.restore_sessions) return
         const keep = []
         for (const p of allPanes()) {
-            if (p.view.tmuxPane !== "" || p.view.sessionId === "") continue
+            if (p.view.sessionId === "") continue
             if (p.view.saveSnapshot(snapshotPath(p.view.sessionId))) keep.push(p.view.sessionId)
         }
         controller.pruneSnapshots(JSON.stringify(keep))
@@ -998,14 +963,14 @@ ApplicationWindow {
     }
 
     function tabPayload(t) {
-        return t.tmuxWindow >= 0 ? "" : JSON.stringify(serializeTab(t, true))
+        return JSON.stringify(serializeTab(t, true))
     }
 
     function onTabDragFinished(t, action) {
         if (action === Qt.MoveAction) {
             // Another window took it (and reattaches its sessions).
             later(30, function() { removeTab(t) })
-        } else if (action === Qt.IgnoreAction && tabs.length > 1 && t.tmuxWindow < 0) {
+        } else if (action === Qt.IgnoreAction && tabs.length > 1) {
             // Dropped away from any tab bar: it becomes a window of its own.
             const json = tabPayload(t)
             later(30, function() {
@@ -1074,108 +1039,10 @@ ApplicationWindow {
         win.visibility === Window.Maximized ? win.showNormal() : win.showMaximized()
     }
 
-    // ---- tmux control mode -----------------------------------------------
-
-    function tmuxTab(gateway, window) {
-        for (const t of tabs) if (t.gateway === gateway && t.tmuxWindow === window) return t
-        return null
+    // Events from a terminal for the window: a trigger's notification.
+    function onSessionEvent(view, ev) {
+        if (ev.type === "notify") controller.notify(ev.title, ev.body)
     }
-
-    function activeGateway() {
-        const t = tabs[currentTab]
-        if (t && t.gateway !== "") return tmuxGateways[t.gateway]
-        if (activeView && activeView.tmuxGateway !== "") return tmuxGateways[activeView.tmuxGateway]
-        return null
-    }
-
-    function onTmuxEvent(view, ev) {
-        switch (ev.type) {
-        case "tmuxStart":
-            tmuxGateways[ev.gateway] = view
-            tmuxGateways = Object.assign({}, tmuxGateways)
-            break
-        case "window": {
-            let t = tmuxTab(ev.gateway, ev.window)
-            if (!t) t = newTab({ tmux: true, gateway: ev.gateway, window: ev.window, background: !ev.active })
-            if (ev.name !== undefined) t.fixedTitle = ev.name
-            buildTmuxLayout(t, ev.layout, view)
-            if (ev.active) focusTab(tabs.indexOf(t))
-            break
-        }
-        case "windowRename": {
-            const t = tmuxTab(ev.gateway, ev.window)
-            if (t) t.fixedTitle = ev.name
-            break
-        }
-        case "windowClose": {
-            const t = tmuxTab(ev.gateway, ev.window)
-            if (t) removeTab(t)
-            break
-        }
-        case "tmuxExit":
-            for (const t of tabs.slice()) if (t.gateway === ev.gateway && t.tmuxWindow >= 0) removeTab(t)
-            delete tmuxGateways[ev.gateway]
-            tmuxGateways = Object.assign({}, tmuxGateways)
-            break
-        case "notify":
-            controller.notify(ev.title, ev.body)
-            break
-        case "tmuxError":
-            console.warn("tmux: " + ev.message)
-            break
-        }
-    }
-
-    // Rebuild a tmux window's splits from tmux's layout tree, keeping the
-    // existing pane views (and their terminals) by pane id.
-    function buildTmuxLayout(t, layout, gatewayView) {
-        const existing = {}
-        for (const p of panesIn(t.root, [])) existing[p.view.tmuxPaneId] = p
-        const oldSplits = []
-        function strip(split) {
-            while (split.count > 0) {
-                const it = split.takeItem(0)
-                if (it.view === undefined) { strip(it); oldSplits.push(it) }
-                else it.parent = holder
-            }
-        }
-        strip(t.root)
-        for (const s of oldSplits) s.destroy()
-
-        const cw = gatewayView.cellWidth, ch = gatewayView.cellHeight, pad = 2 * gatewayView.padding
-        const prof = profileFor(paneOf(gatewayView) ? paneOf(gatewayView).profileName : t.profile)
-        function build(node, host) {
-            if (node.t === "pane") {
-                let p = existing[node.id]
-                if (p) delete existing[node.id]
-                else p = makePane(host, { tmuxPane: t.gateway + ":%" + node.id, profileName: prof.name })
-                p.host = host
-                p.prefW = node.w * cw + pad
-                p.prefH = node.h * ch + pad
-                return p
-            }
-            const s = splitComp.createObject(null, { orientation: node.t === "h" ? Qt.Horizontal : Qt.Vertical })
-            s.host = host
-            s.prefW = node.w * cw + pad
-            s.prefH = node.h * ch + pad
-            for (const c of node.c) s.addItem(build(c, s))
-            return s
-        }
-        if (layout.t === "pane") {
-            t.root.addItem(build(layout, t.root))
-        } else {
-            t.root.orientation = layout.t === "h" ? Qt.Horizontal : Qt.Vertical
-            for (const c of layout.c) t.root.addItem(build(c, t.root))
-        }
-        for (const id in existing) existing[id].destroy()
-        if (!t.lastView || panesIn(t.root, []).indexOf(paneOf(t.lastView)) < 0) {
-            const f = firstPane(t.root)
-            t.lastView = f ? f.view : null
-        }
-        treeRev++
-    }
-
-    Item { id: holder; visible: false }
 
     // ---- shortcuts (iTerm2's, with Ctrl+Shift where it has Cmd) -------------
     // The menus show these keys in their text; the keys themselves live here
@@ -1258,7 +1125,7 @@ ApplicationWindow {
             P.MenuItem { icon.name: "tab-new"; text: "New Tab with Current Profile"; onTriggered: newTab({ profile: activeProfile.name }) }
             P.MenuItem { icon.name: "window-new"; text: "New Window\tCtrl+Shift+N"; onTriggered: controller.newWindow() }
             P.MenuItem { icon.name: "security-high"; text: "New Administrator Window"; visible: Qt.platform.os === "windows" && !controller.isAdmin(); onTriggered: controller.newAdminWindow() }
-            P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Tab"; enabled: tabs.length > 0 && tabs[currentTab].tmuxWindow < 0
+            P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Tab"; enabled: tabs.length > 0
                 onTriggered: newTab({ layout: serializeTab(tabs[currentTab], false), profile: tabs[currentTab].profile }) }
             P.MenuSeparator {}
             P.MenuItem { icon.name: "view-split-left-right"; text: "Split Right with Current Profile\tCtrl+Shift+D"; onTriggered: splitPane(activePane, Qt.Horizontal) }
@@ -1284,13 +1151,6 @@ ApplicationWindow {
                 P.MenuItem { text: "Send Input to Current Session Only"; checkable: true; group: broadcastGroup; checked: broadcastMode === "off"; onTriggered: broadcastMode = "off" }
                 P.MenuItem { text: "Broadcast Input to All Panes in All Tabs"; checkable: true; group: broadcastGroup; checked: broadcastMode === "all"; onTriggered: broadcastMode = "all" }
                 P.MenuItem { text: "Broadcast Input to All Panes in Current Tab"; checkable: true; group: broadcastGroup; checked: broadcastMode === "tab"; onTriggered: broadcastMode = "tab" }
-            }
-            P.Menu {
-                title: "tmux"
-                icon.name: "view-split-left-right"
-                enabled: Object.keys(tmuxGateways).length > 0
-                P.MenuItem { icon.name: "network-disconnect"; text: "Detach"; onTriggered: { const g = activeGateway(); if (g) g.tmuxCommand("detach-client") } }
-                P.MenuItem { icon.name: "tab-new"; text: "New tmux Window"; onTriggered: { const g = activeGateway(); if (g) g.tmuxCommand("new-window") } }
             }
         }
 
@@ -1402,7 +1262,7 @@ ApplicationWindow {
             title: "Session"
             icon.name: "system-run"
             P.MenuItem { icon.name: "document-edit"; text: "Edit Session…"; onTriggered: prefs.showProfile(activeProfile.name) }
-            P.MenuItem { icon.name: "view-refresh"; text: "Restart Session"; enabled: activeView !== null && activeView.tmuxPane === ""
+            P.MenuItem { icon.name: "view-refresh"; text: "Restart Session"; enabled: activeView !== null
                 onTriggered: { const v = activeView; confirmJobs([paneOf(v)], function() { v.restart() }) } }
             P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Session"; enabled: activeView !== null
                 onTriggered: newTab({ profile: activeProfile.name, cwd: activeView.pwd }) }
@@ -1592,23 +1452,14 @@ ApplicationWindow {
     // Right click on a tab.
     property var menuTab: null
     function renameTab(t) {
-        if (t.tmuxWindow >= 0) {
-            askText("Rename tmux Window", "Name", t.fixedTitle, function(s) {
-                const g = tmuxGateways[t.gateway]
-                if (g && s.trim() !== "") g.tmuxCommand("rename-window -t @" + t.tmuxWindow + " '" + s.replace(/'/g, "'\\''") + "'")
-            })
-        } else {
-            askText("Tab Title", "Title (empty: automatic)", t.customTitle, function(s) { t.customTitle = s; treeRev++ })
-        }
+        askText("Tab Title", "Title (empty: automatic)", t.customTitle, function(s) { t.customTitle = s; treeRev++ })
     }
     function closeTabs(list) {
         list = list.filter(t => t)
         if (list.length === 0) return
-        const local = list.filter(t => t.tmuxWindow < 0)
-        const count = local.reduce((n, t) => n + panesIn(t.root, []).length, 0)
+        const count = list.reduce((n, t) => n + panesIn(t.root, []).length, 0)
         const doIt = function() {
             for (const t of list) {
-                if (t.tmuxWindow >= 0) { closeTab(t); continue }
                 if (settings.undo_close_seconds > 0) retire(serializeTab(t, true))
                 else for (const p of panesIn(t.root, [])) p.view.killSession()
                 removeTab(t)
@@ -1619,7 +1470,7 @@ ApplicationWindow {
         else doIt()
     }
     function moveToNewWindow(t) {
-        if (!t || t.tmuxWindow >= 0 || tabs.length < 2) return
+        if (!t || tabs.length < 2) return
         const json = tabPayload(t)
         removeTab(t)
         controller.newWindowWithTab(json)
@@ -1629,7 +1480,7 @@ ApplicationWindow {
         readonly property var t: win.menuTab
         readonly property int at: tabs.indexOf(t)
         P.MenuItem { icon.name: "tab-new"; text: "New Tab\tCtrl+Shift+T"; onTriggered: newTab({}) }
-        P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Tab"; enabled: tabMenu.t !== null && tabMenu.t.tmuxWindow < 0
+        P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Tab"; enabled: tabMenu.t !== null
             onTriggered: newTab({ layout: serializeTab(tabMenu.t, false), profile: tabMenu.t.profile }) }
         P.MenuSeparator {}
         P.MenuItem { icon.name: "edit-rename"; text: "Rename Tab\u2026"; onTriggered: renameTab(tabMenu.t) }
@@ -1649,7 +1500,7 @@ ApplicationWindow {
         P.MenuSeparator {}
         P.MenuItem { icon.name: "arrow-left"; text: "Move Tab Left"; enabled: tabMenu.at > 0; onTriggered: moveTabToIndex(tabMenu.t, tabMenu.at - 1) }
         P.MenuItem { icon.name: "arrow-right"; text: "Move Tab Right"; enabled: tabMenu.at >= 0 && tabMenu.at < tabs.length - 1; onTriggered: moveTabToIndex(tabMenu.t, tabMenu.at + 1) }
-        P.MenuItem { icon.name: "window-new"; text: "Move Tab to New Window"; enabled: tabMenu.t !== null && tabMenu.t.tmuxWindow < 0 && tabs.length > 1
+        P.MenuItem { icon.name: "window-new"; text: "Move Tab to New Window"; enabled: tabMenu.t !== null && tabs.length > 1
             onTriggered: moveToNewWindow(tabMenu.t) }
         P.MenuSeparator {}
         P.MenuItem { icon.name: "tab-close"; text: "Close Tab\tCtrl+Shift+W"; onTriggered: closeTab(tabMenu.t) }
@@ -1666,7 +1517,7 @@ ApplicationWindow {
     readonly property string contextSelShort: contextSelection.length > 30 ? contextSelection.slice(0, 28).trim() + "…" : contextSelection.trim()
 
     function movePaneToNewTab(p, window) {
-        if (!p || p.view.tmuxPane !== "") return
+        if (!p) return
         const layout = { title: "", color: "", profile: p.profileName, root: serializeNode(p, true) }
         const json = JSON.stringify(layout)
         closePane(p, false)   // detaches; the new tab or window reattaches it
@@ -1692,7 +1543,7 @@ ApplicationWindow {
                 const v = p.view
                 if (!v) continue
                 let info = { job: "", cwd: "", shell: "" }
-                if (v.tmuxPane === "" && !v.exited && v.sessionId !== "") {
+                if (!v.exited && v.sessionId !== "") {
                     try { info = JSON.parse(controller.sessionInfo(v.sessionId)) } catch (e) {}
                 }
                 if (p.job !== info.job) p.job = info.job
@@ -1883,10 +1734,10 @@ ApplicationWindow {
         P.MenuItem { icon.name: "zoom-fit-best"; text: "Maximize Pane\tCtrl+Shift+Enter"; checkable: true; checked: maximizedPane !== null
             enabled: maximizedPane !== null || (contextView !== null && paneOf(contextView) !== null && paneOf(contextView).split); onTriggered: toggleMaximize() }
         P.MenuItem { icon.name: "tab-new"; text: "Move Pane to New Tab"
-            enabled: contextView !== null && contextView.tmuxPane === "" && paneOf(contextView) !== null && paneOf(contextView).split
+            enabled: contextView !== null && paneOf(contextView) !== null && paneOf(contextView).split
             onTriggered: movePaneToNewTab(paneOf(contextView), false) }
         P.MenuItem { icon.name: "window-new"; text: "Move Pane to New Window"
-            enabled: contextView !== null && contextView.tmuxPane === "" && (tabs.length > 1 || (paneOf(contextView) !== null && paneOf(contextView).split))
+            enabled: contextView !== null && (tabs.length > 1 || (paneOf(contextView) !== null && paneOf(contextView).split))
             onTriggered: movePaneToNewTab(paneOf(contextView), true) }
         P.MenuSeparator {}
         // -- the session
@@ -1908,7 +1759,7 @@ ApplicationWindow {
         P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Buffer\tCtrl+Shift+K"; onTriggered: contextView.clearScrollback() }
         P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Scrollback Buffer"; onTriggered: contextView.showMessage("\u001b[3J") }
         P.MenuItem { icon.name: "edit-clear"; text: "Reset"; onTriggered: contextView.resetTerminal() }
-        P.MenuItem { icon.name: "view-refresh"; text: "Restart Session"; enabled: contextView !== null && contextView.tmuxPane === ""
+        P.MenuItem { icon.name: "view-refresh"; text: "Restart Session"; enabled: contextView !== null
             onTriggered: { const v = contextView; confirmJobs([paneOf(v)], function() { v.restart() }) } }
         P.MenuSeparator {}
         P.Menu {
@@ -1941,7 +1792,7 @@ ApplicationWindow {
     // ---- layout ----------------------------------------------------------
 
     readonly property bool tabsAtBottom: settings.tab_position === "bottom"
-    readonly property bool showTabs: settings.always_show_tabs || tabs.length > 1 || tabs.some(t => t.tmuxWindow >= 0)
+    readonly property bool showTabs: settings.always_show_tabs || tabs.length > 1
     readonly property real barHeight: 34
 
     // The tab row (with the + button and the drop target for dragged tabs),
@@ -2009,7 +1860,6 @@ ApplicationWindow {
                         number: settings.show_tab_numbers && index < 9 ? index + 1 : 0
                         current: index === currentTab
                         nextIsCurrent: index + 1 === currentTab
-                        tmux: modelData.tmuxWindow >= 0
                         view: modelData.lastPane ? modelData.lastPane.viewMode : ""
                         activity: modelData.activity
                         bell: modelData.bell
@@ -2018,7 +1868,6 @@ ApplicationWindow {
                         flipped: box.flipped
                         surface: Theme.bg
                         tabItem: modelData
-                        canTearOff: modelData.tmuxWindow < 0
                         payload: function() { return win.tabPayload(modelData) }
                         onClicked: focusTab(index)
                         onCloseClicked: closeTab(modelData)

@@ -34,7 +34,6 @@ mod syntax;
 mod tables;
 mod session;
 mod snippets;
-mod tmux;
 
 use cxx_qt_lib::{QQmlApplicationEngine, QString, QUrl};
 

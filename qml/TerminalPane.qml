@@ -45,7 +45,6 @@ Item {
             notebook.listKernels()
         }
     }
-    property alias tmuxPane: term.tmuxPane
     property alias cwd: term.cwd
     property string profileName: ""
     property bool taken: false         // its session moved to another window

@@ -30,7 +30,6 @@ class TerminalItem : public QQuickItem {
     Q_PROPERTY(QString host READ host WRITE setHost NOTIFY hostChanged)
     // False until the shell can be opened (an SSH host still connecting).
     Q_PROPERTY(bool ready READ ready WRITE setReady NOTIFY readyChanged)
-    Q_PROPERTY(QString tmuxPane READ tmuxPane WRITE setTmuxPane NOTIFY tmuxPaneChanged)
     Q_PROPERTY(QString cwd READ cwd WRITE setCwd NOTIFY cwdChanged)
     Q_PROPERTY(QString fontFamily READ fontFamily WRITE setFontFamily NOTIFY fontChanged)
     Q_PROPERTY(qreal fontPointSize READ fontPointSize WRITE setFontPointSize NOTIFY fontChanged)
@@ -50,8 +49,6 @@ class TerminalItem : public QQuickItem {
     // "tsv", "html", "svg", "markdown"; "" otherwise).
     Q_PROPERTY(QString richKind READ richKind NOTIFY commandFinished)
     Q_PROPERTY(qint64 lastDuration READ lastDuration NOTIFY commandFinished)
-    Q_PROPERTY(int tmuxPaneId READ tmuxPaneId NOTIFY sessionIdChanged)
-    Q_PROPERTY(QString tmuxGateway READ tmuxGateway NOTIFY tmuxGatewayChanged)
     Q_PROPERTY(bool exited READ exited NOTIFY exitedChanged)
     Q_PROPERTY(int columns READ columns NOTIFY gridChanged)
     Q_PROPERTY(int rows READ rows NOTIFY gridChanged)
@@ -122,8 +119,6 @@ public:
     }
     void setHost(const QString& v) { if (v == m_host) return; m_host = v; emit hostChanged(); }
     void setAttachId(const QString& v);
-    QString tmuxPane() const { return m_tmuxPane; }
-    void setTmuxPane(const QString& v);
     QString cwd() const { return m_cwd; }
     void setCwd(const QString& v);
     QString fontFamily() const { return m_fontFamily; }
@@ -133,8 +128,6 @@ public:
     QString sessionId() const { return m_sessionId; }
     QString title() const { return m_title; }
     QString pwd() const { return m_pwd; }
-    int tmuxPaneId() const;
-    QString tmuxGateway() const { return m_tmuxGateway; }
     bool exited() const { return m_exited; }
     int columns() const { return m_cols; }
     int rows() const { return m_rows; }
@@ -160,7 +153,6 @@ public:
     Q_INVOKABLE void paste();
     Q_INVOKABLE void sendText(const QString& text);
     Q_INVOKABLE void killSession();
-    Q_INVOKABLE void tmuxCommand(const QString& command);
     Q_INVOKABLE void scrollToBottom();
     Q_INVOKABLE void scrollLines(int n);
     Q_INVOKABLE void selectAll();
@@ -206,20 +198,18 @@ signals:
     void attachIdChanged();
     void hostChanged();
     void readyChanged();
-    void tmuxPaneChanged();
     void cwdChanged();
     void fontChanged();
     void sessionIdChanged();
     void titleChanged();
     void pwdChanged();
-    void tmuxGatewayChanged();
     void exitedChanged();
     void gridChanged();
     void metricsChanged();
     void backgroundChanged();
     void selectionChanged();
     void bell();
-    void tmuxEvent(const QVariantMap& event);
+    void sessionEvent(const QVariantMap& event);
     void openFailed(const QString& message);
     void themeJsonChanged();
     void cursorShapeChanged();
@@ -290,7 +280,7 @@ private:
 
     QString m_host;
     bool m_ready = true;
-    QString m_attachId, m_tmuxPane, m_cwd, m_sessionId, m_title, m_pwd, m_tmuxGateway;
+    QString m_attachId, m_cwd, m_sessionId, m_title, m_pwd;
     QString m_fontFamily;
     qreal m_fontPointSize = 0;
     bool m_exited = false;

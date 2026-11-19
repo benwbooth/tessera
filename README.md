@@ -4,7 +4,8 @@
 
 Tessera pairs Ghostty's terminal engine with a native Qt Quick UI written in
 Rust: tabs that look like tabs, splits, profiles, hundreds of color schemes,
-built-in `tmux -CC`, and shells that survive closing the window.
+and shells, notebooks and kernels that survive closing the window, here or on
+an SSH host.
 
 ![Tessera with split panes, git, bat and a color test](docs/screenshots/hero.png)
 
@@ -25,7 +26,6 @@ built-in `tmux -CC`, and shells that survive closing the window.
 - **Native text.** Rows are painted with QPainter (FreeType, glyphs on exact cells) only when they change, then composited as GPU textures. Box drawing and block characters are drawn as shapes, so lines join at any line height; Powerline and Nerd Font symbols keep their colors.
 - **Shells that outlive the window.** `tesserad`, a small backend in the spirit of tmux's server, owns the shells, the notebook kernels, each pane's notebook cells, and Nix runs. Close the window, update, or crash, and the next launch reattaches every shell and notebook — splits, scrollback, screen, running kernels and what they printed meanwhile. After a reboot, tabs come back in their folders under their last screen.
 - **SSH hosts, the same way.** Pick a host from the + menu: its shells and notebook kernels run there, in that host's `tesserad`, reached through one shared SSH connection. A host without `tesserad` gets a static build of it copied over (to `~/.local/bin`, or `~`). Reconnecting attaches to what's still running there. Features that need Nix say how to install it when the host has none.
-- **`tmux -CC` built in.** tmux windows become native tabs and panes native splits.
 - **Shell integration without setup.** zsh and fish load it automatically: command marks, jump between prompts, select a command's output, new tabs in the same folder, and prompts that redraw cleanly when the window or text size changes.
 - **A modern window.** The tab bar is the title bar, with KDE-style buttons on the right. Tabs drag to reorder, out to a new window, or into another window, shells and all. A split **+** button opens profiles, other shells and SSH hosts from `~/.ssh/config`.
 - **285 color schemes** built in (the permissively licensed part of [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)), searchable, with separate light and dark themes that follow the desktop. One click fetches the rest of the collection; `.itermcolors` files import.
@@ -100,7 +100,6 @@ iTerm2's Cmd shortcuts become Ctrl+Shift.
 | Full screen | F11 |
 | Find cursor | Ctrl+Shift+/ |
 | Preferences | Ctrl+, |
-| Leave tmux control mode | Esc in the tmux gateway tab |
 
 ## Build
 

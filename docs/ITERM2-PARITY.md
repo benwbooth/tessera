@@ -46,9 +46,8 @@ click in a terminal opens a context menu.
 | Toggle Buffer Input | 🔜 | |
 | Broadcast Input (current only / all panes in all tabs / all panes in tab) | ✅ | receiving panes get a red outline |
 | Broadcast Input › toggle for current session, background pattern | 🔜 | |
-| tmux › Detach, New tmux Window | ✅ | |
-| tmux › Dashboard | 🔜 | |
-| ssh › … (SSH integration) | 🔜 | |
+| tmux › Detach, New tmux Window, Dashboard | ➖ | tesserad does what tmux integration was for: sessions outlive the window, here and on SSH hosts |
+| ssh › … (SSH integration) | ✅ | + menu SSH hosts run in that host's tesserad (copied there when missing) |
 | Workgroups | ➖ | |
 | Print | 🔜 | |
 
@@ -172,8 +171,7 @@ click in a terminal opens a context menu.
 | Each tab may have its own title | ✅ | |
 | Smart placement, remember window frames, adjust window on font change, native fullscreen | 🔜 / ➖ | Wayland places windows itself |
 | Load settings from folder/URL, export/import all | 🔜 | settings are plain JSON in ~/.config/tessera |
-| tmux: windows as tabs | ✅ | always tabs |
-| tmux: bury client session, tmux status bar, pause panes, mirror paste buffer | 🔜 | |
+| tmux integration (windows as tabs, bury client, status bar, pause panes, paste buffer) | ➖ | removed: tesserad keeps sessions alive instead |
 | Magic: Bonjour hosts, Instant Replay memory, Python API, GPU options, throughput | ➖ / 🔜 | Python API → a scripting API later |
 | AI, Software Update | ➖ | |
 
