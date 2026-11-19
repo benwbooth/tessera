@@ -78,6 +78,7 @@ fn main() {
         QmlFile::from("qml/FileView.qml"),
         QmlFile::from("qml/CsvTable.qml"),
         QmlFile::from("qml/EditKeys.qml"),
+        QmlFile::from("qml/ExCommands.qml"),
     ]))
     .crate_include_root(None)
     .include_dir("include");

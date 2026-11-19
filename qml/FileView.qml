@@ -121,6 +121,62 @@ Item {
         savedAs(p)
         return true
     }
+    // ---- vi's command line: ":" commands, "/" and "?" searches ----------------
+    property string cmdKind: ""          // ":", "/", "?" while it's open
+    property string exMessage: ""
+    property bool exError: false
+    property int exHistoryAt: -1
+    function openCommandLine(kind, initial) {
+        cmdKind = kind
+        exMessage = ""
+        exHistoryAt = -1
+        cmdField.text = initial
+        cmdField.forceActiveFocus()
+        cmdField.cursorPosition = initial.length
+    }
+    function closeCommandLine() { cmdKind = ""; editor.forceActiveFocus() }
+    function showExMessage(t, err) { exMessage = t; exError = !!err; exMessageTimer.restart() }
+    function runCommandLine() {
+        const kind = cmdKind, line = cmdField.text
+        closeCommandLine()
+        if (kind === "/" || kind === "?") { const r = ek.search(line, kind === "?"); if (r !== "") showExMessage(r, r.startsWith("E")); return }
+        const out = ek.ex.run(line)
+        if (out !== "") showExMessage(out, ek.ex.error)
+    }
+    Timer { id: exMessageTimer; interval: 6000; onTriggered: if (fv.exMessage.indexOf("\n") < 0) fv.exMessage = "" }
+    Connections {
+        target: ek.ex
+        function onWrite(p, force) {
+            if (p === "") { if (fv.save()) fv.showExMessage("\"" + fv.name + "\" written", false) }
+            else {
+                const err = fv.controller.fileSaveEdited(p, editor.text, fv.crlf)
+                fv.showExMessage(err === "" ? "\"" + p + "\" written" : err, err !== "")
+            }
+        }
+        function onQuit(force) {
+            if (fv.dirty && !force) { fv.showExMessage("E37: No write since last change (add ! to override)", true); return }
+            fv.stopEdit()
+        }
+        function onEditFile(p, force) {
+            if (fv.dirty && !force) { fv.showExMessage("E37: No write since last change (add ! to override)", true); return }
+            if (p === "" || p === fv.path) { fv.reload(); return }
+            fv.savedAs(p)                       // (the card shows that file now)
+            Qt.callLater(fv.startEdit)
+        }
+        function onSetOption(name, value) {
+            if (name === "wrap") fv.wrap = value === "toggle" ? !fv.wrap : value
+            else if (name === "number" || name === "hlsearch" || name === "incsearch") {}
+            else if (name === "list" || name === "readonly") fv.showExMessage("E518: Not here: " + name, true)
+        }
+    }
+    Binding { target: ek.ex; property: "fileName"; value: fv.name }
+    Binding { target: ek.ex; property: "folder"; value: fv.path.replace(/\/[^\/]*$/, "") }
+    Component.onCompleted: ek.ex.readFile = (p) => {
+        const r = JSON.parse(fv.controller.readTextFile(p === "" ? fv.path : p))
+        if (r.error !== undefined) throw "E484: Can't open file " + (p || fv.path) + ": " + r.error
+        return r.text
+    }
+
     // ---- find, replace, go to a line ---------------------------------------
     // (Any case unless the search has a capital, as the terminal's find.)
     property var matches: []            // where the search is found (positions)
@@ -186,8 +242,8 @@ Item {
     property bool toolsShown: false
     readonly property bool canUndo: editor.canUndo
     readonly property bool canRedo: editor.canRedo
-    function undo() { editor.undo() }
-    function redo() { editor.redo() }
+    function undo() { ek.ex.undo() }
+    function redo() { ek.ex.redo() }
     function showFind() { toolsShown = true; findField.forceActiveFocus(); findField.selectAll() }
     function showReplace() { toolsShown = true; replaceField.forceActiveFocus(); replaceField.selectAll() }
     function showGoTo() { toolsShown = true; lineField.forceActiveFocus() }
@@ -412,8 +468,8 @@ Item {
             background: Rectangle { radius: 4; color: Theme.bg; border.color: parent.activeFocus ? Theme.accent : Theme.divider }
             Keys.onEscapePressed: editor.forceActiveFocus()
         }
-        Chip { base: Theme.panel; label: "↶"; tip: "Undo (Ctrl+Z)"; opacity: editor.canUndo ? 1 : 0.4; onClicked: editor.undo() }
-        Chip { base: Theme.panel; label: "↷"; tip: "Redo (Ctrl+Shift+Z)"; opacity: editor.canRedo ? 1 : 0.4; onClicked: editor.redo() }
+        Chip { base: Theme.panel; label: "↶"; tip: "Undo (Ctrl+Z)"; opacity: editor.canUndo ? 1 : 0.4; onClicked: fv.undo() }
+        Chip { base: Theme.panel; label: "↷"; tip: "Redo (Ctrl+Shift+Z)"; opacity: editor.canRedo ? 1 : 0.4; onClicked: fv.redo() }
         BarField {
             id: findField
             width: 150
@@ -504,7 +560,11 @@ Item {
             onCursorRectangleChanged: editFlick.ensureVisible(cursorRectangle)
             // (Ctrl+S saves; the rest is the input editor's keys.)
             Keys.onPressed: (e) => {
+                if (fv.exMessage !== "") fv.exMessage = ""       // (a key: what a command said goes)
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_S) { fv.save(); e.accepted = true; return }
+                // (Undo and redo through the : commands' own, so one of theirs is one step.)
+                if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_Z) { if (e.modifiers & Qt.ShiftModifier) ek.ex.redo(); else ek.ex.undo(); e.accepted = true; return }
+                if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_Y) { ek.ex.redo(); e.accepted = true; return }
                 // (Find, replace, a line: their fields in the bar; F3 the next match.)
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_F) { if (editor.selectedText !== "" && editor.selectedText.indexOf("\u2029") < 0) findField.text = editor.selectedText; fv.showFind(); e.accepted = true; return }
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_H) { fv.showReplace(); e.accepted = true; return }
@@ -550,6 +610,8 @@ Item {
     EditKeys {
         id: ek
         edit: editor
+        onCommandLine: (kind, initial) => fv.openCommandLine(kind, initial)
+        onMessage: (t) => fv.showExMessage(t, true)
         keys: fv.editorKeys
         indentUnit: ["python", "rust", "c", "cpp", "java", "go", "haskell"].indexOf(fv.lang) >= 0 ? "    " : "  "
         commentPrefix: ({ rust: "// ", c: "// ", cpp: "// ", javascript: "// ", typescript: "// ", tsx: "// ", go: "// ", java: "// ", kotlin: "// ", qmljs: "// ", swift: "// ", zig: "// ", "c-sharp": "// ", dart: "// ", scala: "// ", php: "// ",
@@ -577,6 +639,128 @@ Item {
             try { const r = JSON.parse(fv.controller.syntax(fv.lang, editor.text)); r.errors = []; edHl.analysis = JSON.stringify(r) } catch (e) {}
         }
     }
+    // The command line, at the bottom of the editor, with the commands it
+    // could be (and what each does) above it while typing one.
+    Rectangle {
+        id: cmdBar
+        visible: fv.editing && !fv.inTerm && (fv.cmdKind !== "" || fv.exMessage !== "")
+        z: 6
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: fv.cmdKind !== "" ? 24 : Math.min(fv.height * 0.6, msgText.implicitHeight + 10)
+        color: Theme.mix(Theme.bg, Theme.fg, 0.08)
+        border.color: Theme.divider
+        Text {
+            id: cmdPrefix
+            visible: fv.cmdKind !== ""
+            x: 8.001
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: 0.001
+            text: fv.cmdKind
+            color: Theme.accent
+            font: editor.font
+            renderType: Text.NativeRendering
+        }
+        TextInput {
+            id: cmdField
+            visible: fv.cmdKind !== ""
+            anchors.left: cmdPrefix.right
+            anchors.leftMargin: 2
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: 0.001
+            font: editor.font
+            color: Theme.text
+            selectionColor: Theme.accent
+            clip: true
+            renderType: Text.NativeRendering
+            property int pick: 0
+            readonly property var choices: fv.cmdKind === ":" ? ek.ex.completions(text) : []
+            onTextChanged: pick = 0
+            function complete() {
+                const c = choices[Math.min(pick, choices.length - 1)]
+                if (!c) return
+                text = c.head + c.name + (["<", ">", "=", "#"].indexOf(c.name) >= 0 ? "" : " ")
+                cursorPosition = text.length
+            }
+            Keys.onPressed: (e) => {
+                if (e.key === Qt.Key_Escape || (e.key === Qt.Key_Backspace && text === "")) { fv.closeCommandLine(); e.accepted = true; return }
+                if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { fv.runCommandLine(); e.accepted = true; return }
+                if (e.key === Qt.Key_Tab && choices.length) { complete(); e.accepted = true; return }
+                if ((e.key === Qt.Key_Down || e.key === Qt.Key_Up) && choices.length > 1 && fv.exHistoryAt < 0) {
+                    pick = (pick + (e.key === Qt.Key_Down ? 1 : choices.length - 1)) % choices.length
+                    e.accepted = true
+                    return
+                }
+                // (↑/↓: the commands run before.)
+                if (e.key === Qt.Key_Up || e.key === Qt.Key_Down) {
+                    const h = ek.ex.history
+                    if (h.length === 0) { e.accepted = true; return }
+                    let i = fv.exHistoryAt < 0 ? h.length : fv.exHistoryAt
+                    i = Math.max(0, Math.min(h.length, i + (e.key === Qt.Key_Up ? -1 : 1)))
+                    fv.exHistoryAt = i
+                    text = i < h.length ? h[i] : ""
+                    e.accepted = true
+                }
+            }
+        }
+        Text {
+            id: msgText
+            visible: fv.cmdKind === "" && fv.exMessage !== ""
+            x: 8.001
+            y: 5.001
+            width: parent.width - 16
+            text: fv.exMessage
+            color: fv.exError ? fv.ansi(1, "#e06c75") : Theme.text
+            font: editor.font
+            wrapMode: Text.WrapAnywhere
+            renderType: Text.NativeRendering
+            MouseArea { anchors.fill: parent; onClicked: { fv.exMessage = ""; editor.forceActiveFocus() } }
+        }
+    }
+    Rectangle {
+        id: cmdChoices
+        visible: cmdBar.visible && fv.cmdKind === ":" && cmdField.choices.length > 0 && cmdField.text.trim() !== "" || cmdBar.visible && fv.cmdKind === ":" && cmdField.text === ""
+        z: 6
+        anchors.left: parent.left
+        anchors.leftMargin: 4
+        anchors.bottom: cmdBar.top
+        width: Math.min(parent.width - 8, 620)
+        height: Math.min(choiceList.contentHeight, 8 * 20) + 6
+        radius: 6
+        color: Theme.mix(Theme.bg, Theme.fg, 0.1)
+        border.color: Theme.divider
+        ListView {
+            id: choiceList
+            anchors.fill: parent
+            anchors.margins: 3
+            clip: true
+            model: cmdField.choices
+            currentIndex: cmdField.pick
+            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+            boundsBehavior: Flickable.StopAtBounds
+            delegate: Rectangle {
+                required property var modelData
+                required property int index
+                width: ListView.view.width
+                height: 20
+                radius: 4
+                color: index === cmdField.pick ? Theme.mix(Theme.bg, Theme.accent, 0.35) : "transparent"
+                Row {
+                    x: 6.001
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0.001
+                    spacing: 10
+                    Text { width: 170; text: modelData.name + (modelData.short !== modelData.name ? "  (" + modelData.short + ")" : ""); color: Theme.text; font.family: editor.font.family; font.pointSize: editor.font.pointSize; font.bold: true; elide: Text.ElideRight; renderType: Text.NativeRendering }
+                    Text { text: modelData.help; color: Theme.textDim; font.pixelSize: 11; renderType: Text.NativeRendering }
+                }
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { cmdField.pick = index; cmdField.complete(); cmdField.forceActiveFocus() } }
+            }
+        }
+    }
+
     // vi's mode, and what went wrong saving.
     Text {
         visible: fv.editing && fv.editError !== ""
@@ -648,4 +832,13 @@ Item {
     Timer { interval: 3000; running: fv.controller !== null && fv.path !== "" && fv.controller.testEnv("FILE_WHEEL") !== ""
             onTriggered: { const p = fv.mapToItem(null, fv.width / 2, fv.height / 2); for (let i = 0; i < 3; i++) fv.controller.testWheel(p.x, p.y, -120, 0, 0); wheelLog.start() } }
     Timer { id: wheelLog; interval: 300; onTriggered: { const b = list.ScrollBar.vertical; console.log("file wheel test: contentY " + list.contentY + " bar active " + b.active + " handle " + (b.contentItem ? b.contentItem.opacity : "-")) } }
+    // (Test hook: TESSERA_TEST_EX="cmd;;cmd;;..." runs those : commands 5 s
+    // after the card shows (while editing), logs what each said, then opens
+    // the command line with TESSERA_TEST_EX_OPEN typed in it.)
+    Timer { interval: 5000; running: fv.controller !== null && fv.path !== "" && fv.controller.testEnv("EX") !== ""
+            onTriggered: {
+                for (const c of fv.controller.testEnv("EX").split(";;")) { const out = ek.ex.run(c); console.log("ex test: :" + c + " -> " + JSON.stringify(out) + (ek.ex.error ? " (error)" : "") + "  now " + JSON.stringify(editor.text)) }
+                console.log("ex test: text " + JSON.stringify(editor.text))
+                if (fv.controller.testEnv("EX_OPEN") !== "") fv.openCommandLine(":", fv.controller.testEnv("EX_OPEN"))
+            } }
 }

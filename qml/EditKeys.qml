@@ -11,7 +11,13 @@ QtObject {
     property string keys: "emacs"       // "emacs", "vscode", "vi"
     property bool viNormal: false
     property string viPending: ""
-    property string killRing: ""
+    property var markCols: ({})
+    // vi's ":" commands (ExCommands.qml), sharing the yanked text.
+    readonly property ExCommands ex: ExCommands { id: exc; edit: ek.edit; indentUnit: ek.indentUnit; keyHandler: (e) => ek.handle(e); viKeys: ek }
+    property alias killRing: exc.killRing
+    // (vi's command line wanted: ":" (with '<,'> over a selection), or "/" and
+    // "?" to search. The owner shows the field and calls ex.run or search.)
+    signal commandLine(string kind, string initial)
     property string indentUnit: "    "
     property string commentPrefix: "# " // (Ctrl+/ in VS Code keys)
     readonly property var pairs: ({ "(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'", "`": "`" })
@@ -167,7 +173,7 @@ QtObject {
             case Qt.Key_Y: insert(killRing); return true
             case Qt.Key_H: if (p > 0) edit.remove(p - 1, p); return true
             case Qt.Key_D: if (p < edit.length) edit.remove(p, p + 1); return true
-            case Qt.Key_Underscore: case Qt.Key_Slash: edit.undo(); return true
+            case Qt.Key_Underscore: case Qt.Key_Slash: exc.undo(); return true
             case Qt.Key_T:
                 if (p > 0 && p < edit.length) {
                     const t = edit.text
@@ -211,6 +217,34 @@ QtObject {
         return false
     }
 
+    // "/" or "?" searching: the next match from the cursor, wrapping.
+    function search(pat, back) {
+        if (pat === "") pat = exc.lastSearch
+        if (pat === "") return "E35: No previous regular expression"
+        exc.lastSearch = pat
+        searchBack = back
+        return searchNext(false)
+    }
+    property bool searchBack: false
+    function searchNext(reverse) {
+        if (exc.lastSearch === "") return "E35: No previous regular expression"
+        let re
+        try { re = exc.regex(exc.lastSearch) } catch (x) { return "E383: Invalid search string" }
+        const g = new RegExp(re.source, re.flags + "g")
+        const t = edit.text, p = edit.cursorPosition
+        const all = []
+        let m
+        while ((m = g.exec(t)) !== null && all.length < 200000) { all.push(m.index); if (m[0] === "") g.lastIndex++ }
+        if (all.length === 0) return "E486: Pattern not found: " + exc.lastSearch
+        const back = searchBack !== reverse
+        let i = back ? all.length - 1 - all.slice().reverse().findIndex(x => x < p) : all.findIndex(x => x > p)
+        let wrapped = false
+        if (i < 0 || i >= all.length) { i = back ? all.length - 1 : 0; wrapped = true }
+        edit.cursorPosition = all[i]
+        return wrapped ? (back ? "search hit TOP, continuing at BOTTOM" : "search hit BOTTOM, continuing at TOP") : ""
+    }
+    signal message(string text)
+
     function viKey(e) {
         if (!viNormal) {
             if (e.key === Qt.Key_Escape) { viNormal = true; edit.cursorPosition = Math.max(lineStart(edit.cursorPosition), edit.cursorPosition - 1); return true }
@@ -220,9 +254,24 @@ QtObject {
         const p = edit.cursorPosition
         const t = edit.text
         if (e.key === Qt.Key_Escape) { viPending = ""; return true }
-        if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_R) { edit.redo(); return true }
+        if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_R) { exc.redo(); return true }
         if (viPending === "r") { if (ch && p < t.length) { edit.remove(p, p + 1); edit.insert(p, ch); edit.cursorPosition = p } viPending = ""; return true }
         if (viPending === "g") { viPending = ""; if (ch === "g") edit.cursorPosition = 0; return true }
+        // (m{a-z} sets a mark; '{a-z} and `{a-z} go to it, its line or its place.)
+        if (viPending === "m") {
+            viPending = ""
+            if (/^[a-zA-Z]$/.test(ch)) { exc.load(); const mm = Object.assign({}, exc.marks); mm[ch] = exc.cursorLine(); exc.marks = mm; markCols[ch] = p - lineStart(p) }
+            return true
+        }
+        if (viPending === "'" || viPending === "`") {
+            const how = viPending
+            viPending = ""
+            exc.load()
+            const n = exc.markLine(ch)
+            if (n < 0) { message("E20: Mark not set"); return true }
+            exc.store(n, how === "`" ? (markCols[ch] || 0) : undefined)
+            return true
+        }
         function motion(c) {
             switch (c) {
             case "h": return Math.max(lineStart(p), p - 1)
@@ -269,9 +318,21 @@ QtObject {
         case "s": if (p < lineEnd(p)) kill(p, p + 1); viNormal = false; return true
         case "p": edit.insert(Math.min(t.length, p + 1), killRing); return true
         case "P": insert(killRing); return true
-        case "u": edit.undo(); return true
+        case "u": exc.undo(); return true
         case "~": if (p < t.length) { const c = t[p]; edit.remove(p, p + 1); edit.insert(p, c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()); edit.cursorPosition = p + 1 } return true
         case "G": edit.cursorPosition = t.length; return true
+        case ":": commandLine(":", edit.selectedText !== "" ? "'<,'>" : ""); return true
+        case "/": commandLine("/", ""); return true
+        case "?": commandLine("?", ""); return true
+        case "n": { const r = searchNext(false); if (r !== "") message(r); return true }
+        case "N": { const r = searchNext(true); if (r !== "") message(r); return true }
+        case "*": case "#": {
+            const a = wordLeft(Math.min(t.length, p + 1)), b = wordRight(p)
+            const w = t.substring(a, b).replace(/[^A-Za-z0-9_]/g, "")
+            if (w !== "") { const r = search("\\<" + w + "\\>", ch === "#"); if (r !== "") message(r) }
+            return true
+        }
+        case "m": case "'": case "`": viPending = ch; return true
         case "d": case "c": case "y": case "g": case "r": viPending = ch; return true
         }
         return ch !== "" && !(e.modifiers & Qt.ControlModifier)
