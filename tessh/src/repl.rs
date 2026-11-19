@@ -204,6 +204,83 @@ impl Completer for TesshHelper {
     }
 }
 
+/// Completions for Tessera's input editor (`tessh --complete`): text and a
+/// UTF-16 cursor in, {"start", "end" (UTF-16), "items": [{insert, label,
+/// kind, detail}]} out, as Tessera's shell completer answers.
+/// A value's kind, said plainly.
+fn type_word(v: &Bound<'_, PyAny>) -> String {
+    let t = v.get_type().name().map(|t| t.to_string()).unwrap_or_default();
+    match t.as_str() {
+        "builtin_function_or_method" | "function" | "method" | "method-wrapper" | "wrapper_descriptor" | "method_descriptor" | "builtin_method" => "function".into(),
+        "type" | "ABCMeta" | "EnumType" => "class".into(),
+        "Builtin" => "tessh builtin".into(),
+        _ => t,
+    }
+}
+
+pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor16: usize) -> serde_json::Value {
+    let mut pos = text.len();
+    let mut n16 = 0;
+    for (i, c) in text.char_indices() {
+        if n16 >= cursor16 {
+            pos = i;
+            break;
+        }
+        n16 += c.len_utf16();
+    }
+    let before = &text[..pos];
+    let start = before.rfind(|c: char| " \t\n()[]{}\"'`;$".contains(c)).map(|i| i + 1).unwrap_or(0);
+    let word = &before[start..];
+    let head = before[..start].trim_end();
+    let first = head.is_empty() || head.ends_with(['|', ';', '(', '\n']) || head.ends_with("&&") || head.ends_with("||");
+    let var = before[..start].ends_with('$');
+    let u16_of = |b: usize| text[..b].encode_utf16().count();
+    let mut items: Vec<serde_json::Value> = vec![];
+    // (obj.attr: what the object has, from a name tessh knows or a module
+    // already loaded.)
+    if let Some((root, part)) = word.rsplit_once('.').filter(|(r, _)| !r.is_empty() && r.split('.').all(crate::reader::is_ident)) {
+        let mut parts = root.split('.');
+        let head_name = parts.next().unwrap_or("");
+        let mut obj = ns.get_item(head_name).ok().flatten().or_else(|| py.import("builtins").ok().and_then(|b| b.getattr(head_name).ok())).or_else(|| py.import("sys").ok().and_then(|s| s.getattr("modules").ok()).and_then(|m| m.get_item(head_name).ok()));
+        for p in parts {
+            obj = obj.and_then(|o| o.getattr(p).ok());
+        }
+        if let Some(o) = obj {
+            if let Ok(names) = o.dir() {
+                let mut ns_: Vec<String> = names.iter().filter_map(|k| k.extract::<String>().ok()).filter(|n| n.starts_with(part) && (part.starts_with('_') || !n.starts_with('_'))).collect();
+                ns_.sort();
+                for n in ns_ {
+                    let v = o.getattr(n.as_str()).ok();
+                    let callable = v.as_ref().is_some_and(|v| v.is_callable());
+                    let detail = v.as_ref().map(type_word).unwrap_or_default();
+                    items.push(serde_json::json!({"insert": format!("{root}.{n}"), "label": n, "kind": if callable { "command" } else { "value" }, "detail": detail}));
+                }
+            }
+        }
+        return serde_json::json!({"start": u16_of(start), "end": u16_of(pos), "items": items});
+    }
+    let builtins = py.import("builtins").ok();
+    for n in completions(py, ns, word, first, &before[..start]) {
+        let (kind, detail) = if before[..start].trim() == "help" {
+            ("option", "help topic".to_string())
+        } else if n.ends_with('/') {
+            ("dir", String::new())
+        } else if !first && !var {
+            ("file", String::new())
+        } else if var {
+            ("variable", ns.get_item(n.as_str()).ok().flatten().map(|v| type_word(&v)).unwrap_or_else(|| "environment".into()))
+        } else if crate::compiler::BLOCK_SPECIALS.contains(&n.as_str()) || ["return", "import", "from"].contains(&n.as_str()) {
+            ("subcommand", "keyword".to_string())
+        } else if let Some(v) = ns.get_item(n.as_str()).ok().flatten().or_else(|| builtins.as_ref().and_then(|b| b.getattr(n.as_str()).ok())) {
+            (if v.is_callable() { "command" } else { "value" }, type_word(&v))
+        } else {
+            ("command", "program".to_string())
+        };
+        items.push(serde_json::json!({"insert": n, "label": n, "kind": kind, "detail": detail}));
+    }
+    serde_json::json!({"start": u16_of(start), "end": u16_of(pos), "items": items})
+}
+
 pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bool, before: &str) -> Vec<String> {
     let mut out = vec![];
     // (help's topics.)

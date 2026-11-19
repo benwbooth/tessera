@@ -360,6 +360,10 @@ pub mod ffi {
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
         fn complete(self: &Controller, reply: &QString, text: &QString, cursor: i32, cwd: &QString, aliases: &QString, pid: i32, host: &QString);
+        /// tessh's own completions (`tessh --complete`), in the background:
+        /// the same {"start", "end", "items"} as complete.
+        #[qinvokable]
+        fn complete_tessh(self: &Controller, reply: &QString, text: &QString, cursor: i32, cwd: &QString);
         /// Download fish's completion files (more commands and subcommands
         /// get help text); progress in help_status.
         #[qinvokable]
@@ -873,6 +877,24 @@ impl ffi::Controller {
 
     fn syntax(&self, lang: &ffi::QString, text: &ffi::QString) -> ffi::QString {
         qs(&crate::syntax::analyze(&lang.to_string(), &text.to_string()))
+    }
+
+    fn complete_tessh(&self, reply: &ffi::QString, text: &ffi::QString, cursor: i32, cwd: &ffi::QString) {
+        let (text, cwd) = (text.to_string(), cwd.to_string());
+        self.answer_on(reply, Some("complete"), move || {
+            use std::io::Write;
+            let none = r#"{"start":0,"end":0,"items":[]}"#.to_string();
+            let Some(prog) = crate::syntax::tessh_program() else { return none };
+            let dir = if std::path::Path::new(&cwd).is_dir() { cwd } else { std::env::var("HOME").unwrap_or_else(|_| "/".into()) };
+            let Ok(mut ch) = std::process::Command::new(prog).arg("--complete").arg(&dir).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn() else { return none };
+            if let Some(mut i) = ch.stdin.take() {
+                let _ = i.write_all(serde_json::json!({"text": text, "cursor": cursor.max(0)}).to_string().as_bytes());
+            }
+            match ch.wait_with_output() {
+                Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                _ => none,
+            }
+        })
     }
 
     fn complete(&self, reply: &ffi::QString, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString, pid: i32, host: &ffi::QString) {

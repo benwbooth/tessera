@@ -436,7 +436,10 @@ Rectangle {
         if (!controller) return
         const seq = ++compSeq, hist = historyMode, query = historyQuery
         const text = edit.text, cursor = edit.cursorPosition
+        // (tessh: its own names, programs and files, not the shell's.)
+        const tessh = box.lang === "tessh" && box.sshHost === ""
         Async.call(controller, k => hist ? controller.historySearch(k, query)
+                                 : tessh ? controller.completeTessh(k, text, cursor, box.cwd)
                                          : controller.complete(k, text, cursor, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid, box.sshHost), json => {
             if (!box || seq !== box.compSeq || !box.compOpen || box.historyMode !== hist) return
             if (hist ? box.historyQuery !== query : (edit.text !== text || edit.cursorPosition !== cursor)) return

@@ -30,6 +30,7 @@ tessh -c CODE [ARGS…]      run CODE
 tessh --check [FILE]       check without running (stdin without FILE); --json for JSON
 tessh --py FILE            print the Python it compiles to
 tessh --kernel -f CONN     the Jupyter kernel
+tessh --complete [DIR]     completions for {\"text\", \"cursor\"} on stdin, in DIR (Tessera's editor)
   --with PKG[,PKG…]        first: PyPI packages to have (uv installs them once), as `need` does";
 
 fn exit_code(py: Python<'_>, e: &PyErr) -> Option<i32> {
@@ -136,6 +137,25 @@ fn run(args: Vec<String>) -> i32 {
                     }
                 }
                 if problems.is_empty() { 0 } else { 1 }
+            }
+            "--complete" => {
+                if let Some(d) = args.get(1) {
+                    let _ = std::env::set_current_dir(d);
+                }
+                let mut s = String::new();
+                let _ = std::io::stdin().read_to_string(&mut s);
+                let q: serde_json::Value = serde_json::from_str(&s).unwrap_or_default();
+                let text = q["text"].as_str().unwrap_or("");
+                let cursor = q["cursor"].as_u64().map(|c| c as usize).unwrap_or(text.encode_utf16().count());
+                let ns = match runner::new_namespace(py, "__main__", vec![]) {
+                    Ok(ns) => ns,
+                    Err(e) => {
+                        e.print(py);
+                        return 1;
+                    }
+                };
+                println!("{}", repl::complete_json(py, &ns, text, cursor));
+                0
             }
             "--kernel" => {
                 let conn = args.iter().position(|x| x == "-f").and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
