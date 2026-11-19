@@ -196,6 +196,10 @@ Item {
     // ("" is the shell's $VISUAL, else $EDITOR, else vi; the pick is kept.)
     property bool inTerm: false
     property string termCommand: ""
+    // (Another host's file, "ssh://<host, URL-encoded>/<path>": the editor runs there.)
+    readonly property var remote: path.match(/^ssh:\/\/([^\/]*)(\/.*)$/)
+    readonly property string termHost: remote ? decodeURIComponent(remote[1]) : ""
+    readonly property string termPath: remote ? remote[2] : path
     readonly property var termEditors: [["", "Your $EDITOR"], ["vim", "Vim"], ["nvim", "Neovim"], ["emacs -nw", "Emacs"], ["hx", "Helix"], ["micro", "micro"], ["nano", "nano"], ["kak", "Kakoune"]]
     property string termEditor: { if (!controller) return ""; controller.revision; try { return JSON.parse(controller.settings()).terminal_editor || "" } catch (e) { return "" } }
     function shq(x) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(x) ? x : "'" + x.replace(/'/g, "'\\''") + "'" }
@@ -204,7 +208,7 @@ Item {
         const e = ed !== undefined ? ed : termEditor
         if (editing && dirty) save()          // (what's typed here first, so it opens that)
         editing = false
-        termCommand = "exec " + (e !== "" ? e : "${VISUAL:-${EDITOR:-vi}}") + " " + shq(path)
+        termCommand = "exec " + (e !== "" ? e : "${VISUAL:-${EDITOR:-vi}}") + " " + shq(termPath)
         inTerm = true
     }
     // (Quit the editor, or close it here: back to the file, as it is now.)
@@ -583,7 +587,8 @@ Item {
         sourceComponent: TerminalView {
             ready: true
             command: fv.termCommand
-            cwd: fv.path.replace(/\/[^\/]*$/, "") || "/"
+            host: fv.termHost
+            cwd: fv.termPath.replace(/\/[^\/]*$/, "") || "/"
             fontFamily: fv.fontFamily
             fontPointSize: fv.pointSize
             themeJson: JSON.stringify(fv.themeData)
