@@ -90,15 +90,17 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building Tessera $version"
 
-  # tesserad for every platform (tesserad.yml): the static Linux ones go in
-  # every package; all of them go on the release, where the window fetches
-  # the one an SSH host needs.
+  # tesserad for every platform (tesserad.yml), with every build of Tessera:
+  # the static Linux ones go in every package; all of them go on the
+  # release (by the publish job), where the window fetches the one an SSH
+  # host needs. A run without a release (only trying the builds) puts them
+  # on tesserad-dev, which dev builds fetch.
   tesserad:
     needs: version
     if: needs.version.outputs.skip != 'true'
     uses: ./.github/workflows/tesserad.yml
     with:
-      tag: ''
+      tag: ${{ needs.version.outputs.tag == '' && 'tesserad-dev' || '' }}
 
   windows:
     needs: [version, tesserad]
