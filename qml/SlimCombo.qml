@@ -42,11 +42,25 @@ T.ComboBox {
         validator: control.validator
         selectByMouse: control.selectTextByMouse
         font: control.font
-        color: Theme.text
+        // (Not editable: drawn by the Text below instead, which is crisper
+        // than a read-only field at fractional scales.)
+        color: control.editable ? Theme.text : "transparent"
         selectionColor: Theme.accent
         selectedTextColor: Theme.bg
         renderType: Text.NativeRendering
         topPadding: 0.001
+        Text {
+            visible: !control.editable
+            anchors.fill: parent
+            leftPadding: 0.001       // (off the half pixel both ways)
+            topPadding: 0.001
+            verticalAlignment: Text.AlignVCenter
+            text: control.displayText
+            elide: Text.ElideRight
+            font: control.font
+            color: Theme.text
+            renderType: Text.NativeRendering
+        }
     }
 
     delegate: T.ItemDelegate {
