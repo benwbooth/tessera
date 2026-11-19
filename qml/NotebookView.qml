@@ -1541,6 +1541,8 @@ FocusScope {
                        onClicked: moreMenu.popup(moreChip, 0, moreChip.height + 2) }
                 // (Test hook: TESSERA_TEST_EXPAND_CELL fills the window with the first cell.)
                 Timer { interval: 2500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("EXPAND_CELL") !== ""; onTriggered: nb.expandedId = cell.cid }
+                // (Test hook: TESSERA_TEST_OPEN_MORE_MENU opens the first card's ⋯ menu.)
+                Timer { interval: 13000; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("OPEN_MORE_MENU") !== ""; onTriggered: moreMenu.popup(moreChip, 0, moreChip.height + 2) }
                 // (Test hook: TESSERA_TEST_OPEN_KIND_MENU opens the first cell's menu.)
                 Timer { interval: 1500; running: cell.index === 0 && cell.fromTerm && nb.controller !== null && nb.controller.testEnv("OPEN_KIND_MENU") !== ""; onTriggered: kindMenu.popup(kindChip, 0, kindChip.height + 2) }
             }

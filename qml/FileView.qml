@@ -273,6 +273,18 @@ Item {
             // (Ctrl+S saves; the rest is the input editor's keys.)
             Keys.onPressed: (e) => {
                 if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_S) { fv.save(); e.accepted = true; return }
+                // (A page of lines at a time; Shift selects as it goes.)
+                if ((e.key === Qt.Key_PageDown || e.key === Qt.Key_PageUp) && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
+                    const n = Math.max(1, Math.floor(editFlick.height / fm.lineSpacing) - 1) * (e.key === Qt.Key_PageDown ? 1 : -1)
+                    const r = editor.cursorRectangle
+                    const y = Math.max(0, Math.min(editor.contentHeight - 1, r.y + r.height / 2 + n * fm.lineSpacing))
+                    const to = editor.positionAt(r.x, y)
+                    if (e.modifiers & Qt.ShiftModifier) editor.moveCursorSelection(to, TextEdit.SelectCharacters)
+                    else editor.cursorPosition = to
+                    editFlick.contentY = Math.max(0, Math.min(editFlick.contentHeight - editFlick.height, editFlick.contentY + n * fm.lineSpacing))
+                    e.accepted = true
+                    return
+                }
                 e.accepted = ek.handle(e)
             }
             // A block cursor, as the input editor's: the letter under it in

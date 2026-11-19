@@ -6,8 +6,12 @@ import QtQuick.Templates as T
 T.MenuItem {
     id: item
     implicitWidth: 22 + label.implicitWidth + 16
-    implicitHeight: 24
+    // (A hidden one takes no room: menus that show only what applies don't
+    // get blank rows.)
+    implicitHeight: visible ? 24 : 0
+    height: visible ? implicitHeight : 0
     hoverEnabled: true
+    HoverHandler { cursorShape: item.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
     contentItem: Item {
         Text {
             x: -2
