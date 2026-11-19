@@ -603,9 +603,9 @@ pub mod ffi {
         /// Markdown as HTML.
         #[qinvokable]
         fn markdown_html(self: &Controller, text: &QString) -> QString;
-        /// The tessh manual (its guide) as HTML: a <nav> and a <main>.
+        /// The tessh guide as a page, in the background: HTML, a <nav> and a <main>.
         #[qinvokable]
-        fn tessh_manual_html(self: &Controller) -> QString;
+        fn tessh_manual_html(self: &Controller, reply: &QString);
         #[qinvokable]
         fn ai_has_key(self: &Controller, provider: &QString) -> bool;
         /// A provider's models, in the background: ai_models_ready(provider, json list or "error: ...").
@@ -1259,8 +1259,8 @@ impl ffi::Controller {
         qs(&crate::cells::markdown_html(&text.to_string()))
     }
 
-    fn tessh_manual_html(&self) -> ffi::QString {
-        qs(&crate::cells::tessh_manual_html())
+    fn tessh_manual_html(&self, reply: &ffi::QString) {
+        self.answer_on(reply, None, crate::cells::tessh_manual_html)
     }
 
     fn history_search(&self, reply: &ffi::QString, query: &ffi::QString) {

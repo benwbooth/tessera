@@ -1065,6 +1065,13 @@ Rectangle {
             onClicked: { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
         }
         Chip {
+            base: box.color
+            visible: box.lang === "tessh"
+            label: "? Guide"
+            tip: "The tessh guide, in a tab: every feature, with examples"
+            onClicked: Window.window.openGuide()
+        }
+        Chip {
             id: modeChip
             base: box.color
             label: box.viewMode === "notebook" ? "\u25a4 Notebook" : "\u25ad Terminal"

@@ -181,6 +181,9 @@ ApplicationWindow {
             property bool activity: false
             property bool bell: false
             property var lastView: null
+            // A page instead of panes ("tessh-guide": the tessh guide).
+            property string page: ""
+            readonly property var pageItem: pageLoader.item
             // The pane the title follows: the last focused, else the first.
             readonly property var titleView: { win.treeRev; if (lastView) return lastView; const ps = win.panesIn(rootSplit, []); return ps.length ? ps[0].view : null }
             readonly property var lastPane: titleView ? win.paneOf(titleView) : null
@@ -202,8 +205,30 @@ ApplicationWindow {
                 anchors.fill: parent
                 isRoot: true
                 tab: tabItem
+                visible: tabItem.page === ""
+            }
+            Loader {
+                id: pageLoader
+                anchors.fill: parent
+                active: tabItem.page === "tessh-guide"
+                sourceComponent: GuidePage {
+                    backend: controller
+                    ansi: win.themeFor(tabItem.prof).ansi || []
+                    fontFamily: tabItem.prof.font_family || "monospace"
+                }
             }
         }
+    }
+
+    // The tessh guide, a tab of its own (the one there is, if it's open).
+    function openGuide() {
+        for (let i = 0; i < tabs.length; ++i) if (tabs[i].page === "tessh-guide") { currentTab = i; return }
+        const t = tabComp.createObject(stack, { profile: profileFor(settings.default_profile).name, page: "tessh-guide", customTitle: "tessh guide" })
+        tabs.splice(tabs.length, 0, t)
+        tabs = tabs.slice()
+        currentTab = tabs.length - 1
+        treeRev++
+        Qt.callLater(() => { if (t.pageItem) t.pageItem.focusFind() })
     }
 
     // ---- pane tree -----------------------------------------------------
@@ -488,7 +513,11 @@ ApplicationWindow {
         const active = activeView
         const prof = profileFor(opts.profile !== undefined ? opts.profile : settings.default_profile)
         const t = tabComp.createObject(stack, { profile: prof.name })
-        if (opts.layout) {
+        if (opts.layout && opts.layout.page) {
+            // (A page's tab: the page again, no panes.)
+            t.page = opts.layout.page
+            t.customTitle = opts.layout.title || ""
+        } else if (opts.layout) {
             buildSavedTree(t, opts.layout.root, opts.alive, !!opts.recreate)
             if (opts.layout.title) t.customTitle = opts.layout.title
             if (opts.layout.color) t.tabColor = opts.layout.color
@@ -821,7 +850,7 @@ ApplicationWindow {
 
     function serializeTab(t, withIds) {
         return { title: t.customTitle, color: t.tabColor.a > 0 ? t.tabColor.toString() : "",
-                 profile: t.profile, root: serializeNode(t.root, withIds) }
+                 profile: t.profile, root: serializeNode(t.root, withIds), page: t.page }
     }
 
     function serializeWindow(withIds) {

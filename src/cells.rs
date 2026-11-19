@@ -400,7 +400,7 @@ pub fn tessh_manual_html() -> String {
         }
     }
     let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    let mut nav = String::from("<nav><div class='title'>tessh manual</div>");
+    let mut nav = String::from("<nav><div class='title'>Contents</div>");
     let mut open = false;
     for (k, (level, t)) in heads.iter().enumerate() {
         let id = format!("{}-{k}", slug(t));

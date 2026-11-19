@@ -313,7 +313,10 @@ FocusScope {
     property var fileViews: ({})        // cid -> an ls card's own view, sort, ... (FileBrowser)
     property var aiKinds: ({})          // cid -> what the AI made of it
     property var heights: ({})          // cid -> output height the user dragged to
+    // The tessh guide, in a tab of its own (Main's openGuide).
+    function openGuide() { Window.window.openGuide() }
     property string expandedId: ""      // the cell filling the window, if any
+    Connections { target: cells; function onCountChanged() { if (nb.expandedId !== "" && nb.indexOf(nb.expandedId) < 0) nb.expandedId = "" } }
     property int execCount: 0
     function setHeight(cid, h) { const m = Object.assign({}, heights); if (h > 0) m[cid] = h; else delete m[cid]; heights = m; touch() }
     function newCell(type, source) {
@@ -772,6 +775,7 @@ FocusScope {
     // Code from the pane's editor, for a kernel that isn't the shell: a new
     // cell at the end, run.
     function submit(code) {
+        expandedId = ""         // (a new card shows: nothing hides it)
         const c = newCell("code", code)
         cells.append(c)
         current = cells.count - 1
@@ -1426,94 +1430,10 @@ FocusScope {
     }
     Shortcut { sequence: "Ctrl+S"; enabled: nb.visible && nb.activeFocus; context: Qt.WindowShortcut; onActivated: nb.save() }
 
-    Shortcut { sequence: "F1"; enabled: nb.visible && (nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")); context: Qt.WindowShortcut; onActivated: manual.open() }
-    // (Test hook: TESSERA_TEST_NB_MANUAL=<text> opens the manual at 12 s and finds the text.)
-    // (NB_MANUAL_SHOT=<path>: a picture of it 4 s later; the window's screenshot leaves popups out.)
-    Timer { interval: 12000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_MANUAL") !== ""; onTriggered: { manual.open(); manualFind.text = nb.controller.testEnv("NB_MANUAL"); manualShot.start() } }
-    Timer { id: manualShot; interval: 4000; onTriggered: { const p = nb.controller.testEnv("NB_MANUAL_SHOT"); if (p !== "") manual.contentItem.grabToImage(r => r.saveToFile(p)) } }
+    // (Test hook: TESSERA_TEST_OPEN_GUIDE opens the guide's tab at 8 s.)
+    Timer { interval: 8000; running: nb.controller !== null && nb.path === "" && nb.controller.testEnv("OPEN_GUIDE") !== ""; onTriggered: nb.openGuide() }
+    Shortcut { sequence: "F1"; enabled: nb.visible && (nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")); context: Qt.WindowShortcut; onActivated: nb.openGuide() }
 
-    // The tessh manual (its guide, built in), as a page: contents on the left,
-    // a find field above.
-    function manualCss() {
-        const c = (x) => String(x), a = themeData.ansi || []
-        const col = (n, d) => c(a[n] || d)
-        return nb.markdownCss(false).replace("max-width:900px", "max-width:none")
-            + "body{margin:0;display:flex;height:100vh;overflow:hidden}"
-            + "nav{width:230px;flex:none;overflow:auto;padding:14px 10px 30px 14px;border-right:1px solid " + c(Theme.divider) + ";font-size:13px;line-height:1.35}"
-            + "nav .title{font-weight:bold;font-size:15px;margin-bottom:10px;color:" + c(Theme.fg) + "}"
-            + "nav a{display:block;color:" + c(Theme.text) + ";text-decoration:none;padding:2px 6px;border-radius:5px}"
-            + "nav a:hover{background:" + c(Theme.field) + "}"
-            + "nav a.part{font-weight:bold;margin-top:10px;color:" + c(Theme.fg) + "}"
-            + "nav .topics a{padding-left:14px;color:" + c(Theme.textDim) + "}"
-            + "main{flex:1;overflow:auto;padding:16px 28px 60px}main>*{max-width:860px}"
-            + "pre.tessh{border-left:3px solid " + c(Theme.accent) + "}"
-            + "pre.output{background:transparent;border:1px dashed " + c(Theme.divider) + ";color:" + c(Theme.textDim) + ";margin-top:-6px}"
-            + "pre.output::before{content:'output';display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:2px}"
-            + ".t-keyword{color:" + col(5, "#c678dd") + "}.t-string{color:" + col(2, "#98c379") + "}"
-            + ".t-number,.t-constant,.t-attribute{color:" + col(3, "#e5c07b") + "}.t-function{color:" + col(4, "#61afef") + "}"
-            + ".t-comment{color:" + col(8, "#5c6370") + ";font-style:italic}.t-operator,.t-property{color:" + col(6, "#56b6c2") + "}"
-            + ".t-variable{color:" + col(1, "#e06c75") + "}.t-punctuation{color:" + c(Theme.textDim) + "}"
-            + "h1:target,h2:target{color:" + c(Theme.accent) + "}"
-    }
-    Popup {
-        id: manual
-        parent: nb
-        x: 14; y: 14
-        width: nb.width - 28
-        height: nb.height - 28
-        padding: 0
-        topPadding: 0.001   // (off the half pixel: 130% scale smears native text there)
-        modal: true
-        dim: true
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        property bool loaded: false
-        background: Rectangle { radius: 9; color: Theme.bg; border.color: Theme.divider }
-        onOpened: {
-            if (!loaded && nb.controller) {
-                loaded = true
-                manualWeb.loadHtml("<!doctype html><html><head><meta charset='utf-8'><style>" + nb.manualCss() + "</style>"
-                    + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href^=\"#\"]');if(!a)return;e.preventDefault();const t=document.getElementById(a.getAttribute('href').slice(1));if(t)t.scrollIntoView({block:'start'})})</script>"
-                    + "</head><body>" + nb.controller.tesshManualHtml() + "</body></html>", "about:blank")
-            }
-            manualFind.forceActiveFocus()
-        }
-        contentItem: ColumnLayout {
-            spacing: 0
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.margins: 8
-                spacing: 8
-                Text { topPadding: 0.001; leftPadding: 6; text: "tessh manual"; color: Theme.fg; font.pixelSize: 14; font.bold: true; renderType: Text.NativeRendering }
-                Text { topPadding: 0.001; text: "help TOPIC in tessh shows one part"; color: Theme.textDim; font.pixelSize: 12; renderType: Text.NativeRendering; visible: !nb.narrow }
-                Item { Layout.fillWidth: true }
-                TextField {
-                    id: manualFind
-                    Layout.preferredWidth: 220
-                    placeholderText: "Find in the manual"
-                    color: Theme.text
-                    font.pixelSize: 12
-                    background: Rectangle { radius: 6; color: Theme.field; border.color: manualFind.activeFocus ? Theme.accent : Theme.divider }
-                    onTextChanged: manualWeb.findText(text)
-                    Keys.onReturnPressed: (e) => manualWeb.findText(text, (e.modifiers & Qt.ShiftModifier) ? WebEngineView.FindBackward : 0)
-                    Keys.onEscapePressed: manual.close()
-                }
-                Tool { label: "✕"; tip: "Close (Esc)"; onClicked: manual.close() }
-            }
-            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.divider }
-            WebEngineView {
-                id: manualWeb
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.margins: 1
-                backgroundColor: Theme.bg
-                settings.pluginsEnabled: false
-                settings.localContentCanAccessFileUrls: false
-                onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
-                onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus && manualFind.text !== "") findText(manualFind.text) }
-            }
-        }
-    }
 
     // (Test hooks: TESSERA_TEST_NB_RUN_ALL runs every cell once it's open,
     // NB_SAVE saves, NB_SCROLL_END scrolls down, NB_EXPORT=<path> saves there.)
@@ -1525,6 +1445,8 @@ FocusScope {
     Timer { interval: 9500; running: nb.controller !== null && nb.controller.testEnv("NB_KERNEL") !== ""
             onTriggered: nb.listKernels(() => { nb.changeKernel(nb.controller.testEnv("NB_KERNEL")); console.log("nb kernel test: " + nb.kernels.length + " in the list, picked " + nb.kernelName + " oneShot " + nb.oneShot) }) }
     Timer { interval: 11000; running: nb.controller !== null && nb.controller.testEnv("NB_CELL") !== ""; onTriggered: nb.submit(nb.controller.testEnv("NB_CELL").replace(/\\n/g, "\n")) }
+    // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s.)
+    Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") !== ""; onTriggered: if (cells.count > 0) nb.expandedId = cells.get(cells.count - 1).cid }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
     // (Test hook: TESSERA_TEST_EDIT_FILE: the last card edited at 12 s, saved at 20 s.)
@@ -1691,9 +1613,9 @@ FocusScope {
             }
             Tool {
                 visible: nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")
-                label: nb.narrow ? "?" : "Manual"
-                tip: "The tessh manual: every feature, with examples (F1)"
-                onClicked: manual.open()
+                label: nb.narrow ? "?" : "Guide"
+                tip: "The tessh guide, in a tab: every feature, with examples (F1)"
+                onClicked: nb.openGuide()
             }
             Tool {
                 label: nb.path === "" ? (nb.narrow ? "Save…" : "Save as .ipynb…") : nb.dirty ? "Save" : "Saved"
@@ -1767,9 +1689,9 @@ FocusScope {
         anchors.rightMargin: 10
         // (A pane's notebook fills up from the bottom, by the input editor,
         // like a terminal; a document starts at the top.)
-        topMargin: nb.path === "" ? Math.max(10, height - contentHeight - bottomMargin) : 10
-        bottomMargin: 10
-        spacing: 12
+        topMargin: nb.expandedId !== "" ? 4 : nb.path === "" ? Math.max(10, height - contentHeight - bottomMargin) : 10
+        bottomMargin: nb.expandedId !== "" ? 4 : 10
+        spacing: nb.expandedId !== "" ? 0 : 12
         model: cells
         clip: true
         focus: true
@@ -1845,7 +1767,9 @@ FocusScope {
             readonly property bool expanded: nb.expandedId === cid
             readonly property bool plainMd: !code && !editing
             width: list.width - 12
-            height: (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
+            // (One card expanded: it's the only one, filling the notebook.)
+            visible: nb.expandedId === "" || expanded
+            height: !visible ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
                      + (hasOutput ? (hideOutput ? 22 : body.height + 12) : 4) + (ask ? askBox.height + 6 : 0))
             radius: 8
             color: plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
@@ -1916,10 +1840,11 @@ FocusScope {
                     // (A file card: its whole path, wrapped if need be, never cut short.)
                     // (Another host's: its name as typed, not URL-encoded.)
                     text: cell.viewPath !== "" ? cell.viewPath.replace(/^ssh:\/\/([^\/]*)/, (m, h) => { try { return "ssh://" + decodeURIComponent(h) } catch (e) { return m } })
-                        : cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.trim().replace(/\s*\n\s*/g, "  ⏎  ") : "(empty)"
-                    // (A command wraps too, so a path in it shows whole; past six
-                    // lines, the rest is in the cell.)
-                    maximumLineCount: 6
+                        : cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.replace(/^\s*\n|\s+$/g, "") : "(empty)"
+                    // (A command wraps too, so a path in it shows whole; code of
+                    // several lines shows as its lines, indented as written,
+                    // the rest in the cell past forty.)
+                    maximumLineCount: cell.source.trim().indexOf("\n") >= 0 ? 40 : 6
                     wrapMode: cell.viewPath !== "" ? Text.WrapAnywhere : Text.WrapAtWordBoundaryOrAnywhere
                     elide: cell.viewPath !== "" ? Text.ElideNone : Text.ElideRight
                     color: cell.editing ? Theme.textDim : Theme.text
@@ -2026,7 +1951,8 @@ FocusScope {
                 Chip { visible: cell.code && !cell.running && cell.source.trim() !== ""; base: cell.color; label: "↻"; tip: "Run it again"; Layout.minimumWidth: implicitWidth
                        onClicked: { nb.current = cell.index; nb.run(cell.index) } }
                 Chip {
-                    visible: cell.hasOutput
+                    // (A terminal app running in it counts as output.)
+                    visible: cell.hasOutput || cell.expanded || (nb.liveWanted && cell.index === nb.liveIndex)
                     base: cell.color
                     Layout.minimumWidth: implicitWidth
                     label: cell.expanded ? "⤡ Restore" : "⤢ Expand"
@@ -2185,7 +2111,7 @@ FocusScope {
                 // Its natural size up to 460 px, or what it was dragged to, or the
                 // whole window when expanded.
                 readonly property real natural: loader.item ? loader.item.implicitHeight : 0
-                height: !visible ? 0 : cell.expanded ? Math.max(80, list.height - header.height - 12)
+                height: !visible ? 0 : cell.expanded ? Math.max(80, list.height - list.topMargin - list.bottomMargin - header.height - 12 - (cell.editing ? editorBox.height + 8 : 0))
                       : nb.heights[cell.cid] > 0 ? nb.heights[cell.cid]
                       : live ? Math.max(240, Math.round(list.height * 0.6)) : Math.min(Math.max(natural, 16), 460)
                 clip: true
