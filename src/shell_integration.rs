@@ -132,6 +132,19 @@ fn write_auto_scripts() -> Option<std::path::PathBuf> {
     Some(base)
 }
 
+/// A pane's default shell on Windows: PowerShell (7 when installed, else
+/// Windows PowerShell) with Tessera's integration, as Windows Terminal starts
+/// it (cmd.exe has no prompt hook to mark). (program, its arguments)
+pub fn windows_default_shell() -> Option<(String, Vec<String>)> {
+    let shell = crate::client::login_shell()?;
+    if std::env::var_os("TESSERA_NO_SHELL_INTEGRATION").is_some() {
+        return Some((shell, vec!["-NoLogo".into()]));
+    }
+    let base = write_auto_scripts()?;
+    let script = base.join("powershell").join("tessera.ps1");
+    Some((shell, vec!["-NoLogo".into(), "-NoExit".into(), "-ExecutionPolicy".into(), "Bypass".into(), "-Command".into(), format!(". '{}'", script.display().to_string().replace('\'', "''"))]))
+}
+
 // A nested bash: the user's .bashrc, then the integration.
 const BASHRC: &str = "[ -f ~/.bashrc ] && . ~/.bashrc\n. \"$(dirname \"${BASH_SOURCE[0]}\")/tessera.bash\"\n";
 

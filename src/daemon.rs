@@ -247,7 +247,13 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
     let pair = pty
         .openpty(PtySize { rows: c.rows.max(1), cols: c.cols.max(1), pixel_width: 0, pixel_height: 0 })
         .map_err(ioe)?;
-    let mut cmd = if c.command.trim().is_empty() {
+    let windows_shell = if cfg!(windows) && c.command.trim().is_empty() { crate::shell_integration::windows_default_shell() } else { None };
+    let mut cmd = if let Some((shell, args)) = windows_shell {
+        // (Windows: PowerShell with Tessera's integration, not cmd.exe.)
+        let mut b = CommandBuilder::new(shell);
+        b.args(args);
+        b
+    } else if c.command.trim().is_empty() {
         CommandBuilder::new_default_prog()
     } else {
         // A profile's command, run through the user's shell so PATH and the

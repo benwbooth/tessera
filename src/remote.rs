@@ -176,16 +176,23 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
             let _ = child.wait();
         });
     }
-    // 2. tesserad there: started (it prints its socket), else deployed.
-    let (remote_sock, which) = match start_remote(ctl, host)? {
+    // 2. tesserad there: looked for (nothing started yet); copied there when
+    // missing, or brought up to this build's when it's one Tessera put there,
+    // so what starts next is the new one; then started (it prints its
+    // socket). One already running an older build is swapped in place
+    // (step 4).
+    let mut updated = false;
+    match start_remote(ctl, host, false)? {
+        Started::Missing { os, arch } => deploy(ctl, host, &os, &arch)?,
+        Started::Socket(_, Some((path, sum, os, arch))) => match update(ctl, host, &path, &sum, &os, &arch) {
+            Ok(u) => updated = u,
+            Err(e) => eprintln!("tessera: {host}: tesserad not updated: {e}"),
+        },
+        Started::Socket(_, None) => {}
+    }
+    let (remote_sock, which) = match start_remote(ctl, host, true)? {
         Started::Socket(s, w) => (s, w),
-        Started::Missing { os, arch } => {
-            deploy(ctl, host, &os, &arch)?;
-            match start_remote(ctl, host)? {
-                Started::Socket(s, w) => (s, w),
-                Started::Missing { .. } => return Err(fail(host, format!("tesserad was copied to {host} but still can't be run there"))),
-            }
-        }
+        Started::Missing { .. } => return Err(fail(host, format!("tesserad was copied to {host} but still can't be run there"))),
     };
     // 3. The local socket, forwarded to it. (A forward from before reaches
     // it again once tesserad there is up at the same socket: kept. One that
@@ -215,12 +222,15 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
-    // 4. A tesserad Tessera put there that isn't this build's: the new one
-    // copied over and swapped in (in place: its shells carry on; with
-    // kernels running, once they're done).
-    if let Some((path, sum, os, arch)) = which {
-        if let Err(e) = update(ctl, host, local, &path, &sum, &os, &arch) {
-            eprintln!("tessera: {host}: tesserad not updated: {e}");
+    // 4. The new build copied over in step 2 swapped in, in place, where an
+    // older one was running (its shells carry on; with kernels running, once
+    // they're done). (Windows can't: the new one starts once the running one
+    // has ended.)
+    if updated {
+        if let Some((path, _, os, arch)) = which {
+            if platform(&os, &arch).is_some_and(|p| p.0 != "windows") {
+                swap_in(local, &path);
+            }
         }
     }
     Ok(())
@@ -276,20 +286,21 @@ enum Started {
 /// The script run there: tesserad from PATH or where Tessera puts it;
 /// started unless running (its socket printed), or exit 127 with
 /// `uname -sm` when there's none.
-fn start_script() -> String {
+fn start_script(start: bool) -> String {
     format!(
-        r#"T=$(command -v tesserad 2>/dev/null); for d in "$HOME/.local/bin" "$HOME"; do [ -z "$T" ] && [ -x "$d/tesserad" ] && T="$d/tesserad"; done; if [ -z "$T" ]; then echo "TESSERAD-MISSING $(uname -sm)"; exit 127; fi; echo "TESSERAD $T $(cksum < "$T") $(uname -sm)"; S="{REMOTE_SOCKET}"; mkdir -p "$(dirname "$S")" && chmod 700 "$(dirname "$S")"; TESSERA_REMOTE=1 exec "$T" start --socket "$S""#
+        r#"T=$(command -v tesserad 2>/dev/null); for d in "$HOME/.local/bin" "$HOME"; do [ -z "$T" ] && [ -x "$d/tesserad" ] && T="$d/tesserad"; done; if [ -z "$T" ]; then echo "TESSERAD-MISSING $(uname -sm)"; exit 127; fi; echo "TESSERAD $T $(cksum < "$T") $(uname -sm)"; S="{REMOTE_SOCKET}"; mkdir -p "$(dirname "$S")" && chmod 700 "$(dirname "$S")"; {}"#,
+        if start { r#"TESSERA_REMOTE=1 exec "$T" start --socket "$S""# } else { "exit 0" }
     )
 }
 
-fn start_remote(ctl: &Path, host: &str) -> std::io::Result<Started> {
+fn start_remote(ctl: &Path, host: &str, start: bool) -> std::io::Result<Started> {
     // (sh -c: whatever the login shell there is, fish or nu included.)
-    let out = ssh(ctl, host).arg("--").arg(format!("{}sh -c {}", remote_env(), shell_words::quote(&start_script()))).output()?;
+    let out = ssh(ctl, host).arg("--").arg(format!("{}sh -c {}", remote_env(), shell_words::quote(&start_script(start)))).output()?;
     // Windows: cmd.exe or PowerShell has no sh (WSL's, if any, isn't the
     // host's own): PowerShell's version of it.
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     let out = if out.status.code() != Some(0) && out.status.code() != Some(127) && (err.contains("not recognized") || err.contains("CommandNotFound") || err.contains("is not recognised")) {
-        ssh(ctl, host).arg("--").arg(windows_command(&windows_start_script())).output()?
+        ssh(ctl, host).arg("--").arg(windows_command(&windows_start_script(start))).output()?
     } else {
         out
     };
@@ -302,7 +313,8 @@ fn start_remote(ctl: &Path, host: &str) -> std::io::Result<Started> {
     }
     let found = text.lines().any(|l| l.starts_with("TESSERAD "));
     match out.status.code() {
-        _ if found && !text.lines().last().unwrap_or("").starts_with("TESSERAD ") => {
+        // (Looked for only: its line is the last. Started: its socket follows.)
+        _ if found && (!start || !text.lines().last().unwrap_or("").starts_with("TESSERAD ")) => {
             // TESSERAD <path, spaces and all> <sum> <size> <os> <arch>
             let which = text.lines().find_map(|l| {
                 let w: Vec<&str> = l.strip_prefix("TESSERAD ")?.rsplitn(5, ' ').collect();
@@ -351,7 +363,7 @@ const WINDOWS_DIR: &str = "(Join-Path $env:LOCALAPPDATA 'Tessera\\bin')";
 /// start_script, for Windows: tesserad from PATH or Tessera's folder, its
 /// SHA-256 (no cksum there), started (out of the SSH session's job: it
 /// stays when the connection ends).
-fn windows_start_script() -> String {
+fn windows_start_script(start: bool) -> String {
     format!(
         r#"$ErrorActionPreference = 'Stop'
 $dir = {WINDOWS_DIR}
@@ -363,6 +375,7 @@ if (-not $t) {{ "TESSERAD-MISSING Windows $arch"; exit 0 }}
 $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $t).Hash.ToLower()
 $n = (Get-Item -LiteralPath $t).Length
 "TESSERAD $t sha256:$h $n Windows $arch"
+if (-not {start}) {{ exit 0 }}
 $env:TESSERA_REMOTE = '1'
 $sock = Join-Path $env:LOCALAPPDATA 'Tessera\daemon.sock'
 # Started through WMI when it isn't running: Windows' sshd ends everything
@@ -374,7 +387,8 @@ if (-not $running) {{
 }}
 & $t start --socket $sock
 exit $LASTEXITCODE
-"#
+"#,
+        start = if start {{ "$true" }} else {{ "$false" }}
     )
 }
 
@@ -466,36 +480,40 @@ fn local_cksum(p: &Path) -> Option<String> {
     (w.len() >= 2).then(|| format!("{} {}", w[0], w[1]))
 }
 
-fn update(ctl: &Path, host: &str, local: &Path, path: &str, sum: &str, os: &str, arch: &str) -> std::io::Result<()> {
-    use crate::proto::*;
-    let Ok(bin) = build_for(os, arch) else { return Ok(()) };
+/// Copies this build's tesserad over one Tessera put there when it differs:
+/// whether it did.
+fn update(ctl: &Path, host: &str, path: &str, sum: &str, os: &str, arch: &str) -> std::io::Result<bool> {
+    let Ok(bin) = build_for(os, arch) else { return Ok(false) };
     let same = if sum.starts_with("sha256:") { local_sha256(&bin).as_deref() == Some(sum) } else { local_cksum(&bin).as_deref() == Some(sum) };
     if same {
-        return Ok(());
+        return Ok(false);
     }
     // (Only one Tessera copied there itself: not a tesserad installed another way.)
     let windows = platform(os, arch).is_some_and(|p| p.0 == "windows");
     let dir = deploy_dir(ctl, host, windows)?;
     let ours = if windows { path.eq_ignore_ascii_case(&format!("{dir}\\tesserad.exe")) } else { path == format!("{dir}/tesserad") };
     if !ours {
-        return Ok(());
+        return Ok(false);
     }
     deploy(ctl, host, os, arch)?;
-    // (Windows can't swap a running build in place: the new one is there for
-    // the next start, once this one has no shells left.)
-    if windows {
-        return Ok(());
-    }
-    let mut s = UnixStream::connect(local)?;
+    Ok(true)
+}
+
+/// The running tesserad (through `local`) execs the build at `path` in its
+/// place, its shells kept; deferred by it while kernels run.
+fn swap_in(local: &Path, path: &str) {
+    use crate::proto::*;
+    let Ok(mut s) = UnixStream::connect(local) else { return };
     let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
-    write_json(&mut s, T_UPGRADE, &serde_json::json!({"exe": path}))?;
+    if write_json(&mut s, T_UPGRADE, &serde_json::json!({"exe": path})).is_err() {
+        return;
+    }
     let _ = read_frame(&mut s);
     // (The new build answers on the same socket once it has taken over.)
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(10) && !answers(local) {
         std::thread::sleep(Duration::from_millis(100));
     }
-    Ok(())
 }
 
 /// Where Tessera puts tesserad on `host`: ~/.local/bin, or ~ when that
@@ -841,7 +859,7 @@ mod tests {
     #[test]
     fn windows_scripts() {
         use base64::Engine;
-        let s = windows_start_script();
+        let s = windows_start_script(true);
         assert!(s.contains("Get-FileHash") && s.contains("& $t start"));
         let cmd = windows_command(&s);
         let b64 = cmd.rsplit(' ').next().unwrap();
