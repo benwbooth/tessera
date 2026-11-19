@@ -93,6 +93,56 @@ fn runners(lang: &str) -> &'static [Runner] {
         "c-sharp" => &[r!("dotnet-script", "dotnet-script {f}", File("csx"), "dotnet-script")],
         "prolog" => &[r!("swipl", "swipl {f}", File("pl"), "swi-prolog")],
         "fortran" => &[r!("gfortran", "gfortran -o {b} {f} && {b}", File("f90"), "gfortran")],
+        "elvish" => &[r!("elvish", "elvish -c", Inline, "elvish")],
+        "fennel" => &[r!("fennel", "fennel -e", Inline, "luaPackages.fennel")],
+        "forth" => &[r!("gforth", "gforth {f} -e bye", File("fs"), "gforth")],
+        "hare" => &[r!("hare", "hare run {f}", File("ha"), "hare")],
+        "janet-simple" | "janet" => &[r!("janet", "janet -e", Inline, "janet")],
+        "koka" => &[r!("koka", "koka --console=raw -v0 -e {f}", File("kk"), "koka")],
+        // (#eval lines print; a `main` runs with lean --run.)
+        "lean" => &[r!("lean", "lean {f}", File("lean"), "lean4")],
+        "luau" => &[r!("luau", "luau {f}", File("luau"), "luau")],
+        "odin" => &[r!("odin", "odin run {f} -file", File("odin"), "odin")],
+        "pascal" => &[r!("fpc", "fpc -v0 -o{b} {f} >/dev/null && {b}", File("pas"), "fpc")],
+        "sml" => &[r!("poly", "poly --script {f}", File("sml"), "polyml")],
+        "ada" => &[r!("gnatmake", "cd {d} && gnatchop -q -w {f} && gnatmake -q -o snippet \"$(ls *.adb | head -1)\" && ./snippet", File("ada"), "gnat")],
+        "gleam" => &[r!(
+            "gleam",
+            "cd {d} && gleam new --skip-git --skip-github app >/dev/null && cp {f} app/src/app.gleam && cd app && gleam run --no-print-progress",
+            File("gleam"),
+            "gleam nixpkgs#erlang nixpkgs#rebar3"
+        )],
+        "koto" => &[r!("koto", "koto {f}", File("koto"), "koto")],
+        "inko" => &[r!("inko", "inko run {f}", File("inko"), "inko")],
+        "amber" => &[r!("amber", "amber run {f}", File("ab"), "amber-lang")],
+        "uxntal" => &[r!("uxncli", "uxnasm {f} {b}.rom >/dev/null && uxncli {b}.rom", File("tal"), "uxn")],
+        // (Assembly for x86-64 Linux: assembled, linked, run.)
+        "nasm" => &[r!("nasm", "nasm -felf64 {f} -o {b}.o && ld {b}.o -o {b} && {b}", File("asm"), "nasm nixpkgs#binutils")],
+        "gas" => &[r!("as", "as {f} -o {b}.o && ld {b}.o -o {b} && {b}", File("s"), "binutils")],
+        "llvm" => &[r!("lli", "lli {f}", File("ll"), "llvm")],
+        "elisp" => &[r!("emacs", "emacs --batch -l {f}", File("el"), "emacs-nox")],
+        // (Configuration languages: what they evaluate to.)
+        "jsonnet" => &[r!("jsonnet", "jsonnet -e", Inline, "go-jsonnet")],
+        "nickel" => &[r!("nickel", "nickel export {f}", File("ncl"), "nickel")],
+        "dhall" => &[r!("dhall", "dhall", Stdin, "dhall")],
+        "cue" => &[r!("cue", "cue eval {f}", File("cue"), "cue")],
+        "pkl" => &[r!("pkl", "pkl eval {f}", File("pkl"), "pkl")],
+        "rego" => &[r!("opa", "opa eval --format pretty -d {f} data", File("rego"), "open-policy-agent")],
+        "prql" => &[r!("prqlc", "prqlc compile {f}", File("prql"), "prqlc")],
+        "scss" => &[r!("sass", "sass --stdin", Stdin, "dart-sass")],
+        "make" => &[r!("make", "make -f {f}", File("mk"), "gnumake")],
+        "cmake" => &[r!("cmake", "cmake -P {f}", File("cmake"), "cmake")],
+        // (Typesetting and drawings: their picture, which the terminal and
+        // the notebook show as an image.)
+        "typst" => &[r!("typst", "typst compile --pages 1 {f} {b}.png && cat {b}.png", File("typ"), "typst")],
+        "dot" => &[r!("dot", "dot -Tpng", Stdin, "graphviz")],
+        "latex" => &[r!(
+            "tectonic",
+            "tectonic -X compile --outdir {d} {f} >/dev/null 2>&1 && pdftoppm -png -r 110 -singlefile {b}.pdf {b} && cat {b}.png",
+            File("tex"),
+            "tectonic nixpkgs#poppler-utils"
+        )],
+        "openscad" => &[r!("openscad", "openscad -o {b}.png {f} 2>/dev/null && cat {b}.png", File("scad"), "openscad")],
         _ => &[],
     }
 }
@@ -752,3 +802,73 @@ mod tests {
 
 
 
+
+/// Each language added for the input editor's list, run for real the way
+/// the editor runs it (its program from Nix when it isn't installed): what
+/// it prints is checked. Slow the first time (Nix fetches compilers).
+/// TESSERA_LANGS=a,b picks some. cargo test -p tesserad -- --ignored languages_run
+#[cfg(test)]
+mod live {
+    #[test]
+    #[ignore]
+    fn languages_run() {
+        let png = "PNG\r\n\u{1a}";
+        let cases: &[(&str, &str, &str)] = &[
+            ("elvish", "echo hi-elvish", "hi-elvish"),
+            ("fennel", "(print \"hi-fennel\")", "hi-fennel"),
+            ("forth", ".( hi-forth) cr", "hi-forth"),
+            ("hare", "use fmt;\nexport fn main() void = {\n\tfmt::println(\"hi-hare\")!;\n};", "hi-hare"),
+            ("janet-simple", "(print \"hi-janet\")", "hi-janet"),
+            ("koka", "fun main()\n  println(\"hi-koka\")", "hi-koka"),
+            ("lean", "#eval \"hi-lean\"", "hi-lean"),
+            ("luau", "print(\"hi-luau\")", "hi-luau"),
+            ("odin", "package main\nimport \"core:fmt\"\nmain :: proc() {\n\tfmt.println(\"hi-odin\")\n}", "hi-odin"),
+            ("pascal", "begin\n  writeln('hi-pascal')\nend.", "hi-pascal"),
+            ("sml", "print \"hi-sml\\n\";", "hi-sml"),
+            ("ada", "with Ada.Text_IO;\nprocedure Hello is\nbegin\n   Ada.Text_IO.Put_Line (\"hi-ada\");\nend Hello;", "hi-ada"),
+            ("gleam", "import gleam/io\n\npub fn main() {\n  io.println(\"hi-gleam\")\n}", "hi-gleam"),
+            ("koto", "print \"hi-koto\"", "hi-koto"),
+            ("inko", "import std.stdio (Stdout)\n\ntype async Main {\n  fn async main {\n    Stdout.new.print('hi-inko')\n  }\n}", "hi-inko"),
+            ("amber", "echo(\"hi-amber\")", "hi-amber"),
+            ("uxntal", "|0100 #68 #18 DEO #69 #18 DEO #0a #18 DEO #800f DEO BRK", "hi"),
+            ("nasm", "global _start\nsection .data\nm: db \"hi-nasm\", 10\nsection .text\n_start:\n  mov rax, 1\n  mov rdi, 1\n  mov rsi, m\n  mov rdx, 8\n  syscall\n  mov rax, 60\n  xor rdi, rdi\n  syscall", "hi-nasm"),
+            ("gas", ".global _start\n.data\nm: .ascii \"hi-gas\\n\"\n.text\n_start:\n  mov $1, %rax\n  mov $1, %rdi\n  lea m(%rip), %rsi\n  mov $7, %rdx\n  syscall\n  mov $60, %rax\n  xor %rdi, %rdi\n  syscall", "hi-gas"),
+            ("llvm", "@s = constant [8 x i8] c\"hi-llvm\\00\"\ndeclare i32 @puts(ptr)\ndefine i32 @main() {\n  call i32 @puts(ptr @s)\n  ret i32 0\n}", "hi-llvm"),
+            ("elisp", "(princ \"hi-elisp\\n\")", "hi-elisp"),
+            ("jsonnet", "{ a: 'hi-jsonnet' }", "hi-jsonnet"),
+            ("nickel", "{ a = \"hi-nickel\" }", "hi-nickel"),
+            ("dhall", "\"hi-dhall\"", "hi-dhall"),
+            ("cue", "a: \"hi-cue\"", "hi-cue"),
+            ("pkl", "a = \"hi-pkl\"", "hi-pkl"),
+            ("rego", "package x\n\nmsg := \"hi-rego\"", "hi-rego"),
+            ("prql", "from t\nselect {a}", "SELECT"),
+            ("scss", "$c: red;\n.a { color: $c; }", "color: red"),
+            ("make", "all:\n\t@echo hi-make", "hi-make"),
+            ("cmake", "message(\"hi-cmake\")", "hi-cmake"),
+            ("typst", "= Hi", png),
+            ("dot", "digraph { a -> b }", png),
+            ("latex", "\\documentclass{article}\n\\begin{document}\nHi\n\\end{document}", png),
+            ("openscad", "cube(5);", png),
+        ];
+        let pick: Vec<String> = std::env::var("TESSERA_LANGS").map(|s| s.split(',').map(String::from).collect()).unwrap_or_default();
+        let mut failed = Vec::new();
+        for (lang, code, want) in cases {
+            if !pick.is_empty() && !pick.iter().any(|p| p == lang) {
+                continue;
+            }
+            assert!(super::runnable(lang), "{lang} has no runner");
+            let cmd = super::command(lang, code, "/tmp", "bash");
+            let t = std::time::Instant::now();
+            // (stderr apart: the command ends with a here-document.)
+            let out = std::process::Command::new("timeout").args(["1200", "bash", "-c", &cmd]).output().unwrap();
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            let ok = text.contains(want);
+            eprintln!("{} {lang} ({:.0}s): {}", if ok { "ok  " } else { "FAIL" }, t.elapsed().as_secs_f64(), if ok { String::new() } else { text.chars().rev().take(300).collect::<String>().chars().rev().collect() });
+            if !ok {
+                eprintln!("     command: {cmd}");
+                failed.push(*lang);
+            }
+        }
+        assert!(failed.is_empty(), "didn't run: {failed:?}");
+    }
+}
