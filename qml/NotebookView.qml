@@ -1468,13 +1468,19 @@ FocusScope {
                 }
                 // (A file card, editing: save, save as, read again, done; ● unsaved.)
                 readonly property var fileView: cell.viewPath !== "" && loader.item && loader.item.editing !== undefined ? loader.item : null
+                // (Edit, and while editing Done: with changes, it saves them
+                // first; Discard changes is in ⋯. The keys button comes next to it.)
                 Chip {
-                    visible: header.fileView !== null && !header.fileView.editing
+                    visible: header.fileView !== null
                     base: cell.color
                     Layout.minimumWidth: implicitWidth
-                    label: "✎ Edit"
-                    tip: "Edit the file (your editor keys: " + nb.editorKeys + ")"
-                    onClicked: header.fileView.startEdit()
+                    label: !(header.fileView && header.fileView.editing) ? "✎ Edit" : header.fileView.dirty ? "✓ Save & done" : "✓ Done"
+                    tip: !(header.fileView && header.fileView.editing) ? "Edit the file" : header.fileView.dirty ? "Save the changes and go back to viewing" : "Back to viewing"
+                    onClicked: {
+                        const v = header.fileView
+                        if (!v.editing) v.startEdit()
+                        else if (!v.dirty || v.save()) v.stopEdit()
+                    }
                 }
                 // (Editing: the keys it edits with, in sight (vi's mode too), ●
                 // when there are changes; a click picks other keys. Saving and
