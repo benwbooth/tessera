@@ -335,6 +335,9 @@ pub mod ffi {
         /// The language from the AI's guesses, weighted by recent use ("" for the shell's).
         #[qinvokable]
         fn rank_languages(self: &Controller, reply: &QString, recent: &QString) -> QString;
+        /// Every language code can be run in once (a snippet), [[name, shown]].
+        #[qinvokable]
+        fn runnable_languages(self: &Controller) -> QString;
         /// The shell command that runs code in a language ("" if it can't).
         #[qinvokable]
         fn snippet_command(self: &Controller, lang: &QString, code: &QString, cwd: &QString, shell: &QString, host: &QString) -> QString;
@@ -1593,6 +1596,10 @@ impl ffi::Controller {
 
     fn rank_languages(&self, reply: &ffi::QString, recent: &ffi::QString) -> ffi::QString {
         qs(&crate::snippets::rank(&reply.to_string(), &recent.to_string()))
+    }
+
+    fn runnable_languages(&self) -> ffi::QString {
+        qs(&crate::snippets::runnable_languages_json())
     }
 
     fn snippet_command(&self, lang: &ffi::QString, code: &ffi::QString, cwd: &ffi::QString, shell: &ffi::QString, host: &ffi::QString) -> ffi::QString {

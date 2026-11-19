@@ -176,6 +176,42 @@ pub fn normalize(name: &str) -> String {
     .to_string()
 }
 
+/// Every language a snippet runs in (runners' own names, not their aliases),
+/// for the notebook's picker: each with its name to show.
+const RUN_LANGS: &[&str] = &[
+    "python", "javascript", "typescript", "ruby", "perl", "lua", "php", "r", "julia", "elixir", "erlang", "groovy",
+    "tcl", "awk", "jq", "nix", "octave", "sql", "rust", "go", "c", "cpp", "java", "kotlin", "scala", "clojure",
+    "haskell", "ocaml", "racket", "scheme", "common-lisp", "dart", "swift", "zig", "nim", "crystal", "d", "v", "fsharp",
+    "c-sharp", "prolog", "fortran", "fennel", "forth", "hare", "janet", "koka", "lean", "luau", "odin", "pascal",
+    "sml", "ada", "gleam", "koto", "inko", "amber", "uxntal", "nasm", "gas", "llvm", "elisp", "jsonnet", "nickel",
+    "dhall", "cue", "pkl", "rego", "prql", "scss", "make", "cmake", "typst", "dot", "latex", "openscad",
+];
+pub fn runnable_languages_json() -> String {
+    let named = |l: &str| -> String {
+        let own = match l {
+            "cpp" => "C++", "c-sharp" => "C#", "fsharp" => "F#", "common-lisp" => "Common Lisp", "sml" => "Standard ML",
+            "nasm" => "x86-64 assembly (nasm)", "gas" => "x86-64 assembly (GNU as)", "llvm" => "LLVM IR",
+            "elisp" => "Emacs Lisp", "rego" => "Rego (OPA)", "prql" => "PRQL", "scss" => "SCSS", "dot" => "Graphviz (dot)",
+            "latex" => "LaTeX", "openscad" => "OpenSCAD", "cue" => "CUE", "jq" => "jq", "awk" => "awk", "sql" => "SQL",
+            "ocaml" => "OCaml", "php" => "PHP", "uxntal" => "Uxntal", "pkl" => "Pkl", "cmake" => "CMake", "make" => "Make",
+            _ => "",
+        };
+        if !own.is_empty() {
+            return own.into();
+        }
+        if let Some((_, n)) = crate::syntax::LANGUAGES.iter().find(|(k, _)| *k == l) {
+            return n.to_string();
+        }
+        let mut s = l.replace('-', " ");
+        if let Some(f) = s.get_mut(0..1) {
+            f.make_ascii_uppercase();
+        }
+        s
+    };
+    let out: Vec<[String; 2]> = RUN_LANGS.iter().filter(|l| runnable(l)).map(|l| [l.to_string(), named(l)]).collect();
+    serde_json::to_string(&out).unwrap_or_default()
+}
+
 /// Can `lang` be run (with an installed program, or one Nix can fetch)?
 pub fn runnable(lang: &str) -> bool {
     !runners(lang).is_empty()

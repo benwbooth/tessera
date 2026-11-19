@@ -68,7 +68,11 @@ FocusScope {
     property string languageVersion: ""
     readonly property var kernel: kernels.find(k => k.name === kernelName) || null
     readonly property bool shellKernel: kernelName === "tessera-shell"
-    readonly property bool kernelUp: shellKernel || kernelState === "idle" || kernelState === "busy"
+    // (A language with no Jupyter kernel: each cell runs once, as a program,
+    // in the pane's shell, as the input editor runs it.)
+    readonly property bool oneShot: kernelName.startsWith("tessera-run:")
+    readonly property bool viaShell: shellKernel || oneShot
+    readonly property bool kernelUp: viaShell || kernelState === "idle" || kernelState === "busy"
     readonly property string codeLang: shellKernel ? "bash" : language
     // (What runs a cell with no language of its own: the pane's shell by its
     // name, so bash from a zsh pane goes to bash's kernel, not to zsh.)
@@ -79,7 +83,13 @@ FocusScope {
         let ks = []
         if (view) ks.push({ name: "tessera-shell", display: "This pane's shell", language: "bash" })
         try { ks = ks.concat(JSON.parse(controller.jupyterKernels(sshHost))) } catch (e) {}
-        kernels = ks
+        // (Then every language Tessera can run code in without a kernel.)
+        let run = []
+        try { run = JSON.parse(controller.runnableLanguages()) } catch (e) {}
+        const more = run.filter(r => !ks.some(k => k.name !== "tessera-shell" && sameLang(k.language, r[0])))
+            .map(r => ({ name: "tessera-run:" + r[0], display: r[1] + " (each cell runs once)", language: r[0], oneShot: true }))
+            .sort((a, b) => a.display.toLowerCase() < b.display.toLowerCase() ? -1 : 1)
+        kernels = ks.concat(more)
     }
     function pickKernel(spec) {
         // The notebook's own kernel, else one for its language; a shell
@@ -99,7 +109,7 @@ FocusScope {
         language = k ? k.language : lang
     }
     function startKernel() {
-        if (!controller || kernelName === "" || shellKernel) return
+        if (!controller || kernelName === "" || viaShell) return
         kernelState = "starting"
         kernelMessage = ""
         controller.jupyterStart(key, kernelName, folder, shellPid, storeKey)
@@ -109,7 +119,7 @@ FocusScope {
         queue = []
     }
     function restartKernel() {
-        if (shellKernel) return
+        if (viaShell) return
         controller.jupyterStop(key)
         stopRunning()
         kernelState = ""
@@ -330,6 +340,7 @@ FocusScope {
         // (A cell in another language: that language's kernel.)
         if (c.lang !== "" && !sameLang(c.lang, runsIn)) { runLang(c.cid, c.lang); return }
         if (shellKernel) { shellRun(c.cid, c.source); return }
+        if (oneShot) { runOnce(c.cid, language, c.source); return }
         if (kernelUp) execute(c.cid)
         else {
             queue = queue.concat([c.cid])
@@ -350,7 +361,7 @@ FocusScope {
     function runAll() { for (let i = 0; i < cells.count; ++i) if (cells.get(i).type === "code") run(i) }
     function runAbove(n) { for (let i = 0; i < n; ++i) if (cells.get(i).type === "code") run(i) }
     function interrupt() {
-        if (shellKernel) { if (view) view.sendText("\x03"); return }
+        if (viaShell) { if (view) view.sendText("\x03"); return }
         controller.jupyterInterrupt(key)
     }
     function clearOutputs() {
@@ -529,7 +540,10 @@ FocusScope {
         if (e && e.state === "starting") return
         const spec = langSpec(l)
         if (!spec) {
+            setLang(l, { queue: [] })
             const i = indexOf(cid)
+            // (No kernel for it: run once, as a program, in the pane's shell.)
+            if (i >= 0 && runOnce(cid, l, cells.get(i).source)) return
             cells.setProperty(i, "running", false)
             addOutput(i, { output_type: "error", ename: "No kernel", evalue: "No Jupyter kernel for " + l, traceback: ["No Jupyter kernel for " + l + " (installed or from Nix)."] })
             setLang(l, { queue: [] })
@@ -588,6 +602,21 @@ FocusScope {
         current = cells.count - 1
         run(cells.count - 1)
         follow()
+    }
+    // A cell as a program run once in the pane's shell (snippets.rs's runner
+    // for its language); false if there's none.
+    function runOnce(cid, l, code) {
+        const cmd = controller ? controller.snippetCommand(l, code, shellDir, shellName || "bash", sshHost) : ""
+        if (cmd === "" || !view) {
+            const i = indexOf(cid)
+            if (i >= 0) {
+                cells.setProperty(i, "running", false)
+                addOutput(i, { output_type: "error", ename: "Can't run", evalue: l, traceback: ["Tessera has no way to run " + l + " here."] })
+            }
+            return false
+        }
+        shellRun(cid, cmd)
+        return true
     }
     // Code from the pane's editor, for a kernel that isn't the shell: a new
     // cell at the end, run.
@@ -1064,7 +1093,7 @@ FocusScope {
     // (A pane's notebook's kernels stay, in tesserad, as long as its session:
     // the window closing doesn't end them. A file's go with it.)
     function kernelsRunning() {
-        if (!shellKernel && (kernelState === "idle" || kernelState === "busy" || kernelState === "starting")) return true
+        if (!viaShell && (kernelState === "idle" || kernelState === "busy" || kernelState === "starting")) return true
         for (const l in langKernels) if (langKernels[l].state && langKernels[l].state !== "dead") return true
         return false
     }
@@ -1108,6 +1137,11 @@ FocusScope {
     Timer { interval: 1500; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_RUN_ALL") !== ""; onTriggered: nb.runAll() }
     Timer { interval: 20000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SAVE") !== ""; onTriggered: nb.save() }
     Timer { interval: 16000; running: nb.controller !== null && nb.visible && nb.controller.testEnv("NB_SCROLL_END") !== ""; onTriggered: list.positionViewAtEnd() }
+    // (Test hook: TESSERA_TEST_NB_KERNEL=<name> picks that kernel at 9.5 s;
+    // TESSERA_TEST_NB_CELL=<code> then runs a cell of it at 11 s.)
+    Timer { interval: 9500; running: nb.controller !== null && nb.controller.testEnv("NB_KERNEL") !== ""
+            onTriggered: { nb.listKernels(); nb.changeKernel(nb.controller.testEnv("NB_KERNEL")); console.log("nb kernel test: " + nb.kernels.length + " in the list, picked " + nb.kernelName + " oneShot " + nb.oneShot) } }
+    Timer { interval: 11000; running: nb.controller !== null && nb.controller.testEnv("NB_CELL") !== ""; onTriggered: nb.submit(nb.controller.testEnv("NB_CELL").replace(/\\n/g, "\n")) }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
     // (Test hook: TESSERA_TEST_EDIT_FILE: the last card edited at 12 s, saved at 20 s.)
@@ -1228,7 +1262,7 @@ FocusScope {
             Item { width: 2; visible: !nb.tiny }
             Tool { label: nb.narrow ? "▶▶" : "▶▶ Run All"; tip: "Run every cell, top to bottom"; onClicked: nb.runAll() }
             Tool { label: "■"; tip: "Interrupt"; onClicked: nb.interrupt() }
-            Tool { visible: !nb.shellKernel; label: nb.narrow ? "↻" : "↻ Restart"; tip: "Restart the kernel (its variables are lost)"; onClicked: nb.restartKernel() }
+            Tool { visible: !nb.viaShell; label: nb.narrow ? "↻" : "↻ Restart"; tip: "Restart the kernel (its variables are lost)"; onClicked: nb.restartKernel() }
             Tool { label: nb.narrow ? "⌫" : "Clear"; tip: "Clear every cell's output"; onClicked: nb.clearOutputs() }
             Tool {
                 id: kernelsTool
@@ -1244,7 +1278,7 @@ FocusScope {
             // The kernel: which, and how it's doing.
             Rectangle {
                 width: 8; height: 8; radius: 4
-                color: nb.shellKernel || nb.kernelState === "idle" ? nb.ansi(2, "#98c379")
+                color: nb.viaShell || nb.kernelState === "idle" ? nb.ansi(2, "#98c379")
                      : nb.kernelState === "busy" ? nb.ansi(3, "#e5c07b")
                      : nb.kernelState === "starting" ? Theme.accent
                      : nb.kernelState === "dead" ? nb.ansi(1, "#e06c75") : Theme.textDim
@@ -1256,7 +1290,7 @@ FocusScope {
                     onRunningChanged: if (!running) parent.opacity = 1
                 }
                 ToolTip.visible: dotHover.hovered
-                ToolTip.text: nb.shellKernel ? "ready" : nb.kernelState === "" ? "not started (starts with the first run)" : nb.kernelState
+                ToolTip.text: nb.viaShell ? "ready" : nb.kernelState === "" ? "not started (starts with the first run)" : nb.kernelState
                 HoverHandler { id: dotHover }
             }
             SlimCombo {
@@ -2002,7 +2036,7 @@ FocusScope {
                 else if (enter) { runAndAdvance(); e.accepted = true } else if (e.key === Qt.Key_Escape) { nb.current = cellIndex; nb.stopEditing(cellIndex); e.accepted = true }
                 else if (e.key === Qt.Key_Tab && !ctrl) {
                     const before = edit.text.slice(0, edit.cursorPosition)
-                    if (edit.selectedText === "" && /[\w.\]\)'"]$/.test(before) && !nb.shellKernel && nb.kernelUp) comp.ask()
+                    if (edit.selectedText === "" && /[\w.\]\)'"]$/.test(before) && !nb.viaShell && nb.kernelUp) comp.ask()
                     else edit.insert(edit.cursorPosition, "    ")
                     e.accepted = true
                 } else if (e.key === Qt.Key_Backtab) {
