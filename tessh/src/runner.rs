@@ -61,6 +61,15 @@ pub fn init(py: Python<'_>) -> PyResult<()> {
     if py.import("sys")?.getattr("modules")?.contains("__tessh__")? {
         return Ok(());
     }
+    // The packages the build's Nix Python has (numpy, pandas, matplotlib),
+    // after the user's own: a dev build's tessh gets them as the Nix
+    // package's wrapper does (TESSH_SITE_PACKAGES is set by the dev shell).
+    if let Some(site) = option_env!("TESSH_SITE_PACKAGES") {
+        let path = py.import("sys")?.getattr("path")?;
+        if std::path::Path::new(site).is_dir() && !path.contains(site)? {
+            path.call_method1("append", (site,))?;
+        }
+    }
     crate::runtime::module(py)?;
     let fm = crate::pyforms::module(py)?;
     py.import("sys")?.getattr("modules")?.set_item("__tessh_forms__", fm)?;

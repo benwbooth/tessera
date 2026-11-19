@@ -173,6 +173,9 @@
         {
           default = pkgs.mkShell {
             packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec pkgs.python3 ];
+            # tessh (built here) adds these to its Python's path at the end:
+            # the packages the Nix package's tessh has.
+            TESSH_SITE_PACKAGES = "${pkgs.python3.withPackages (p: with p; [ numpy pandas matplotlib ])}/${pkgs.python3.sitePackages}";
             QMAKE = "${qtEnv}/bin/qmake";
             TESSERA_MUSL_TARGET = muslTarget;
             "CARGO_TARGET_${muslVar}_LINKER" = "${muslCc}cc";
