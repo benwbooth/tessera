@@ -121,16 +121,36 @@
 
       # `nix develop`: Rust, the same Qt, and Zig 0.15 for libghostty-vt.
       devShells = forAll (pkgs:
-        let qtEnv = qtEnvFor pkgs; in
+        let
+          qtEnv = qtEnvFor pkgs;
+          # The static tesserad, built incrementally like the rest (copied to
+          # SSH hosts): Rust for the musl target, and musl's C compiler for
+          # the crates with C in them. `cargo build -p tesserad --target
+          # <musl> --config target/musl.toml` (written by the shell hook:
+          # that rustc, by its whole path; a compiler cache like kache only
+          # takes one named rustc).
+          musl = pkgs.pkgsStatic;
+          muslTarget = musl.stdenv.hostPlatform.rust.rustcTarget;
+          muslVar = musl.stdenv.hostPlatform.rust.cargoEnvVarTarget;
+          muslUnder = builtins.replaceStrings [ "-" ] [ "_" ] muslTarget;
+          muslCc = "${musl.stdenv.cc}/bin/${musl.stdenv.cc.targetPrefix}";
+        in
         {
           default = pkgs.mkShell {
             packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec ];
             QMAKE = "${qtEnv}/bin/qmake";
+            TESSERA_MUSL_TARGET = muslTarget;
+            "CARGO_TARGET_${muslVar}_LINKER" = "${muslCc}cc";
+            "CC_${muslUnder}" = "${muslCc}cc";
+            "CXX_${muslUnder}" = "${muslCc}c++";
+            "AR_${muslUnder}" = "${muslCc}ar";
             # Link with this shell's compiler (a system clang links against the
             # system glibc and the binary can't load this nixpkgs' Qt).
             "CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "cc";
             shellHook = ''
               ln -sfn ${qtEnv} .qt-env
+              mkdir -p target
+              printf '[build]\nrustc = "%s"\n' "${musl.buildPackages.rustc}/bin/rustc" > target/musl.toml
               export NIX_LDFLAGS="''${NIX_LDFLAGS//"-rpath $out/lib"/}"
             '';
           };
