@@ -182,33 +182,41 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
             }
         }
     };
-    // 3. The local socket, forwarded to it (a stale forward of it dropped
-    // first).
-    let _ = Command::new("ssh")
-        .arg("-S")
-        .arg(ctl)
-        .args(["-O", "cancel", "-L"])
-        .arg(format!("{}:{}", local.display(), remote_sock))
-        .args(host_args(host))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let _ = std::fs::remove_file(local);
-    let fwd = Command::new("ssh")
-        .arg("-S")
-        .arg(ctl)
-        .args(["-O", "forward", "-L"])
-        .arg(format!("{}:{}", local.display(), remote_sock))
-        .args(host_args(host))
-        .stdin(Stdio::null())
-        .output()?;
-    if !fwd.status.success() {
-        return Err(fail(host, format!("Couldn't forward tesserad's socket from {host}: {}", String::from_utf8_lossy(&fwd.stderr).trim())));
-    }
-    let start = Instant::now();
-    while !local.exists() && start.elapsed() < Duration::from_secs(5) {
-        std::thread::sleep(Duration::from_millis(20));
+    // 3. The local socket, forwarded to it. (A forward from before reaches
+    // it again once tesserad there is up at the same socket: kept. One that
+    // still doesn't answer is dropped and made again.)
+    if !answers(local) {
+        let _ = Command::new("ssh")
+            .arg("-S")
+            .arg(ctl)
+            .args(["-O", "cancel", "-L"])
+            .arg(format!("{}:{}", local.display(), remote_sock))
+            .args(host_args(host))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = std::fs::remove_file(local);
+        let fwd = Command::new("ssh")
+            .arg("-S")
+            .arg(ctl)
+            .args(["-O", "forward", "-L"])
+            .arg(format!("{}:{}", local.display(), remote_sock))
+            .args(host_args(host))
+            .stdin(Stdio::null())
+            .output()?;
+        if !fwd.status.success() {
+            return Err(fail(host, format!("Couldn't forward tesserad's socket from {host}: {}", String::from_utf8_lossy(&fwd.stderr).trim())));
+        }
+        // (It answers before this says it's up: the master can be slow to bind
+        // it, and drops the cancelled forward's file a moment later.)
+        let start = Instant::now();
+        while !answers(local) {
+            if start.elapsed() > Duration::from_secs(10) {
+                return Err(fail(host, format!("tesserad on {host} doesn't answer through the forwarded socket {}", local.display())));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
     // 4. A tesserad Tessera put there that isn't this build's: the new one
     // copied over and swapped in (in place: its shells carry on; with
