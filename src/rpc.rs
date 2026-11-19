@@ -307,6 +307,19 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             let names: Vec<String> = serde_json::from_value(p["names"].clone()).unwrap_or_default();
             crate::prompt_widgets::modules(&names, &s("cwd"), p["status"].as_i64().unwrap_or(0) as i32, n("duration"), pid())
         }
+        // ---- language servers (the pane's editor), run here ----
+        "lsp.available" => json!(crate::lsp::server_for(&s("lang")).map(|c| c[0].clone()).unwrap_or_default()),
+        "lsp.ask" => {
+            let at = n("cursor") as usize;
+            let ask = match s("what").as_str() {
+                "hover" => crate::lsp::Ask::Hover(at),
+                "complete" => crate::lsp::Ask::Complete(at),
+                _ => crate::lsp::Ask::Diagnostics,
+            };
+            // (Each editor its own document: the key names it.)
+            let doc: String = s("key").chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            json!(crate::lsp::ask(&s("lang"), &s("root"), &doc, &s("text"), ask).unwrap_or_default())
+        }
         // ---- files on this host (a remote pane's browser, viewer, tables) ----
         "files" => {
             let path = s("path");

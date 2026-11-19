@@ -31,6 +31,7 @@ mod history;
 mod images;
 mod jupyter;
 mod launchers;
+mod lsp;
 mod net;
 mod nixcmds;
 mod procinfo;

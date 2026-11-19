@@ -440,9 +440,9 @@ pub mod ffi {
         /// the background: `what` "diagnostics", "hover" or "complete" at a
         /// UTF-16 cursor. The answer: lsp_ready(key, what, json).
         #[qinvokable]
-        fn lsp_ask(self: Pin<&mut Controller>, key: &QString, lang: &QString, cwd: &QString, text: &QString, what: &QString, cursor: i32);
+        fn lsp_ask(self: Pin<&mut Controller>, key: &QString, lang: &QString, cwd: &QString, text: &QString, what: &QString, cursor: i32, host: &QString);
         #[qinvokable]
-        fn lsp_available(self: &Controller, lang: &QString) -> QString;
+        fn lsp_available(self: &Controller, lang: &QString, host: &QString) -> QString;
         #[qsignal]
         fn lsp_ready(self: Pin<&mut Controller>, key: QString, what: QString, json: QString);
         /// Whether a task has a model set up (and its provider a key, if it needs one).
@@ -1181,25 +1181,21 @@ impl ffi::Controller {
         });
     }
 
-    fn lsp_ask(self: Pin<&mut Self>, key: &ffi::QString, lang: &ffi::QString, cwd: &ffi::QString, text: &ffi::QString, what: &ffi::QString, cursor: i32) {
-        let (key, lang, root, text, what) = (key.to_string(), lang.to_string(), local_path(cwd), text.to_string(), what.to_string());
+    fn lsp_ask(self: Pin<&mut Self>, key: &ffi::QString, lang: &ffi::QString, cwd: &ffi::QString, text: &ffi::QString, what: &ffi::QString, cursor: i32, host: &ffi::QString) {
+        let (key, lang, root, text, what, host) = (key.to_string(), lang.to_string(), local_path(cwd), text.to_string(), what.to_string(), host.to_string());
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let at = cursor.max(0) as usize;
-            let ask = match what.as_str() {
-                "hover" => crate::lsp::Ask::Hover(at),
-                "complete" => crate::lsp::Ask::Complete(at),
-                _ => crate::lsp::Ask::Diagnostics,
-            };
-            // (Each editor its own document: the key names it.)
-            let doc: String = key.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-            let r = crate::lsp::ask(&lang, &root, &doc, &text, ask).unwrap_or_default();
+            // (The language servers run where the pane's files are: its host's
+            // tesserad.)
+            let params = serde_json::json!({"key": key, "lang": lang, "root": root, "text": text, "what": what, "cursor": cursor.max(0)});
+            let r = crate::client::rpc_within(&host, "lsp.ask", params, std::time::Duration::from_secs(30)).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
             let _ = qt.queue(move |c| c.lsp_ready(qs(&key), qs(&what), qs(&r)));
         });
     }
 
-    fn lsp_available(&self, lang: &ffi::QString) -> ffi::QString {
-        qs(&crate::lsp::server_for(&lang.to_string()).map(|c| c[0].clone()).unwrap_or_default())
+    fn lsp_available(&self, lang: &ffi::QString, host: &ffi::QString) -> ffi::QString {
+        let r = crate::client::rpc_within(&host.to_string(), "lsp.available", serde_json::json!({"lang": lang.to_string()}), std::time::Duration::from_secs(2));
+        qs(r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or(""))
     }
 
     fn test_key(&self, key: i32, mods: i32, text: &ffi::QString, scan: i32) {

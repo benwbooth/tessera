@@ -327,7 +327,7 @@ Rectangle {
     function requestComplete() {
         if (!controller) return
         if (!historyMode && box.lspServer !== "")
-            controller.lspAsk(aiKey + "-comp", box.lang, box.cwd, edit.text, "complete", edit.cursorPosition)
+            controller.lspAsk(aiKey + "-comp", box.lang, box.cwd, edit.text, "complete", edit.cursorPosition, box.sshHost)
         const r = JSON.parse(historyMode ? controller.historySearch(historyQuery)
                                          : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid, box.sshHost))
         comp = r
@@ -1196,7 +1196,7 @@ Rectangle {
     property string problem: ""        // the first syntax error, shown in the corner
     Timer { id: idle; interval: 650; onTriggered: box.analyze(true) }
     // ---- language server --------------------------------------------------
-    readonly property string lspServer: controller ? controller.lspAvailable(box.lang) : ""
+    readonly property string lspServer: controller ? controller.lspAvailable(box.lang, box.sshHost) : ""
     property var lspDiags: []          // [[start, length, message, severity]] for lspText
     property string lspText: ""
     // (Diagnostics are for a language: bash's shellcheck says nothing about C++.)
@@ -1225,7 +1225,7 @@ Rectangle {
         hl.analysis = JSON.stringify(r)
         if (withErrors && box.lspServer !== "" && box.lang !== "bash" && (box.lspText !== edit.text || box.lspLang !== box.lang) && edit.text.trim() !== "") {
             box.lspAskedLang = box.lang
-            controller.lspAsk(aiKey + "-diag", box.lang, box.cwd, edit.text, "diagnostics", 0)
+            controller.lspAsk(aiKey + "-diag", box.lang, box.cwd, edit.text, "diagnostics", 0, box.sshHost)
         }
     }
     property string hoverDoc: ""
@@ -1233,7 +1233,7 @@ Rectangle {
     function hoverAtPosition(pos) {
         if (box.lspServer === "" || edit.text.trim() === "") return
         hoverAt = edit.positionToRectangle(pos)
-        controller.lspAsk(aiKey + "-hover", box.lang, box.cwd, edit.text, "hover", pos)
+        controller.lspAsk(aiKey + "-hover", box.lang, box.cwd, edit.text, "hover", pos, box.sshHost)
     }
     Connections {
         target: box.controller
