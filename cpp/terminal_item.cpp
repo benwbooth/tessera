@@ -338,6 +338,15 @@ void TerminalItem::itemChange(ItemChange change, const ItemChangeData& value)
     }
     // (After the layouts around it have settled: a moment after it's shown.)
     if (change == ItemVisibleHasChanged && value.boolValue && m_resizeWhenShown) m_resizeTimer->start();
+    // (Shown again (a notebook card's terminal app moved between its card and
+    // the whole pane): all of it drawn afresh, as focus does; what changed
+    // while it was hidden isn't all in the next frame.)
+    if (change == ItemVisibleHasChanged && value.boolValue) {
+        m_forceFull = true;
+        m_rebuildNodes = true;
+        polish();
+        update();
+    }
     QQuickItem::itemChange(change, value);
 }
 
@@ -538,6 +547,8 @@ void TerminalItem::geometryChange(const QRectF& g, const QRectF& old)
         m_resizeTimer->start();
     }
     m_rebuildNodes = true;
+    m_forceFull = true;
+    polish();
     update();
 }
 
