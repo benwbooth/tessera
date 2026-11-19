@@ -836,6 +836,7 @@ FocusScope {
         const cmd = (tty.cwd && tty.cwd !== shellDir ? "cd " + q(tty.cwd) + " && " : "") + tty.command
         ttyRun = { cid: cid, key: k, tid: 0, base: -1, before: "" }
         updateOwnRun()
+        touch()
         view.sendText(cmd + "\r")
         findLive()
         Qt.callLater(followLive)
@@ -870,6 +871,7 @@ FocusScope {
         const r = ttyRun
         ttyRun = null
         updateOwnRun()
+        touch()
         controller.jupyterInput(r.key, String(t.status))
     }
     function shellRun(cid, code) {
@@ -912,7 +914,7 @@ FocusScope {
         for (const t of ts) {
             if (linked[t.id] !== undefined || retired.indexOf(t.id) >= 0 || t.id <= fileStart) continue
             // (A tessh cell's program: shown in that cell, no card of its own.)
-            if (ttyRun && ttyRun.tid === 0) { ttyRun = Object.assign({}, ttyRun, { tid: t.id }); retire(t.id); continue }
+            if (ttyRun && ttyRun.tid === 0) { ttyRun = Object.assign({}, ttyRun, { tid: t.id }); retire(t.id); touch(); continue }
             // (Nothing typed and nothing shown: a shell starting up, no card.)
             if (nb.blankTerm(t)) { retire(t.id); continue }
             let at = -1
@@ -959,6 +961,7 @@ FocusScope {
     // output, at its size; Expand makes it the window's.
     property bool shown: true               // (the pane shows the notebook)
     // A terminal app's card: most of the notebook, at least 300 px.
+    Timer { id: restoreFollow; interval: 120; onTriggered: nb.followLive() }
     readonly property int liveHeight: Math.max(300, Math.round(list.height * 0.7))
     readonly property bool liveWanted: view !== null && view.fullScreen && shown
     property int liveIndex: -1
@@ -1116,6 +1119,7 @@ FocusScope {
         // in it; one kept from before there was a default, as a shell
         // notebook, does too.)
         kernelPicked = !!t.kernel_picked
+        if (path === "" && t.tty_run && t.tty_run.cid && t.tty_run.key) ttyRun = t.tty_run
         const ks = metadata.kernelspec
         pickKernel(path === "" && !kernelPicked && (!ks || ks.name === "bash") ? null : ks)
     }
@@ -1372,6 +1376,9 @@ FocusScope {
         if (kept && retired.length) t.retired = retired.slice(-500)
         if (kept) t.kernel_key = keyBase
         if (kernelPicked) t.kernel_picked = true
+        // (A tessh program running in the terminal for a cell: still waited on
+        // by the kernel when the window comes back.)
+        if (kept && ttyRun) t.tty_run = ttyRun
         if (Object.keys(t).length) md.tessera = t
         return JSON.stringify(sorted({ cells: out, metadata: md, nbformat: 4, nbformat_minor: 5 }), null, 1) + "\n"
     }
@@ -1464,7 +1471,7 @@ FocusScope {
     // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s.)
     Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") !== ""; onTriggered: if (cells.count > 0) nb.expandedId = cells.get(cells.count - 1).cid }
     // (TESSERA_TEST_EXPAND_LAST=restore: and back to its own size at 19 s.)
-    Timer { interval: 19000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") === "restore"; onTriggered: nb.expandedId = "" }
+    Timer { interval: 19000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") === "restore"; onTriggered: { nb.expandedId = ""; if (cells.count - 1 === nb.liveIndex) restoreFollow.restart() } }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
     // (Test hook: TESSERA_TEST_EDIT_FILE: the last card edited at 12 s, saved at 20 s.)
@@ -1782,7 +1789,8 @@ FocusScope {
             readonly property var outs: { try { return JSON.parse(outputs) } catch (e) { return [] } }
             // (A tessh cell that's an ls or cd: Tessera's own folder view, as a shell cell's.)
             readonly property string kind: fromTerm ? nb.shownKind(cid, tkind, source) : nb.tesshFiles(cid, lang, source) ? "files" : ""
-            readonly property bool hasOutput: code && (fromTerm || outs.length > 0 || viewPath !== "" || kind === "files")
+            // (A terminal app running in it counts: it needs the card's room.)
+            readonly property bool hasOutput: code && (fromTerm || outs.length > 0 || viewPath !== "" || kind === "files" || (nb.liveWanted && index === nb.liveIndex))
             readonly property bool expanded: nb.expandedId === cid
             readonly property bool plainMd: !code && !editing
             width: list.width - 12
@@ -1982,6 +1990,8 @@ FocusScope {
                         const i = cell.index
                         // (Back from expanded, a terminal app's card stays in view.)
                         Qt.callLater(() => { list.positionViewAtIndex(i, nb.expandedId === "" && i === nb.liveIndex ? ListView.Contain : ListView.Beginning); nb.placeLive() })
+                        // (The other cards come back and lay out first: then again.)
+                        if (nb.expandedId === "" && i === nb.liveIndex) restoreFollow.restart()
                     }
                 }
                 Chip { id: moreChip; base: cell.color; label: "⋯"; tip: "More"; Layout.minimumWidth: implicitWidth
