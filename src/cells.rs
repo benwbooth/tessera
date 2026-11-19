@@ -331,6 +331,18 @@ fn line_cell(l: &str) -> Option<Cell> {
     })
 }
 
+/// Kept cell `id` of a session's kept text, as {"id", "status", "screen"}
+/// ("" if it isn't there).
+pub fn kept_summary(text: &str, id: u64) -> String {
+    text.lines()
+        .rev()
+        .filter(|l| l.contains(&format!("\"id\":{id},")))
+        .filter_map(line_cell)
+        .find(|c| c.id == id)
+        .map(|c| json!({"id": c.id, "status": c.status, "screen": c.screen}).to_string())
+        .unwrap_or_default()
+}
+
 /// A session's kept cells as stored (one JSON line each), for a window.
 pub fn load_text(session: &str) -> String {
     std::fs::read_to_string(store_path(session)).unwrap_or_default()

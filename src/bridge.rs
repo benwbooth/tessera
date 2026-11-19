@@ -547,6 +547,11 @@ pub mod ffi {
         /// The shells the one in front (pid) was started in: [{name, pid}].
         #[qinvokable]
         fn shell_chain(self: &Controller, reply: &QString, pid: i32, host: &QString);
+        /// A finished command tesserad kept for `session` ({"id", "status",
+        /// "screen"}; "" while it isn't kept, i.e. still running): for a
+        /// window that came back while it ran, and never saw it start.
+        #[qinvokable]
+        fn kept_cell(self: &Controller, reply: &QString, host: &QString, session: &QString, id: i32);
         /// What an exit status means for a command (complete::exit_meaning).
         #[qinvokable]
         fn exit_meaning(self: &Controller, reply: &QString, command: &QString, status: i32, host: &QString);
@@ -1119,6 +1124,15 @@ impl ffi::Controller {
         let (host, k) = crate::client::split_key(&key.to_string());
         let cwd = local_path(cwd);
         crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.sync", serde_json::json!({"key": k, "pid": pid.max(0), "cwd": cwd})); });
+    }
+
+    fn kept_cell(&self, reply: &ffi::QString, host: &ffi::QString, session: &ffi::QString, id: i32) {
+        let (host, session) = (host.to_string(), session.to_string());
+        self.answer_on(reply, None, move || {
+            let r = crate::client::rpc_within(&host, "cells.load", serde_json::json!({"session": session}), std::time::Duration::from_secs(5));
+            let text = r.ok().as_ref().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+            crate::cells::kept_summary(&text, id.max(0) as u64)
+        })
     }
 
     fn exit_meaning(&self, reply: &ffi::QString, command: &ffi::QString, status: i32, host: &ffi::QString) {

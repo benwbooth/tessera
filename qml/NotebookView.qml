@@ -992,7 +992,28 @@ FocusScope {
         running: nb.ttyRun !== null && nb.ttyRun.tid > 0
         // (Its end too: the terminal's word that it finished can come while
         // the notebook isn't listening, and the cell would spin on.)
-        onTriggered: { const t = nb.termCells().find(x => x.id === nb.ttyRun.tid); if (t) { if (t.done) nb.finishTty(t); else nb.ttyText(t) } }
+        onTriggered: {
+            const t = nb.termCells().find(x => x.id === nb.ttyRun.tid)
+            if (t) { if (t.done) nb.finishTty(t); else nb.ttyText(t) }
+            else nb.askKept()
+        }
+    }
+    // (A window that came back while it ran never saw it start, and won't see
+    // it end: tesserad keeps it once it's done, so that's asked, now and then.)
+    property bool keptAsking: false
+    property real keptAsked: 0
+    function askKept() {
+        if (keptAsking || !controller || storeKey === "" || Date.now() - keptAsked < 1000) return
+        keptAsking = true
+        keptAsked = Date.now()
+        const r = ttyRun, h = sshHost, sk = storeKey
+        Async.call(controller, k => controller.keptCell(k, h, sk, r.tid), text => {
+            keptAsking = false
+            if (text === "" || !ttyRun || ttyRun.key !== r.key || ttyRun.tid !== r.tid) return
+            let c = null
+            try { c = JSON.parse(text) } catch (e) { return }
+            finishTty({ id: c.id, done: true, status: c.status, screen: true })
+        })
     }
     function finishTty(t) {
         ttyText(t)
