@@ -197,7 +197,7 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
     if !answers(local) && (force_mux || forward(host, ctl, local, &remote_sock).is_err()) {
         let path = which.as_ref().map(|w| w.0.clone()).ok_or_else(|| fail(host, format!("tesserad on {host} can't be reached: its socket isn't forwarded, and its path isn't known")))?;
         let mut c = ssh(ctl, host);
-        c.arg("--").arg(if windows { windows_command(&format!("& {} mux", ps_quote(&path))) } else { format!("{}TESSERA_REMOTE=1 {} mux --socket {}", remote_env(), shell_words::quote(&path), shell_words::quote(&remote_sock)) });
+        c.arg("--").arg(if windows { windows_command(&format!("& {} mux --socket {}", ps_quote(&path), ps_quote(&remote_sock))) } else { format!("{}TESSERA_REMOTE=1 {} mux --socket {}", remote_env(), shell_words::quote(&path), shell_words::quote(&remote_sock)) });
         c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
         let child = c.spawn()?;
         #[cfg(unix)]
@@ -278,7 +278,7 @@ enum Started {
 /// `uname -sm` when there's none.
 fn start_script() -> String {
     format!(
-        r#"T=$(command -v tesserad 2>/dev/null); for d in "$HOME/.local/bin" "$HOME"; do [ -z "$T" ] && [ -x "$d/tesserad" ] && T="$d/tesserad"; done; if [ -z "$T" ]; then uname -sm; exit 127; fi; echo "TESSERAD $T $(cksum < "$T") $(uname -sm)"; S="{REMOTE_SOCKET}"; mkdir -p "$(dirname "$S")" && chmod 700 "$(dirname "$S")"; TESSERA_REMOTE=1 exec "$T" start --socket "$S""#
+        r#"T=$(command -v tesserad 2>/dev/null); for d in "$HOME/.local/bin" "$HOME"; do [ -z "$T" ] && [ -x "$d/tesserad" ] && T="$d/tesserad"; done; if [ -z "$T" ]; then echo "TESSERAD-MISSING $(uname -sm)"; exit 127; fi; echo "TESSERAD $T $(cksum < "$T") $(uname -sm)"; S="{REMOTE_SOCKET}"; mkdir -p "$(dirname "$S")" && chmod 700 "$(dirname "$S")"; TESSERA_REMOTE=1 exec "$T" start --socket "$S""#
     )
 }
 
@@ -294,8 +294,15 @@ fn start_remote(ctl: &Path, host: &str) -> std::io::Result<Started> {
         out
     };
     let text = String::from_utf8_lossy(&out.stdout).replace('\r', "").trim().to_string();
+    // (By what it printed, not its exit status: through a PowerShell that's
+    // the SSH shell, a script's exit code comes back as 0 or 1.)
+    if let Some(m) = text.lines().find_map(|l| l.strip_prefix("TESSERAD-MISSING ")) {
+        let mut it = m.split_whitespace();
+        return Ok(Started::Missing { os: it.next().unwrap_or("").to_string(), arch: it.next().unwrap_or("").to_string() });
+    }
+    let found = text.lines().any(|l| l.starts_with("TESSERAD "));
     match out.status.code() {
-        Some(0) if !text.is_empty() => {
+        _ if found && !text.lines().last().unwrap_or("").starts_with("TESSERAD ") => {
             // TESSERAD <path, spaces and all> <sum> <size> <os> <arch>
             let which = text.lines().find_map(|l| {
                 let w: Vec<&str> = l.strip_prefix("TESSERAD ")?.rsplitn(5, ' ').collect();
@@ -303,12 +310,25 @@ fn start_remote(ctl: &Path, host: &str) -> std::io::Result<Started> {
             });
             Ok(Started::Socket(text.lines().last().unwrap_or("").to_string(), which))
         }
-        Some(127) => {
-            let mut it = text.lines().last().unwrap_or("").split_whitespace();
-            Ok(Started::Missing { os: it.next().unwrap_or("").to_string(), arch: it.next().unwrap_or("").to_string() })
-        }
-        _ => Err(fail(host, format!("Couldn't start tesserad on {host}: {}", String::from_utf8_lossy(&out.stderr).trim()))),
+        _ => Err(fail(host, format!("Couldn't start tesserad on {host}: {}", readable_err(&out.stderr)))),
     }
+}
+
+/// stderr for a message: PowerShell's CLIXML progress records (it sends
+/// them over SSH) left out, its error lines kept.
+fn readable_err(e: &[u8]) -> String {
+    let s = String::from_utf8_lossy(e);
+    if !s.contains("#< CLIXML") {
+        return s.trim().to_string();
+    }
+    let mut out = Vec::new();
+    for part in s.split("<S S=\"Error\">").skip(1) {
+        let line = part.split("</S>").next().unwrap_or("").replace("_x000D__x000A_", "").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        if !line.trim().is_empty() {
+            out.push(line.trim().to_string());
+        }
+    }
+    out.join(" ")
 }
 
 /// A PowerShell script as a command line any Windows shell (cmd.exe,
@@ -339,12 +359,20 @@ $t = $null
 $c = Get-Command tesserad -ErrorAction SilentlyContinue
 if ($c) {{ $t = $c.Source }} elseif (Test-Path (Join-Path $dir 'tesserad.exe')) {{ $t = Join-Path $dir 'tesserad.exe' }}
 $arch = $env:PROCESSOR_ARCHITECTURE
-if (-not $t) {{ "Windows $arch"; exit 127 }}
+if (-not $t) {{ "TESSERAD-MISSING Windows $arch"; exit 0 }}
 $h = (Get-FileHash -Algorithm SHA256 -LiteralPath $t).Hash.ToLower()
 $n = (Get-Item -LiteralPath $t).Length
 "TESSERAD $t sha256:$h $n Windows $arch"
 $env:TESSERA_REMOTE = '1'
-& $t start
+$sock = Join-Path $env:LOCALAPPDATA 'Tessera\daemon.sock'
+# Started through WMI when it isn't running: Windows' sshd ends everything
+# this session starts when the connection closes; WMI's isn't this session's.
+$running = Get-Process tesserad -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq $t }}
+if (-not $running) {{
+  $null = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = ('"{{0}}" daemon --socket "{{1}}"' -f $t, $sock); CurrentDirectory = $env:USERPROFILE }}
+  for ($i = 0; $i -lt 50 -and -not (Test-Path -LiteralPath $sock); $i++) {{ Start-Sleep -Milliseconds 100 }}
+}}
+& $t start --socket $sock
 exit $LASTEXITCODE
 "#
     )

@@ -13,7 +13,7 @@
 //!   tesserad start           start one in the background unless running;
 //!                            prints the socket's path
 //!   tesserad --socket PATH   serve or start at PATH instead of the default
-//!   tesserad connect HOST    reach HOST's tesserad over SSH (started, or
+//!   tesserad connect HOST [--wait]  reach HOST's tesserad over SSH (started, or
 //!                            copied there, when missing); prints the local
 //!                            socket forwarded to it
 //!   tesserad version         this build's version
@@ -82,7 +82,18 @@ fn main() {
         "connect" => {
             let host = std::env::args().skip_while(|a| a != "connect").nth(1).unwrap_or_default();
             match remote::connect(&host) {
-                Ok(_) => println!("{}", remote::local_socket(&host).display()),
+                Ok(_) => {
+                    println!("{}", remote::local_socket(&host).display());
+                    // (--wait: stays, so a connection carried by this process
+                    // (tesserad mux, for Windows hosts) stays up.)
+                    if std::env::args().any(|a| a == "--wait") {
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                        loop {
+                            std::thread::park();
+                        }
+                    }
+                }
                 Err(e) => {
                     eprintln!("tesserad: {host}: {e}");
                     std::process::exit(1);
