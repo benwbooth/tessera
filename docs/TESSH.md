@@ -438,6 +438,12 @@ Associativity is `left`, `right` or `none`.
 
 ## 10. Dependencies with uv (PEP 723)
 
+`need pkg "spec" …` (a command builtin) installs the packages with
+`uv pip install --target` into a cache folder keyed by the set and the
+Python version, then puts it on `sys.path`; `tessh --with PKG[,PKG…]` before
+the other arguments does the same first. Both share the cache with the
+PEP 723 block below.
+
 A script or notebook cell can name the PyPI packages it needs in an inline
 metadata block, the way `uv run` reads Python scripts:
 

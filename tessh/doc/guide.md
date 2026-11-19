@@ -1865,10 +1865,28 @@ teal
 # Running tessh
 
 ## Dependencies
-<!-- help: dependencies uv pep723 packages pip script-metadata -->
+<!-- help: dependencies need --with uv pep723 packages pip script-metadata -->
 
-A script or cell names the PyPI packages it needs in an inline metadata block
-(PEP 723), and tessh installs them with uv into a cache before running.
+`need` names PyPI packages a script, a cell or the REPL uses: uv installs
+them once into a cache, and they import from the next line. Quote a version
+range, so its `>` isn't a redirection.
+
+```tessh no-run
+need requests "rich>=13"
+import requests
+print (requests.get "https://example.com").status_code
+```
+
+From the command line, `--with` (any number of times, or comma-separated)
+does the same before the script runs, as `uv run --with` does.
+
+```
+tessh --with requests --with "rich>=13" fetch.tsh
+tessh --with requests,rich -c 'import rich; rich.print "[bold]hi"'
+```
+
+A PEP 723 inline metadata block, the one `uv run` reads, works too, and
+says which Python it wants:
 
 ```tessh no-run
 # /// script

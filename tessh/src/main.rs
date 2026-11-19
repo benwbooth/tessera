@@ -29,7 +29,8 @@ tessh FILE [ARGS…]         run a script
 tessh -c CODE [ARGS…]      run CODE
 tessh --check [FILE]       check without running (stdin without FILE); --json for JSON
 tessh --py FILE            print the Python it compiles to
-tessh --kernel -f CONN     the Jupyter kernel";
+tessh --kernel -f CONN     the Jupyter kernel
+  --with PKG[,PKG…]        first: PyPI packages to have (uv installs them once), as `need` does";
 
 fn exit_code(py: Python<'_>, e: &PyErr) -> Option<i32> {
     if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) {
@@ -59,6 +60,34 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> i32 {
+    // (--with PKG, any number, before the rest: packages to have, as uv run's.)
+    let mut args = args;
+    let mut with: Vec<String> = vec![];
+    loop {
+        match args.first().map(String::as_str) {
+            Some("--with") if args.len() > 1 => {
+                with.extend(args[1].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+                args.drain(..2);
+            }
+            Some(w) if w.starts_with("--with=") => {
+                with.extend(w["--with=".len()..].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+                args.remove(0);
+            }
+            _ => break,
+        }
+    }
+    if !with.is_empty() {
+        let failed = Python::attach(|py| {
+            let r = runner::init(py).and_then(|_| deps::ensure(py, &with, None));
+            if let Err(e) = &r {
+                e.print(py);
+            }
+            r.is_err()
+        });
+        if failed {
+            return 1;
+        }
+    }
     let a = args.first().map(String::as_str).unwrap_or("");
     if a.is_empty() {
         return repl::run();

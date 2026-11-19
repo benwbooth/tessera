@@ -1240,7 +1240,7 @@ fn dump_env(b64_env: &str, b64_pwd: &str) -> PyResult<()> {
 
 // ---- builtins ------------------------------------------------------------------------------
 
-pub const COMMAND_BUILTINS: &[&str] = &["cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg"];
+pub const COMMAND_BUILTINS: &[&str] = &["cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg", "need"];
 
 pub fn is_command_builtin(n: &str) -> bool {
     COMMAND_BUILTINS.contains(&n)
@@ -1273,6 +1273,15 @@ impl Builtin {
         let words: Vec<String> = args.iter().map(word).collect::<PyResult<_>>()?;
         let none = py.None();
         match self.name {
+            // need pkg "pkg>=1" …: PyPI packages, installed with uv (once, kept
+            // in a cache) and importable from the next line.
+            "need" => {
+                if words.is_empty() {
+                    return Err(PyTypeError::new_err("need package…"));
+                }
+                crate::deps::ensure(py, &words, None)?;
+                Ok(none)
+            }
             "cd" => {
                 if words.len() > 1 {
                     return Err(PyTypeError::new_err("cd: too many arguments"));
