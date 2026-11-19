@@ -212,18 +212,29 @@ Item {
         }
     }
 
-    TerminalView {
-        property bool keepsBacktab: true    // (it decides: the editor at a prompt, else the program)
-        id: term
-        ready: pane.hostUp
-        // (Ctrl+click on a path in another host's output: Tessera's viewer, read there.)
-        onRemoteLinkActivated: (l) => pane.viewFile(l)
+    // Where the terminal sits in the pane. While a full-screen program runs
+    // in notebook mode, the terminal itself moves into that command's card
+    // (termSlot, the notebook's), so the program runs in the card at its size.
+    property Item termSlot: notebook.liveSlot
+    Item {
+        id: termHome
         anchors.top: titleBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         // (Whether the editor should show, not whether it's on screen: a tab in
         // the background has it hidden, and the terminal mustn't resize then.)
         anchors.bottom: pane.editorOn ? compose.top : parent.bottom
+    }
+    TerminalView {
+        property bool keepsBacktab: true    // (it decides: the editor at a prompt, else the program)
+        id: term
+        ready: pane.hostUp
+        // (Ctrl+click on a path in another host's output: Tessera's viewer, read there.)
+        onRemoteLinkActivated: (l) => pane.viewFile(l)
+        // (Its place: here, or a notebook card's output while a full-screen
+        // program runs there; see termSlot.)
+        parent: pane.termSlot !== null ? pane.termSlot : termHome
+        anchors.fill: parent
         focus: true
         onContextMenuRequested: (x, y) => pane.contextMenu(term, x, y)
         // At a prompt the keys go to the editor under it, even after a click
@@ -233,7 +244,7 @@ Item {
         onActiveFocusChanged: {
             if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
             // (A notebook over it takes the keys, when the editor doesn't.)
-            else if (activeFocus && notebook.visible) Qt.callLater(() => notebook.forceActiveFocus())
+            else if (activeFocus && notebook.visible && pane.termSlot === null && !pane.runningLong) Qt.callLater(() => notebook.forceActiveFocus())
         }
         // (At a prompt a click keeps the keys in the editor, unless it's on
         // the cursor's line: then the terminal takes them, as it's typed in.)
@@ -319,8 +330,8 @@ Item {
     // Badge: large text behind the content, top right (iTerm2's badges).
     Text {
         visible: pane.badge !== ""
-        anchors.top: term.top
-        anchors.right: term.right
+        anchors.top: termHome.top
+        anchors.right: termHome.right
         anchors.margins: 14
         text: pane.badge
             .replace("{title}", term.title).replace("{cwd}", term.pwd)
@@ -336,7 +347,7 @@ Item {
     Rectangle {
         id: sizeTip
         z: 6
-        anchors.centerIn: term
+        anchors.centerIn: termHome
         width: sizeText.implicitWidth + 24
         height: sizeText.implicitHeight + 12
         radius: 8
@@ -375,9 +386,9 @@ Item {
     Item {
         id: sbar
         z: 4
-        anchors.top: term.top
-        anchors.bottom: term.bottom
-        anchors.right: term.right
+        anchors.top: termHome.top
+        anchors.bottom: termHome.bottom
+        anchors.right: termHome.right
         anchors.topMargin: 2
         anchors.bottomMargin: 2
         width: 14
@@ -454,6 +465,11 @@ Item {
     property string viewMode: "terminal"
     property bool runningLong: false
     Timer { id: longTimer; interval: 700; onTriggered: pane.runningLong = true }
+    // (In notebook mode, a command that runs on, or a program in a card: the
+    // keys go to it, as typed into the terminal; at the prompt again, back to
+    // the editor.)
+    onRunningLongChanged: if (runningLong && notebook.visible && !notebook.ownRun) term.forceActiveFocus()
+    onTermSlotChanged: if (termSlot !== null) Qt.callLater(() => term.forceActiveFocus())
     Connections {
         target: term
         function onCellsChanged(id, done) {
@@ -473,7 +489,7 @@ Item {
     // copied there), or why it couldn't.
     Rectangle {
         z: 20
-        anchors.fill: term
+        anchors.fill: termHome
         visible: !pane.hostUp
         color: Theme.dark ? "#1e1f22" : "#f4f4f5"
         Column {
@@ -541,8 +557,13 @@ Item {
         editorKeys: pane.editorKeys
         onEditorKeysPicked: (k) => pane.editorKeysPicked(k)
         shellName: pane.shellName
-        anchors.fill: term
-        visible: pane.viewMode === "notebook" && !term.fullScreen && !(pane.runningLong && !notebook.ownRun)
+        anchors.fill: termHome
+        // (It stays for a program that runs on: a full-screen one runs in its
+        // card (termSlot), and keys go to the program while it runs.)
+        shown: pane.viewMode === "notebook"
+        // (A full-screen program with no card of its own, started before the
+        // notebook showed: it has the pane, as in the terminal.)
+        visible: shown && !(term.fullScreen && notebook.liveIndex < 0)
         enabled: visible
         view: term
         controller: pane.controller
@@ -614,7 +635,7 @@ Item {
         id: rich
         visible: false
         z: 20
-        anchors.fill: term
+        anchors.fill: termHome
         fontFamily: term.fontFamily
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onClosed: { visible = false; if (pane.editorOn) compose.focusEditor(); else term.forceActiveFocus() }
@@ -625,7 +646,7 @@ Item {
         id: preview
         visible: false
         z: 21
-        anchors.fill: term
+        anchors.fill: termHome
         controller: pane.controller
         fontFamily: term.fontFamily
         pointSize: term.fontPointSize
@@ -637,15 +658,15 @@ Item {
         id: findBar
         view: term
         z: 5
-        anchors.top: term.top
-        anchors.right: term.right
+        anchors.top: termHome.top
+        anchors.right: termHome.right
         anchors.topMargin: 8
         anchors.rightMargin: 14
     }
 
     // Broadcast Input: the receiving panes get a red outline.
     Rectangle {
-        anchors.fill: term
+        anchors.fill: termHome
         visible: pane.broadcasting
         color: "transparent"
         border.width: 2

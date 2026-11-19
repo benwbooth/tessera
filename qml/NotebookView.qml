@@ -732,6 +732,31 @@ FocusScope {
     }
     // While a command runs, its cell's output is read again now and then.
     property int tick: 0
+    // ---- a full-screen program in its card ----------------------------------
+    // The running command's card holds the pane's live terminal while a
+    // full-screen program (vim, htop, mdfried, ...) runs: the terminal moves
+    // into liveHost (TerminalPane's termSlot), which sits over that card's
+    // output, at its size; Expand makes it the window's.
+    property bool shown: true               // (the pane shows the notebook)
+    readonly property bool liveWanted: view !== null && view.fullScreen && shown
+    property int liveIndex: -1
+    property Item liveBox: null            // the card's place for it (set by the card)
+    readonly property Item liveSlot: liveWanted && liveIndex >= 0 ? liveHost : null
+    function findLive() {
+        let n = -1
+        for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).running) { n = i; break }
+        liveIndex = n
+    }
+    onLiveWantedChanged: { findLive(); if (liveWanted) Qt.callLater(followLive) }
+    Timer { interval: 150; repeat: true; running: nb.liveWanted; onTriggered: { nb.findLive(); nb.placeLive() } }
+    function placeLive() {
+        if (!liveBox || !liveBox.visible) { liveHost.visible = false; return }
+        const p = liveBox.mapToItem(liveClip, 0, 0)
+        liveHost.x = Math.round(p.x); liveHost.y = Math.round(p.y)
+        liveHost.width = liveBox.width; liveHost.height = liveBox.height
+        liveHost.visible = true
+    }
+    function followLive() { if (liveIndex >= 0) { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
     property int termRev: 0             // the terminal's cells came back: read outputs again
     Timer { interval: 400; repeat: true; running: nb.visible && nb.ownRunOrAny; onTriggered: nb.tick++ }
     property bool ownRunOrAny: false
@@ -1357,6 +1382,17 @@ FocusScope {
     Rectangle { anchors.fill: parent; color: Theme.bg; z: -1 }
     property bool dPending: false
     Timer { id: dTimer; interval: 700; onTriggered: nb.dPending = false }
+    // (Over the list, clipped to it: where the live terminal goes; it follows
+    // its card as the list scrolls.)
+    Item {
+        id: liveClip
+        z: 50
+        anchors.fill: list
+        clip: true
+        visible: nb.liveSlot !== null
+        Item { id: liveHost; visible: false }
+    }
+    Connections { target: list; function onContentYChanged() { if (nb.liveWanted) nb.placeLive() } }
     ListView {
         id: list
         anchors.top: banner.bottom
@@ -1772,7 +1808,9 @@ FocusScope {
                 id: body
                 objectName: "cardBody"
                 readonly property var viewer: loader.item
-                visible: cell.hasOutput && !cell.hideOutput
+                // (The card a full-screen program runs in: its terminal here.)
+                readonly property bool live: nb.liveWanted && cell.index === nb.liveIndex
+                visible: (cell.hasOutput || live) && !cell.hideOutput
                 anchors.top: editorBox.visible ? editorBox.bottom : header.bottom
                 anchors.topMargin: editorBox.visible ? 6 : 0
                 x: 10
@@ -1781,8 +1819,19 @@ FocusScope {
                 // whole window when expanded.
                 readonly property real natural: loader.item ? loader.item.implicitHeight : 0
                 height: !visible ? 0 : cell.expanded ? Math.max(80, list.height - header.height - 12)
-                      : nb.heights[cell.cid] > 0 ? nb.heights[cell.cid] : Math.min(Math.max(natural, 16), 460)
+                      : nb.heights[cell.cid] > 0 ? nb.heights[cell.cid]
+                      : live ? Math.max(240, Math.round(list.height * 0.6)) : Math.min(Math.max(natural, 16), 460)
                 clip: true
+                Item {
+                    id: liveBox
+                    anchors.fill: parent
+                    visible: body.live
+                    z: 4
+                    onVisibleChanged: { if (visible) { nb.liveBox = liveBox; Qt.callLater(nb.followLive) } else if (nb.liveBox === liveBox) nb.liveBox = null }
+                    onWidthChanged: if (visible) Qt.callLater(nb.placeLive)
+                    onHeightChanged: if (visible) Qt.callLater(nb.placeLive)
+                    Component.onDestruction: if (nb.liveBox === liveBox) nb.liveBox = null
+                }
                 Loader {
                     id: loader
                     anchors.fill: parent
