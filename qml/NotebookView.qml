@@ -317,6 +317,8 @@ FocusScope {
     property int current: 0
     property int nextId: 1
     property var kinds: ({})            // cid -> chosen view (the dropdown)
+    property var streamViews: ({})      // cid -> "all", "stdout" or "stderr" (a card's output)
+    function setStreamView(cid, v) { const m = Object.assign({}, streamViews); m[cid] = v; streamViews = m }
     property var fileViews: ({})        // cid -> an ls card's own view, sort, ... (FileBrowser)
     property var aiKinds: ({})          // cid -> what the AI made of it
     property var heights: ({})          // cid -> output height the user dragged to
@@ -3000,13 +3002,36 @@ FocusScope {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: jf.contentHeight > jf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
             MomentumWheel { flick: jf }
+            // stdout and stderr together (in order, marked in the margin), or
+            // one at a time: the card's choice (nb.streamViews).
+            readonly property bool both: jf.src.outs.some(o => o.output_type === "stream" && o.name === "stdout")
+                                         && jf.src.outs.some(o => (o.output_type === "stream" && o.name === "stderr") || o.output_type === "error")
+            // (TESSERA_TEST_STREAM_VIEW: the tab cards start on, for tests.)
+            readonly property string pick: both ? (nb.streamViews[jf.src.cid] || (nb.controller ? nb.controller.testEnv("STREAM_VIEW") : "") || "all") : "all"
+            readonly property var shown: pick === "all" ? jf.src.outs
+                : jf.src.outs.filter(o => pick === "stderr" ? (o.output_type === "error" || (o.output_type === "stream" && o.name === "stderr"))
+                                                            : !(o.output_type === "error" || (o.output_type === "stream" && o.name === "stderr")))
             Column {
                 id: oc
                 y: 2
                 width: jf.width - 10
                 spacing: 4
+                Row {
+                    visible: jf.both
+                    spacing: 4
+                    Repeater {
+                        model: [["all", "All"], ["stdout", "stdout"], ["stderr", "stderr"]]
+                        delegate: Chip {
+                            required property var modelData
+                            base: jf.pick === modelData[0] ? Theme.mix(Theme.panel, Theme.accent, 0.35) : Theme.panel
+                            label: modelData[1]
+                            tip: modelData[0] === "all" ? "Both, in the order they came (stderr marked red)" : "Only " + modelData[1]
+                            onClicked: nb.setStreamView(jf.src.cid, modelData[0])
+                        }
+                    }
+                }
                 Repeater {
-                    model: jf.src.outs
+                    model: jf.shown
                     delegate: Loader {
                         required property var modelData
                         width: oc.width
@@ -3038,15 +3063,25 @@ FocusScope {
             id: tbox
             readonly property var o: parent ? parent.out : ({})
             readonly property bool bad: o.output_type === "error" || (o.output_type === "stream" && o.name === "stderr")
+            readonly property bool stream: o.output_type === "stream" || o.output_type === "error"
             implicitHeight: tv.implicitHeight + 8
             height: implicitHeight
-            color: bad ? Theme.mix(Theme.bg, nb.ansi(1, "#e06c75"), 0.07) : "transparent"
+            color: "transparent"
             radius: 4
+            // (Where it came from, in the margin: stderr and errors red, stdout plain.)
+            Rectangle {
+                visible: tbox.stream
+                width: 3
+                height: parent.height
+                radius: 1.5
+                color: tbox.bad ? nb.ansi(1, "#e06c75") : Theme.divider
+            }
             Flickable {
                 id: tf
                 interactive: false
                 anchors.fill: parent
                 anchors.margins: 4
+                anchors.leftMargin: tbox.stream ? 10 : 4
                 contentWidth: Math.max(width, tv.implicitWidth)
                 contentHeight: tv.implicitHeight
                 clip: true
@@ -3058,7 +3093,7 @@ FocusScope {
                     text: {
                         const o = tbox.o
                         if (!o) return ""
-                        if (o.output_type === "stream") return nb.colored(o.text || "")
+                        if (o.output_type === "stream") return nb.colored((o.text || "").replace(/\n$/, ""))
                         if (o.output_type === "error") return nb.colored((o.traceback || []).join("\n") || (o.ename + ": " + o.evalue))
                         const d = o.data || {}
                         const t = d["text/plain"] !== undefined ? d["text/plain"]
