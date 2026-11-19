@@ -283,6 +283,15 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             stop_tree(&s("key"));
             Value::Null
         }
+        // ---- background jobs (src/jobs.rs) ----
+        "job.start" => crate::jobs::start(p),
+        "job.list" => crate::jobs::list(&s("owner")),
+        "job.output" => crate::jobs::output(n("id"), n("from"), p["exec"].as_bool().unwrap_or(false)),
+        "job.stop" => json!(crate::jobs::stop(n("id"))),
+        "job.forget" => {
+            crate::jobs::forget(n("id"));
+            Value::Null
+        }
         // ---- the pane's shell ----
         "shell.chain" => json!(crate::procinfo::shell_chain(pid())),
         "shell.launch_line" => json!(crate::shell_integration::launch_line(&s("shell"), n("parent") as u32)),

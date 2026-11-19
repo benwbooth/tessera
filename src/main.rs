@@ -15,6 +15,7 @@ mod grammars;
 mod history;
 mod images;
 mod image_places;
+mod jobs;
 mod jupyter;
 mod keymap;
 mod net;

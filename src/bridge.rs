@@ -555,6 +555,11 @@ pub mod ffi {
         fn jupyter_input(self: &Controller, key: &QString, value: &QString);
         #[qinvokable]
         fn jupyter_execute(self: &Controller, reply: &QString, key: &QString, cell: &QString, code: &QString);
+        /// A background job request (src/jobs.rs: job.start, job.list,
+        /// job.output, job.stop, job.forget) to `host`'s tesserad; the
+        /// answer's JSON ({"error"} if it failed).
+        #[qinvokable]
+        fn job_call(self: &Controller, reply: &QString, host: &QString, method: &QString, params: &QString);
         /// A local process's user and environment (cells::Exec as JSON, "" if gone).
         #[qinvokable]
         fn process_exec(self: &Controller, reply: &QString, pid: i32);
@@ -1152,6 +1157,20 @@ impl ffi::Controller {
     }
 
     /// Answers `reply` with whether the kernel took it (true/false).
+    fn job_call(&self, reply: &ffi::QString, host: &ffi::QString, method: &ffi::QString, params: &ffi::QString) {
+        let (host, method) = (host.to_string(), method.to_string());
+        let params: serde_json::Value = serde_json::from_str(&params.to_string()).unwrap_or_default();
+        self.answer(reply, false, move || {
+            if !method.starts_with("job.") {
+                return serde_json::json!({"error": "not a job request"}).to_string();
+            }
+            match crate::client::rpc(&host, &method, params) {
+                Ok(v) => v.to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        });
+    }
+
     fn process_exec(&self, reply: &ffi::QString, pid: i32) {
         self.answer(reply, false, move || crate::cells::Exec::of_process(pid.max(0) as u32).map(|e| e.to_json().to_string()).unwrap_or_default());
     }

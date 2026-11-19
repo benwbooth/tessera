@@ -69,14 +69,14 @@ impl Exec {
         })
     }
 
-    /// A local shell's, read from /proc when its integration didn't say
-    /// (its environment as it started, and its user).
+    /// A local shell's, when its integration didn't say: its environment
+    /// (exports at its last prompt, or as it started) and its user.
     pub fn of_process(pid: u32) -> Option<Exec> {
         if pid == 0 {
             return None;
         }
-        let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
-        let mut env: Vec<String> = environ.split(|&b| b == 0).filter(|e| e.contains(&b'=')).map(|e| String::from_utf8_lossy(e).into_owned()).collect();
+        // (Its exports at the last prompt, as its integration wrote them; else /proc.)
+        let mut env: Vec<String> = crate::prompt::shell_env(pid)?.into_iter().map(|(k, v)| format!("{k}={v}")).collect();
         env.sort();
         let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
         let uid = status.lines().find_map(|l| l.strip_prefix("Uid:")).and_then(|l| l.split_whitespace().next()).unwrap_or("");

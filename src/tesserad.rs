@@ -29,6 +29,7 @@ mod find;
 mod grammars;
 mod history;
 mod images;
+mod jobs;
 mod jupyter;
 mod launchers;
 mod mux;
