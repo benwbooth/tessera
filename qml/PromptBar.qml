@@ -31,6 +31,9 @@ Item {
     property real fontSize: 11
     property int shellPid: 0
     property string sshHost: ""         // the pane's host: its prompt is drawn there
+    // (The home folder where the shell is: ~ means the host's.)
+    // (Asked again once the shell is there: by then the host is connected.)
+    readonly property string home: { shellPid; return controller ? (sshHost !== "" ? controller.hostHome(sshHost) : controller.homeDir()) : "" }
     property string engine: "auto"     // "auto", "starship", "builtin"
     readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && controller.hasStarshipOn(sshHost)))
     signal runRequested(string command)
@@ -198,7 +201,7 @@ Item {
     function path() {
         let p = bar.cwd.replace(/^file:\/\/[^/]*/, "")
         try { p = decodeURIComponent(p) } catch (e) {}
-        const home = controller ? controller.homeDir() : ""
+        const home = bar.home
         if (home !== "" && (p === home || p.startsWith(home + "/"))) p = "~" + p.substring(home.length)
         // (Always the whole path: a shortened one reads like a relative path.)
         return p
@@ -272,7 +275,7 @@ Item {
         let cwd = bar.cwd.replace(/^file:\/\/[^/]*/, "")
         try { cwd = decodeURIComponent(cwd) } catch (e) {}
         if (cwd === "") return []
-        const home = controller.homeDir()
+        const home = bar.home
         const re = /\S+/g
         let m
         while ((m = re.exec(t)) !== null) {
@@ -301,6 +304,63 @@ Item {
         }
         return []
     }
+    // ---- lines too long for the bar: wrapped, never cut short ----------------
+    // Runs past `room` px go on to another line, a long one (the folder)
+    // broken after a "/" (or a space), its pill closed and opened again
+    // around the break. Its folders stay clickable (PathHits gets the whole run).
+    // (FontMetrics, not TextMetrics: measuring writes nothing, so the bindings
+    // that wrap don't loop.)
+    FontMetrics { id: boldMetrics; font.family: bar.fontFamily; font.pointSize: bar.fontSize; font.bold: true }
+    function isCap(t) { return t.length === 1 && "\ue0b0\ue0b2\ue0b4\ue0b6\ue0bc\ue0be\ue0b8\ue0ba".indexOf(t) >= 0 }
+    function runWidth(r, t) {
+        if (isCap(r.t)) return Math.ceil((Math.ceil(sfm.height) + 2) / 2)
+        return Math.ceil((r.b ? boldMetrics : sfm).advanceWidth(t !== undefined ? t : r.t))
+    }
+    function wrapLines(lines, room) {
+        if (!(room > 40)) return lines
+        const out = []
+        for (const line of lines) {
+            let cur = [], w = 0
+            for (let i = 0; i < line.length; i++) {
+                const r = line[i]
+                const rw = runWidth(r)
+                if (w + rw <= room || isCap(r.t)) { cur.push(r); w += rw; continue }
+                // (The pill it's in: its caps, to close it here and open it on the next line.)
+                let open = null, close = null
+                if (r.bg) {
+                    for (let j = i - 1; j >= 0; j--) if (isCap(line[j].t)) { open = line[j]; break }
+                    for (let j = i + 1; j < line.length; j++) if (isCap(line[j].t)) { close = line[j]; break }
+                }
+                const capW = close ? runWidth(close) : 0
+                const full = r.full !== undefined ? r.full : r.t
+                let off = r.off || 0, rest = r.t
+                while (rest.length > 0) {
+                    const left = room - w - capW
+                    // (The longest piece that fits, ending after a "/" or a space.)
+                    let cut = -1
+                    for (let k = 1; k <= rest.length; k++) {
+                        if (k < rest.length && rest[k - 1] !== "/" && rest[k - 1] !== " ") continue
+                        if (runWidth(r, rest.substring(0, k)) <= left) cut = k; else break
+                    }
+                    if (cut < 0 && cur.length <= (open ? 1 : 0)) {
+                        // (Nowhere to break and a line to itself: as much as fits.)
+                        cut = 1
+                        while (cut < rest.length && runWidth(r, rest.substring(0, cut + 1)) <= left) cut++
+                    }
+                    if (cut >= rest.length) { cur.push(Object.assign({}, r, { t: rest, full: full, off: off })); w += runWidth(r, rest); break }
+                    if (cut > 0) cur.push(Object.assign({}, r, { t: rest.substring(0, cut), full: full, off: off }))
+                    if (close && cut > 0) cur.push(close)
+                    out.push(cur)
+                    cur = open ? [open] : []
+                    w = open ? runWidth(open) : 0
+                    off += Math.max(0, cut)
+                    rest = rest.substring(Math.max(0, cut))
+                }
+            }
+            out.push(cur)
+        }
+        return out
+    }
     TextMetrics { id: choiceMetrics; font.family: bar.fontFamily; font.pixelSize: 12 }
     readonly property real choiceWidth: { let w = 0; for (const c of choices) { choiceMetrics.text = c.label; w = Math.max(w, choiceMetrics.advanceWidth) } return w }
     property double cdTapAt: 0          // the drop-up was the click
@@ -314,13 +374,23 @@ Item {
         property string t: ""
         property var font
         property color ink
-        readonly property var parts: { bar.cwd; return bar.pathParts(t) }
+        // (A piece of a run wrapped onto lines: `t` is the whole run, this
+        // piece its text from `off`, `len` long.)
+        property int off: 0
+        property int len: -1
+        readonly property var parts: {
+            bar.cwd
+            const all = bar.pathParts(t)
+            if (off === 0 && len < 0) return all
+            const end = len < 0 ? t.length : off + len
+            return all.filter(p => p.end > off && p.start < end).map(p => Object.assign({}, p, { start: Math.max(p.start, off), end: Math.min(p.end, end) }))
+        }
         Repeater {
             model: ph.parts
             delegate: Item {
                 required property var modelData
-                Text { topPadding: 0.001; id: m0; visible: false; text: bar.glyphs(ph.t.substring(0, modelData.start)); textFormat: Text.RichText; font: ph.font }
-                Text { topPadding: 0.001; id: m1; visible: false; text: bar.glyphs(ph.t.substring(0, modelData.end)); textFormat: Text.RichText; font: ph.font }
+                Text { topPadding: 0.001; id: m0; visible: false; text: bar.glyphs(ph.t.substring(ph.off, modelData.start)); textFormat: Text.RichText; font: ph.font }
+                Text { topPadding: 0.001; id: m1; visible: false; text: bar.glyphs(ph.t.substring(ph.off, modelData.end)); textFormat: Text.RichText; font: ph.font }
                 x: m0.implicitWidth
                 width: m1.implicitWidth - m0.implicitWidth
                 height: ph.height
@@ -438,7 +508,7 @@ Item {
             font.bold: run.r.b
             font.underline: run.hot && run.r.t.trim() !== ""
             renderType: Text.NativeRendering
-            PathHits { anchors.fill: parent; t: run.cap === "" ? run.r.t : ""; font: rt.font; ink: rt.color }
+            PathHits { anchors.fill: parent; t: run.cap === "" ? (run.r.full !== undefined ? run.r.full : run.r.t) : ""; off: run.r.off || 0; len: run.r.full !== undefined ? run.r.t.length : -1; font: rt.font; ink: rt.color }
         }
         Canvas {
             visible: run.cap !== ""
@@ -635,6 +705,8 @@ Item {
             sourceComponent: w.wd.kind === "seg" ? segBody : w.wd.kind === "lines" ? linesBody : runsBody
             property var wd: w.wd
             property bool hot: w.hot
+            // (On the left: the room to the right-hand widgets, for wrapping.)
+            readonly property real room: w.parent === leftRow ? bar.width - leftRow.x - w.x - body.x - addButton.width - 30 - (rightRow.width > 0 ? rightRow.width + 16 : 0) : 0
         }
         Rectangle {
             anchors.fill: parent
@@ -685,10 +757,17 @@ Item {
     Component { id: segBody; Seg { s: parent.wd.seg; hot: parent ? parent.hot : false } }
     Component {
         id: runsBody
-        Row {
+        Column {
             id: rr
             readonly property var wd: parent ? parent.wd : null
-            Repeater { model: rr.wd ? rr.wd.runs : []; delegate: Run { required property var modelData; r: modelData; hot: rr.parent ? rr.parent.hot : false } }
+            spacing: 2
+            Repeater {
+                model: rr.wd ? bar.wrapLines([rr.wd.runs], rr.parent ? rr.parent.room : 0) : []
+                delegate: Row {
+                    required property var modelData
+                    Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData; hot: rr.parent ? rr.parent.hot : false } }
+                }
+            }
         }
     }
     Component {
@@ -698,7 +777,7 @@ Item {
             readonly property var wd: parent ? parent.wd : null
             spacing: 2
             Repeater {
-                model: lc.wd ? lc.wd.lines : []
+                model: lc.wd ? bar.wrapLines(lc.wd.lines, lc.parent ? lc.parent.room : 0) : []
                 delegate: Row {
                     required property var modelData
                     Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData; hot: lc.parent ? lc.parent.hot : false } }
@@ -877,7 +956,7 @@ Item {
         if (c.length === 0) { openWidgetMenu(layout.indexOf(name), name, item); return }
         // (The folder's choices: this tab's own folders first.)
         if (c.some(o => o.section && o.label === "Up") && visited.length > 1) {
-            const home = controller.homeDir()
+            const home = bar.home
             const mine = visited.filter(p => p !== cwd).map(p => ({
                 label: home !== "" && (p === home || p.startsWith(home + "/")) ? "~" + p.substring(home.length) : p,
                 cmd: "cd " + shQuote(p), current: false
