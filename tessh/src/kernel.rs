@@ -285,6 +285,12 @@ struct StdinBridge {
 
 /// The cell's frontend runs programs in its terminal (execute_request's tessera_tty).
 static TTY_OK: AtomicBool = AtomicBool::new(false);
+/// Tessera started this kernel (its connection file is in Tessera's kernels
+/// folder): its notebook runs programs, even through a tesserad too old to
+/// say so.
+static IN_TESSERA: AtomicBool = AtomicBool::new(false);
+/// The request, in the prompt too (an older tesserad passes only that on).
+pub const TTY_PROMPT: &str = "\x1b]tessera-tty;";
 static STDIN: StdinBridge = StdinBridge { allowed: AtomicBool::new(false), ids: Mutex::new(Vec::new()), req: Mutex::new(None), reply: Mutex::new(None) };
 
 #[pyfunction]
@@ -315,14 +321,15 @@ fn kernel_input(py: Python<'_>, prompt: &str) -> PyResult<String> {
 fn kernel_tty(py: Python<'_>, command: &str, cwd: &str) -> PyResult<Option<i32>> {
     // (Only a Tessera that says it runs them: an older one would take the
     // request for input() and never answer.)
-    if !STDIN.allowed.load(Ordering::SeqCst) || !TTY_OK.load(Ordering::SeqCst) {
+    if !STDIN.allowed.load(Ordering::SeqCst) || !(TTY_OK.load(Ordering::SeqCst) || IN_TESSERA.load(Ordering::SeqCst)) {
         return Ok(None);
     }
     drain(py);
     let parent = PARENT.lock().unwrap().clone();
     let ids = STDIN.ids.lock().unwrap().clone();
     if let Some(tx) = STDIN.req.lock().unwrap().as_ref() {
-        let _ = tx.send((ids, parent, json!({"prompt": "", "password": false, "tessera_tty": {"command": command, "cwd": cwd}})));
+        let tty = json!({"command": command, "cwd": cwd});
+        let _ = tx.send((ids, parent, json!({"prompt": format!("{TTY_PROMPT}{tty}"), "password": false, "tessera_tty": tty})));
     }
     loop {
         let got = py.detach(|| STDIN.reply.lock().unwrap().as_ref().map(|rx| rx.recv_timeout(std::time::Duration::from_millis(50))));
@@ -417,6 +424,7 @@ fn is_complete(ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
 // ---- the sockets ---------------------------------------------------------------------------
 
 pub fn run(conn_file: &str) -> i32 {
+    IN_TESSERA.store(conn_file.contains("/tessera/kernels/"), Ordering::SeqCst);
     let conn: Value = match std::fs::read_to_string(conn_file).ok().and_then(|t| serde_json::from_str(&t).ok()) {
         Some(c) => c,
         None => {

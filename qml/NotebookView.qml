@@ -256,7 +256,14 @@ FocusScope {
         setAsking(cid, null)
     }
     function kernelEvent(e, fromKey) {
-        if (e.type === "input" && e.tty) { runTty(e.cell, e.tty, fromKey || key); return }
+        // (A tessh program to run in the terminal: the event's tty, or, through
+        // an older tesserad that passes only the prompt on, in the prompt.)
+        if (e.type === "input") {
+            let tty = e.tty || null
+            const M = "\x1b]tessera-tty;", p = e.prompt || ""
+            if (!tty && p.startsWith(M)) { try { tty = JSON.parse(p.substring(M.length)) } catch (x) {} }
+            if (tty) { runTty(e.cell, tty, fromKey || key); return }
+        }
         if (e.type === "input") { setAsking(e.cell, { prompt: e.prompt || "", password: !!e.password, key: fromKey || key }); return }
         if (e.type === "status") {
             kernelState = e.state
