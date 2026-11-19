@@ -52,6 +52,7 @@ fn main() {
     let mut builder = CxxQtBuilder::new_qml_module(QmlModule::new("Tessera").qml_files([
         QmlFile::from("qml/Main.qml"),
         QmlFile::from("qml/Theme.qml").singleton(true),
+        QmlFile::from("qml/Async.qml").singleton(true),
         QmlFile::from("qml/TerminalPane.qml"),
         QmlFile::from("qml/PaneSplit.qml"),
         QmlFile::from("qml/TabButtonX.qml"),

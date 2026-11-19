@@ -69,7 +69,7 @@ Rectangle {
         controller.aiRun(key, "chat", JSON.stringify(msgs), JSON.stringify(context()))
     }
     function stop() { controller.aiCancel(key); busy = false }
-    function clear() { stop(); saveNow(); messages = []; chatId = newId(); chatTitle = "" }
+    function clear() { stop(); saveNow(); openSeq++; messages = []; chatId = newId(); chatTitle = "" }
 
     // ---- history -------------------------------------------------------------
     // Saved a moment after each change (and right away before switching).
@@ -88,17 +88,22 @@ Rectangle {
     function open(id, title) {
         if (id === chatId) return
         stop(); saveNow()
-        let msgs = []
-        try { msgs = JSON.parse(controller.chatLoad(id)) } catch (e) {}
-        chatId = id
-        chatTitle = title || ""
-        messages = msgs
-        saveTimer.stop()
-        Qt.callLater(list.positionViewAtEnd)
+        const s = ++openSeq
+        Async.call(controller, k => controller.chatLoad(k, id), r => {
+            if (s !== openSeq) return   // (another chat opened, or cleared, since)
+            let msgs = []
+            try { msgs = JSON.parse(r) } catch (e) {}
+            chatId = id
+            chatTitle = title || ""
+            messages = msgs
+            saveTimer.stop()
+            Qt.callLater(list.positionViewAtEnd)
+        })
     }
+    property int openSeq: 0
     function remove(id) {
         controller.chatDelete(id)
-        if (id === chatId) { stop(); messages = []; chatId = newId(); chatTitle = ""; saveTimer.stop() }
+        if (id === chatId) { stop(); openSeq++; messages = []; chatId = newId(); chatTitle = ""; saveTimer.stop() }
     }
     // "Today 14:05", "Yesterday", "Mon", "12 Nov", "12 Nov 2025"
     function when(secs) {
@@ -114,9 +119,12 @@ Rectangle {
     // The last conversation comes back with the window.
     Component.onCompleted: Qt.callLater(() => {
         if (!controller) return
-        let all = []
-        try { all = JSON.parse(controller.chatsList()) } catch (e) {}
-        if (all.length > 0) open(all[0].id, all[0].title)
+        Async.call(controller, k => controller.chatsList(k), r => {
+            let all = []
+            try { all = JSON.parse(r) } catch (e) {}
+            // (Not if a chat was started or opened meanwhile.)
+            if (all.length > 0 && openSeq === 0 && messages.length === 0) open(all[0].id, all[0].title)
+        })
         // (Test hooks: TESSERA_TEST_CHAT_HISTORY opens the dropdown;
         // TESSERA_TEST_CHAT_SEARCH=<text> also types that in its search.)
         if (controller.testEnv("CHAT_HISTORY") !== "" || controller.testEnv("CHAT_SEARCH") !== "") historyTest.start()
@@ -129,7 +137,7 @@ Rectangle {
             const q = panel.controller.testEnv("CHAT_SEARCH")
             if (q !== "") search.text = q
             // (TESSERA_TEST_CHAT_CHOOSE: and open the first match.)
-            if (panel.controller.testEnv("CHAT_CHOOSE") !== "") history.choose(0)
+            if (panel.controller.testEnv("CHAT_CHOOSE") !== "") history.refresh(() => history.choose(0))
         }
     }
 
@@ -521,10 +529,16 @@ Rectangle {
         z: 10
         property var rows: []
         property int current: 0
-        function refresh() {
+        property int seq: 0
+        function refresh(then) {
             panel.saveNow()
-            try { rows = JSON.parse(search.text.trim() === "" ? panel.controller.chatsList() : panel.controller.chatsSearch(search.text)) } catch (e) { rows = [] }
-            current = 0
+            const s = ++seq, q = search.text
+            Async.call(panel.controller, k => q.trim() === "" ? panel.controller.chatsList(k) : panel.controller.chatsSearch(k, q), r => {
+                if (s !== seq) return   // (the search changed since)
+                try { rows = JSON.parse(r) } catch (e) { rows = [] }
+                current = 0
+                if (then) then()
+            })
         }
         function openIt() {
             // (On whole pixels in the window, plus the nudge: native text at

@@ -67,6 +67,8 @@ Item {
         size = 0
         problem = ""
         rev++
+        pollSeq++
+        polling = false
         if (!controller || path === "") return
         poll()
         if (lang !== "" && !controller.languageInstalled(lang)) controller.ensureLanguage(lang)
@@ -86,39 +88,72 @@ Item {
     onCrlfChanged: if (editing) updateDirty()
     property string editError: ""
     signal savedAs(string path)
+    // (Read in the background: editing starts when the text comes.)
+    property int editSeq: 0
     function startEdit() {
         editError = ""
-        let r = {}
-        try { r = JSON.parse(controller.fileReadForEdit(path)) } catch (e) {}
-        if (r.error) { editError = r.error; return false }
-        savedText = r.text || ""
-        savedCrlf = !!r.crlf
-        editor.text = savedText
-        crlf = !!r.crlf
-        dirty = false
-        ek.viNormal = editorKeys === "vi"
-        editing = true
-        editor.cursorPosition = 0
-        Qt.callLater(() => editor.forceActiveFocus())
-        edHlTimer.restart()
-        return true
+        const p = path, n = ++editSeq
+        Async.call(controller, k => controller.fileReadForEdit(k, p), res => {
+            if (n !== editSeq || p !== path) return   // (stopped, or another file, since)
+            let r = {}
+            try { r = JSON.parse(res) } catch (e) {}
+            if (r.error) { editError = r.error; return }
+            savedText = r.text || ""
+            savedCrlf = !!r.crlf
+            editor.text = savedText
+            crlf = !!r.crlf
+            dirty = false
+            ek.viNormal = editorKeys === "vi"
+            editing = true
+            editor.cursorPosition = 0
+            Qt.callLater(() => editor.forceActiveFocus())
+            edHlTimer.restart()
+        })
     }
-    function save() {
-        if (!editing) return true
-        const err = controller.fileSaveEdited(path, editor.text, crlf)
-        editError = err
-        if (err === "") { savedText = editor.text; savedCrlf = crlf; dirty = false; rev++ }
-        return err === ""
+    // Saves run in the background, in order. `then` gets whether it worked;
+    // the return is only whether it was asked (save-then-stop: stopEdit waits
+    // for the saves still out).
+    property int saving: 0              // (saves asked, not answered yet)
+    property string savingText: ""      // (the last one's text)
+    property bool savingCrlf: false
+    property bool stopAfterSave: false
+    // (Changed from the file and from what's being saved: quitting would lose it.)
+    function unsaved() { return dirty && !(saving > 0 && savingText === editor.text && savingCrlf === crlf) }
+    function saved(err) {
+        saving--
+        if (saving === 0 && stopAfterSave) { stopAfterSave = false; if (err === "") stopEdit() }
+    }
+    function save(then) {
+        if (!editing) { if (then) then(true); return true }
+        const p = path, t = editor.text, c = crlf
+        saving++
+        savingText = t
+        savingCrlf = c
+        Async.call(controller, k => controller.fileSaveEdited(k, p, t, c), err => {
+            if (editing && p === path) {
+                editError = err
+                // (Dirty again if it was typed in since.)
+                if (err === "") { savedText = t; savedCrlf = c; updateDirty(); rev++ }
+            }
+            if (then) then(err === "")
+            saved(err)
+        })
+        return true
     }
     function saveAs(p) {
         if (!editing || p === "") return false
-        const err = controller.fileSaveEdited(p, editor.text, crlf)
-        editError = err
-        if (err !== "") return false
-        savedText = editor.text
-        savedCrlf = crlf
-        dirty = false
-        savedAs(p)
+        const t = editor.text, c = crlf
+        saving++
+        Async.call(controller, k => controller.fileSaveEdited(k, p, t, c), err => {
+            editError = err
+            if (err === "") {
+                savedText = t
+                savedCrlf = c
+                updateDirty()
+                savedAs(p)
+            }
+            saved(err)
+        })
         return true
     }
     // ---- vi's command line: ":" commands, "/" and "?" searches ----------------
@@ -127,14 +162,15 @@ Item {
     Connections {
         target: ek.ex
         function onWrite(p, force) {
-            if (p === "") { if (fv.save()) fv.showExMessage("\"" + fv.name + "\" written", false) }
+            if (p === "") { const n = fv.name; fv.save(ok => { if (ok) fv.showExMessage("\"" + n + "\" written", false) }) }
             else {
-                const err = fv.controller.fileSaveEdited(p, editor.text, fv.crlf)
-                fv.showExMessage(err === "" ? "\"" + p + "\" written" : err, err !== "")
+                Async.call(fv.controller, k => fv.controller.fileSaveEdited(k, p, editor.text, fv.crlf),
+                    err => fv.showExMessage(err === "" ? "\"" + p + "\" written" : err, err !== ""))
             }
         }
         function onQuit(force) {
-            if (fv.dirty && !force) { fv.showExMessage("E37: No write since last change (add ! to override)", true); return }
+            // (A :w just before, still out, counts as written: stopEdit waits for it.)
+            if (fv.unsaved() && !force) { fv.showExMessage("E37: No write since last change (add ! to override)", true); return }
             fv.stopEdit()
         }
         function onEditFile(p, force) {
@@ -151,10 +187,30 @@ Item {
     }
     Binding { target: ek.ex; property: "fileName"; value: fv.name }
     Binding { target: ek.ex; property: "folder"; value: fv.path.replace(/\/[^\/]*$/, "") }
+    // (:r wants the text at once, but it's read in the background: the
+    // first try asks for it, and when it comes the same command runs again
+    // and finds it here. Only a plain :r, so nothing else runs twice.)
+    property var readCache: ({})
     Component.onCompleted: ek.ex.readFile = (p) => {
-        const r = JSON.parse(fv.controller.readTextFile(p === "" ? fv.path : p))
-        if (r.error !== undefined) throw "E484: Can't open file " + (p || fv.path) + ": " + r.error
-        return r.text
+        const f = p === "" ? fv.path : p
+        const got = fv.readCache[f]
+        if (got !== undefined) {
+            delete fv.readCache[f]
+            const r = JSON.parse(got)
+            if (r.error !== undefined) throw "E484: Can't open file " + (p || fv.path) + ": " + r.error
+            return r.text
+        }
+        const line = ek.ex.history[ek.ex.history.length - 1] || ""
+        if (line.indexOf("|") >= 0 || !/^[\s:]*(?:'[a-z]|[^a-zA-Z|])*r(?:e(?:ad?)?)?(?:\s|$)/.test(line))
+            throw "Not here: :r inside another command (on its own, it works)"
+        Async.call(fv.controller, k => fv.controller.readTextFile(k, f), r => {
+            if (!fv.editing) return
+            fv.readCache[f] = r
+            const out = ek.ex.run(line)
+            delete fv.readCache[f]
+            if (out !== "") fv.showExMessage(out, ek.ex.error)
+        })
+        throw "Reading " + (p || fv.name) + "…"
     }
 
     // ---- find, replace, go to a line ---------------------------------------
@@ -270,13 +326,16 @@ Item {
     function openInTerminal(ed) {
         if (ed !== undefined && ed !== termEditor && controller) controller.setSetting("terminal_editor", JSON.stringify(ed))
         const e = ed !== undefined ? ed : termEditor
-        if (editing && dirty) save()          // (what's typed here first, so it opens that)
-        editing = false
-        termHostUp = termHost === ""
-        termHostError = ""
-        if (!termHostUp && controller) controller.connectHost(termHost)
-        termCommand = "exec sh -c " + shq(editorScript(e)) + " sh " + shq(termPath)
-        inTerm = true
+        const open = () => {
+            editing = false
+            termHostUp = termHost === ""
+            termHostError = ""
+            if (!termHostUp && controller) controller.connectHost(termHost)
+            termCommand = "exec sh -c " + shq(editorScript(e)) + " sh " + shq(termPath)
+            inTerm = true
+        }
+        if (editing && dirty) save(open)      // (what's typed here first, so it opens that)
+        else open()
     }
     // (Quit the editor, or close it here: back to the file, as it is now.)
     function closeTerminal() {
@@ -315,16 +374,34 @@ Item {
     onWrapChanged: gutterTimer.restart()
 
     // (Done: back to viewing, the file as it is now.)
-    function stopEdit() { editing = false; editError = ""; load() }
+    // (A save still out: done once it lands, and only if it worked.)
+    function stopEdit() {
+        if (saving > 0) { stopAfterSave = true; return }
+        editSeq++
+        editing = false; editError = ""; load()
+    }
+    // (In the background: one at a time, and dropped if the file changed since.)
+    property int pollSeq: 0
+    property bool polling: false
     function poll() {
-        let r = {}
-        try { r = JSON.parse(controller.fileLineIndex(path)) } catch (e) {}
-        if (r.error) { problem = r.error; counted = true; return }
-        lines = r.lines || 0
-        size = r.size || 0
-        counted = !!r.done
-        // (A NUL in the start: binary.)
-        if (lines > 0 && problem === "" && controller.fileLines(path, 0, 50).indexOf("\u0000") >= 0) problem = "It's a binary file."
+        if (polling || !controller || path === "") return
+        polling = true
+        const p = path, n = pollSeq
+        Async.call(controller, k => controller.fileLineIndex(k, p), res => {
+            polling = false
+            if (n !== pollSeq || p !== path) return
+            let r = {}
+            try { r = JSON.parse(res) } catch (e) {}
+            if (r.error) { problem = r.error; counted = true; return }
+            lines = r.lines || 0
+            size = r.size || 0
+            counted = !!r.done
+            // (A NUL in the start: binary.)
+            if (lines > 0 && problem === "")
+                Async.call(controller, k => controller.fileLines(k, p, 0, 50), t => {
+                    if (n === pollSeq && p === path && t.indexOf("\u0000") >= 0) problem = "It's a binary file."
+                })
+        })
     }
     Timer { interval: 250; repeat: true; running: !fv.counted && fv.path !== ""; onTriggered: fv.poll() }
     Connections {
@@ -368,7 +445,22 @@ Item {
             readonly property int count: Math.min(fv.block, fv.lines - first)
             // (Read when it comes near the screen; again when the file's read again
             // or the block fills out while the lines are still being counted.)
-            readonly property string body: { fv.rev; return fv.controller ? fv.controller.fileLines(fv.path, first, count) : "" }
+            // (In the background; the last text stays up until the new one comes.)
+            property string body: ""
+            property int asked: 0
+            function fetch() {
+                if (!fv.controller) return
+                const n = ++asked
+                Async.call(fv.controller, k => fv.controller.fileLines(k, fv.path, first, count), r => { if (n === asked) body = r })
+            }
+            onFirstChanged: fetch()
+            onCountChanged: fetch()
+            Connections {
+                target: fv
+                function onRevChanged() { blk.fetch() }
+                function onPathChanged() { blk.fetch() }
+                function onControllerChanged() { blk.fetch() }
+            }
             width: Math.max(list.width, fv.gutterWidth + view.implicitWidth + 24)
             height: Math.max(count * fm.lineSpacing, view.contentHeight)
             onWidthChanged: if (width > list.widest) list.widest = width
@@ -425,7 +517,7 @@ Item {
                 try { const r = JSON.parse(fv.controller.syntax(fv.lang, body)); r.errors = []; hl.analysis = JSON.stringify(r) } catch (e) {}
             }
             onBodyChanged: Qt.callLater(highlight)
-            Component.onCompleted: Qt.callLater(highlight)
+            Component.onCompleted: { fetch(); Qt.callLater(highlight) }
             Connections { target: fv; function onLanguageReadyChanged() { Qt.callLater(blk.highlight) } }
         }
     }

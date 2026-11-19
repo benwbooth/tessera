@@ -34,7 +34,7 @@ Item {
     property var kept: null             // the notebook's copy of this card's choices
     signal keptChanged2(var choices)    // (to the notebook, to keep)
     property var mine: ({})
-    Component.onCompleted: mine = kept ? Object.assign({}, kept) : Object.assign({}, saved, { view: undefined })
+    Component.onCompleted: { mine = kept ? Object.assign({}, kept) : Object.assign({}, saved, { view: undefined }); list() }
     readonly property string view: mine.view ? mine.view : flagLong ? "details" : (saved.view || "list")
     readonly property string sortBy: mine.sort || "name"
     readonly property bool desc: !!mine.desc
@@ -69,7 +69,23 @@ Item {
     function up() { const p = bareDir.replace(/\/[^/]+\/?$/, ""); go(hostPrefix + (p === "" ? "/" : p)) }
     onStartDirChanged: { dir = startDir; back = []; forward = [] }
 
-    readonly property var raw: { refresh; if (!controller || dir === "") return []; try { return JSON.parse(controller.listDir(dir, showHidden)) } catch (e) { return [] } }
+    // (Read in the background; the last listing stays up until the new one comes.)
+    property var raw: []
+    property int listSeq: 0
+    property bool listed: false         // (an answer came: "(empty)" means it)
+    function list() {
+        const n = ++listSeq
+        if (!controller || dir === "") { raw = []; return }
+        Async.call(controller, k => controller.listDir(k, dir, showHidden), r => {
+            if (n !== listSeq) return   // (another folder asked for since)
+            try { raw = JSON.parse(r) } catch (e) { raw = [] }
+            listed = true
+        })
+    }
+    onRefreshChanged: list()
+    onDirChanged: list()
+    onShowHiddenChanged: list()
+    onControllerChanged: list()
     readonly property var entries: {
         const a = raw.slice()
         const name = (x) => x.name.toLowerCase().replace(/^\./, "")
@@ -159,11 +175,13 @@ Item {
     property double entryTapAt: 0       // an entry was just clicked (not the space around them)
     property var menuEntry: null        // what the right click was on (null: the folder)
     property string error: ""
-    function act(op, path, arg) {
-        const r = controller.fileAction(op, path, arg || "")
-        error = r
-        if (r === "") refresh++
-        return r === ""
+    // (`then` gets whether it worked, once the answer comes.)
+    function act(op, path, arg, then) {
+        Async.call(controller, k => controller.fileAction(k, op, path, arg || ""), r => {
+            error = r
+            if (r === "") refresh++
+            if (then) then(r === "")
+        })
     }
     // A click: a folder goes in; a text file that isn't a program shows in a
     // new card below, in Tessera's viewer (line numbers, highlighting);
@@ -182,14 +200,13 @@ Item {
         if (!drop.hasUrls) return
         const internal = drop.source !== null && drop.source !== undefined
         const move = drop.proposedAction === Qt.MoveAction || (internal && drop.proposedAction !== Qt.CopyAction)
-        let done = 0
+        // (Each one reads the folder again when it's done.)
         for (const u of drop.urls) {
             const p = pathOf(u)
             if (p === "" || p === into || p.replace(/\/[^/]+$/, "") === into) continue
-            if (act(move ? "move" : "copy", p, into)) done++
+            act(move ? "move" : "copy", p, into)
         }
         drop.accept(move ? Qt.MoveAction : Qt.CopyAction)
-        if (done) refresh++
     }
     property string dropOn: ""          // the folder a drag is over
     DropArea {
@@ -271,7 +288,7 @@ Item {
         TapHandler { onTapped: Qt.callLater(() => { if (Date.now() - fb.entryTapAt > 300) fb.selected = "" }) }
         Text {
             visible: fb.entries.length === 0
-            text: fb.raw.length === 0 && fb.dir !== "" ? "(empty)" : ""
+            text: fb.listed && fb.raw.length === 0 && fb.dir !== "" ? "(empty)" : ""
             color: Theme.textDim
             font.family: fb.fontFamily
             font.pointSize: fb.pointSize
@@ -483,7 +500,7 @@ Item {
         SlimMenuItem { text: "Copy"; onTriggered: fb.held = { op: "copy", path: itemMenu.e.path } }
         SlimMenuItem { text: "Cut"; onTriggered: fb.held = { op: "move", path: itemMenu.e.path } }
         SlimMenuItem { text: "Paste into it"; visible: itemMenu.e.dir && fb.held !== null; height: visible ? implicitHeight : 0
-            onTriggered: { if (fb.act(fb.held.op, fb.held.path, itemMenu.e.path) && fb.held.op === "move") fb.held = null } }
+            onTriggered: { const h = fb.held; fb.act(h.op, h.path, itemMenu.e.path, ok => { if (ok && h.op === "move" && fb.held === h) fb.held = null }) } }
         SlimMenuItem { text: "Rename…"; onTriggered: fb.ask("rename", itemMenu.e) }
         SlimMenuItem { text: "Duplicate"; onTriggered: fb.act("duplicate", itemMenu.e.path) }
         SlimMenuItem { text: "Move to the trash"; onTriggered: fb.act("trash", itemMenu.e.path) }
@@ -495,7 +512,7 @@ Item {
         id: folderMenu
         SlimMenuItem { text: "New folder…"; onTriggered: fb.ask("mkdir", null) }
         SlimMenuItem { text: "New file…"; onTriggered: fb.ask("touch", null) }
-        SlimMenuItem { text: "Paste"; enabled: fb.held !== null; onTriggered: { if (fb.act(fb.held.op, fb.held.path, fb.dir) && fb.held.op === "move") fb.held = null } }
+        SlimMenuItem { text: "Paste"; enabled: fb.held !== null; onTriggered: { const h = fb.held; fb.act(h.op, h.path, fb.dir, ok => { if (ok && h.op === "move" && fb.held === h) fb.held = null }) } }
         SlimMenuItem { text: "List (as ls)"; checkable: true; checked: fb.view === "list"; onTriggered: fb.setView("list") }
         SlimMenuItem { text: "Details (as ls -l)"; checkable: true; checked: fb.view === "details"; onTriggered: fb.setView("details") }
         SlimMenuItem { text: "Tiles"; checkable: true; checked: fb.view === "tiles"; onTriggered: fb.setView("tiles") }
@@ -538,8 +555,9 @@ Item {
                 background: Rectangle { radius: 5; color: Theme.bg; border.color: nameField.activeFocus ? Theme.accent : Theme.divider }
                 Keys.onEscapePressed: namePop.close()
                 onAccepted: {
-                    const ok = fb.asking === "rename" ? fb.act("rename", fb.askFor.path, text) : fb.act(fb.asking, fb.dir, text)
-                    if (ok) namePop.close()
+                    const close = ok => { if (ok) namePop.close() }
+                    if (fb.asking === "rename") fb.act("rename", fb.askFor.path, text, close)
+                    else fb.act(fb.asking, fb.dir, text, close)
                 }
             }
             Text { visible: fb.error !== ""; width: parent.width; wrapMode: Text.Wrap; text: fb.error; color: fb.ansi(1, "#e06c75"); font.pixelSize: 11 }

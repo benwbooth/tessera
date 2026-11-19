@@ -39,17 +39,24 @@ Rectangle {
     function restorePick() {
         if (pickRestored || !controller) return
         pickRestored = true
-        try { savedPick = JSON.parse(JSON.parse(controller.readTextFile(controller.stateFolder() + "/input-language.json")).text || "{}").id || "" } catch (e) { savedPick = "" }
-        if (savedPick !== "") pickLanguage(savedPick, false)
+        // (Read in the background; a pick made meanwhile wins.)
+        Async.call(controller, k => controller.readTextFile(k, controller.stateFolder() + "/input-language.json"), r => {
+            if (!box || box.savedPick !== "") return
+            let id = ""
+            try { id = JSON.parse(JSON.parse(r).text || "{}").id || "" } catch (e) {}
+            box.savedPick = id
+            if (id !== "") box.pickLanguage(id, false)
+        })
+        loadLangRecent()
     }
-    onControllerChanged: restorePick()
-    Component.onCompleted: restorePick()
+    onControllerChanged: { restorePick(); refreshLsp() }
+    Component.onCompleted: { restorePick(); refreshLsp() }
     // (A shell picked before the pane's own shell is known: decided again once it is.)
     onShellNameChanged: if (savedPick.startsWith("shell:") && langOverride === "bash") pickLanguage(savedPick, false)
     function pickLanguage(id, remember) {
         if (remember !== false && controller) {
             savedPick = id
-            controller.writeTextFile(controller.stateFolder() + "/input-language.json", JSON.stringify({ id: id }))
+            Async.call(controller, k => controller.writeTextFile(k, controller.stateFolder() + "/input-language.json", JSON.stringify({ id: id })), null)
         }
         if (id.startsWith("shell:")) {
             const sh = id.substring(6)
@@ -63,15 +70,22 @@ Rectangle {
             langOverride = id
         }
     }
-    property var langRecent: {
-        if (!controller) return []
-        try { return JSON.parse(JSON.parse(controller.readTextFile(controller.stateFolder() + "/languages.json")).text || "[]") } catch (e) { return [] }
+    property var langRecent: []
+    // (Read in the background; languages used meanwhile stay in front.)
+    function loadLangRecent() {
+        Async.call(controller, k => controller.readTextFile(k, controller.stateFolder() + "/languages.json"), r => {
+            if (!box) return
+            let l = []
+            try { l = JSON.parse(JSON.parse(r).text || "[]") } catch (e) {}
+            if (!Array.isArray(l)) return
+            box.langRecent = box.langRecent.concat(l.filter(x => box.langRecent.indexOf(x) < 0)).slice(0, 8)
+        })
     }
     function useLanguage(l) {
         if (!controller || l === "" || l === "bash") return
         const r = [l].concat(langRecent.filter(x => x !== l)).slice(0, 8)
         langRecent = r
-        controller.writeTextFile(controller.stateFolder() + "/languages.json", JSON.stringify(r))
+        Async.call(controller, k => controller.writeTextFile(k, controller.stateFolder() + "/languages.json", JSON.stringify(r)), null)
     }
     property string langAsked: ""
     Timer {
@@ -415,16 +429,27 @@ Rectangle {
         historySearch.forceActiveFocus()
         historySearch.selectAll()
     }
+    // (Answered in the background: a reply is dropped when a newer ask went
+    // out, or the text or cursor moved since.)
+    property int compSeq: 0
     function requestComplete() {
         if (!controller) return
-        if (!historyMode && box.lspServer !== "")
-            controller.lspAsk(aiKey + "-comp", box.lang, box.cwd, edit.text, "complete", edit.cursorPosition, box.sshHost)
-        const r = JSON.parse(historyMode ? controller.historySearch(historyQuery)
-                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid, box.sshHost))
-        comp = r
-        if (compIndex >= r.items.length) compIndex = 0
-        if (r.items.length === 0 && !r.pending) closeComp()
-        if (r.pending) compRetry.restart()
+        const seq = ++compSeq, hist = historyMode, query = historyQuery
+        const text = edit.text, cursor = edit.cursorPosition
+        Async.call(controller, k => hist ? controller.historySearch(k, query)
+                                         : controller.complete(k, text, cursor, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid, box.sshHost), json => {
+            if (!box || seq !== box.compSeq || !box.compOpen || box.historyMode !== hist) return
+            if (hist ? box.historyQuery !== query : (edit.text !== text || edit.cursorPosition !== cursor)) return
+            let r
+            try { r = JSON.parse(json) } catch (e) { return }
+            box.comp = r
+            if (box.compIndex >= r.items.length) box.compIndex = 0
+            if (r.items.length === 0 && !r.pending) box.closeComp()
+            if (r.pending) compRetry.restart()
+            // (The language server's items are added to these when they come.)
+            if (!hist && box.lspServer !== "")
+                box.controller.lspAsk(box.aiKey + "-comp", box.lang, box.cwd, text, "complete", cursor, box.sshHost)
+        })
     }
     function openComp() { compOpen = true; compChosen = false; compIndex = 0; typing = false; requestComplete() }
     function closeComp() { compOpen = false; compChosen = false; historyMode = false }
@@ -1312,7 +1337,18 @@ Rectangle {
     property string problem: ""        // the first syntax error, shown in the corner
     Timer { id: idle; interval: 650; onTriggered: box.analyze(true) }
     // ---- language server --------------------------------------------------
-    readonly property string lspServer: controller ? controller.lspAvailable(box.lang, box.sshHost) : ""
+    // (Asked in the background when the language or host changes; the last
+    // answer holds until the new one comes.)
+    property string lspServer: ""
+    function refreshLsp() {
+        if (!controller) return
+        const lang = box.lang, host = box.sshHost
+        Async.call(controller, k => controller.lspAvailable(k, lang, host), r => {
+            if (!box || box.lang !== lang || box.sshHost !== host) return
+            box.lspServer = r
+        })
+    }
+    onSshHostChanged: refreshLsp()
     property var lspDiags: []          // [[start, length, message, severity]] for lspText
     property string lspText: ""
     // (Diagnostics are for a language: bash's shellcheck says nothing about C++.)
@@ -1410,6 +1446,7 @@ Rectangle {
     // A language that isn't here yet is fetched (once) in the background.
     property string fetchingLang: ""
     onLangChanged: {
+        refreshLsp()
         // (Another language: the last one's diagnostics go, and it's checked again.)
         lspDiags = []; lspText = ""; lspNote = ""
         idle.restart()

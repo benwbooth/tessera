@@ -33,9 +33,26 @@ Item {
     property string sshHost: ""         // the pane's host: its prompt is drawn there
     // (The home folder where the shell is: ~ means the host's.)
     // (Asked again once the shell is there: by then the host is connected.)
-    readonly property string home: { shellPid; return controller ? (sshHost !== "" ? controller.hostHome(sshHost) : controller.homeDir()) : "" }
+    // (Another host's: asked in the background, the last answer kept till then.)
+    property string home: ""
+    function refreshHome() {
+        if (!controller) return
+        if (sshHost === "") { home = controller.homeDir(); return }
+        const host = sshHost
+        Async.call(controller, k => controller.hostHome(k, host), r => { if (bar && bar.sshHost === host) bar.home = r })
+    }
     property string engine: "auto"     // "auto", "starship", "builtin"
-    readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && controller.hasStarshipOn(sshHost)))
+    // (Whether the host has starship: asked in the background.)
+    property bool starshipThere: false
+    function refreshStarship() {
+        if (!controller) return
+        const host = sshHost
+        Async.call(controller, k => controller.hasStarshipOn(k, host), r => { if (bar && bar.sshHost === host) bar.starshipThere = r === "true" })
+    }
+    onSshHostChanged: { refreshHome(); refreshStarship() }
+    onControllerChanged: { refreshHome(); refreshStarship() }
+    Component.onCompleted: { refreshHome(); refreshStarship() }
+    readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && starshipThere))
     signal runRequested(string command)
     signal fixRequested()
 
@@ -179,7 +196,7 @@ Item {
     }
     onWidthChanged: roomChanged()
     Timer { id: resizeRefresh; interval: 200; onTriggered: bar.refresh() }
-    onShellPidChanged: refresh()
+    onShellPidChanged: { refresh(); refreshHome() }
     // (The prompt's config changed in Preferences.)
     Connections { target: bar.controller; function onRevisionChanged() { bar.refresh() } }
     function color(c, fallback) {
@@ -968,8 +985,17 @@ Item {
     property var choices: []
     function openChoices(name, item) {
         if (name === "status") { bar.fixRequested(); return }
-        let c = []
-        try { c = JSON.parse(controller.promptChoices(name, bar.cwd, bar.shellPid, bar.sshHost)) } catch (e) {}
+        // (The menu opens when the choices come; a newer click's win.)
+        const seq = ++choicesSeq
+        Async.call(controller, k => controller.promptChoices(k, name, bar.cwd, bar.shellPid, bar.sshHost), r => {
+            if (!bar || !item || seq !== bar.choicesSeq) return
+            let c = []
+            try { c = JSON.parse(r) } catch (e) {}
+            bar.showChoices(name, item, c)
+        })
+    }
+    property int choicesSeq: 0
+    function showChoices(name, item, c) {
         if (c.length === 0) { openWidgetMenu(layout.indexOf(name), name, item); return }
         // (The folder's choices: this tab's own folders first.)
         if (c.some(o => o.section && o.label === "Up") && visited.length > 1) {
@@ -1198,7 +1224,7 @@ Item {
             if (t === "add") { addPop.x = Math.max(0, bar.width - addPop.width - 4); addPop.open() }
             else if (t === "split") bar.splitStarship()
             else if (t === "cdhist") bar.openChoices("dir", leftRow)
-            else if (t.startsWith("run:")) { let c = []; try { c = JSON.parse(controller.promptChoices("dir", "/usr", 0, "")) } catch (e) {} const x = c.find(o => o.cmd === t.substring(4)); if (x) bar.runRequested(x.cmd) }
+            else if (t.startsWith("run:")) Async.call(bar.controller, k => bar.controller.promptChoices(k, "dir", "/usr", 0, ""), r => { let c = []; try { c = JSON.parse(r) } catch (e) {} const x = c.find(o => o.cmd === t.substring(4)); if (x) bar.runRequested(x.cmd) })
             else if (t.startsWith("split,")) { bar.splitStarship(); t2.cmd = t.substring(6); t2.start() }
             else for (const row of [leftRow, rightRow]) for (let k = 0; k < row.children.length; k++) {
                 const c = row.children[k]

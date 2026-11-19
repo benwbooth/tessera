@@ -106,6 +106,10 @@ pub struct Session {
     cells: crate::cells::Cells,
     /// The session whose kept cells a restored screen brings back.
     cells_from: Option<String>,
+    /// Kept cells being read (in the background, never on the window's
+    /// thread): they come on this, and a byte on `wake` says so.
+    cells_coming: Option<std::sync::mpsc::Receiver<String>>,
+    wake: (UnixStream, UnixStream),
     pending_command: String,
     command_buf: Option<Vec<u8>>,
     cell_image: Option<Vec<u8>>,
@@ -320,6 +324,12 @@ pub fn session_open(
         last_rich: (String::new(), String::new()),
         cells: Default::default(),
         cells_from: None,
+        cells_coming: None,
+        wake: {
+            let (a, b) = UnixStream::pair().map_err(|e| e.to_string())?;
+            a.set_nonblocking(true).map_err(|e| e.to_string())?;
+            (a, b)
+        },
         pending_command: String::new(),
         command_buf: None,
         cell_image: None,
@@ -399,8 +409,24 @@ impl Session {
         }
     }
 
+    /// What the window watches besides fd(): kept cells have come.
+    pub fn wake_fd(&self) -> i64 {
+        crate::net::raw(&self.wake.0)
+    }
+
     pub fn on_readable(&mut self) -> u32 {
         let mut sig = 0;
+        {
+            let mut b = [0u8; 16];
+            while matches!((&self.wake.0).read(&mut b), Ok(n) if n > 0) {}
+        }
+        if let Some(text) = self.cells_coming.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.cells_coming = None;
+            if self.cells.restore_text(&text) {
+                self.events.push(json!({"type": "cell", "id": 0, "done": true}));
+                sig |= SIG_EVENTS;
+            }
+        }
         match &mut self.backend {
             Backend::Daemon { stream, reader, .. } => {
                 let mut buf = vec![0u8; 256 * 1024];
@@ -443,9 +469,17 @@ impl Session {
                                 // as tesserad kept them.
                                 let (id, host) = (id.clone(), host.clone());
                                 let from = self.cells_from.take().unwrap_or_else(|| id.clone());
-                                let kept = crate::client::rpc_read(&host, "cells.load", json!({"session": id, "from": from}));
-                                if self.cells.restore_text(kept.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("")) {
-                                    self.events.push(json!({"type": "cell", "id": 0, "done": true}));
+                                // (Read in the background: on_readable takes them when
+                                // they come. Cells started meanwhile have later ids,
+                                // and restore_text keeps them.)
+                                let (tx, rx) = std::sync::mpsc::channel();
+                                self.cells_coming = Some(rx);
+                                if let Ok(mut wake) = self.wake.1.try_clone() {
+                                    std::thread::spawn(move || {
+                                        let kept = crate::client::rpc_read(&host, "cells.load", json!({"session": id, "from": from}));
+                                        let _ = tx.send(kept.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("").to_string());
+                                        let _ = wake.write_all(&[1]);
+                                    });
                                 }
                             }
                         }

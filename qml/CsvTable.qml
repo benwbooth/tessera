@@ -34,6 +34,9 @@ Item {
     property string query: ""
     // A page of rows each, as asked for (a change of view starts again).
     property var pages: ({})
+    property var lastPages: ({})        // (the ones before: shown until the new ones come)
+    property var asking: ({})           // (pages asked for: their gen)
+    property var afterFirstPage: null   // (run once the next first page is in)
     property int total: 0
     property var shownCols: []          // what the rows are (a SELECT's own columns)
     property var idPages: ({})          // each page's rows' _row (to edit them by)
@@ -55,32 +58,55 @@ Item {
     onControllerChanged: start()
     Component.onDestruction: if (controller && path !== "") controller.tableClose(path)
     function start() {
-        columns = []; order = []; sort = []; pages = ({}); total = 0; rows = 0; done = false; error = ""; widths = ({})
+        columns = []; order = []; sort = []; pages = ({}); lastPages = ({}); total = 0; rows = 0; done = false; error = ""; widths = ({})
+        gen++
+        openSeq++
+        polling = false
         if (!controller || path === "") return
         poll()
     }
-    function poll() {
-        let r = {}
-        try { r = JSON.parse(controller.tableOpen(path)) } catch (e) {}
-        if (r.error) { error = r.error; done = true; return }
-        const fresh = columns.length === 0 && (r.columns || []).length > 0
-        columns = r.columns || []
-        numeric = r.numeric || []
-        rows = r.rows || 0
-        done = !!r.done
-        dirty = !!r.dirty
-        if (fresh) order = columns.slice()
-        refresh()
+    // (In the background, in order with the table's edits; `then` after it's in.)
+    property int openSeq: 0
+    property bool polling: false
+    function poll(then) {
+        if (!controller || path === "" || (polling && !then)) return
+        polling = true
+        const pth = path, n = openSeq
+        Async.call(controller, k => controller.tableOpen(k, pth), res => {
+            if (n !== openSeq || pth !== path) return   // (another file since)
+            polling = false
+            let r = {}
+            try { r = JSON.parse(res) } catch (e) {}
+            if (r.error) { error = r.error; done = true; return }
+            const fresh = columns.length === 0 && (r.columns || []).length > 0
+            columns = r.columns || []
+            numeric = r.numeric || []
+            rows = r.rows || 0
+            done = !!r.done
+            dirty = !!r.dirty
+            if (fresh) order = columns.slice()
+            refresh()
+            if (then) then()
+        })
     }
     Timer { interval: 400; repeat: true; running: !tv.done && tv.path !== ""; onTriggered: tv.poll() }
 
     // Asked again from the top (the view changed, or more rows came in).
-    function refresh() { pages = ({}); idPages = ({}); gen++; fetch(0) }
+    function refresh() { if (Object.keys(pages).length) lastPages = pages; pages = ({}); idPages = ({}); gen++; fetch(0) }
     function fetch(page) {
-        if (!controller || pages[page] !== undefined) return
+        if (!controller || pages[page] !== undefined || asking[page] === gen) return
+        const g = gen, pth = path
+        asking[page] = g
         const spec = { columns: order, sort: sort, filter: filter, query: query, offset: page * pageSize, limit: pageSize }
-        let r = {}
-        try { r = JSON.parse(controller.tableQuery(path, JSON.stringify(spec))) } catch (e) {}
+        Async.call(controller, k => controller.tableQuery(k, pth, JSON.stringify(spec)), res => {
+            if (asking[page] === g) delete asking[page]
+            if (g !== gen || pth !== path) return   // (the view changed since: asked again)
+            let r = {}
+            try { r = JSON.parse(res) } catch (e) {}
+            fill(page, r)
+        })
+    }
+    function fill(page, r) {
         const p = Object.assign({}, pages)
         p[page] = r.rows || []
         pages = p
@@ -103,11 +129,12 @@ Item {
             changed = true
         }
         if (changed) widths = w
+        if (page === 0 && afterFirstPage) { const f = afterFirstPage; afterFirstPage = null; Qt.callLater(f) }
     }
     function cell(row, col) {
         const pg = Math.floor(row / pageSize)
-        const p = pages[pg]
-        if (p === undefined) { Qt.callLater(fetch, pg); return "" }
+        let p = pages[pg]
+        if (p === undefined) { Qt.callLater(fetch, pg); p = lastPages[pg]; if (p === undefined) return "" }
         const r = p[row - pg * pageSize]
         return r ? (r[col] === undefined ? "" : r[col]) : ""
     }
@@ -118,10 +145,14 @@ Item {
         const row = editRow, col = editCol
         editRow = -1; editCol = -1
         if (row < 0 || col < 0 || text === cell(row, col)) return
-        const err = controller.tableEditCell(path, idOf(row), shownCols[col], text)
-        if (err !== "") { error = err; return }
-        // (Shown at once, without asking for the page again.)
         const pg = Math.floor(row / pageSize)
+        if (pages[pg] === undefined) return
+        Async.call(controller, k => controller.tableEditCell(k, path, idOf(row), shownCols[col], text), err => {
+            // (Not taken: the rows as they are.)
+            if (err !== "") { error = err; refresh(); return }
+            dirty = true
+        })
+        // (Shown at once, without asking for the page again.)
         const p = Object.assign({}, pages)
         const rows2 = p[pg].slice()
         const r = rows2[row - pg * pageSize].slice()
@@ -129,43 +160,54 @@ Item {
         rows2[row - pg * pageSize] = r
         p[pg] = rows2
         pages = p
-        dirty = true
     }
     function addRow() {
-        let r = {}
-        try { r = JSON.parse(controller.tableAddRow(path)) } catch (e) {}
-        if (r.error) { error = r.error; return }
-        dirty = true
-        rows++
-        refresh()
-        // (To it, to fill in: the end, when it isn't sorted.)
-        Qt.callLater(() => { list.positionViewAtEnd(); if (sort.length === 0) beginEdit(total - 1, 0) })
+        const pth = path
+        Async.call(controller, k => controller.tableAddRow(k, pth), res => {
+            if (pth !== path) return
+            let r = {}
+            try { r = JSON.parse(res) } catch (e) {}
+            if (r.error) { error = r.error; return }
+            dirty = true
+            rows++
+            // (To it, to fill in, once the rows are in: the end, when it isn't sorted.)
+            afterFirstPage = () => { list.positionViewAtEnd(); if (sort.length === 0) beginEdit(total - 1, 0) }
+            refresh()
+        })
     }
     function deleteSelected() {
         const id = idOf(selRow)
         if (id === undefined) return
-        const err = controller.tableDeleteRows(path, JSON.stringify([id]))
-        if (err !== "") { error = err; return }
-        selRow = -1
-        dirty = true
-        refresh()
+        const pth = path
+        Async.call(controller, k => controller.tableDeleteRows(k, pth, JSON.stringify([id])), err => {
+            if (pth !== path) return
+            if (err !== "") { error = err; return }
+            if (idOf(selRow) === id) selRow = -1   // (unless another's been picked since)
+            dirty = true
+            refresh()
+        })
     }
     readonly property bool changingSql: /^\s*(update|insert|delete|alter|replace|create|drop)\b/i.test(queryField.text)
     function runSql(text) {
         if (/^\s*(update|insert|delete|alter|replace|create|drop)\b/i.test(text)) {
-            let r = {}
-            try { r = JSON.parse(controller.tableExec(path, text)) } catch (e) {}
-            if (r.error) { error = r.error; return }
-            error = ""
-            note = r.changed + " row" + (r.changed === 1 ? "" : "s") + " changed"
-            dirty = true
-            // (Columns added: shown too.)
-            const before = columns
-            poll()
-            for (const c of columns) if (before.indexOf(c) < 0 && order.indexOf(c) < 0) { const o = order.slice(); o.push(c); order = o }
-            query = ""
-            widths = ({})
-            refresh()
+            const pth = path
+            Async.call(controller, k => controller.tableExec(k, pth, text), res => {
+                if (pth !== path) return
+                let r = {}
+                try { r = JSON.parse(res) } catch (e) {}
+                if (r.error) { error = r.error; return }
+                error = ""
+                note = r.changed + " row" + (r.changed === 1 ? "" : "s") + " changed"
+                dirty = true
+                // (Columns added: shown too.)
+                const before = columns
+                poll(() => {
+                    for (const c of columns) if (before.indexOf(c) < 0 && order.indexOf(c) < 0) { const o = order.slice(); o.push(c); order = o }
+                    query = ""
+                    widths = ({})
+                    refresh()
+                })
+            })
             return
         }
         note = ""
@@ -174,10 +216,13 @@ Item {
     }
     function saveAs(p) { saveTo(p) }
     function saveTo(dest) {
-        const err = controller.tableSave(path, dest || "")
-        error = err
-        if (err === "" && !dest) dirty = false
-        if (err === "") note = dest ? "Saved as " + dest : "Saved"
+        const pth = path
+        Async.call(controller, k => controller.tableSave(k, pth, dest || ""), err => {
+            if (pth !== path) return
+            error = err
+            if (err === "" && !dest) dirty = false
+            if (err === "") note = dest ? "Saved as " + dest : "Saved"
+        })
     }
     function sortBy(c, add) {
         const at = sort.findIndex(s => s[0] === c)

@@ -143,17 +143,30 @@ FocusScope {
     readonly property string runsIn: shellKernel ? (shellName || "bash") : language
     property var queue: []              // cells waiting for the kernel to come up
 
-    function listKernels() {
-        let ks = []
-        if (view) ks.push({ name: "tessera-shell", display: "This pane's shell", language: "bash" })
-        try { ks = ks.concat(JSON.parse(controller.jupyterKernels(sshHost))) } catch (e) {}
-        // (Then every language Tessera can run code in without a kernel.)
-        let run = []
-        try { run = JSON.parse(controller.runnableLanguages()) } catch (e) {}
-        const more = run.filter(r => !ks.some(k => k.name !== "tessera-shell" && sameLang(k.language, r[0])))
-            .map(r => ({ name: "tessera-run:" + r[0], display: r[1] + " (each cell runs once)", language: r[0], oneShot: true }))
-            .sort((a, b) => a.display.toLowerCase() < b.display.toLowerCase() ? -1 : 1)
-        kernels = ks.concat(more)
+    // (Asked in the background; `done` runs once the list is in.)
+    property int kernelsSeq: 0
+    property int kernelsApplied: 0
+    function listKernels(done) {
+        const s = ++kernelsSeq, h = sshHost
+        const apply = (json) => {
+            // (An older answer than one shown, or another host's: not shown.)
+            if (s > kernelsApplied && h === sshHost) {
+                kernelsApplied = s
+                let ks = []
+                if (view) ks.push({ name: "tessera-shell", display: "This pane's shell", language: "bash" })
+                try { ks = ks.concat(JSON.parse(json)) } catch (e) {}
+                // (Then every language Tessera can run code in without a kernel.)
+                let run = []
+                try { run = JSON.parse(controller.runnableLanguages()) } catch (e) {}
+                const more = run.filter(r => !ks.some(k => k.name !== "tessera-shell" && sameLang(k.language, r[0])))
+                    .map(r => ({ name: "tessera-run:" + r[0], display: r[1] + " (each cell runs once)", language: r[0], oneShot: true }))
+                    .sort((a, b) => a.display.toLowerCase() < b.display.toLowerCase() ? -1 : 1)
+                kernels = ks.concat(more)
+            }
+            if (done) done()
+        }
+        if (!controller) { apply(""); return }
+        Async.call(controller, k => controller.jupyterKernels(k, h), apply)
     }
     function pickKernel(spec) {
         // The notebook's own kernel, else one for its language; a shell
@@ -431,7 +444,7 @@ FocusScope {
         if (path === "") controller.jupyterSync(key, shellPid, shellDir)
         Async.call(controller, k => controller.jupyterExecute(k, key, cid, cells.get(i).source), ok => {
             const j = indexOf(cid)
-            if (ok === true || j < 0) return
+            if (ok === "true" || j < 0) return
             cells.setProperty(j, "running", false)
             addOutput(j, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The kernel isn't reachable: restart it."] })
         })
@@ -456,7 +469,17 @@ FocusScope {
     }
     // ---- the kernels running, every notebook's (the bar's Kernels list) ----
     property var runningKernels: []
-    function refreshKernels() { if (controller) try { runningKernels = JSON.parse(controller.jupyterRunning()) } catch (e) { runningKernels = [] } }
+    property int runningSeq: 0
+    property int runningApplied: 0
+    function refreshKernels() {
+        if (!controller) return
+        const s = ++runningSeq
+        Async.call(controller, k => controller.jupyterRunning(k), r => {
+            if (s < runningApplied) return   // (a later answer is shown already)
+            runningApplied = s
+            try { runningKernels = JSON.parse(r) } catch (e) { runningKernels = [] }
+        })
+    }
     Timer { interval: kernelsPop.opened ? 1500 : 4000; running: nb.visible && nb.controller !== null; repeat: true; triggeredOnStart: true; onTriggered: nb.refreshKernels() }
     // (Test hook: TESSERA_TEST_NB_KERNELS=<ms>: the list opened after that long.)
     Timer { interval: nb.controller ? parseInt(nb.controller.testEnv("NB_KERNELS") || "0") : 0; running: interval > 0 && nb.visible; onTriggered: { nb.refreshKernels(); kernelsPop.open() } }
@@ -564,16 +587,45 @@ FocusScope {
     function exitTip(c) {
         const st = c.fromTerm ? c.status : (c.failed ? 1 : 0)
         if (!c.fromTerm) return c.failed ? "Failed (an error)" : "Done"
-        const m = controller ? controller.exitMeaning(c.source, st, sshHost) : ""
+        const m = exitMeaning(c.source, st)
         const ai = exitNotes[c.cid] || ""
         return "Exit " + st + (m !== "" ? ": " + m : ai === "…" ? ": asking the AI…" : ai !== "" ? ": " + ai + " (AI)" : "")
     }
+    // (The shell's or man page's meaning, asked in the background and kept
+    // by host, status and command: "" until it's in, then the tip shows it.)
+    property var exitMeanings: ({})
+    property var exitAsking: ({})       // (changed in place: no binding depends on it)
+    function exitMeaning(src, st, done) {
+        const k = sshHost + "\n" + st + "\n" + src
+        if (exitMeanings[k] !== undefined) { if (done) done(exitMeanings[k]); return exitMeanings[k] }
+        if (exitAsking[k]) { if (done) exitAsking[k].push(done); return "" }
+        exitAsking[k] = done ? [done] : []
+        const h = sshHost
+        // (Later, not inside the tip's binding.)
+        Qt.callLater(() => {
+            const answer = (r) => {
+                const m = Object.assign({}, exitMeanings); m[k] = r; exitMeanings = m
+                const w = exitAsking[k] || []
+                delete exitAsking[k]
+                for (const f of w) f(r)
+            }
+            if (!controller) { answer(""); return }
+            Async.call(controller, q => controller.exitMeaning(q, src, st, h), answer)
+        })
+        return ""
+    }
     function askExit(c, i) {
         if (!controller || !(c.tid > 0) || c.status === 0 || exitNotes[c.cid] !== undefined) return
-        if (controller.exitMeaning(c.source, c.status, sshHost) !== "" || !controller.aiReady("inline")) return
-        const n = Object.assign({}, exitNotes); n[c.cid] = "…"; exitNotes = n
-        const out = outputText(i).split("\n").slice(-30).join("\n")
-        controller.aiRun(exitKey + c.cid, "exit", JSON.stringify([{ role: "user", content: "Command: " + c.source + "\nExit status: " + c.status + "\nIts output (the end):\n" + out }]), JSON.stringify({ cwd: c.cwd, shell: shellName }))
+        const cid = c.cid, src = c.source, st = c.status, cwd = c.cwd
+        exitMeaning(src, st, m => {
+            if (m !== "" || !controller || !controller.aiReady("inline") || exitNotes[cid] !== undefined) return
+            // (The cell again by its id: it may have moved or gone.)
+            const j = indexOf(cid)
+            if (j < 0) return
+            const n = Object.assign({}, exitNotes); n[cid] = "…"; exitNotes = n
+            const out = outputText(j).split("\n").slice(-30).join("\n")
+            controller.aiRun(exitKey + cid, "exit", JSON.stringify([{ role: "user", content: "Command: " + src + "\nExit status: " + st + "\nIts output (the end):\n" + out }]), JSON.stringify({ cwd: cwd, shell: shellName }))
+        })
     }
     // (Test hook: TESSERA_TEST_EXIT_AI: the last cell's status asked about at
     // 12 s, its tip logged at 30 s.)
@@ -610,8 +662,9 @@ FocusScope {
     }
     function hasKernelFor(l) { if (kernels.length === 0) listKernels(); return l !== "" && langSpec(l) !== null }
     function setLang(l, patch) { const m = Object.assign({}, langKernels); m[l] = Object.assign({}, m[l] || {}, patch); langKernels = m }
-    function runLang(cid, l) {
-        if (kernels.length === 0) listKernels()
+    function runLang(cid, l, listed) {
+        // (No list yet: run once it's in.)
+        if (kernels.length === 0 && !listed) { listKernels(() => runLang(cid, l, true)); return }
         const e = langKernels[l]
         if (e && (e.state === "idle" || e.state === "busy")) { execLang(cid, l); return }
         setLang(l, { queue: ((e && e.queue) || []).concat([cid]) })
@@ -620,11 +673,16 @@ FocusScope {
         if (!spec) {
             setLang(l, { queue: [] })
             const i = indexOf(cid)
+            const none = () => {
+                const j = indexOf(cid)
+                if (j < 0) return
+                cells.setProperty(j, "running", false)
+                addOutput(j, { output_type: "error", ename: "No kernel", evalue: "No Jupyter kernel for " + l, traceback: ["No Jupyter kernel for " + l + " (installed or from Nix)."] })
+                setLang(l, { queue: [] })
+            }
             // (No kernel for it: run once, as a program, in the pane's shell.)
-            if (i >= 0 && runOnce(cid, l, cells.get(i).source)) return
-            cells.setProperty(i, "running", false)
-            addOutput(i, { output_type: "error", ename: "No kernel", evalue: "No Jupyter kernel for " + l, traceback: ["No Jupyter kernel for " + l + " (installed or from Nix)."] })
-            setLang(l, { queue: [] })
+            if (i >= 0) runOnce(cid, l, cells.get(i).source, none)
+            else none()
             return
         }
         setLang(l, { name: spec.name, display: spec.display, state: "starting", message: "" })
@@ -632,8 +690,8 @@ FocusScope {
     }
     // Start a language's kernel ahead of its first cell (a shell picked in
     // the editor), so the run doesn't wait for it to come up.
-    function warmLang(l) {
-        if (kernels.length === 0) listKernels()
+    function warmLang(l, listed) {
+        if (kernels.length === 0 && !listed) { listKernels(() => warmLang(l, true)); return }
         const e = langKernels[l]
         if (e && e.state !== "dead") return
         const spec = langSpec(l)
@@ -647,7 +705,7 @@ FocusScope {
         controller.jupyterSync(langKey(l), shellPid, shellDir)
         Async.call(controller, k => controller.jupyterExecute(k, langKey(l), cid, cells.get(i).source), ok => {
             const j = indexOf(cid)
-            if (ok === true || j < 0) return
+            if (ok === "true" || j < 0) return
             cells.setProperty(j, "running", false)
             addOutput(j, { output_type: "error", ename: "Not sent", evalue: "The kernel isn't reachable.", traceback: ["The " + l + " kernel isn't reachable: run it again to restart it."] })
             setLang(l, { state: "dead" })
@@ -684,19 +742,30 @@ FocusScope {
         follow()
     }
     // A cell as a program run once in the pane's shell (snippets.rs's runner
-    // for its language); false if there's none.
-    function runOnce(cid, l, code) {
-        const cmd = controller ? controller.snippetCommand(l, code, shellDir, shellName || "bash", sshHost) : ""
-        if (cmd === "" || !view) {
-            const i = indexOf(cid)
-            if (i >= 0) {
-                cells.setProperty(i, "running", false)
-                addOutput(i, { output_type: "error", ename: "Can't run", evalue: l, traceback: ["Tessera has no way to run " + l + " here."] })
-            }
-            return false
+    // for its language); `failed` runs if there's none. (The command is
+    // worked out in the background; runs go to the shell in the order asked.)
+    property var onceQueue: []          // (changed in place)
+    function runOnce(cid, l, code, failed) {
+        const e = { cid: cid, l: l, failed: failed, cmd: "", done: false }
+        onceQueue.push(e)
+        const answer = (cmd) => {
+            e.cmd = cmd; e.done = true
+            while (onceQueue.length > 0 && onceQueue[0].done) onceRun(onceQueue.shift())
         }
-        shellRun(cid, cmd)
-        return true
+        if (!controller) { answer(""); return }
+        Async.call(controller, k => controller.snippetCommand(k, l, code, shellDir, shellName || "bash", sshHost), answer)
+    }
+    function onceRun(e) {
+        const i = indexOf(e.cid)
+        if (i < 0) return   // (the cell's gone)
+        if (e.cmd === "" || !view) {
+            cells.setProperty(i, "running", false)
+            addOutput(i, { output_type: "error", ename: "Can't run", evalue: e.l, traceback: ["Tessera has no way to run " + e.l + " here."] })
+            if (e.failed) e.failed()
+            return
+        }
+        if (!cells.get(i).running) return   // (stopped meanwhile)
+        shellRun(e.cid, e.cmd)
     }
     // Code from the pane's editor, for a kernel that isn't the shell: a new
     // cell at the end, run.
@@ -804,7 +873,8 @@ FocusScope {
         target: nb.view
         function onCellsChanged(id, done) {
             // (0: the terminal's kept cells came back after a restart.)
-            if (id === 0 && nb.path === "" && !nb.storeFound) nb.loadStore()
+            // (The kept notebook first, then the terminal's cells.)
+            if (id === 0 && nb.path === "" && !nb.storeFound) { nb.loadStore(() => { nb.termRev++; nb.syncTerm() }); return }
             if (id === 0) nb.termRev++
             nb.syncTerm()
             if (done && id > 0) nb.classify(id)
@@ -971,8 +1041,13 @@ FocusScope {
         const ks = metadata.kernelspec
         pickKernel(path === "" && !kernelPicked && (!ks || ks.name === "bash") ? null : ks)
     }
+    // (Each step answers in the background; a later load() drops an
+    // earlier one's answers.)
+    property int loadSeq: 0
     function load() {
+        const s = ++loadSeq
         loaded = false
+        shadowed = false
         loadError = ""
         saveError = ""
         // (Kernels are kept, a pane's notebook's and a file's: reattach()
@@ -980,17 +1055,28 @@ FocusScope {
         if (path !== "") keyBase = fileKey(path)
         kernelState = ""
         shellWaiting = []
-        listKernels()
-        if (path === "") {
-            // The pane's own notebook: what was kept with its session, then the
-            // terminal's cells.
-            cells.clear(); linked = ({}); retired = []; kinds = ({}); fileViews = ({}); heights = ({}); metadata = ({})
-            fileStart = 0
-            pickKernel(null)
-            loadStore()
-            reattach()
-        } else {
-            const r = JSON.parse(controller.readTextFile(path))
+        listKernels(() => {
+            if (s !== loadSeq) return
+            if (path === "") loadOwn(s)
+            else loadFile(s)
+        })
+    }
+    function loadOwn(s) {
+        // The pane's own notebook: what was kept with its session, then the
+        // terminal's cells.
+        cells.clear(); linked = ({}); retired = []; kinds = ({}); fileViews = ({}); heights = ({}); metadata = ({})
+        fileStart = 0
+        pickKernel(null)
+        loadStore(() => {
+            if (s !== loadSeq) return
+            reattach(() => { if (s === loadSeq) finishLoad() })
+        })
+    }
+    function loadFile(s) {
+        const p = path, h = sshHost, kb = keyBase
+        Async.call(controller, k => controller.readTextFile(k, p), text => {
+            if (s !== loadSeq) return
+            const r = JSON.parse(text)
             cells.clear(); metadata = ({})
             if (r.error !== undefined) {
                 // A new notebook (nothing there yet), or one that can't be read.
@@ -1005,15 +1091,21 @@ FocusScope {
             // (Kept when the app quit with its kernels running: the cells as
             // they were then, their ids and outputs, so what the kernels
             // printed since lands in them. Unsaved changes, as they were.)
-            let shadow = null
-            try { shadow = JSON.parse(controller.notebookRead(sshHost, keyBase)) } catch (e) {}
-            if (shadow && shadow.text) {
-                try { fill(JSON.parse(shadow.text), true); shadowed = true } catch (e) {}
-            }
-            // (The terminal's cells from before it opened aren't the file's.)
-            const ts = view ? termCells() : []
-            fileStart = ts.length ? ts[ts.length - 1].id : 0
-        }
+            Async.call(controller, k => controller.notebookRead(k, h, kb), kept => {
+                if (s !== loadSeq) return
+                let shadow = null
+                try { shadow = JSON.parse(kept) } catch (e) {}
+                if (shadow && shadow.text) {
+                    try { fill(JSON.parse(shadow.text), true); shadowed = true } catch (e) {}
+                }
+                // (The terminal's cells from before it opened aren't the file's.)
+                const ts = view ? termCells() : []
+                fileStart = ts.length ? ts[ts.length - 1].id : 0
+                finishLoad()
+            })
+        })
+    }
+    function finishLoad() {
         dirty = shadowed
         shadowed = false
         current = 0
@@ -1028,12 +1120,33 @@ FocusScope {
     // ---- the pane's own notebook, kept with its session ----
     property bool storeFound: false
     function storePath() { return controller && storeKey !== "" ? controller.stateFolder() + "/notebooks/" + storeKey + ".ipynb" : "" }
-    function loadStore() {
-        if (!controller || storeKey === "") return
-        const r = JSON.parse(controller.notebookRead(sshHost, storeKey))
-        if (r.error !== undefined) return
-        try { fill(JSON.parse(r.text), true); storeFound = true } catch (e) {}
-        dirty = false
+    // (Read in the background, one read at a time: a call while one is out
+    // waits for it, and `done` runs once it's filled in.)
+    property bool storeLoading: false
+    property var storeWaiting: []
+    function loadStore(done) {
+        if (done) storeWaiting = storeWaiting.concat([done])
+        if (!controller || storeKey === "") {
+            if (storeLoading) return
+            const w = storeWaiting; storeWaiting = []
+            for (const f of w) f()
+            return
+        }
+        if (storeLoading) return
+        storeLoading = true
+        const h = sshHost, sk = storeKey
+        Async.call(controller, k => controller.notebookRead(k, h, sk), text => {
+            storeLoading = false
+            // (Another session's since: that one's read instead.)
+            if (h !== sshHost || sk !== storeKey) { loadStore(); return }
+            const w = storeWaiting; storeWaiting = []
+            const r = JSON.parse(text)
+            if (r.error === undefined) {
+                try { fill(JSON.parse(r.text), true); storeFound = true } catch (e) {}
+                dirty = false
+            }
+            for (const f of w) f()
+        })
     }
     // (The pane's shell started again (exit, restart): a new session, and the
     // notebook carries on in it, its cards as they were.)
@@ -1051,14 +1164,22 @@ FocusScope {
             touch()
             return
         }
-        if (loaded && path === "" && !storeFound) { loadStore(); reattach(); syncTerm() }
+        if (loaded && path === "" && !storeFound) loadStore(() => reattach(() => syncTerm()))
     }
     // The pane's notebook's kernels that ran on in tesserad (the window was
     // closed, or rebuilt): taken back, with what they printed meanwhile.
-    function reattach() {
-        if (!controller) return
+    function reattach(done) {
+        if (!controller) { if (done) done(); return }
+        const ak = key
+        Async.call(controller, q => controller.jupyterAttach(q, ak, storeKey), text => {
+            // (Another notebook's kernels by now: not these.)
+            if (ak === key) attached(text)
+            if (done) done()
+        })
+    }
+    function attached(text) {
         let r = null
-        try { r = JSON.parse(controller.jupyterAttach(key, storeKey)) } catch (e) { return }
+        try { r = JSON.parse(text) } catch (e) { return }
         const up = (s) => s === "busy" ? "busy" : s === "starting" ? "starting" : "idle"
         for (const k of (r && r.kernels) || []) {
             if (k.key === key) {
@@ -1094,7 +1215,8 @@ FocusScope {
         }
     }
     function keep() {
-        if (!controller || storeKey === "" || path !== "") return
+        // (Not while loading: the cells aren't all in.)
+        if (!controller || storeKey === "" || path !== "" || !loaded) return
         controller.notebookWrite(sshHost, storeKey, serialize(true))
         storeFound = true
         dirty = false
@@ -1181,18 +1303,21 @@ FocusScope {
         writeTo(path)
     }
     function writeTo(p) {
-        const err = controller.writeTextFile(p, serialize(false))
-        // (Saved: the copy kept for after a restart isn't needed.)
-        if (err === "" && p === path) controller.notebookWrite(sshHost, keyBase, "")
-        if (err !== "") { saveError = err; return false }
-        saveError = ""
-        dirty = false
-        if (p !== path) {
-            // (The pane's notebook is now this file's: the shell's cells so far are in it.)
-            written = p
-            pathPicked(p)
-        }
-        return true
+        const was = path, h = sshHost, kb = keyBase
+        Async.call(controller, k => controller.writeTextFile(k, p, serialize(false)), err => {
+            // (Saved: the copy kept for after a restart isn't needed.)
+            if (err === "" && p === was) controller.notebookWrite(h, kb, "")
+            // (Another notebook here since: nothing more of this one's.)
+            if (path !== was) return
+            if (err !== "") { saveError = err; return }
+            saveError = ""
+            dirty = false
+            if (p !== path) {
+                // (The pane's notebook is now this file's: the shell's cells so far are in it.)
+                written = p
+                pathPicked(p)
+            }
+        })
     }
     onPathChanged: {
         if (!controller) return
@@ -1340,7 +1465,7 @@ FocusScope {
     // (Test hook: TESSERA_TEST_NB_KERNEL=<name> picks that kernel at 9.5 s;
     // TESSERA_TEST_NB_CELL=<code> then runs a cell of it at 11 s.)
     Timer { interval: 9500; running: nb.controller !== null && nb.controller.testEnv("NB_KERNEL") !== ""
-            onTriggered: { nb.listKernels(); nb.changeKernel(nb.controller.testEnv("NB_KERNEL")); console.log("nb kernel test: " + nb.kernels.length + " in the list, picked " + nb.kernelName + " oneShot " + nb.oneShot) } }
+            onTriggered: nb.listKernels(() => { nb.changeKernel(nb.controller.testEnv("NB_KERNEL")); console.log("nb kernel test: " + nb.kernels.length + " in the list, picked " + nb.kernelName + " oneShot " + nb.oneShot) }) }
     Timer { interval: 11000; running: nb.controller !== null && nb.controller.testEnv("NB_CELL") !== ""; onTriggered: nb.submit(nb.controller.testEnv("NB_CELL").replace(/\\n/g, "\n")) }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
@@ -1836,7 +1961,10 @@ FocusScope {
                     onClicked: kindMenu.popup(kindChip, 0, kindChip.height + 2)
                 }
                 Chip { visible: cell.hasOutput; base: cell.color; label: "Copy"; tip: "Copy the output"; Layout.minimumWidth: implicitWidth
-                       onClicked: nb.copyText(nb.outputText(cell.index)) }
+                       onClicked: { const c = cells.get(cell.index)
+                                    // (A file card's text: read now, then copied.)
+                                    if (c && c.tid <= 0 && c.viewPath !== "") nb.fileText(c.viewPath, t => nb.copyText(t))
+                                    else nb.copyText(nb.outputText(cell.index)) } }
                 Chip { visible: cell.code && !cell.running && cell.source.trim() !== ""; base: cell.color; label: "↻"; tip: "Run it again"; Layout.minimumWidth: implicitWidth
                        onClicked: { nb.current = cell.index; nb.run(cell.index) } }
                 Chip {
@@ -2136,13 +2264,36 @@ FocusScope {
         }
     }
     TextEdit { id: clip; visible: false }
+    // A file card's text, read in the background and kept by path: what was
+    // read last until the new read is in (`done` gets the new one).
+    property var fileTexts: ({})
+    property var fileAsking: ({})       // (changed in place: no binding depends on it)
+    function fileText(p, done) {
+        if (fileAsking[p]) { if (done) fileAsking[p].push(done) }
+        else {
+            fileAsking[p] = done ? [done] : []
+            Qt.callLater(() => {
+                const answer = (text) => {
+                    let t = ""
+                    try { t = JSON.parse(text).text || "" } catch (e) {}
+                    const m = Object.assign({}, fileTexts); m[p] = t; fileTexts = m
+                    const w = fileAsking[p] || []
+                    delete fileAsking[p]
+                    for (const f of w) f(t)
+                }
+                if (!controller) { answer(""); return }
+                Async.call(controller, k => controller.readTextFile(k, p), answer)
+            })
+        }
+        return fileTexts[p] || ""
+    }
     function copyText(t) { clip.text = t; clip.selectAll(); clip.copy() }
     function outputText(i) {
         const c = cells.get(i)
         if (!c) return ""
         if (c.tid > 0) return view ? view.cellOutput(c.tid, "text") : ""
         // (A file card: its text, the first 3 MB at most of a big one.)
-        if (c.viewPath !== "") { try { return JSON.parse(controller.readTextFile(c.viewPath)).text || "" } catch (e) { return "" } }
+        if (c.viewPath !== "") return fileText(c.viewPath)
         let outs = []
         try { outs = JSON.parse(c.outputs) } catch (e) {}
         return outs.map(o => o.output_type === "stream" ? o.text
@@ -2401,6 +2552,24 @@ FocusScope {
     // Where Save as… starts for a card's file: its folder, or home for
     // another host's file (the dialog shows this computer's folders; the
     // copy is saved here).
+    // Another host's home folder, asked in the background and kept by host
+    // ("" until it's in; one not connected yet is asked again next time).
+    property var hostHomes: ({})
+    property var homeAsking: ({})       // (changed in place: no binding depends on it)
+    function homeOn(h) {
+        if (!homeAsking[h] && !hostHomes[h]) {
+            homeAsking[h] = true
+            Qt.callLater(() => {
+                if (!controller) { delete homeAsking[h]; return }
+                Async.call(controller, k => controller.hostHome(k, h), home => {
+                    delete homeAsking[h]
+                    if (home === "") return
+                    const m = Object.assign({}, hostHomes); m[h] = home; hostHomes = m
+                })
+            })
+        }
+        return hostHomes[h] || ""
+    }
     function saveFolder(p) { return p.startsWith("ssh://") ? "file://" + (controller ? controller.homeDir() : "") : "file://" + p.replace(/\/[^\/]*$/, "") }
     function onHost(p) { return sshHost === "" || p.startsWith("ssh://") ? p : "ssh://" + encodeURIComponent(sshHost) + p }
     function localPath(p) { let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x }
@@ -2422,7 +2591,7 @@ FocusScope {
             flagLong: !isCd && (args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test(words[0]))
             startDir: {
                 const base = nb.localPath(src.cwd) || nb.shellDir
-                const home = nb.controller ? (nb.sshHost !== "" ? nb.controller.hostHome(nb.sshHost) : nb.controller.homeDir()) : "~"
+                const home = nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
                 const a = args.find(x => !x.startsWith("-"))
                 // (cd: where it went. With no folder, home; "cd -" and z: wherever the shell is now.)
                 if (isCd && (!a || a === "-" || words[0] === "z" || words[0] === "zi")) return nb.onHost(a || words[0] !== "cd" ? nb.shellDir : home)

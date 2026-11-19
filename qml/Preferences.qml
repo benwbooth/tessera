@@ -682,11 +682,18 @@ Window {
                                 label: "Notebook kernel"
                                 hint: "What a notebook runs commands and cells in until you pick another in its own list. tessh by default; any Jupyter kernel or shell, or the pane's own shell. (Or notebook_kernel in settings.json: a kernel's name or a language.)"
                                 ChoiceBox {
+                                    id: defaultKernelBox
                                     implicitWidth: 230
                                     value: prefs.settings.notebook_kernel !== undefined ? prefs.settings.notebook_kernel : "tessh"
-                                    values: {
+                                    // (The kernels, asked in the background when the page is made.)
+                                    property var jupyterList: []
+                                    Component.onCompleted: Async.call(prefs.controller, k => prefs.controller.jupyterKernels(k, ""), r => {
                                         let ks = []
-                                        try { ks = JSON.parse(prefs.controller.jupyterKernels("")) } catch (e) {}
+                                        try { ks = JSON.parse(r) } catch (e) { return }
+                                        if (defaultKernelBox) defaultKernelBox.jupyterList = ks
+                                    })
+                                    values: {
+                                        const ks = jupyterList
                                         const v = [["tessera-shell", "This pane's shell"]].concat(ks.map(k => [k.name, k.display || k.name]))
                                         if (!v.some(x => x[0] === value)) v.push([value, value])
                                         return v

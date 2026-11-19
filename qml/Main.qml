@@ -43,7 +43,7 @@ ApplicationWindow {
         if (assistantOpen) Qt.callLater(assistant.focusInput)
         else if (activeView) activeView.forceActiveFocus()
     }
-    property var commandHistory: { try { return JSON.parse(controller.historyAll(5000)) } catch (e) { return [] } }
+    property var commandHistory: []    // (filled at startup)
     property real zoomBase: 11         // the profile's size when zooming started
     readonly property int zoomPercent: fontSize > 0 ? Math.round(100 * fontSize / zoomBase) : 100
     property var contextView: null
@@ -579,21 +579,29 @@ ApplicationWindow {
     // Ask before closing panes whose profile says so (always, or when a job
     // other than the shell runs).
     function confirmJobs(panes, doIt) {
-        const busy = []
+        const busy = [], asks = []
         let always = false
         for (const p of panes) {
             if (p.view.exited) continue
             const prof = profileFor(p.profileName)
             if (prof.confirm_close === "always") { always = true; continue }
             if (prof.confirm_close !== "jobs") continue
-            const job = controller.sessionJob(p.view.sessionId)
-            const ignored = prof.ignored_jobs.split(",").map(s => s.trim()).filter(s => s)
-            if (job !== "" && ignored.indexOf(job) < 0) busy.push(job)
+            asks.push({ id: p.view.sessionId, ignored: prof.ignored_jobs.split(",").map(s => s.trim()).filter(s => s) })
         }
-        if (busy.length > 0)
-            confirm("Close", "“" + busy.join("”, “") + "” " + (busy.length > 1 ? "are" : "is") + " still running. Close anyway?", doIt)
-        else if (always) confirm("Close", "Close this session?", doIt)
-        else doIt()
+        const decide = () => {
+            if (busy.length > 0)
+                confirm("Close", "“" + busy.join("”, “") + "” " + (busy.length > 1 ? "are" : "is") + " still running. Close anyway?", doIt)
+            else if (always) confirm("Close", "Close this session?", doIt)
+            else doIt()
+        }
+        if (asks.length === 0) { decide(); return }
+        // (Every pane's job asked at once; decided when the last answers.)
+        let left = asks.length
+        for (const a of asks)
+            Async.call(controller, k => controller.sessionJob(k, a.id), job => {
+                if (job !== "" && a.ignored.indexOf(job) < 0) busy.push(job)
+                if (--left === 0) decide()
+            })
     }
 
     function requestClosePane(p) {
@@ -624,14 +632,17 @@ ApplicationWindow {
     function screenshot(item) {
         if (!item) return
         const dir = controller.homeDir() + "/Pictures/Screenshots"
-        controller.fileAction("mkdirs", dir, "")
         const path = dir + "/Tessera " + fileStamp() + ".png"
-        item.grabToImage(r => {
-            if (!r.saveToFile(path)) { notice("Couldn't save the screenshot to " + dir, []); return }
-            if (activeView) activeView.copyImageFile(path)
-            notice("Screenshot saved and copied: " + path.replace(controller.homeDir(), "~"), [
-                { label: "Open", run: () => controller.fileAction("open", path, "") },
-                { label: "Show in folder", run: () => controller.fileAction("reveal", path, "") }])
+        // (Grabbed once the folder's there.)
+        Async.call(controller, k => controller.fileAction(k, "mkdirs", dir, ""), () => {
+            if (!item) return
+            item.grabToImage(r => {
+                if (!r.saveToFile(path)) { notice("Couldn't save the screenshot to " + dir, []); return }
+                if (activeView) activeView.copyImageFile(path)
+                notice("Screenshot saved and copied: " + path.replace(controller.homeDir(), "~"), [
+                    { label: "Open", run: () => Async.call(controller, k => controller.fileAction(k, "open", path, ""), null) },
+                    { label: "Show in folder", run: () => Async.call(controller, k => controller.fileAction(k, "reveal", path, ""), null) }])
+            })
         })
     }
     function toggleRecording(view) {
@@ -640,13 +651,17 @@ ApplicationWindow {
             const path = view.stopRecording()
             if (path === "") return
             notice("Recording saved: " + path.replace(controller.homeDir(), "~"), [
-                { label: "Make a GIF", run: () => { controller.fileAction("gif", path, ""); notice("Making the GIF (agg)… it opens when it's done.", []) } },
-                { label: "Show in folder", run: () => controller.fileAction("reveal", path, "") }])
+                { label: "Make a GIF", run: () => { Async.call(controller, k => controller.fileAction(k, "gif", path, ""), null); notice("Making the GIF (agg)… it opens when it's done.", []) } },
+                { label: "Show in folder", run: () => Async.call(controller, k => controller.fileAction(k, "reveal", path, ""), null) }])
         } else {
             const dir = controller.homeDir() + "/Videos/Tessera"
-            controller.fileAction("mkdirs", dir, "")
-            const path = view.startRecording(dir + "/Tessera " + fileStamp() + ".cast")
-            notice(path !== "" ? "Recording this pane (the red dot); Session › Stop Recording ends it." : "Couldn't start recording in " + dir, [])
+            const file = dir + "/Tessera " + fileStamp() + ".cast"
+            // (Started once the folder's there.)
+            Async.call(controller, k => controller.fileAction(k, "mkdirs", dir, ""), () => {
+                if (!view || view.recording) return
+                const path = view.startRecording(file)
+                notice(path !== "" ? "Recording this pane (the red dot); Session › Stop Recording ends it." : "Couldn't start recording in " + dir, [])
+            })
         }
     }
     // (Test hook: TESSERA_TEST_RECORD=<ms>: record the pane from 5 s for that
@@ -915,10 +930,18 @@ ApplicationWindow {
     }
     function newNotebook() {
         const dir = (activeView && activeView.pwd) || controller.homeDir()
-        let n = 1, path = dir + "/Untitled.ipynb"
-        const taken = (p) => JSON.parse(controller.readTextFile(p)).error === undefined || allPanes().some(x => x.docPath === p)
-        while (taken(path)) path = dir + "/Untitled-" + (++n) + ".ipynb"
-        openNotebook(path)
+        // (The first free name: each one read in the background, then the next.)
+        const tryName = (n) => {
+            const path = n === 1 ? dir + "/Untitled.ipynb" : dir + "/Untitled-" + n + ".ipynb"
+            if (allPanes().some(x => x.docPath === path)) { tryName(n + 1); return }
+            Async.call(controller, k => controller.readTextFile(k, path), r => {
+                let taken = false
+                try { taken = JSON.parse(r).error === undefined } catch (e) {}
+                if (taken) tryName(n + 1)
+                else openNotebook(path)
+            })
+        }
+        tryName(1)
     }
     function localPath(u) { return decodeURIComponent(String(u).replace(/^file:\/\//, "")) }
     FileDialog {
@@ -1522,19 +1545,30 @@ ApplicationWindow {
         interval: 1000
         running: true
         repeat: true
+        property var infoAsking: ({})    // (session ids asked, not yet answered)
         onTriggered: {
             // (Every pane: titles, and each editor's prompt and REPL detection.)
             for (const p of allPanes()) {
                 const v = p.view
                 if (!v) continue
-                let info = { job: "", cwd: "", shell: "" }
-                if (!v.exited && v.sessionId !== "") {
-                    try { info = JSON.parse(controller.sessionInfo(v.sessionId)) } catch (e) {}
+                const apply = (info) => {
+                    if (p.job !== info.job) p.job = info.job
+                    if (p.procCwd !== info.cwd) p.procCwd = info.cwd
+                    if (p.shellName !== info.shell) p.shellName = info.shell
+                    if (info.pid && p.shellPid !== info.pid) p.shellPid = info.pid
                 }
-                if (p.job !== info.job) p.job = info.job
-                if (p.procCwd !== info.cwd) p.procCwd = info.cwd
-                if (p.shellName !== info.shell) p.shellName = info.shell
-                if (info.pid && p.shellPid !== info.pid) p.shellPid = info.pid
+                if (v.exited || v.sessionId === "") { apply({ job: "", cwd: "", shell: "" }); continue }
+                // (One question in flight per pane; a stale answer, for a
+                // session the pane no longer shows, is dropped.)
+                const id = v.sessionId
+                if (infoAsking[id]) continue
+                infoAsking[id] = true
+                Async.call(controller, k => controller.sessionInfo(k, id), r => {
+                    delete infoAsking[id]
+                    let info = { job: "", cwd: "", shell: "" }
+                    try { info = JSON.parse(r) } catch (e) {}
+                    try { if (p && p.view && p.view.sessionId === id) apply(info) } catch (e) {}
+                })
             }
         }
     }
@@ -1558,14 +1592,16 @@ ApplicationWindow {
                 win.saveSnapshots()
                 const layout = win.serializeWindow(true)
                 const old = win.tabs.slice(), cur = win.currentTab
-                if (!controller.stopDaemon()) {
-                    sheet.ask({ title: "Couldn't restart it", message: "The background process didn't stop. Logging out and back in restarts it.", infoOnly: true, okText: "OK" })
-                    return
-                }
-                win.restoreArrangement(layout, {}, true)
-                for (const t of old) win.removeTab(t)
-                win.focusTab(Math.min(cur, win.tabs.length - 1))
-                win.saveLayoutNow()
+                Async.call(controller, k => controller.stopDaemon(k), stopped => {
+                    if (stopped !== "true") {
+                        sheet.ask({ title: "Couldn't restart it", message: "The background process didn't stop. Logging out and back in restarts it.", infoOnly: true, okText: "OK" })
+                        return
+                    }
+                    win.restoreArrangement(layout, {}, true)
+                    for (const t of old) win.removeTab(t)
+                    win.focusTab(Math.min(cur, win.tabs.length - 1))
+                    win.saveLayoutNow()
+                })
             }
         })
     }
@@ -1699,7 +1735,7 @@ ApplicationWindow {
             visible: contextLink.startsWith("file://") || contextLink.startsWith("ssh://")
             onTriggered: { const p = paneOf(contextView); let f = contextLink.startsWith("ssh://") ? contextLink : contextLink.replace(/^file:\/\/[^/]*/, ""); try { if (!f.startsWith("ssh://")) f = decodeURIComponent(f) } catch (e) {} if (p) p.viewFile(f) } }
         P.MenuItem { icon.name: "internet-services"; text: "Open “" + win.shortLabel(termMenu.contextPath) + "”"
-            visible: contextLink !== ""; onTriggered: { if (contextLink.startsWith("ssh://")) { const e = controller.fileAction("open", contextLink, ""); if (e !== "") notice(e, []) } else Qt.openUrlExternally(contextLink) } }
+            visible: contextLink !== ""; onTriggered: { if (contextLink.startsWith("ssh://")) { Async.call(controller, k => controller.fileAction(k, "open", contextLink, ""), e => { if (e !== "") notice(e, []) }) } else Qt.openUrlExternally(contextLink) } }
         P.MenuItem { icon.name: "edit-copy"; text: "Copy Link Address"; visible: contextLink !== ""
             onTriggered: { clipHelper.text = termMenu.contextPath; clipHelper.selectAll(); clipHelper.copy() } }
         P.MenuSeparator { visible: contextLink !== "" }
@@ -2240,19 +2276,23 @@ ApplicationWindow {
     // ---- startup -----------------------------------------------------------
 
     Component.onCompleted: {
-        let alive = {}
-        let restored = false
+        Async.call(controller, k => controller.historyAll(k, 5000), r => { try { win.commandHistory = JSON.parse(r) } catch (e) {} })
         const torn = controller.initialTab()
         if (torn !== "") {
+            let restored = false
             try {
                 const tl = JSON.parse(torn)
                 newTab({ layout: tl, alive: sessionIds(tl.root, {}), profile: tl.profile })
                 restored = tabs.length > 0
             } catch (e) {}
-        } else if (controller.restoreAllowed()) {
-            const ids = JSON.parse(controller.restorableSessions(""))
-            for (const id of ids) alive[id] = true
-            if (settings.restore_sessions) {
+            startupRest(restored)
+        } else if (controller.restoreAllowed() && settings.restore_sessions) {
+            // (The daemon's live shells, asked in the background; the rest of
+            // startup waits for them.)
+            Async.call(controller, k => controller.restorableSessions(k, ""), r => {
+                let alive = {}, ids = []
+                try { ids = JSON.parse(r) } catch (e) {}
+                for (const id of ids) alive[id] = true
                 let layout = null
                 try { layout = JSON.parse(controller.lastLayout()) } catch (e) {}
                 if (layout && layout.tabs) {
@@ -2273,9 +2313,12 @@ ApplicationWindow {
                 }
                 // Shells the saved layout didn't know about get tabs of their own.
                 for (const id of ids) if (alive[id]) newTab({ attachId: id })
-                restored = tabs.length > 0
-            }
-        }
+                startupRest(tabs.length > 0)
+            })
+        } else startupRest(false)
+    }
+    // (The rest of startup, once the tabs are back.)
+    function startupRest(restored) {
         if (!restored) {
             newTab({})
             sizeTimer.start()

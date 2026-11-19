@@ -66,16 +66,18 @@ Item {
             if (err !== "") { pane.hostError = err; return }
             // (Reattaching: when the shell there has ended, a new one starts
             // under the saved screen.)
-            if (term.attachId !== "") {
+            const up = () => { pane.hostUp = true; notebook.listKernels() }
+            if (term.attachId === "") { up(); return }
+            Async.call(pane.controller, k => pane.controller.restorableSessions(k, h), r => {
+                if (!term || h !== pane.sshHost || pane.hostUp) return
                 let ids = []
-                try { ids = JSON.parse(pane.controller.restorableSessions(h)) } catch (e) {}
+                try { ids = JSON.parse(r) } catch (e) {}
                 if (ids.indexOf(term.attachId) < 0) {
                     term.attachId = ""
                     if (pane.restoreSnapshot !== "") term.preloadFile = pane.restoreSnapshot
                 }
-            }
-            pane.hostUp = true
-            notebook.listKernels()
+                up()
+            })
         }
     }
     property alias cwd: term.cwd
@@ -145,19 +147,27 @@ Item {
     function switchShell(sh) {
         if (!controller || term.exited || !(term.atPrompt || idleShell)) return
         const cur = pane.shellName !== "" ? pane.shellName : "bash"
-        let st = []
-        try { st = JSON.parse(controller.shellChain(pane.shellPid, pane.sshHost)) } catch (e) {}
-        if (st.length === 0) st = [{ name: cur, pid: pane.shellPid }]
-        const below = st.slice(0, -1).map(x => x.name).lastIndexOf(sh)
-        if (below >= 0) {
-            controller.shellHandBack(st[st.length - 1].pid, st[below].pid, pane.sshHost)
-            for (let k = st.length - 1; k > below; --k) { shellCmdPending++; term.sendText(" exit\r") }
-            return
-        }
-        const line = controller.shellLaunchLine(sh, pane.shellPid, pane.sshHost)
-        if (line === "") return
-        shellCmdPending++
-        term.sendText(line + "\r")
+        const pid = pane.shellPid, host = pane.sshHost
+        // (The chain, then the hand back or the launch line: one ordered
+        // worker, so they stay in order. A pane whose shell changed since
+        // drops the answer.)
+        Async.call(controller, k => controller.shellChain(k, pid, host), r => {
+            if (!term || term.exited || pane.shellPid !== pid || pane.sshHost !== host) return
+            let st = []
+            try { st = JSON.parse(r) } catch (e) {}
+            if (st.length === 0) st = [{ name: cur, pid: pid }]
+            const below = st.slice(0, -1).map(x => x.name).lastIndexOf(sh)
+            if (below >= 0) {
+                controller.shellHandBack(st[st.length - 1].pid, st[below].pid, host)
+                for (let k = st.length - 1; k > below; --k) { shellCmdPending++; term.sendText(" exit\r") }
+                return
+            }
+            Async.call(controller, k => controller.shellLaunchLine(k, sh, pid, host), line => {
+                if (!term || term.exited || pane.shellPid !== pid || line === "") return
+                shellCmdPending++
+                term.sendText(line + "\r")
+            })
+        })
     }
     Timer {
         id: idleCheck
@@ -169,17 +179,25 @@ Item {
         // didn't see start (it was reattached) is shown, not hidden behind
         // the notebook.)
         property bool sawJob: false
+        property bool asking: false     // (a tick's question still in flight: the next is skipped)
         onTriggered: {
-            if (!pane.controller) return
-            const job = pane.controller.sessionJob(term.sessionId)
-            if (job !== "") {
-                tries = 0
-                if (!pane.runningLong) { pane.runningLong = true; sawJob = true }
-            } else if (++tries >= 2) {
-                if (sawJob) { pane.runningLong = false; sawJob = false }
-                pane.idleShell = true
-                tries = 0
-            }
+            if (!pane.controller || asking) return
+            asking = true
+            const id = term.sessionId
+            Async.call(pane.controller, k => pane.controller.sessionJob(k, id), job => {
+                if (!term) return
+                idleCheck.asking = false
+                // (Stale: the session changed, or the prompt came back meanwhile.)
+                if (term.sessionId !== id || !idleCheck.running) return
+                if (job !== "") {
+                    idleCheck.tries = 0
+                    if (!pane.runningLong) { pane.runningLong = true; idleCheck.sawJob = true }
+                } else if (++idleCheck.tries >= 2) {
+                    if (idleCheck.sawJob) { pane.runningLong = false; idleCheck.sawJob = false }
+                    pane.idleShell = true
+                    idleCheck.tries = 0
+                }
+            })
         }
     }
     Connections { target: term; function onPromptChanged() { pane.idleShell = false; idleCheck.tries = 0; if (idleCheck.sawJob) { pane.runningLong = false; idleCheck.sawJob = false } } }      // the window's text zoom, shown with the size
@@ -301,23 +319,34 @@ Item {
             // (Another shell picked: its kernel, kept alive in the notebook,
             // else run by it once.)
             const S = compose.runShellUsed
+            const cwd = compose.cwd, shell = compose.shellName, host = pane.sshHost
+            // (The snippet's command comes back in the background; none: on
+            // to the next way of running it.)
+            const plain = () => {
+                if (t.indexOf("\n") < 0) term.sendText(t + "\r")
+                else { term.pasteText(t); term.sendText("\r") }
+                term.scrollToBottom()
+            }
+            const snippet = (lang, otherwise) => Async.call(controller, k => controller.snippetCommand(k, lang, t, cwd, shell, host), cmd => {
+                if (!term) return
+                if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
+                otherwise()
+            })
+            const asLang = () => {
+                if (pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
+                    pane.viewMode = "notebook"
+                    notebook.submitLang(t, L)
+                    return
+                }
+                if (pane.replLang === "" && L !== "" && L !== "bash" && controller) { snippet(L, plain); return }
+                plain()
+            }
             if (S !== "" && controller) {
                 if (notebook.hasKernelFor(S)) { pane.viewMode = "notebook"; notebook.submitLang(t, S); return }
-                const cmd = controller.snippetCommand(S, t, compose.cwd, compose.shellName, pane.sshHost)
-                if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
-            }
-            if (pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
-                pane.viewMode = "notebook"
-                notebook.submitLang(t, L)
+                snippet(S, asLang)
                 return
             }
-            if (pane.replLang === "" && L !== "" && L !== "bash" && controller) {
-                const cmd = controller.snippetCommand(L, t, compose.cwd, compose.shellName, pane.sshHost)
-                if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
-            }
-            if (t.indexOf("\n") < 0) term.sendText(t + "\r")
-            else { term.pasteText(t); term.sendText("\r") }
-            term.scrollToBottom()
+            asLang()
         }
         // (The terminal keeps the keys until the editor is clicked again.)
         onHandBack: { pane.preferEditor = false; term.forceActiveFocus() }

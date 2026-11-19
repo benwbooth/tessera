@@ -39,20 +39,30 @@ Rectangle {
     property string text: ""
     property string problem: ""
     onPathChanged: load()
+    property int loadSeq: 0
+    property bool reading: false        // (asked, not in yet: not "(empty)")
     function load() {
         text = ""
         problem = ""
+        const n = ++loadSeq
+        reading = false
         // (Text and code: the viewer streams it itself; only the formatted
-        // kinds are read whole.)
+        // kinds are read whole, in the background.)
         if (!controller || path === "" || isImage || richKind === "") return
-        let r = {}
-        try { r = JSON.parse(controller.readTextFile(path)) } catch (e) {}
-        if (r.error) { problem = r.error; return }
-        const t = r.text || ""
-        // (A NUL byte, or much that isn't text: binary.)
-        if (t.indexOf("\u0000") >= 0 || (t.match(/�/g) || []).length > t.length / 20) { problem = "It's a binary file."; return }
-        text = t.length > 3000000 ? t.substring(0, 3000000) : t
-        if (t.length > 3000000) problem = "Only the first 3 MB are shown."
+        const p = path
+        reading = true
+        Async.call(controller, k => controller.readTextFile(k, p), res => {
+            if (n !== loadSeq || p !== path) return   // (another file since)
+            reading = false
+            let r = {}
+            try { r = JSON.parse(res) } catch (e) {}
+            if (r.error) { problem = r.error; return }
+            const t = r.text || ""
+            // (A NUL byte, or much that isn't text: binary.)
+            if (t.indexOf("\u0000") >= 0 || (t.match(/�/g) || []).length > t.length / 20) { problem = "It's a binary file."; return }
+            text = t.length > 3000000 ? t.substring(0, 3000000) : t
+            if (t.length > 3000000) problem = "Only the first 3 MB are shown."
+        })
     }
 
     // ---- the bar: what it is, and what to do with it ----------------------
@@ -76,7 +86,7 @@ Rectangle {
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
             spacing: 6
-            Chip { base: Theme.panel; label: "Open with its app"; onClicked: pv.controller.fileAction("open", pv.path, "") }
+            Chip { base: Theme.panel; label: "Open with its app"; onClicked: Async.call(pv.controller, k => pv.controller.fileAction(k, "open", pv.path, "")) }
             Chip { base: Theme.panel; label: "Insert the path"; onClicked: pv.insertRequested((/^[A-Za-z0-9_\/.~+:@-]+$/.test(pv.path) ? pv.path : "'" + pv.path.replace(/'/g, "'\\''") + "'") + " ") }
             Chip { base: Theme.panel; label: "×"; tip: "Close (Esc)"; onClicked: pv.closed() }
         }
@@ -145,10 +155,10 @@ Rectangle {
 
     // ---- nothing to show ------------------------------------------------------
     Column {
-        visible: !pv.isImage && pv.richKind !== "" && pv.text === "" && pv.path !== ""
+        visible: !pv.isImage && pv.richKind !== "" && pv.text === "" && pv.path !== "" && !pv.reading
         anchors.centerIn: parent
         spacing: 10
         Text { anchors.horizontalCenter: parent.horizontalCenter; text: pv.problem !== "" ? pv.problem : "(empty)"; color: Theme.textDim; font.pixelSize: 13 }
-        Chip { anchors.horizontalCenter: parent.horizontalCenter; visible: pv.problem !== ""; base: Theme.bg; label: "Open with its app"; onClicked: pv.controller.fileAction("open", pv.path, "") }
+        Chip { anchors.horizontalCenter: parent.horizontalCenter; visible: pv.problem !== ""; base: Theme.bg; label: "Open with its app"; onClicked: Async.call(pv.controller, k => pv.controller.fileAction(k, "open", pv.path, "")) }
     }
 }

@@ -279,6 +279,7 @@ private:
     tessera::Session* m_session = nullptr;
     tessera::Frame* m_frame = nullptr;
     QSocketNotifier* m_notifier = nullptr;
+    QSocketNotifier* m_wakeNotifier = nullptr;
 
     QString m_host;
     bool m_ready = true;

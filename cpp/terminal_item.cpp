@@ -159,6 +159,7 @@ TerminalItem::TerminalItem(QQuickItem* parent)
 TerminalItem::~TerminalItem()
 {
     delete m_notifier;
+    delete m_wakeNotifier;
     if (m_session)
         rust::Box<tessera::Session>::from_raw(m_session); // drops: detaches
     delete m_frame;
@@ -421,6 +422,10 @@ void TerminalItem::open()
     emit sessionIdChanged();
     m_notifier = new QSocketNotifier(m_session->fd(), QSocketNotifier::Read, this);
     connect(m_notifier, &QSocketNotifier::activated, this, &TerminalItem::onReadable);
+    // (Kept cells, read in the background, come through this one.)
+    auto* wake = new QSocketNotifier(m_session->wake_fd(), QSocketNotifier::Read, this);
+    connect(wake, &QSocketNotifier::activated, this, &TerminalItem::onReadable);
+    m_wakeNotifier = wake;
     m_forceFull = true;
     handleEvents();
     polish();
@@ -1449,6 +1454,8 @@ void TerminalItem::restart()
 {
     delete m_notifier;
     m_notifier = nullptr;
+    delete m_wakeNotifier;
+    m_wakeNotifier = nullptr;
     if (m_session) {
         m_session->kill();
         rust::Box<tessera::Session>::from_raw(m_session);

@@ -139,6 +139,8 @@ pub mod ffi {
 
         /// The fd to watch for readability (its tesserad socket).
         fn fd(self: &Session) -> i64;
+        /// Watched too: kept cells read in the background have come.
+        fn wake_fd(self: &Session) -> i64;
         fn id(self: &Session) -> String;
         /// Read whatever is available. Returns SIG_* bits.
         fn on_readable(self: &mut Session) -> u32;
@@ -288,21 +290,21 @@ pub mod ffi {
         /// The program running in a daemon session's foreground, if it isn't
         /// the shell itself ("" when the shell is idle).
         #[qinvokable]
-        fn session_job(self: &Controller, id: &QString) -> QString;
+        fn session_job(self: &Controller, reply: &QString, id: &QString);
         /// {job, cwd, shell} of a session, as JSON.
         #[qinvokable]
-        fn session_info(self: &Controller, id: &QString) -> QString;
+        fn session_info(self: &Controller, reply: &QString, id: &QString);
         #[qinvokable]
         fn home_dir(self: &Controller) -> QString;
         /// A folder's entries for the notebook's file view: JSON
         /// [{name, path, dir, link, exec, hidden, size, mtime}] (folders first).
         #[qinvokable]
-        fn list_dir(self: &Controller, path: &QString, all: bool) -> QString;
+        fn list_dir(self: &Controller, reply: &QString, path: &QString, all: bool);
         /// A file browser's action on a path (src/files.rs): "open", "reveal",
         /// "trash", "rename" (arg: new name), "mkdir"/"touch" (arg: name),
         /// "duplicate", "copy"/"move" (arg: to folder). "" or the error.
         #[qinvokable]
-        fn file_action(self: &Controller, op: &QString, path: &QString, arg: &QString) -> QString;
+        fn file_action(self: &Controller, reply: &QString, op: &QString, path: &QString, arg: &QString);
         /// Open a window holding this tab (JSON layout with session ids): a
         /// tab torn off by dragging it out of the tab bar.
         #[qinvokable]
@@ -340,7 +342,7 @@ pub mod ffi {
         fn runnable_languages(self: &Controller) -> QString;
         /// The shell command that runs code in a language ("" if it can't).
         #[qinvokable]
-        fn snippet_command(self: &Controller, lang: &QString, code: &QString, cwd: &QString, shell: &QString, host: &QString) -> QString;
+        fn snippet_command(self: &Controller, reply: &QString, lang: &QString, code: &QString, cwd: &QString, shell: &QString, host: &QString);
         /// Download Helix's grammars (~250 languages) for the editor;
         /// progress in help_status. (Used after the next start.)
         #[qinvokable]
@@ -357,18 +359,15 @@ pub mod ffi {
         fn language_ready(self: Pin<&mut Controller>, name: QString, error: QString);
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
-        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString, pid: i32, host: &QString) -> QString;
+        fn complete(self: &Controller, reply: &QString, text: &QString, cursor: i32, cwd: &QString, aliases: &QString, pid: i32, host: &QString);
         /// Download fish's completion files (more commands and subcommands
         /// get help text); progress in help_status.
         #[qinvokable]
         fn download_command_help(self: Pin<&mut Controller>);
         #[qinvokable]
         fn command_help_count(self: &Controller) -> i32;
-        /// The prompt bar's facts about a folder (git, user, host), JSON.
-        #[qinvokable]
-        fn prompt_info(self: &Controller, cwd: &QString, pid: i32, host: &QString) -> QString;
-        /// The same in the background (a slow git status mustn't hold up a
-        /// tab switch): prompt_info_ready(key, json).
+        /// The prompt bar's facts about a folder (git, user, host), JSON, in
+        /// the background: prompt_info_ready(key, json).
         #[qinvokable]
         fn request_prompt_info(self: Pin<&mut Controller>, key: &QString, cwd: &QString, pid: i32, host: &QString);
         #[qsignal]
@@ -377,7 +376,7 @@ pub mod ffi {
         fn has_starship(self: &Controller) -> bool;
         /// Whether Starship is on `host` (the pane's prompt is drawn there).
         #[qinvokable]
-        fn has_starship_on(self: &Controller, host: &QString) -> bool;
+        fn has_starship_on(self: &Controller, reply: &QString, host: &QString);
         /// Ask Starship for the prompt (in the background); the answer comes
         /// as starship_ready(key, json) (see prompt::starship).
         #[qinvokable]
@@ -396,7 +395,7 @@ pub mod ffi {
         #[qinvokable]
         fn prompt_format_modules(self: &Controller) -> QString;
         #[qinvokable]
-        fn prompt_choices(self: &Controller, widget: &QString, cwd: &QString, pid: i32, host: &QString) -> QString;
+        fn prompt_choices(self: &Controller, reply: &QString, widget: &QString, cwd: &QString, pid: i32, host: &QString);
         /// Draw Starship modules one by one, in the background:
         /// prompt_modules_ready(key, {name: runs}).
         #[qinvokable]
@@ -436,14 +435,14 @@ pub mod ffi {
         /// The assistant's saved conversations (src/chats.rs): newest first,
         /// [{id, title, updated, count}].
         #[qinvokable]
-        fn chats_list(self: &Controller) -> QString;
+        fn chats_list(self: &Controller, reply: &QString);
         /// Conversations with every word of `query`, with a snippet:
         /// [{id, title, updated, count, snippet}].
         #[qinvokable]
-        fn chats_search(self: &Controller, query: &QString) -> QString;
+        fn chats_search(self: &Controller, reply: &QString, query: &QString);
         /// One conversation's messages (JSON array; "[]" if there's none).
         #[qinvokable]
-        fn chat_load(self: &Controller, id: &QString) -> QString;
+        fn chat_load(self: &Controller, reply: &QString, id: &QString);
         /// Keep a conversation (an empty one is removed).
         #[qinvokable]
         fn chat_save(self: &Controller, id: &QString, messages_json: &QString);
@@ -464,7 +463,7 @@ pub mod ffi {
         #[qinvokable]
         fn lsp_ask(self: Pin<&mut Controller>, key: &QString, lang: &QString, cwd: &QString, text: &QString, what: &QString, cursor: i32, host: &QString);
         #[qinvokable]
-        fn lsp_available(self: &Controller, lang: &QString, host: &QString) -> QString;
+        fn lsp_available(self: &Controller, reply: &QString, lang: &QString, host: &QString);
         #[qsignal]
         fn lsp_ready(self: Pin<&mut Controller>, key: QString, what: QString, json: QString);
         /// Whether a task has a model set up (and its provider a key, if it needs one).
@@ -483,14 +482,14 @@ pub mod ffi {
         // ---- Jupyter notebooks (src/jupyter.rs) ----
         /// The kernels there are: [{name, display, language}].
         #[qinvokable]
-        fn jupyter_kernels(self: &Controller, host: &QString) -> QString;
+        fn jupyter_kernels(self: &Controller, reply: &QString, host: &QString);
         /// Another host's kernel list came (jupyter_kernels gave what it had,
         /// and asked there in the background).
         #[qsignal]
         fn kernels_ready(self: Pin<&mut Controller>, host: QString);
         /// The kernels running now (every notebook's), JSON (jupyter::running).
         #[qinvokable]
-        fn jupyter_running(self: &Controller) -> QString;
+        fn jupyter_running(self: &Controller, reply: &QString);
         /// Start kernel `spec` for notebook `key` (one per key); it reports
         /// with jupyter_event(key, json).
         #[qinvokable]
@@ -499,7 +498,7 @@ pub mod ffi {
         /// the window was closed): {kernels: [running]}; what they said
         /// meanwhile comes as jupyter_event.
         #[qinvokable]
-        fn jupyter_attach(self: Pin<&mut Controller>, key: &QString, session: &QString) -> QString;
+        fn jupyter_attach(self: Pin<&mut Controller>, reply: &QString, key: &QString, session: &QString);
         /// A pane's notebook, kept by its host's tesserad with the session.
         #[qinvokable]
         fn notebook_read(self: &Controller, reply: &QString, host: &QString, session: &QString);
@@ -514,7 +513,7 @@ pub mod ffi {
         fn files_uploaded(self: Pin<&mut Controller>, key: QString, paths: QString, error: QString);
         /// `host`'s home folder (its tesserad's HOME), for paths there.
         #[qinvokable]
-        fn host_home(self: &Controller, host: &QString) -> QString;
+        fn host_home(self: &Controller, reply: &QString, host: &QString);
         /// The user said to install tesserad on `host` (it had none): the next
         /// connect_host does.
         #[qinvokable]
@@ -538,15 +537,15 @@ pub mod ffi {
         /// The line that starts a shell in the pane's shell (with Tessera's
         /// integration), and handing a nested shell's changes back down.
         #[qinvokable]
-        fn shell_launch_line(self: &Controller, shell: &QString, parent: i32, host: &QString) -> QString;
+        fn shell_launch_line(self: &Controller, reply: &QString, shell: &QString, parent: i32, host: &QString);
         #[qinvokable]
         fn shell_hand_back(self: &Controller, child: i32, parent: i32, host: &QString);
         /// The shells the one in front (pid) was started in: [{name, pid}].
         #[qinvokable]
-        fn shell_chain(self: &Controller, pid: i32, host: &QString) -> QString;
+        fn shell_chain(self: &Controller, reply: &QString, pid: i32, host: &QString);
         /// What an exit status means for a command (complete::exit_meaning).
         #[qinvokable]
-        fn exit_meaning(self: &Controller, command: &QString, status: i32, host: &QString) -> QString;
+        fn exit_meaning(self: &Controller, reply: &QString, command: &QString, status: i32, host: &QString);
         /// Answer a kernel's input request (jupyter_event {"type": "input"}).
         #[qinvokable]
         fn jupyter_input(self: &Controller, key: &QString, value: &QString);
@@ -562,42 +561,42 @@ pub mod ffi {
         fn jupyter_event(self: Pin<&mut Controller>, key: QString, json: QString);
         /// A text file: {"text": ...} or {"error": ...}.
         #[qinvokable]
-        fn read_text_file(self: &Controller, path: &QString) -> QString;
+        fn read_text_file(self: &Controller, reply: &QString, path: &QString);
         /// A big file read a part at a time: its lines counted in the
         /// background ({"lines", "done", "size"}), and a range of them.
         #[qinvokable]
-        fn file_line_index(self: &Controller, path: &QString) -> QString;
+        fn file_line_index(self: &Controller, reply: &QString, path: &QString);
         #[qinvokable]
-        fn file_lines(self: &Controller, path: &QString, start: i32, count: i32) -> QString;
+        fn file_lines(self: &Controller, reply: &QString, path: &QString, start: i32, count: i32);
         /// A CSV/TSV file as a table (tables.rs): read in the background
         /// ({"columns", "numeric", "rows", "done"}), a page of it by a spec,
         /// and let go.
         /// A file whole, to edit ({"text", "crlf", "error"}), and saved back.
         #[qinvokable]
-        fn file_read_for_edit(self: &Controller, path: &QString) -> QString;
+        fn file_read_for_edit(self: &Controller, reply: &QString, path: &QString);
         #[qinvokable]
-        fn file_save_edited(self: &Controller, path: &QString, text: &QString, crlf: bool) -> QString;
+        fn file_save_edited(self: &Controller, reply: &QString, path: &QString, text: &QString, crlf: bool);
         #[qinvokable]
-        fn table_open(self: &Controller, path: &QString) -> QString;
+        fn table_open(self: &Controller, reply: &QString, path: &QString);
         #[qinvokable]
-        fn table_query(self: &Controller, path: &QString, spec: &QString) -> QString;
+        fn table_query(self: &Controller, reply: &QString, path: &QString, spec: &QString);
         #[qinvokable]
         fn table_close(self: &Controller, path: &QString);
         /// Editing it: a cell, a row added or rows deleted, SQL that changes
         /// it, and saved back (dest "": the file itself).
         #[qinvokable]
-        fn table_edit_cell(self: &Controller, path: &QString, row: i64, column: &QString, value: &QString) -> QString;
+        fn table_edit_cell(self: &Controller, reply: &QString, path: &QString, row: i64, column: &QString, value: &QString);
         #[qinvokable]
-        fn table_add_row(self: &Controller, path: &QString) -> QString;
+        fn table_add_row(self: &Controller, reply: &QString, path: &QString);
         #[qinvokable]
-        fn table_delete_rows(self: &Controller, path: &QString, rows: &QString) -> QString;
+        fn table_delete_rows(self: &Controller, reply: &QString, path: &QString, rows: &QString);
         #[qinvokable]
-        fn table_exec(self: &Controller, path: &QString, sql: &QString) -> QString;
+        fn table_exec(self: &Controller, reply: &QString, path: &QString, sql: &QString);
         #[qinvokable]
-        fn table_save(self: &Controller, path: &QString, dest: &QString) -> QString;
+        fn table_save(self: &Controller, reply: &QString, path: &QString, dest: &QString);
         /// Write a text file (atomically); "" or what went wrong.
         #[qinvokable]
-        fn write_text_file(self: &Controller, path: &QString, text: &QString) -> QString;
+        fn write_text_file(self: &Controller, reply: &QString, path: &QString, text: &QString);
         /// Text with ANSI colors as HTML (colors as var(--vt-palette-N)).
         #[qinvokable]
         fn ansi_html(self: &Controller, text: &QString) -> QString;
@@ -619,19 +618,19 @@ pub mod ffi {
         fn ai_autodetect(self: Pin<&mut Controller>);
         /// Command history (Tessera's merged with the shells'), newest last, JSON array.
         #[qinvokable]
-        fn history_all(self: &Controller, limit: i32) -> QString;
+        fn history_all(self: &Controller, reply: &QString, limit: i32);
         #[qinvokable]
         fn history_add(self: &Controller, cmd: &QString, cwd: &QString);
         /// History matches for the dropdown (completion JSON).
         #[qinvokable]
-        fn history_search(self: &Controller, query: &QString) -> QString;
+        fn history_search(self: &Controller, reply: &QString, query: &QString);
         /// How the running daemon compared with this build at startup:
         /// "none", "current", "upgraded", "outdated", "newer".
         #[qinvokable]
         fn daemon_state(self: &Controller) -> QString;
         /// End an outdated daemon (and its shells). False if it couldn't be.
         #[qinvokable]
-        fn stop_daemon(self: &Controller) -> bool;
+        fn stop_daemon(self: &Controller, reply: &QString);
         /// Windows: open an elevated window (the UAC prompt first).
         #[qinvokable]
         fn new_admin_window(self: &Controller);
@@ -680,7 +679,7 @@ pub mod ffi {
 
         /// JSON list of detached daemon session ids to restore at startup.
         #[qinvokable]
-        fn restorable_sessions(self: &Controller, host: &QString) -> QString;
+        fn restorable_sessions(self: &Controller, reply: &QString, host: &QString);
 
         /// Where to save a screenshot and quit (--screenshot), or empty.
         #[qinvokable]
@@ -727,13 +726,20 @@ impl ffi::Controller {
     /// Run `f` in the background (`ordered`: after the calls queued before
     /// it) and send what it returns back as async_reply(key, ...).
     fn answer(&self, key: &ffi::QString, ordered: bool, f: impl FnOnce() -> String + Send + 'static) {
+        self.answer_on(key, if ordered { Some("kernel") } else { None }, f)
+    }
+    /// The same on a lane of its own (None: a thread of its own).
+    fn answer_on(&self, key: &ffi::QString, lane: Option<&'static str>, f: impl FnOnce() -> String + Send + 'static) {
         let key = key.to_string();
         let qt = self.qt_thread();
         let job = move || {
             let r = f();
             let _ = qt.queue(move |c| c.async_reply(qs(&key), qs(&r)));
         };
-        if ordered { crate::background::in_order(job) } else { crate::background::spawn(job) }
+        match lane {
+            Some(l) => crate::background::in_order_on(l, job),
+            None => crate::background::spawn(job),
+        }
     }
 }
 
@@ -821,72 +827,24 @@ impl ffi::Controller {
         std::fs::write(p, text.to_string()).is_ok()
     }
 
-    fn session_job(&self, id: &ffi::QString) -> ffi::QString {
-        qs(&crate::client::session_job(&id.to_string()).unwrap_or_default())
+    fn session_job(&self, reply: &ffi::QString, id: &ffi::QString) {
+        let id = id.to_string();
+        self.answer_on(reply, None, move || crate::client::session_job(&id).unwrap_or_default())
     }
 
-    fn session_info(&self, id: &ffi::QString) -> ffi::QString {
-        let info = crate::client::proc_info(&id.to_string()).unwrap_or_default();
-        qs(&serde_json::to_string(&info).unwrap_or_default())
+    fn session_info(&self, reply: &ffi::QString, id: &ffi::QString) {
+        let id = id.to_string();
+        self.answer_on(reply, None, move || serde_json::to_string(&crate::client::proc_info(&id).unwrap_or_default()).unwrap_or_default())
     }
 
-    fn list_dir(&self, path: &ffi::QString, all: bool) -> ffi::QString {
-        on_host(path, "list", serde_json::json!({"all": all}), |p| crate::files::list(p, all))
+    fn list_dir(&self, reply: &ffi::QString, path: &ffi::QString, all: bool) {
+        let path = path.to_string();
+        self.answer_on(reply, None, move || on_host(&path, "list", serde_json::json!({"all": all}), |p| crate::files::list(p, all)))
     }
 
-    fn file_action(&self, op: &ffi::QString, path: &ffi::QString, arg: &ffi::QString) -> ffi::QString {
-        let (op, arg) = (op.to_string(), arg.to_string());
-        // (Another host's file, for this desktop: opened or made a GIF of as
-        // a copy fetched here; revealed in the file manager over sftp:// when
-        // the host is a plain name, else the copy. The rest happen there.)
-        let (host, p) = host_path(&path.to_string());
-        if !host.is_empty() && matches!(op.as_str(), "open" | "gif" | "reveal") {
-            if op == "reveal" && !host.contains(char::is_whitespace) {
-                let uri = format!("sftp://{host}{p}");
-                return qs(&crate::files::action("reveal_uri", &uri, ""));
-            }
-            return qs(&match crate::remote::fetch(&host, &p) {
-                Ok(local) => crate::files::action(&op, &local.to_string_lossy(), &arg),
-                Err(e) => e,
-            });
-        }
-        // (Copied or moved between this computer and a host, or two hosts:
-        // through scp; a move then removes the original.)
-        if matches!(op.as_str(), "copy" | "move") {
-            let (dhost, dpath) = host_path(&arg);
-            if dhost != host {
-                let r: Result<(), String> = (|| {
-                    if host.is_empty() {
-                        crate::remote::upload(&dhost, std::path::Path::new(&p), &dpath)?;
-                    } else if dhost.is_empty() {
-                        crate::remote::download(&host, &p, std::path::Path::new(&dpath))?;
-                    } else {
-                        let tmp = std::env::temp_dir().join(format!("tessera-copy-{}", std::process::id()));
-                        let _ = std::fs::create_dir_all(&tmp);
-                        let here = crate::remote::download(&host, &p, &tmp)?;
-                        let r = crate::remote::upload(&dhost, &here, &dpath);
-                        let _ = std::fs::remove_dir_all(&tmp);
-                        r?;
-                    }
-                    if op == "move" {
-                        let e = if host.is_empty() {
-                            crate::files::action("trash", &p, "")
-                        } else {
-                            let r = crate::client::rpc_within(&host, "files", serde_json::json!({"op": "action", "action": "trash", "path": p, "arg": ""}), std::time::Duration::from_secs(10))?;
-                            r.as_str().unwrap_or("").to_string()
-                        };
-                        if !e.is_empty() {
-                            return Err(e);
-                        }
-                    }
-                    Ok(())
-                })();
-                return qs(&r.err().unwrap_or_default());
-            }
-        }
-        // (A folder on the same host, as a path there.)
-        let arg = if !host.is_empty() && arg.starts_with("ssh://") { host_path(&arg).1 } else { arg };
-        on_host(path, "action", serde_json::json!({"action": op, "arg": arg}), |p| crate::files::action(&op, p, &arg))
+    fn file_action(&self, reply: &ffi::QString, op: &ffi::QString, path: &ffi::QString, arg: &ffi::QString) {
+        let (op, path, arg) = (op.to_string(), path.to_string(), arg.to_string());
+        self.answer_on(reply, Some("files"), move || file_action_now(op, &path, arg))
     }
 
     fn home_dir(&self) -> ffi::QString {
@@ -917,7 +875,7 @@ impl ffi::Controller {
         qs(&crate::syntax::analyze(&lang.to_string(), &text.to_string()))
     }
 
-    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString, pid: i32, host: &ffi::QString) -> ffi::QString {
+    fn complete(&self, reply: &ffi::QString, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString, pid: i32, host: &ffi::QString) {
         let aliases: serde_json::Value = serde_json::from_str(&aliases.to_string()).unwrap_or_default();
         let cwd = cwd.to_string();
         // An OSC 7 URL (file://host/path) or a plain path.
@@ -928,10 +886,11 @@ impl ffi::Controller {
         // (Where the pane's shell is: its commands, files, Nix and help. Not
         // answered in time over SSH: "pending", and the editor asks again.)
         let params = serde_json::json!({"text": text.to_string(), "cursor": cursor.max(0), "cwd": cwd, "aliases": aliases, "pid": pid.max(0)});
-        match crate::client::rpc_within(&host.to_string(), "complete", params, std::time::Duration::from_millis(400)) {
-            Ok(v) => qs(&v.to_string()),
-            Err(_) => qs(r#"{"start":0,"end":0,"items":[],"pending":true}"#),
-        }
+        let host = host.to_string();
+        self.answer_on(reply, None, move || match crate::client::rpc_within(&host, "complete", params, std::time::Duration::from_millis(400)) {
+            Ok(v) => v.to_string(),
+            Err(_) => r#"{"start":0,"end":0,"items":[],"pending":true}"#.to_string(),
+        })
     }
 
     fn download_command_help(mut self: Pin<&mut Self>) {
@@ -955,63 +914,65 @@ impl ffi::Controller {
         qs(&std::env::var("TESSERA_DAEMON_STATE").unwrap_or_default())
     }
 
-    fn stop_daemon(&self) -> bool {
-        crate::client::stop_daemon()
+    fn stop_daemon(&self, reply: &ffi::QString) {
+        self.answer_on(reply, None, move || crate::client::stop_daemon().to_string())
     }
 
-    fn history_all(&self, limit: i32) -> ffi::QString {
-        qs(&crate::history::all_json(limit.max(1) as usize))
+    fn history_all(&self, reply: &ffi::QString, limit: i32) {
+        self.answer_on(reply, None, move || crate::history::all_json(limit.max(1) as usize))
     }
 
     fn history_add(&self, cmd: &ffi::QString, cwd: &ffi::QString) {
-        let cwd = cwd.to_string();
+        let (cmd, cwd) = (cmd.to_string(), cwd.to_string());
         let cwd = match cwd.strip_prefix("file://") {
             Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
             None => cwd,
         };
-        crate::history::add(&cmd.to_string(), &cwd);
+        crate::background::in_order_on("history", move || crate::history::add(&cmd, &cwd));
     }
 
-    fn jupyter_running(&self) -> ffi::QString {
-        // (Jupyter's kernels and Tessera's shell kernels: this computer's
-        // tesserad's, then each connected host's, "host//key" with its
-        // host. A host's list is what it said last, asked again in the
-        // background: this runs on the window's thread, every few seconds.)
-        let mut all: Vec<serde_json::Value> = crate::client::rpc("", "kernel.running", serde_json::json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-        static REMOTE: std::sync::Mutex<Option<std::collections::HashMap<String, Vec<serde_json::Value>>>> = std::sync::Mutex::new(None);
-        static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        let hosts = crate::remote::connected_hosts();
-        if !ASKING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            let hosts = hosts.clone();
-            std::thread::spawn(move || {
-                let mut got = std::collections::HashMap::new();
-                for h in hosts {
-                    let list = crate::client::rpc_within(&h, "kernel.running", serde_json::json!({}), std::time::Duration::from_secs(5)).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
-                    got.insert(h, list);
-                }
-                *REMOTE.lock().unwrap() = Some(got);
-                ASKING.store(false, std::sync::atomic::Ordering::SeqCst);
-            });
-        }
-        if let Some(m) = REMOTE.lock().unwrap().as_ref() {
-            for h in &hosts {
-                for k in m.get(h).into_iter().flatten() {
-                    let mut k = k.clone();
-                    if let Some(key) = k["key"].as_str().map(String::from) {
-                        k["key"] = serde_json::Value::String(format!("{h}//{key}"));
+    fn jupyter_running(&self, reply: &ffi::QString) {
+        self.answer(reply, false, move || {
+            // (Jupyter's kernels and Tessera's shell kernels: this computer's
+            // tesserad's, then each connected host's, "host//key" with its
+            // host. A host's list is what it said last, asked again in the
+            // background: this is asked every few seconds.)
+            let mut all: Vec<serde_json::Value> = crate::client::rpc("", "kernel.running", serde_json::json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+            static REMOTE: std::sync::Mutex<Option<std::collections::HashMap<String, Vec<serde_json::Value>>>> = std::sync::Mutex::new(None);
+            static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            let hosts = crate::remote::connected_hosts();
+            if !ASKING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                let hosts = hosts.clone();
+                std::thread::spawn(move || {
+                    let mut got = std::collections::HashMap::new();
+                    for h in hosts {
+                        let list = crate::client::rpc_within(&h, "kernel.running", serde_json::json!({}), std::time::Duration::from_secs(5)).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+                        got.insert(h, list);
                     }
-                    k["host"] = serde_json::Value::String(h.clone());
-                    all.push(k);
+                    *REMOTE.lock().unwrap() = Some(got);
+                    ASKING.store(false, std::sync::atomic::Ordering::SeqCst);
+                });
+            }
+            if let Some(m) = REMOTE.lock().unwrap().as_ref() {
+                for h in &hosts {
+                    for k in m.get(h).into_iter().flatten() {
+                        let mut k = k.clone();
+                        if let Some(key) = k["key"].as_str().map(String::from) {
+                            k["key"] = serde_json::Value::String(format!("{h}//{key}"));
+                        }
+                        k["host"] = serde_json::Value::String(h.clone());
+                        all.push(k);
+                    }
                 }
             }
-        }
-        qs(&serde_json::Value::Array(all).to_string())
+            serde_json::Value::Array(all).to_string()
+        })
     }
 
-    fn jupyter_kernels(&self, host: &ffi::QString) -> ffi::QString {
+    fn jupyter_kernels(&self, reply: &ffi::QString, host: &ffi::QString) {
         let host = host.to_string();
         if host.is_empty() {
-            return qs(&crate::client::rpc("", "kernel.specs", serde_json::json!({})).unwrap_or_else(|_| serde_json::json!([])).to_string());
+            return self.answer(reply, false, || crate::client::rpc("", "kernel.specs", serde_json::json!({})).unwrap_or_else(|_| serde_json::json!([])).to_string());
         }
         // (Another host's: looking for its kernels can take a while there,
         // so never on this thread. What it said last, and asked again.)
@@ -1039,7 +1000,8 @@ impl ffi::Controller {
                 }
             });
         }
-        qs(&have)
+        drop(c);
+        self.answer(reply, false, move || have)
     }
 
     fn jupyter_start(self: Pin<&mut Self>, key: &ffi::QString, spec: &ffi::QString, cwd: &ffi::QString, pid: i32, session: &ffi::QString) {
@@ -1051,9 +1013,10 @@ impl ffi::Controller {
         });
     }
 
-    fn jupyter_attach(self: Pin<&mut Self>, key: &ffi::QString, session: &ffi::QString) -> ffi::QString {
+    fn jupyter_attach(self: Pin<&mut Self>, reply: &ffi::QString, key: &ffi::QString, session: &ffi::QString) {
         ensure_kernel_events(&self);
-        qs(&crate::client::attach_kernels(&key.to_string(), &session.to_string()).to_string())
+        let (key, session) = (key.to_string(), session.to_string());
+        self.answer(reply, true, move || crate::client::attach_kernels(&key, &session).to_string())
     }
 
     // (In order: a read sees the writes queued before it.)
@@ -1091,10 +1054,10 @@ impl ffi::Controller {
         });
     }
 
-    fn host_home(&self, host: &ffi::QString) -> ffi::QString {
-        // (Asked once a host: the prompt bar wants it often. "" until it's
-        // connected: no ~ for now.)
-        qs(&crate::client::host_home(&host.to_string()))
+    fn host_home(&self, reply: &ffi::QString, host: &ffi::QString) {
+        // (Asked once a host; "" until it's connected: no ~ for now.)
+        let host = host.to_string();
+        self.answer_on(reply, None, move || crate::client::host_home(&host))
     }
 
     fn allow_tesserad_install(&self, host: &ffi::QString) {
@@ -1128,19 +1091,28 @@ impl ffi::Controller {
         crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.sync", serde_json::json!({"key": k, "pid": pid.max(0), "cwd": cwd})); });
     }
 
-    fn exit_meaning(&self, command: &ffi::QString, status: i32, host: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc_within(&host.to_string(), "complete.exit_meaning", serde_json::json!({"command": command.to_string(), "status": status}), std::time::Duration::from_secs(3));
-        qs(r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or(""))
+    fn exit_meaning(&self, reply: &ffi::QString, command: &ffi::QString, status: i32, host: &ffi::QString) {
+        let (command, host) = (command.to_string(), host.to_string());
+        self.answer_on(reply, None, move || {
+            let r = crate::client::rpc_within(&host, "complete.exit_meaning", serde_json::json!({"command": command, "status": status}), std::time::Duration::from_secs(3));
+            r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("").to_string()
+        })
     }
 
-    fn shell_launch_line(&self, shell: &ffi::QString, parent: i32, host: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc(&host.to_string(), "shell.launch_line", serde_json::json!({"shell": shell.to_string(), "parent": parent.max(0)}));
-        qs(r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or(""))
+    fn shell_launch_line(&self, reply: &ffi::QString, shell: &ffi::QString, parent: i32, host: &ffi::QString) {
+        let (shell, host) = (shell.to_string(), host.to_string());
+        self.answer_on(reply, Some("kernel"), move || {
+            let r = crate::client::rpc(&host, "shell.launch_line", serde_json::json!({"shell": shell, "parent": parent.max(0)}));
+            r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("").to_string()
+        })
     }
 
-    fn shell_chain(&self, pid: i32, host: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc(&host.to_string(), "shell.chain", serde_json::json!({"pid": pid.max(0)}));
-        qs(r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("[]"))
+    fn shell_chain(&self, reply: &ffi::QString, pid: i32, host: &ffi::QString) {
+        let host = host.to_string();
+        self.answer_on(reply, Some("kernel"), move || {
+            let r = crate::client::rpc(&host, "shell.chain", serde_json::json!({"pid": pid.max(0)}));
+            r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("[]").to_string()
+        })
     }
 
     fn shell_hand_back(&self, child: i32, parent: i32, host: &ffi::QString) {
@@ -1195,73 +1167,88 @@ impl ffi::Controller {
         });
     }
 
-    fn file_read_for_edit(&self, path: &ffi::QString) -> ffi::QString {
-        on_host(path, "read_for_edit", serde_json::json!({}), |p| crate::files::read_for_edit(p))
+    fn file_read_for_edit(&self, reply: &ffi::QString, path: &ffi::QString) {
+        let path = path.to_string();
+        self.answer_on(reply, None, move || on_host(&path, "read_for_edit", serde_json::json!({}), |p| crate::files::read_for_edit(p)))
     }
 
-    fn file_save_edited(&self, path: &ffi::QString, text: &ffi::QString, crlf: bool) -> ffi::QString {
+    fn file_save_edited(&self, reply: &ffi::QString, path: &ffi::QString, text: &ffi::QString, crlf: bool) {
+        let path = path.to_string();
         let text = text.to_string();
-        on_host(path, "save_edited", serde_json::json!({"text": text, "crlf": crlf}), |p| crate::files::save_edited(p, &text, crlf))
+        self.answer_on(reply, Some("files"), move || on_host(&path, "save_edited", serde_json::json!({"text": text, "crlf": crlf}), |p| crate::files::save_edited(p, &text, crlf)))
     }
 
-    fn table_open(&self, path: &ffi::QString) -> ffi::QString {
-        on_host(path, "table_open", serde_json::json!({}), |p| crate::tables::open(p))
+    fn table_open(&self, reply: &ffi::QString, path: &ffi::QString) {
+        let path = path.to_string();
+        self.answer_on(reply, Some("files"), move || on_host(&path, "table_open", serde_json::json!({}), |p| crate::tables::open(p)))
     }
 
-    fn table_query(&self, path: &ffi::QString, spec: &ffi::QString) -> ffi::QString {
+    fn table_query(&self, reply: &ffi::QString, path: &ffi::QString, spec: &ffi::QString) {
+        let path = path.to_string();
         let spec = spec.to_string();
-        on_host(path, "table_query", serde_json::json!({"spec": spec}), |p| crate::tables::query(p, &spec))
+        self.answer_on(reply, Some("files"), move || on_host(&path, "table_query", serde_json::json!({"spec": spec}), |p| crate::tables::query(p, &spec)))
     }
 
-    fn table_edit_cell(&self, path: &ffi::QString, row: i64, column: &ffi::QString, value: &ffi::QString) -> ffi::QString {
+    fn table_edit_cell(&self, reply: &ffi::QString, path: &ffi::QString, row: i64, column: &ffi::QString, value: &ffi::QString) {
+        let path = path.to_string();
         let (column, value) = (column.to_string(), value.to_string());
-        on_host(path, "table_edit_cell", serde_json::json!({"row": row, "column": column, "value": value}), |p| crate::tables::edit_cell(p, row, &column, &value))
+        self.answer_on(reply, Some("files"), move || on_host(&path, "table_edit_cell", serde_json::json!({"row": row, "column": column, "value": value}), |p| crate::tables::edit_cell(p, row, &column, &value)))
     }
 
-    fn table_add_row(&self, path: &ffi::QString) -> ffi::QString {
-        on_host(path, "table_add_row", serde_json::json!({}), |p| crate::tables::add_row(p))
+    fn table_add_row(&self, reply: &ffi::QString, path: &ffi::QString) {
+        let path = path.to_string();
+        self.answer_on(reply, Some("files"), move || on_host(&path, "table_add_row", serde_json::json!({}), |p| crate::tables::add_row(p)))
     }
 
-    fn table_delete_rows(&self, path: &ffi::QString, rows: &ffi::QString) -> ffi::QString {
+    fn table_delete_rows(&self, reply: &ffi::QString, path: &ffi::QString, rows: &ffi::QString) {
+        let path = path.to_string();
         let rows = rows.to_string();
-        on_host(path, "table_delete_rows", serde_json::json!({"rows": rows}), |p| crate::tables::delete_rows(p, &rows))
+        self.answer_on(reply, Some("files"), move || on_host(&path, "table_delete_rows", serde_json::json!({"rows": rows}), |p| crate::tables::delete_rows(p, &rows)))
     }
 
-    fn table_exec(&self, path: &ffi::QString, sql: &ffi::QString) -> ffi::QString {
+    fn table_exec(&self, reply: &ffi::QString, path: &ffi::QString, sql: &ffi::QString) {
+        let path = path.to_string();
         let sql = sql.to_string();
-        on_host(path, "table_exec", serde_json::json!({"sql": sql}), |p| crate::tables::exec(p, &sql))
+        self.answer_on(reply, Some("files"), move || on_host(&path, "table_exec", serde_json::json!({"sql": sql}), |p| crate::tables::exec(p, &sql)))
     }
 
-    fn table_save(&self, path: &ffi::QString, dest: &ffi::QString) -> ffi::QString {
+    fn table_save(&self, reply: &ffi::QString, path: &ffi::QString, dest: &ffi::QString) {
+        let path = path.to_string();
         // (Saved where the table is: a destination on its host.)
-        let d = host_path(&dest.to_string()).1;
-        let d = if dest.to_string().is_empty() { String::new() } else { d };
-        on_host(path, "table_save", serde_json::json!({"dest": d}), |p| crate::tables::save(p, &d))
+        let d = if dest.to_string().is_empty() { String::new() } else { host_path(&dest.to_string()).1 };
+        self.answer_on(reply, Some("files"), move || on_host(&path, "table_save", serde_json::json!({"dest": d}), |p| crate::tables::save(p, &d)))
     }
 
     fn table_close(&self, path: &ffi::QString) {
-        let _ = on_host(path, "table_close", serde_json::json!({}), |p| {
-            crate::tables::close(p);
-            String::new()
+        let path = path.to_string();
+        crate::background::in_order_on("files", move || {
+            let _ = on_host(&path, "table_close", serde_json::json!({}), |p| {
+                crate::tables::close(p);
+                String::new()
+            });
         });
     }
 
-    fn file_line_index(&self, path: &ffi::QString) -> ffi::QString {
-        on_host(path, "line_index", serde_json::json!({}), |p| crate::files::line_index(p))
+    fn file_line_index(&self, reply: &ffi::QString, path: &ffi::QString) {
+        let path = path.to_string();
+        self.answer_on(reply, None, move || on_host(&path, "line_index", serde_json::json!({}), |p| crate::files::line_index(p)))
     }
 
-    fn file_lines(&self, path: &ffi::QString, start: i32, count: i32) -> ffi::QString {
+    fn file_lines(&self, reply: &ffi::QString, path: &ffi::QString, start: i32, count: i32) {
+        let path = path.to_string();
         let (start, count) = (start.max(0) as usize, count.max(0) as usize);
-        on_host(path, "read_lines", serde_json::json!({"start": start, "count": count}), |p| crate::files::read_lines(p, start, count))
+        self.answer_on(reply, None, move || on_host(&path, "read_lines", serde_json::json!({"start": start, "count": count}), |p| crate::files::read_lines(p, start, count)))
     }
 
-    fn read_text_file(&self, path: &ffi::QString) -> ffi::QString {
-        on_host(path, "read_text", serde_json::json!({}), |p| crate::files::read_text(p))
+    fn read_text_file(&self, reply: &ffi::QString, path: &ffi::QString) {
+        let path = path.to_string();
+        self.answer_on(reply, None, move || on_host(&path, "read_text", serde_json::json!({}), |p| crate::files::read_text(p)))
     }
 
-    fn write_text_file(&self, path: &ffi::QString, text: &ffi::QString) -> ffi::QString {
+    fn write_text_file(&self, reply: &ffi::QString, path: &ffi::QString, text: &ffi::QString) {
+        let path = path.to_string();
         let text = text.to_string();
-        on_host(path, "write_text", serde_json::json!({"text": text}), |p| crate::files::write_text(p, &text))
+        self.answer_on(reply, Some("files"), move || on_host(&path, "write_text", serde_json::json!({"text": text}), |p| crate::files::write_text(p, &text)))
     }
 
     fn ansi_html(&self, text: &ffi::QString) -> ffi::QString {
@@ -1276,14 +1263,11 @@ impl ffi::Controller {
         qs(&crate::cells::tessh_manual_html())
     }
 
-    fn history_search(&self, query: &ffi::QString) -> ffi::QString {
-        qs(&crate::history::search(&query.to_string()))
+    fn history_search(&self, reply: &ffi::QString, query: &ffi::QString) {
+        let query = query.to_string();
+        self.answer_on(reply, None, move || crate::history::search(&query))
     }
 
-    fn prompt_info(&self, cwd: &ffi::QString, pid: i32, host: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc_within(&host.to_string(), "prompt.info", serde_json::json!({"cwd": local_path(cwd), "pid": pid.max(0)}), std::time::Duration::from_millis(400));
-        qs(&r.map(|v| v.to_string()).unwrap_or_else(|_| "{}".into()))
-    }
 
     fn request_prompt_info(self: Pin<&mut Self>, key: &ffi::QString, cwd: &ffi::QString, pid: i32, host: &ffi::QString) {
         let (key, cwd, host) = (key.to_string(), local_path(cwd), host.to_string());
@@ -1372,9 +1356,12 @@ impl ffi::Controller {
         });
     }
 
-    fn lsp_available(&self, lang: &ffi::QString, host: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc_within(&host.to_string(), "lsp.available", serde_json::json!({"lang": lang.to_string()}), std::time::Duration::from_secs(2));
-        qs(r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or(""))
+    fn lsp_available(&self, reply: &ffi::QString, lang: &ffi::QString, host: &ffi::QString) {
+        let (lang, host) = (lang.to_string(), host.to_string());
+        self.answer_on(reply, None, move || {
+            let r = crate::client::rpc_within(&host, "lsp.available", serde_json::json!({"lang": lang}), std::time::Duration::from_secs(2));
+            r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("").to_string()
+        })
     }
 
     fn test_key(&self, key: i32, mods: i32, text: &ffi::QString, scan: i32) {
@@ -1395,17 +1382,18 @@ impl ffi::Controller {
         }
     }
 
-    fn chats_list(&self) -> ffi::QString {
-        qs(&serde_json::to_string(&crate::chats::list()).unwrap_or_default())
+    fn chats_list(&self, reply: &ffi::QString) {
+        self.answer_on(reply, None, move || serde_json::to_string(&crate::chats::list()).unwrap_or_default())
     }
 
-    fn chats_search(&self, query: &ffi::QString) -> ffi::QString {
-        qs(&serde_json::to_string(&crate::chats::search(&query.to_string())).unwrap_or_default())
+    fn chats_search(&self, reply: &ffi::QString, query: &ffi::QString) {
+        let query = query.to_string();
+        self.answer_on(reply, None, move || serde_json::to_string(&crate::chats::search(&query)).unwrap_or_default())
     }
 
-    fn chat_load(&self, id: &ffi::QString) -> ffi::QString {
-        let msgs = crate::chats::load(&id.to_string()).and_then(|v| v.get("messages").cloned()).unwrap_or_else(|| serde_json::json!([]));
-        qs(&msgs.to_string())
+    fn chat_load(&self, reply: &ffi::QString, id: &ffi::QString) {
+        let id = id.to_string();
+        self.answer_on(reply, None, move || crate::chats::load(&id).and_then(|v| v.get("messages").cloned()).unwrap_or_else(|| serde_json::json!([])).to_string())
     }
 
     fn chat_save(&self, id: &ffi::QString, messages_json: &ffi::QString) {
@@ -1531,24 +1519,26 @@ impl ffi::Controller {
         crate::prompt::has_starship()
     }
 
-    fn has_starship_on(&self, host: &ffi::QString) -> bool {
+    fn has_starship_on(&self, reply: &ffi::QString, host: &ffi::QString) {
         let host = host.to_string();
-        if host.is_empty() {
-            return crate::prompt::has_starship();
-        }
-        // (Asked once a host: it's in every prompt's binding.)
-        static KNOWN: std::sync::Mutex<Option<std::collections::HashMap<String, bool>>> = std::sync::Mutex::new(None);
-        if let Some(v) = KNOWN.lock().unwrap().as_ref().and_then(|m| m.get(&host)) {
-            return *v;
-        }
-        match crate::client::rpc_within(&host, "prompt.has_starship", serde_json::json!({}), std::time::Duration::from_secs(2)) {
-            Ok(v) => {
-                let has = v.as_bool().unwrap_or(false);
-                KNOWN.lock().unwrap().get_or_insert_with(Default::default).insert(host, has);
-                has
+        self.answer_on(reply, None, move || {
+            if host.is_empty() {
+                return crate::prompt::has_starship().to_string();
             }
-            Err(_) => false,
-        }
+            // (Asked once a host.)
+            static KNOWN: std::sync::Mutex<Option<std::collections::HashMap<String, bool>>> = std::sync::Mutex::new(None);
+            if let Some(v) = KNOWN.lock().unwrap().as_ref().and_then(|m| m.get(&host)) {
+                return v.to_string();
+            }
+            match crate::client::rpc_within(&host, "prompt.has_starship", serde_json::json!({}), std::time::Duration::from_secs(2)) {
+                Ok(v) => {
+                    let has = v.as_bool().unwrap_or(false);
+                    KNOWN.lock().unwrap().get_or_insert_with(Default::default).insert(host, has);
+                    has.to_string()
+                }
+                Err(_) => "false".into(),
+            }
+        })
     }
 
     fn request_starship(self: Pin<&mut Self>, key: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, width: i32, pid: i32, host: &ffi::QString) {
@@ -1569,9 +1559,12 @@ impl ffi::Controller {
         qs(&serde_json::to_string(&crate::prompt_widgets::format_modules()).unwrap_or_default())
     }
 
-    fn prompt_choices(&self, widget: &ffi::QString, cwd: &ffi::QString, pid: i32, host: &ffi::QString) -> ffi::QString {
-        let r = crate::client::rpc_within(&host.to_string(), "prompt.choices", serde_json::json!({"widget": widget.to_string(), "cwd": local_path(cwd), "pid": pid.max(0)}), std::time::Duration::from_secs(5));
-        qs(&r.map(|v| v.to_string()).unwrap_or_else(|_| "[]".into()))
+    fn prompt_choices(&self, reply: &ffi::QString, widget: &ffi::QString, cwd: &ffi::QString, pid: i32, host: &ffi::QString) {
+        let (widget, cwd, host) = (widget.to_string(), local_path(cwd), host.to_string());
+        self.answer_on(reply, None, move || {
+            let r = crate::client::rpc_within(&host, "prompt.choices", serde_json::json!({"widget": widget, "cwd": cwd, "pid": pid.max(0)}), std::time::Duration::from_secs(5));
+            r.map(|v| v.to_string()).unwrap_or_else(|_| "[]".into())
+        })
     }
 
     fn request_prompt_modules(self: Pin<&mut Self>, key: &ffi::QString, names: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, pid: i32, host: &ffi::QString) {
@@ -1657,10 +1650,13 @@ impl ffi::Controller {
         qs(&crate::snippets::runnable_languages_json())
     }
 
-    fn snippet_command(&self, lang: &ffi::QString, code: &ffi::QString, cwd: &ffi::QString, shell: &ffi::QString, host: &ffi::QString) -> ffi::QString {
+    fn snippet_command(&self, reply: &ffi::QString, lang: &ffi::QString, code: &ffi::QString, cwd: &ffi::QString, shell: &ffi::QString, host: &ffi::QString) {
         // (Worked out where it runs: what's installed there, its Nix.)
-        let r = crate::client::rpc(&host.to_string(), "snippet.command", serde_json::json!({"lang": lang.to_string(), "code": code.to_string(), "cwd": local_path(cwd), "shell": shell.to_string()}));
-        qs(r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or(""))
+        let (lang, code, cwd, shell, host) = (lang.to_string(), code.to_string(), local_path(cwd), shell.to_string(), host.to_string());
+        self.answer_on(reply, None, move || {
+            let r = crate::client::rpc(&host, "snippet.command", serde_json::json!({"lang": lang, "code": code, "cwd": cwd, "shell": shell}));
+            r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or("").to_string()
+        })
     }
 
     fn language_for(&self, program: &ffi::QString) -> ffi::QString {
@@ -1822,14 +1818,12 @@ impl ffi::Controller {
         qs(&crate::settings::config_dir().display().to_string())
     }
 
-    fn restorable_sessions(&self, host: &ffi::QString) -> ffi::QString {
-        let ids: Vec<String> = crate::client::list_sessions(&host.to_string())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|s| !s.attached)
-            .map(|s| s.id)
-            .collect();
-        ffi::QString::from(&serde_json::to_string(&ids).unwrap())
+    fn restorable_sessions(&self, reply: &ffi::QString, host: &ffi::QString) {
+        let host = host.to_string();
+        self.answer_on(reply, None, move || {
+            let ids: Vec<String> = crate::client::list_sessions(&host).unwrap_or_default().into_iter().filter(|s| !s.attached).map(|s| s.id).collect();
+            serde_json::to_string(&ids).unwrap()
+        })
     }
 
     fn screenshot_path(&self) -> ffi::QString {
@@ -1904,10 +1898,67 @@ fn host_path(s: &str) -> (String, String) {
 /// A file request: here (`local`), or by the file's host's tesserad (rpc.rs
 /// "files"), which runs the same function there. A few seconds at most over
 /// SSH (it's the window's thread).
-fn on_host(path: &ffi::QString, op: &str, mut params: serde_json::Value, local: impl FnOnce(&str) -> String) -> ffi::QString {
-    let (host, p) = host_path(&path.to_string());
+/// A file action (open, trash, copy...), here or on the file's host: "" or
+/// what went wrong. (In the background: copies over scp take a while.)
+fn file_action_now(op: String, path: &str, arg: String) -> String {
+    // (Another host's file, for this desktop: opened or made a GIF of as
+    // a copy fetched here; revealed in the file manager over sftp:// when
+    // the host is a plain name, else the copy. The rest happen there.)
+    let (host, p) = host_path(path);
+    if !host.is_empty() && matches!(op.as_str(), "open" | "gif" | "reveal") {
+        if op == "reveal" && !host.contains(char::is_whitespace) {
+            let uri = format!("sftp://{host}{p}");
+            return crate::files::action("reveal_uri", &uri, "");
+        }
+        return match crate::remote::fetch(&host, &p) {
+            Ok(local) => crate::files::action(&op, &local.to_string_lossy(), &arg),
+            Err(e) => e,
+        };
+    }
+    // (Copied or moved between this computer and a host, or two hosts:
+    // through scp; a move then removes the original.)
+    if matches!(op.as_str(), "copy" | "move") {
+        let (dhost, dpath) = host_path(&arg);
+        if dhost != host {
+            let r: Result<(), String> = (|| {
+                if host.is_empty() {
+                    crate::remote::upload(&dhost, std::path::Path::new(&p), &dpath)?;
+                } else if dhost.is_empty() {
+                    crate::remote::download(&host, &p, std::path::Path::new(&dpath))?;
+                } else {
+                    let tmp = std::env::temp_dir().join(format!("tessera-copy-{}", std::process::id()));
+                    let _ = std::fs::create_dir_all(&tmp);
+                    let here = crate::remote::download(&host, &p, &tmp)?;
+                    let r = crate::remote::upload(&dhost, &here, &dpath);
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    r?;
+                }
+                if op == "move" {
+                    let e = if host.is_empty() {
+                        crate::files::action("trash", &p, "")
+                    } else {
+                        let r = crate::client::rpc_within(&host, "files", serde_json::json!({"op": "action", "action": "trash", "path": p, "arg": ""}), std::time::Duration::from_secs(10))?;
+                        r.as_str().unwrap_or("").to_string()
+                    };
+                    if !e.is_empty() {
+                        return Err(e);
+                    }
+                }
+                Ok(())
+            })();
+            return r.err().unwrap_or_default();
+        }
+    }
+    // (A folder on the same host, as a path there.)
+    let arg = if !host.is_empty() && arg.starts_with("ssh://") { host_path(&arg).1 } else { arg };
+    on_host(path, "action", serde_json::json!({"action": op, "arg": arg}), |p| crate::files::action(&op, p, &arg))
+}
+
+// (Runs in the background: never on the window's thread.)
+fn on_host(path: &str, op: &str, mut params: serde_json::Value, local: impl FnOnce(&str) -> String) -> String {
+    let (host, p) = host_path(path);
     if host.is_empty() {
-        return qs(&local(&p));
+        return local(&p);
     }
     params["op"] = serde_json::Value::String(op.to_string());
     params["path"] = serde_json::Value::String(p);
@@ -1921,11 +1972,11 @@ fn on_host(path: &ffi::QString, op: &str, mut params: serde_json::Value, local: 
                     e["path"] = serde_json::Value::String(format!("{prefix}{p}"));
                 }
             }
-            qs(&v.to_string())
+            v.to_string()
         }
-        Ok(serde_json::Value::String(s)) => qs(&s),
-        Ok(v) => qs(&v.to_string()),
-        Err(e) => qs(&serde_json::json!({"error": e}).to_string()),
+        Ok(serde_json::Value::String(s)) => s,
+        Ok(v) => v.to_string(),
+        Err(e) => serde_json::json!({"error": e}).to_string(),
     }
 }
 

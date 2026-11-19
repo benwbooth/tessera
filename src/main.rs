@@ -1,5 +1,6 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod ai;
+mod background;
 mod bridge;
 mod cells;
 mod chats;
@@ -156,6 +157,8 @@ fn main() {
     }
     bridge::ffi::tessera_show_windows();
     let code = bridge::ffi::tessera_exec();
+    // (Notebook saves and kernel stops queued at the end still go out.)
+    background::drain(std::time::Duration::from_secs(5));
     // (Kernels run on in tesserad, like the shells.)
     if wayland {
         // Qt reads "-session id_key", so an id with "_" in it can't be passed back.
