@@ -18,9 +18,6 @@ Item {
     property string hostError: ""
     // (A saved remote pane's screen, shown when its shell there is gone.)
     property string restoreSnapshot: ""
-    // The shell's pid when it's on this computer (what's looked up here:
-    // the prompt's and the editor's environment); 0 for another host's.
-    readonly property int localPid: sshHost === "" ? shellPid : 0
     function connectHost() { hostError = ""; controller.connectHost(sshHost) }
     Component.onCompleted: {
         if (sshHost === "") hostUp = true
@@ -242,7 +239,8 @@ Item {
         aiCheck: pane.aiSettings.check !== false
         aiNL: pane.aiSettings.natural_language !== false
         shellName: pane.shellName !== "" ? pane.shellName : "bash"
-        shellPid: pane.localPid
+        shellPid: pane.shellPid
+        sshHost: pane.sshHost
         promptEngine: pane.promptEngine
         promptSegments: pane.promptSegments
         // (A shell picked: its kernel starts now, ready by the first Enter.)

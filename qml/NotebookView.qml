@@ -470,13 +470,13 @@ FocusScope {
     function exitTip(c) {
         const st = c.fromTerm ? c.status : (c.failed ? 1 : 0)
         if (!c.fromTerm) return c.failed ? "Failed (an error)" : "Done"
-        const m = controller ? controller.exitMeaning(c.source, st) : ""
+        const m = controller ? controller.exitMeaning(c.source, st, sshHost) : ""
         const ai = exitNotes[c.cid] || ""
         return "Exit " + st + (m !== "" ? ": " + m : ai === "…" ? ": asking the AI…" : ai !== "" ? ": " + ai + " (AI)" : "")
     }
     function askExit(c, i) {
         if (!controller || !(c.tid > 0) || c.status === 0 || exitNotes[c.cid] !== undefined) return
-        if (controller.exitMeaning(c.source, c.status) !== "" || !controller.aiReady("inline")) return
+        if (controller.exitMeaning(c.source, c.status, sshHost) !== "" || !controller.aiReady("inline")) return
         const n = Object.assign({}, exitNotes); n[c.cid] = "…"; exitNotes = n
         const out = outputText(i).split("\n").slice(-30).join("\n")
         controller.aiRun(exitKey + c.cid, "exit", JSON.stringify([{ role: "user", content: "Command: " + c.source + "\nExit status: " + c.status + "\nIts output (the end):\n" + out }]), JSON.stringify({ cwd: c.cwd, shell: shellName }))

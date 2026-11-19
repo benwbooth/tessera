@@ -30,6 +30,7 @@ Item {
     }
     property real fontSize: 11
     property int shellPid: 0
+    property string sshHost: ""         // the pane's host: its prompt is drawn there
     property string engine: "auto"     // "auto", "starship", "builtin"
     readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && controller.hasStarship()))
     signal runRequested(string command)
@@ -146,11 +147,11 @@ Item {
         const st = bar.view ? bar.view.lastStatus : 0, du = bar.view ? bar.view.lastDuration : 0
         if (layout.indexOf("starship") >= 0 || layout.indexOf("starship_right") >= 0) {
             lastCols = fillCols()
-            controller.requestStarship(key, bar.cwd, st, du, lastCols, bar.shellPid)
+            controller.requestStarship(key, bar.cwd, st, du, lastCols, bar.shellPid, bar.sshHost)
         }
         const mods = layout.filter(w => w.startsWith("star:")).map(w => w.substring(5))
-        if (mods.length > 0) controller.requestPromptModules(key, JSON.stringify(mods), bar.cwd, st, du, bar.shellPid)
-        try { info = JSON.parse(controller.promptInfo(bar.cwd, bar.shellPid)) } catch (e) { info = {} }
+        if (mods.length > 0) controller.requestPromptModules(key, JSON.stringify(mods), bar.cwd, st, du, bar.shellPid, bar.sshHost)
+        try { info = JSON.parse(controller.promptInfo(bar.cwd, bar.shellPid, bar.sshHost)) } catch (e) { info = {} }
     }
     onLayoutChanged: refresh()
     Connections {
@@ -872,7 +873,7 @@ Item {
     function openChoices(name, item) {
         if (name === "status") { bar.fixRequested(); return }
         let c = []
-        try { c = JSON.parse(controller.promptChoices(name, bar.cwd, bar.shellPid)) } catch (e) {}
+        try { c = JSON.parse(controller.promptChoices(name, bar.cwd, bar.shellPid, bar.sshHost)) } catch (e) {}
         if (c.length === 0) { openWidgetMenu(layout.indexOf(name), name, item); return }
         // (The folder's choices: this tab's own folders first.)
         if (c.some(o => o.section && o.label === "Up") && visited.length > 1) {
@@ -1101,7 +1102,7 @@ Item {
             if (t === "add") { addPop.x = Math.max(0, bar.width - addPop.width - 4); addPop.open() }
             else if (t === "split") bar.splitStarship()
             else if (t === "cdhist") bar.openChoices("dir", leftRow)
-            else if (t.startsWith("run:")) { let c = []; try { c = JSON.parse(controller.promptChoices("dir", "/usr", 0)) } catch (e) {} const x = c.find(o => o.cmd === t.substring(4)); if (x) bar.runRequested(x.cmd) }
+            else if (t.startsWith("run:")) { let c = []; try { c = JSON.parse(controller.promptChoices("dir", "/usr", 0, "")) } catch (e) {} const x = c.find(o => o.cmd === t.substring(4)); if (x) bar.runRequested(x.cmd) }
             else if (t.startsWith("split,")) { bar.splitStarship(); t2.cmd = t.substring(6); t2.start() }
             else for (const row of [leftRow, rightRow]) for (let k = 0; k < row.children.length; k++) {
                 const c = row.children[k]

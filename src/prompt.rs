@@ -138,7 +138,7 @@ pub fn shell_env(pid: u32) -> Option<Vec<(String, String)>> {
 /// alone) is left out: the editor stands in for it.
 pub fn starship(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: u32) -> String {
     // Tessera's own prompt (built in Preferences), when that's the choice.
-    let config = (crate::settings::load().prompt_config == "tessera").then(tessera_config_path);
+    let config = active_config();
     starship_with(cwd, status, duration_ms, width, pid, config.as_deref())
 }
 
@@ -352,6 +352,42 @@ mod starship_tests {
 /// it may be managed elsewhere).
 pub fn tessera_config_path() -> std::path::PathBuf {
     crate::settings::config_dir().join("starship.toml")
+}
+
+/// The Starship config the window uses, sent with its requests to tesserad
+/// (another host has neither Tessera's settings nor its starship.toml):
+/// Some("") for the user's own there, Some(text) for Tessera's.
+static WINDOW_CONFIG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub fn set_window_config(text: Option<String>) {
+    *WINDOW_CONFIG.lock().unwrap() = text;
+}
+
+/// What the window would send: Tessera's config text when that's the
+/// choice, else "".
+pub fn window_config_text() -> String {
+    if crate::settings::load().prompt_config == "tessera" {
+        std::fs::read_to_string(tessera_config_path()).unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+/// The config file Starship's prompt uses: the window's (written to a file
+/// here), else Tessera's when the settings here say so, else the user's.
+pub fn active_config() -> Option<std::path::PathBuf> {
+    if let Some(text) = WINDOW_CONFIG.lock().unwrap().clone() {
+        if text.is_empty() {
+            return None;
+        }
+        let path = crate::settings::state_dir().join("window-starship.toml");
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) {
+            let _ = std::fs::create_dir_all(crate::settings::state_dir());
+            let _ = std::fs::write(&path, &text);
+        }
+        return Some(path);
+    }
+    (crate::settings::load().prompt_config == "tessera").then(tessera_config_path)
 }
 
 pub fn tessera_config() -> String {

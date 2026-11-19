@@ -82,6 +82,7 @@ Rectangle {
     property string cwd: ""            // the shell's folder (for path completion)
     property bool showPrompt: true     // Tessera's prompt bar above the editor
     property int shellPid: 0
+    property string sshHost: ""         // the pane's host ("" here): completions are worked out there
     property string promptEngine: "auto"
     property var promptSegments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
     signal submitted(string text)
@@ -328,7 +329,7 @@ Rectangle {
         if (!historyMode && box.lspServer !== "")
             controller.lspAsk(aiKey + "-comp", box.lang, box.cwd, edit.text, "complete", edit.cursorPosition)
         const r = JSON.parse(historyMode ? controller.historySearch(historyQuery)
-                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid))
+                                         : controller.complete(edit.text, edit.cursorPosition, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid, box.sshHost))
         comp = r
         if (compIndex >= r.items.length) compIndex = 0
         if (r.items.length === 0 && !r.pending) closeComp()
@@ -586,6 +587,7 @@ Rectangle {
         themeData: box.themeData
         segments: box.promptSegments
         shellPid: box.shellPid
+        sshHost: box.sshHost
         engine: box.promptEngine
         fontFamily: edit.font.family
         fontSize: edit.font.pointSize

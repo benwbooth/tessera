@@ -364,7 +364,7 @@ pub mod ffi {
         fn language_ready(self: Pin<&mut Controller>, name: QString, error: QString);
         /// Input editor completions at a UTF-16 cursor (src/complete.rs), JSON.
         #[qinvokable]
-        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString, pid: i32) -> QString;
+        fn complete(self: &Controller, text: &QString, cursor: i32, cwd: &QString, aliases: &QString, pid: i32, host: &QString) -> QString;
         /// Download fish's completion files (more commands and subcommands
         /// get help text); progress in help_status.
         #[qinvokable]
@@ -373,13 +373,13 @@ pub mod ffi {
         fn command_help_count(self: &Controller) -> i32;
         /// The prompt bar's facts about a folder (git, user, host), JSON.
         #[qinvokable]
-        fn prompt_info(self: &Controller, cwd: &QString, pid: i32) -> QString;
+        fn prompt_info(self: &Controller, cwd: &QString, pid: i32, host: &QString) -> QString;
         #[qinvokable]
         fn has_starship(self: &Controller) -> bool;
         /// Ask Starship for the prompt (in the background); the answer comes
         /// as starship_ready(key, json) (see prompt::starship).
         #[qinvokable]
-        fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32);
+        fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32, host: &QString);
         #[qsignal]
         fn starship_ready(self: Pin<&mut Controller>, key: QString, json: QString);
         /// The prompt bar's widgets (src/prompt_widgets.rs): every Starship
@@ -390,11 +390,11 @@ pub mod ffi {
         #[qinvokable]
         fn prompt_format_modules(self: &Controller) -> QString;
         #[qinvokable]
-        fn prompt_choices(self: &Controller, widget: &QString, cwd: &QString, pid: i32) -> QString;
+        fn prompt_choices(self: &Controller, widget: &QString, cwd: &QString, pid: i32, host: &QString) -> QString;
         /// Draw Starship modules one by one, in the background:
         /// prompt_modules_ready(key, {name: runs}).
         #[qinvokable]
-        fn request_prompt_modules(self: Pin<&mut Controller>, key: &QString, names: &QString, cwd: &QString, status: i32, duration_ms: f64, pid: i32);
+        fn request_prompt_modules(self: Pin<&mut Controller>, key: &QString, names: &QString, cwd: &QString, status: i32, duration_ms: f64, pid: i32, host: &QString);
         #[qsignal]
         fn prompt_modules_ready(self: Pin<&mut Controller>, key: QString, json: QString);
         /// The prompt builder (Preferences › Prompt): Starship's presets,
@@ -510,7 +510,7 @@ pub mod ffi {
         fn shell_chain(self: &Controller, pid: i32, host: &QString) -> QString;
         /// What an exit status means for a command (complete::exit_meaning).
         #[qinvokable]
-        fn exit_meaning(self: &Controller, command: &QString, status: i32) -> QString;
+        fn exit_meaning(self: &Controller, command: &QString, status: i32, host: &QString) -> QString;
         /// Answer a kernel's input request (jupyter_event {"type": "input"}).
         #[qinvokable]
         fn jupyter_input(self: &Controller, key: &QString, value: &QString) -> bool;
@@ -818,8 +818,7 @@ impl ffi::Controller {
         qs(&crate::syntax::analyze(&lang.to_string(), &text.to_string()))
     }
 
-    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString, pid: i32) -> ffi::QString {
-        crate::complete::set_shell_env(crate::prompt::shell_env(pid.max(0) as u32));
+    fn complete(&self, text: &ffi::QString, cursor: i32, cwd: &ffi::QString, aliases: &ffi::QString, pid: i32, host: &ffi::QString) -> ffi::QString {
         let aliases: serde_json::Value = serde_json::from_str(&aliases.to_string()).unwrap_or_default();
         let cwd = cwd.to_string();
         // An OSC 7 URL (file://host/path) or a plain path.
@@ -827,20 +826,26 @@ impl ffi::Controller {
             Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
             None => cwd,
         };
-        let cwd = if cwd.is_empty() { std::env::var("HOME").unwrap_or_default() } else { cwd };
-        qs(&crate::complete::complete(&text.to_string(), cursor.max(0) as usize, &cwd, &aliases))
+        // (Where the pane's shell is: its commands, files, Nix and help. Not
+        // answered in time over SSH: "pending", and the editor asks again.)
+        let params = serde_json::json!({"text": text.to_string(), "cursor": cursor.max(0), "cwd": cwd, "aliases": aliases, "pid": pid.max(0)});
+        match crate::client::rpc_within(&host.to_string(), "complete", params, std::time::Duration::from_millis(400)) {
+            Ok(v) => qs(&v.to_string()),
+            Err(_) => qs(r#"{"start":0,"end":0,"items":[],"pending":true}"#),
+        }
     }
 
     fn download_command_help(mut self: Pin<&mut Self>) {
         self.as_mut().set_help_status(qs("Downloading fish's completions and tldr-pages\u{2026}"));
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let fish = crate::complete::download_fish_completions();
-            let tldr = crate::complete::update_tldr();
+            // (Kept where the completions are worked out: this computer's tesserad.)
+            let r = crate::client::rpc_within("", "complete.download", serde_json::json!({}), std::time::Duration::from_secs(900));
             let _ = qt.queue(move |mut c| {
-                let msg = match (fish, tldr) {
-                    (Ok(f), Ok(t)) => format!("Up to date: completions for {f} commands (fish-shell), examples for {t} (tldr-pages)."),
-                    (Err(e), _) | (_, Err(e)) => format!("Couldn't download: {e}"),
+                let msg = match r {
+                    Ok(v) if v["error"].is_null() => format!("Up to date: completions for {} commands (fish-shell), examples for {} (tldr-pages).", v["fish"], v["tldr"]),
+                    Ok(v) => format!("Couldn't download: {}", v["error"].as_str().unwrap_or("")),
+                    Err(e) => format!("Couldn't download: {e}"),
                 };
                 c.as_mut().set_help_status(qs(&msg));
             });
@@ -958,8 +963,9 @@ impl ffi::Controller {
         crate::client::rpc(&host, "kernel.sync", serde_json::json!({"key": k, "pid": pid.max(0), "cwd": local_path(cwd)})).ok().and_then(|v| v.as_bool()).unwrap_or(false)
     }
 
-    fn exit_meaning(&self, command: &ffi::QString, status: i32) -> ffi::QString {
-        qs(&crate::complete::exit_meaning(&command.to_string(), status))
+    fn exit_meaning(&self, command: &ffi::QString, status: i32, host: &ffi::QString) -> ffi::QString {
+        let r = crate::client::rpc_within(&host.to_string(), "complete.exit_meaning", serde_json::json!({"command": command.to_string(), "status": status}), std::time::Duration::from_secs(3));
+        qs(r.ok().as_ref().and_then(|v| v.as_str()).unwrap_or(""))
     }
 
     fn shell_launch_line(&self, shell: &ffi::QString, parent: i32, host: &ffi::QString) -> ffi::QString {
@@ -1107,8 +1113,9 @@ impl ffi::Controller {
         qs(&crate::history::search(&query.to_string()))
     }
 
-    fn prompt_info(&self, cwd: &ffi::QString, pid: i32) -> ffi::QString {
-        qs(&crate::prompt::info(&local_path(cwd), pid.max(0) as u32))
+    fn prompt_info(&self, cwd: &ffi::QString, pid: i32, host: &ffi::QString) -> ffi::QString {
+        let r = crate::client::rpc_within(&host.to_string(), "prompt.info", serde_json::json!({"cwd": local_path(cwd), "pid": pid.max(0)}), std::time::Duration::from_millis(400));
+        qs(&r.map(|v| v.to_string()).unwrap_or_else(|_| "{}".into()))
     }
 
     fn ai_run(self: Pin<&mut Self>, key: &ffi::QString, task: &ffi::QString, messages_json: &ffi::QString, ctx_json: &ffi::QString) {
@@ -1327,11 +1334,12 @@ impl ffi::Controller {
         crate::prompt::has_starship()
     }
 
-    fn request_starship(self: Pin<&mut Self>, key: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, width: i32, pid: i32) {
-        let (key, cwd) = (key.to_string(), local_path(cwd));
+    fn request_starship(self: Pin<&mut Self>, key: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, width: i32, pid: i32, host: &ffi::QString) {
+        let (key, cwd, host) = (key.to_string(), local_path(cwd), host.to_string());
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let json = crate::prompt::starship(&cwd, status, duration_ms.max(0.0) as u64, width.max(1) as u32, pid.max(0) as u32);
+            let params = serde_json::json!({"cwd": cwd, "status": status, "duration": duration_ms.max(0.0) as u64, "width": width.max(1), "pid": pid.max(0), "config": crate::prompt::window_config_text()});
+            let json = crate::client::rpc(&host, "prompt.starship", params).map(|v| v.to_string()).unwrap_or_else(|_| "{}".into());
             let _ = qt.queue(move |c| c.starship_ready(qs(&key), qs(&json)));
         });
     }
@@ -1344,22 +1352,25 @@ impl ffi::Controller {
         qs(&serde_json::to_string(&crate::prompt_widgets::format_modules()).unwrap_or_default())
     }
 
-    fn prompt_choices(&self, widget: &ffi::QString, cwd: &ffi::QString, pid: i32) -> ffi::QString {
-        qs(&crate::prompt_widgets::choices(&widget.to_string(), &local_path(cwd), pid.max(0) as u32))
+    fn prompt_choices(&self, widget: &ffi::QString, cwd: &ffi::QString, pid: i32, host: &ffi::QString) -> ffi::QString {
+        let r = crate::client::rpc_within(&host.to_string(), "prompt.choices", serde_json::json!({"widget": widget.to_string(), "cwd": local_path(cwd), "pid": pid.max(0)}), std::time::Duration::from_secs(5));
+        qs(&r.map(|v| v.to_string()).unwrap_or_else(|_| "[]".into()))
     }
 
-    fn request_prompt_modules(self: Pin<&mut Self>, key: &ffi::QString, names: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, pid: i32) {
-        let (key, cwd) = (key.to_string(), local_path(cwd));
-        let names: Vec<String> = serde_json::from_str(&names.to_string()).unwrap_or_default();
+    fn request_prompt_modules(self: Pin<&mut Self>, key: &ffi::QString, names: &ffi::QString, cwd: &ffi::QString, status: i32, duration_ms: f64, pid: i32, host: &ffi::QString) {
+        let (key, cwd, host) = (key.to_string(), local_path(cwd), host.to_string());
+        let names: serde_json::Value = serde_json::from_str(&names.to_string()).unwrap_or_default();
         let qt = self.qt_thread();
         std::thread::spawn(move || {
-            let json = crate::prompt_widgets::modules(&names, &cwd, status, duration_ms.max(0.0) as u64, pid.max(0) as u32).to_string();
+            let params = serde_json::json!({"names": names, "cwd": cwd, "status": status, "duration": duration_ms.max(0.0) as u64, "pid": pid.max(0), "config": crate::prompt::window_config_text()});
+            let json = crate::client::rpc(&host, "prompt.modules", params).map(|v| v.to_string()).unwrap_or_else(|_| "{}".into());
             let _ = qt.queue(move |c| c.prompt_modules_ready(qs(&key), qs(&json)));
         });
     }
 
     fn command_help_count(&self) -> i32 {
-        (crate::complete::fish_completion_count() + crate::complete::tldr_count()) as i32
+        let r = crate::client::rpc("", "complete.counts", serde_json::json!({})).unwrap_or_default();
+        (r["fish"].as_u64().unwrap_or(0) + r["tldr"].as_u64().unwrap_or(0)) as i32
     }
 
     fn syntax_languages(&self) -> ffi::QString {

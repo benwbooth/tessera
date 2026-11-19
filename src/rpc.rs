@@ -143,6 +143,13 @@ fn stop_tree(key: &str) {
     }
 }
 
+/// The window's Starship config, when a request carries it.
+fn set_window_config(p: &Value) {
+    if let Some(c) = p["config"].as_str() {
+        crate::prompt::set_window_config(Some(c.to_string()));
+    }
+}
+
 pub fn handle(mut stream: UnixStream, payload: &[u8]) -> std::io::Result<()> {
     let req: Value = serde_json::from_slice(payload).unwrap_or_default();
     let method = req["method"].as_str().unwrap_or("");
@@ -274,6 +281,32 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             Value::Null
         }
         "shell.env" => json!(crate::prompt::shell_env(pid()).unwrap_or_default()),
+        // ---- the pane's editor and prompt bar (they look at the host) ----
+        "complete" => {
+            crate::complete::set_shell_env(crate::prompt::shell_env(pid()));
+            let cwd = s("cwd");
+            let cwd = if cwd.is_empty() { std::env::var("HOME").unwrap_or_default() } else { cwd };
+            let out = crate::complete::complete(&s("text"), n("cursor") as usize, &cwd, &p["aliases"]);
+            serde_json::from_str(&out).unwrap_or(Value::String(out))
+        }
+        "complete.exit_meaning" => json!(crate::complete::exit_meaning(&s("command"), p["status"].as_i64().unwrap_or(0) as i32)),
+        "complete.download" => {
+            let fish = crate::complete::download_fish_completions();
+            let tldr = crate::complete::update_tldr();
+            json!({"fish": fish.as_ref().ok(), "tldr": tldr.as_ref().ok(), "error": fish.err().or(tldr.err()).map(|e| e.to_string())})
+        }
+        "complete.counts" => json!({"fish": crate::complete::fish_completion_count(), "tldr": crate::complete::tldr_count()}),
+        "prompt.info" => serde_json::from_str(&crate::prompt::info(&s("cwd"), pid())).unwrap_or(Value::Null),
+        "prompt.starship" => {
+            set_window_config(p);
+            serde_json::from_str(&crate::prompt::starship(&s("cwd"), p["status"].as_i64().unwrap_or(0) as i32, n("duration"), n("width").max(1) as u32, pid())).unwrap_or(Value::Null)
+        }
+        "prompt.choices" => serde_json::from_str(&crate::prompt_widgets::choices(&s("widget"), &s("cwd"), pid())).unwrap_or(Value::Null),
+        "prompt.modules" => {
+            set_window_config(p);
+            let names: Vec<String> = serde_json::from_value(p["names"].clone()).unwrap_or_default();
+            crate::prompt_widgets::modules(&names, &s("cwd"), p["status"].as_i64().unwrap_or(0) as i32, n("duration"), pid())
+        }
         // ---- running code and Nix commands ----
         "snippet.command" => json!(crate::snippets::command(&s("lang"), &s("code"), &s("cwd"), &s("shell"))),
         "nix.lookup" => {

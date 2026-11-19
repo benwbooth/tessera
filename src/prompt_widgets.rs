@@ -63,7 +63,7 @@ pub fn module_list() -> Vec<String> {
 
 /// The config Starship's prompt uses here (Tessera's or the user's own).
 fn config() -> Option<PathBuf> {
-    (crate::settings::load().prompt_config == "tessera").then(crate::prompt::tessera_config_path)
+    crate::prompt::active_config()
 }
 
 /// One module, drawn: colored runs (as prompt::runs), [] when it shows nothing.

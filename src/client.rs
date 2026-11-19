@@ -20,9 +20,14 @@ pub fn connect_to(host: &str) -> std::io::Result<UnixStream> {
 
 /// One request to `host`'s tesserad (rpc.rs): its result.
 pub fn rpc(host: &str, method: &str, params: Value) -> Result<Value, String> {
-    let mut s = connect_to(host).map_err(|e| e.to_string())?;
     // (Long ones, like a Nix lookup building its index, answer later.)
-    let _ = s.set_read_timeout(Some(Duration::from_secs(120)));
+    rpc_within(host, method, params, Duration::from_secs(120))
+}
+
+/// A request that must answer within `wait` (the window's thread asks).
+pub fn rpc_within(host: &str, method: &str, params: Value, wait: Duration) -> Result<Value, String> {
+    let mut s = connect_to(host).map_err(|e| e.to_string())?;
+    let _ = s.set_read_timeout(Some(wait));
     write_json(&mut s, T_RPC, &serde_json::json!({"method": method, "params": params})).map_err(|e| e.to_string())?;
     match read_frame(&mut s).map_err(|e| e.to_string())? {
         (T_RPC_REPLY, p) => serde_json::from_slice(&p).map_err(|e| e.to_string()),

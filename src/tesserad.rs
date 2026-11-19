@@ -34,6 +34,7 @@ mod net;
 mod nixcmds;
 mod procinfo;
 mod prompt;
+mod prompt_widgets;
 mod proto;
 mod remote;
 mod rpc;
