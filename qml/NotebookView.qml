@@ -841,7 +841,10 @@ FocusScope {
         if (!view) { controller.jupyterInput(k, "127"); return }
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         const cmd = (tty.cwd && tty.cwd !== shellDir ? "cd " + q(tty.cwd) + " && " : "") + tty.command
-        ttyRun = { cid: cid, key: k, tid: 0, base: -1, before: "" }
+        // (since: the terminal's newest command now; the one this starts comes
+        // after it, and reads as cmd.)
+        const ts = termCells()
+        ttyRun = { cid: cid, key: k, tid: 0, base: -1, before: "", cmd: cmd, since: ts.length ? ts[ts.length - 1].id : 0 }
         updateOwnRun()
         touch()
         view.sendText(cmd + "\r")
@@ -866,7 +869,10 @@ FocusScope {
         let text = t.screen ? "" : view.cellOutput(t.id, "text")
         text = text.trim() === "" ? "" : text.replace(/\n*$/, "\n")
         if (r.before + text !== "") outs.push({ output_type: "stream", name: "stdout", text: r.before + text })
-        cells.setProperty(i, "outputs", JSON.stringify(outs))
+        // (Only when it changed: a card set again redraws, and can take the
+        // keys from a terminal app running in it.)
+        const j = JSON.stringify(outs)
+        if (j !== cells.get(i).outputs) cells.setProperty(i, "outputs", j)
     }
     Timer {
         interval: 300; repeat: true
@@ -923,11 +929,18 @@ FocusScope {
             if (bt) fromTerm(i, bt)
             else if (path === "" && oldest > 0 && c.tid < oldest) cells.remove(i)
         }
+        // (A tessh cell's program: its terminal command found by what it ran,
+        // newer than when it was sent; shown in that cell, no card of its own.
+        // Not by the ids kept from before: a new shell numbers from 1 again.)
+        if (ttyRun && ttyRun.tid === 0) {
+            const want = (ttyRun.cmd || "").trim()
+            const t = ts.find(x => x.id > (ttyRun.since || 0) && (want === "" || (x.command || "").trim() === want))
+            if (t) { ttyRun = Object.assign({}, ttyRun, { tid: t.id }); retire(t.id); delete linked[t.id]; touch() }
+        }
         let added = false
         for (const t of ts) {
+            if (ttyRun && t.id === ttyRun.tid) continue
             if (linked[t.id] !== undefined || retired.indexOf(t.id) >= 0 || t.id <= fileStart) continue
-            // (A tessh cell's program: shown in that cell, no card of its own.)
-            if (ttyRun && ttyRun.tid === 0) { ttyRun = Object.assign({}, ttyRun, { tid: t.id }); retire(t.id); touch(); continue }
             // (Nothing typed and nothing shown: a shell starting up, no card.)
             if (nb.blankTerm(t)) { retire(t.id); continue }
             let at = -1
