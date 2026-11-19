@@ -782,7 +782,7 @@ FocusScope {
     function updateOwnRun() {
         let on = false
         for (let i = 0; i < cells.count && !on; ++i) { const c = cells.get(i); on = c.running && c.mine && (c.tid > 0 || shellWaiting.indexOf(c.cid) >= 0) }
-        ownRun = on
+        ownRun = on || ttyRun !== null
     }
 
     // ---- the shell: cells the terminal made ----------------------------------------
@@ -810,30 +810,55 @@ FocusScope {
         if (retired.indexOf(tid) < 0) retired = retired.concat([tid])
         const m = Object.assign({}, linked); delete m[tid]; linked = m
     }
-    // A program a tessh cell runs that needs a terminal (vim, less, a REPL):
-    // the kernel hands it here, it runs in this pane's terminal, which shows
-    // in the cell's card while it runs (as a full-screen program's does), and
-    // its exit status goes back. {cid, key, tid (its terminal cell), full}
+    // A program a tessh cell runs: the kernel hands it here and it runs in
+    // this pane's terminal, as a shell cell's does. Its output goes in the
+    // cell's card as it comes; a terminal app (one on the alternate screen)
+    // gets the live terminal in the card instead, and leaves no text. Its
+    // exit status goes back. {cid, key, tid (its terminal cell), base (the
+    // card's outputs before it)}
     property var ttyRun: null
     function runTty(cid, tty, k) {
         if (!view) { controller.jupyterInput(k, "127"); return }
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         const cmd = (tty.cwd && tty.cwd !== shellDir ? "cd " + q(tty.cwd) + " && " : "") + tty.command
-        ttyRun = { cid: cid, key: k, tid: 0, full: tty.keep === false }
+        ttyRun = { cid: cid, key: k, tid: 0, base: -1, before: "" }
+        updateOwnRun()
         view.sendText(cmd + "\r")
         findLive()
         Qt.callLater(followLive)
     }
+    // (Its output so far, after what the card had before it.)
+    function ttyText(t) {
+        const r = ttyRun
+        const i = indexOf(r.cid)
+        if (i < 0) return
+        let outs = []
+        try { outs = JSON.parse(cells.get(i).outputs) } catch (x) {}
+        // (It goes on the text before it, as a stream's next text would.)
+        if (r.base < 0) {
+            const last = outs[outs.length - 1]
+            const joins = last && last.output_type === "stream" && last.name === "stdout"
+            ttyRun = Object.assign({}, r, { base: joins ? outs.length - 1 : outs.length, before: joins ? last.text : "" })
+            return ttyText(t)
+        }
+        outs = outs.slice(0, r.base)
+        let text = t.screen ? "" : view.cellOutput(t.id, "text")
+        text = text.trim() === "" ? "" : text.replace(/\n*$/, "\n")
+        if (r.before + text !== "") outs.push({ output_type: "stream", name: "stdout", text: r.before + text })
+        cells.setProperty(i, "outputs", JSON.stringify(outs))
+    }
+    Timer {
+        interval: 300; repeat: true
+        running: nb.ttyRun !== null && nb.ttyRun.tid > 0
+        onTriggered: { const t = nb.termCells().find(x => x.id === nb.ttyRun.tid); if (t && !t.done) nb.ttyText(t) }
+    }
     function finishTty(t) {
+        ttyText(t)
         const r = ttyRun
         ttyRun = null
-        // (What a program that isn't full screen printed stays in the card.)
-        const i = indexOf(r.cid)
-        const text = r.full ? "" : view.cellOutput(t.id, "text")
-        if (i >= 0 && text.trim() !== "") addOutput(i, { output_type: "stream", name: "stdout", text: text.replace(/\n*$/, "\n") })
+        updateOwnRun()
         controller.jupyterInput(r.key, String(t.status))
     }
-    Connections { target: nb.view; function onFullScreenChanged() { if (nb.ttyRun && nb.view.fullScreen) nb.ttyRun = Object.assign({}, nb.ttyRun, { full: true }) } }
     function shellRun(cid, code) {
         if (!view) return
         shellWaiting = shellWaiting.concat([cid])
@@ -894,7 +919,10 @@ FocusScope {
             fromTerm(at, t)
             touch()
         }
-        if (ttyRun && ttyRun.tid > 0 && byId[ttyRun.tid] && byId[ttyRun.tid].done) finishTty(byId[ttyRun.tid])
+        if (ttyRun && ttyRun.tid > 0 && byId[ttyRun.tid]) {
+            if (byId[ttyRun.tid].done) finishTty(byId[ttyRun.tid])
+            else ttyText(byId[ttyRun.tid])
+        }
         updateOwnRun()
         if (added) follow()
     }
@@ -917,7 +945,7 @@ FocusScope {
     // into liveHost (TerminalPane's termSlot), which sits over that card's
     // output, at its size; Expand makes it the window's.
     property bool shown: true               // (the pane shows the notebook)
-    readonly property bool liveWanted: view !== null && (view.fullScreen || ttyRun !== null) && shown
+    readonly property bool liveWanted: view !== null && view.fullScreen && shown
     property int liveIndex: -1
     property Item liveBox: null            // the card's place for it (set by the card)
     readonly property Item liveSlot: liveWanted && liveIndex >= 0 ? liveHost : null

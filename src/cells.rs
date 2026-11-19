@@ -20,6 +20,19 @@ pub struct Cell {
     /// The image file the command printed (shown as the picture).
     pub image: Option<Vec<u8>>,
     pub truncated: bool,
+    /// It switched to the alternate screen: a terminal app (vim, less, htop),
+    /// not a program printing lines.
+    pub screen: bool,
+}
+
+/// Output that switches to the alternate screen (after `before`, the bytes
+/// already seen, in case the sequence was split).
+fn enters_alt_screen(before: &[u8], data: &[u8]) -> bool {
+    let tail = &before[before.len().saturating_sub(8)..];
+    let mut buf = Vec::with_capacity(tail.len() + data.len());
+    buf.extend_from_slice(tail);
+    buf.extend_from_slice(data);
+    [b"\x1b[?1049h".as_slice(), b"\x1b[?1047h", b"\x1b[?47h"].iter().any(|s| buf.windows(s.len()).any(|w| w == *s))
 }
 
 const MAX_CELLS: usize = 400;
@@ -57,6 +70,7 @@ impl Cells {
             kind: String::new(),
             image: None,
             truncated: false,
+            screen: false,
         });
         while self.list.len() > MAX_CELLS {
             self.list.pop_front();
@@ -82,6 +96,9 @@ impl Cells {
 
     pub fn output(&mut self, data: &[u8]) {
         if let Some(c) = self.running() {
+            if !c.screen && enters_alt_screen(&c.raw, data) {
+                c.screen = true;
+            }
             if c.raw.len() + data.len() <= MAX_CELL_BYTES {
                 c.raw.extend_from_slice(data);
             } else {
@@ -112,7 +129,7 @@ impl Cells {
             .map(|c| {
                 json!({"id": c.id, "command": c.command, "cwd": c.cwd, "started": c.started, "duration": c.duration_ms,
                        "status": c.status, "done": c.done, "kind": if c.image.is_some() { "image" } else { &c.kind },
-                       "size": c.raw.len(), "truncated": c.truncated})
+                       "size": c.raw.len(), "truncated": c.truncated, "screen": c.screen})
             })
             .collect();
         serde_json::to_string(&cells).unwrap_or_else(|_| "[]".into())
@@ -158,6 +175,11 @@ fn line_cell(l: &str) -> Option<Cell> {
         kind: s("kind"),
         image: v["image"].as_str().and_then(|i| b.decode(i).ok()),
         truncated: v["truncated"].as_bool().unwrap_or(false),
+        screen: false,
+    })
+    .map(|mut c| {
+        c.screen = enters_alt_screen(&[], &c.raw);
+        c
     })
 }
 

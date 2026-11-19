@@ -1782,10 +1782,11 @@ shows with its richest form: HTML, Markdown, images, matplotlib figures.
 `display x` shows a value partway through, and `input` asks in the card.
 The folder and exported variables go back and forth with the pane's shell.
 
-A program that needs a terminal (an editor, a pager, `htop`, a REPL or a
-shell started bare, `ssh host`) runs in the pane's terminal, shown in the
-cell's card while it runs; the cell goes on when it exits, with its status
-in `$?`. `TESSH_TTY="prog …"` adds programs to that list.
+Programs a cell runs run in the pane's terminal, as a shell cell's do, with
+the cell's folder and variables. What they print goes in the card in order
+with the rest; a terminal app (vim, less, htop: one that takes the whole
+screen) gets the live terminal in the card while it runs. The cell goes on
+when it exits, with its status in `$?`.
 
 ```tessh no-run
 import pandas as pd

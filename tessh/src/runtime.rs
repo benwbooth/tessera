@@ -17,11 +17,12 @@ pub static INTERACTIVE: AtomicBool = AtomicBool::new(false);
 /// Run attached programs with their output captured and passed on through
 /// Python's sys.stdout (the kernel: the notebook shows it).
 pub static PASS_THROUGH: AtomicBool = AtomicBool::new(false);
-/// Where a program that needs a terminal runs when tessh has none (the
-/// kernel: the notebook's pane terminal). Given the shell command and the
-/// folder, it gives the exit status, or None to run it here anyway.
-/// (The third argument: whether what it printed is worth keeping, not a full-screen program's.)
-pub static TTY_HOOK: std::sync::OnceLock<fn(Python<'_>, &str, &str, bool) -> PyResult<Option<i32>>> = std::sync::OnceLock::new();
+/// Where programs run when tessh has no terminal (the kernel: in the
+/// notebook's pane terminal, so a terminal app gets one). Given the shell
+/// command and the folder, it gives the exit status, or None to run it here.
+pub static TTY_HOOK: std::sync::OnceLock<fn(Python<'_>, &str, &str) -> PyResult<Option<i32>>> = std::sync::OnceLock::new();
+/// The environment when the hook was set: what differs is passed along.
+pub static HOOK_ENV: std::sync::OnceLock<std::collections::HashMap<String, String>> = std::sync::OnceLock::new();
 static OLDPWD: Mutex<Option<String>> = Mutex::new(None);
 static DIRSTACK: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -670,58 +671,6 @@ fn to_stdio(o: &Out) -> PyResult<Stdio> {
     })
 }
 
-/// Programs that need a terminal: always, or (REPLs and shells) when given
-/// no arguments but flags. TESSH_TTY adds names (spaced) to the first.
-const TTY_ALWAYS: &[&str] = &["vi", "vim", "nvim", "view", "vimdiff", "nano", "pico", "emacs", "micro", "hx", "helix", "kak", "joe", "ne", "mcedit", "less", "more", "most", "man", "htop", "top", "btop", "atop", "nvtop", "glances", "iotop", "iftop", "nload", "bmon", "ncdu", "gdu", "tmux", "screen", "zellij", "mc", "ranger", "nnn", "lf", "yazi", "vifm", "lazygit", "lazydocker", "tig", "gitui", "k9s", "fzf", "sk", "watch", "w3m", "lynx", "elinks", "mutt", "neomutt", "aerc", "weechat", "irssi", "newsboat", "alsamixer", "pulsemixer", "nmtui", "btm", "calcurse", "cmatrix", "nethack", "passwd", "su", "visudo", "vipw", "crontab"];
-const TTY_BARE: &[&str] = &["python", "python3", "ipython", "bpython", "ptpython", "node", "deno", "bun", "irb", "pry", "ghci", "lua", "luajit", "R", "julia", "sqlite3", "psql", "mysql", "mariadb", "redis-cli", "mongosh", "bash", "zsh", "fish", "sh", "dash", "ksh", "nu", "xonsh", "pwsh", "elvish", "tessh", "gdb", "lldb", "bc", "sftp", "ftp", "telnet", "guile", "racket", "sbcl", "clj", "clojure", "ssh", "mosh", "docker", "podman", "kubectl"];
-
-pub fn needs_tty(words: &[String]) -> bool {
-    tty_need(words) > 0
-}
-
-/// 0: no terminal needed; 1: a REPL or login (what it prints is worth
-/// keeping); 2: a full-screen program (an editor, a pager, …).
-pub fn tty_need(words: &[String]) -> u8 {
-    let mut w = words;
-    // (sudo vim, env X=1 less, …: the program after.)
-    while let Some(first) = w.first() {
-        let base = first.rsplit('/').next().unwrap_or(first);
-        if ["sudo", "doas", "nice", "time", "nohup", "env", "command", "exec"].contains(&base) {
-            w = &w[1..];
-            while w.first().is_some_and(|x| x.starts_with('-') || (base == "env" && x.contains('='))) {
-                w = &w[1..];
-            }
-        } else {
-            break;
-        }
-    }
-    let Some(first) = w.first() else { return 0 };
-    let base = first.rsplit('/').next().unwrap_or(first);
-    let extra = std::env::var("TESSH_TTY").unwrap_or_default();
-    if TTY_ALWAYS.contains(&base) || extra.split_whitespace().any(|x| x == base) {
-        return 2;
-    }
-    let args: Vec<&String> = w[1..].iter().filter(|a| !a.starts_with('-')).collect();
-    let bare = match base {
-        // (ssh host: a login; ssh host cmd runs cmd. docker run -it …: a terminal asked for.)
-        "ssh" | "mosh" => {
-            let mut n = 0;
-            let mut it = w[1..].iter();
-            while let Some(a) = it.next() {
-                if a.len() == 2 && a.starts_with('-') && "bcDEeFIiJLlmOoPpQRSWw".contains(&a[1..]) {
-                    it.next();
-                } else if !a.starts_with('-') {
-                    n += 1;
-                }
-            }
-            n <= 1
-        }
-        "docker" | "podman" | "kubectl" => w[1..].iter().any(|a| a == "-it" || a == "-ti" || a == "--tty" || a == "-t"),
-        _ => TTY_BARE.contains(&base) && args.is_empty(),
-    };
-    u8::from(bare)
-}
-
 /// A word for a POSIX shell (and fish): quoted unless plain.
 fn sh_quote(s: &str) -> String {
     if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+,".contains(c)) {
@@ -734,13 +683,27 @@ fn sh_quote(s: &str) -> String {
 /// Run a chain of programs connected by pipes.
 fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: bool, bg: bool) -> PyResult<Py<PyAny>> {
     flush_python(py);
-    // (No terminal here, and one of them needs it: run them in the one there is.)
+    // (No terminal here: programs whose output is shown run in the one there
+    // is, so whichever is a terminal app gets it.)
     if let Some(hook) = TTY_HOOK.get() {
-        if !capture && !bg && data.is_none() && cmds.iter().all(|c| c.redirs.is_empty()) && cmds.iter().any(|c| needs_tty(&c.words)) {
-            let line = cmds.iter().map(|c| c.words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join(" | ");
+        if !capture && !bg && data.is_none() && cmds.iter().all(|c| c.redirs.is_empty()) {
+            // (Variables set or unset here since: given to each program.)
+            let mut envs: Vec<String> = vec![];
+            if let Some(base) = HOOK_ENV.get() {
+                let now: std::collections::HashMap<String, String> = std::env::vars().collect();
+                let mut set: Vec<_> = now.iter().filter(|(k, v)| base.get(*k) != Some(*v)).collect();
+                set.sort();
+                for k in base.keys().filter(|k| !now.contains_key(*k)) {
+                    envs.push(format!("-u {}", sh_quote(k)));
+                }
+                for (k, v) in set {
+                    envs.push(sh_quote(&format!("{k}={v}")));
+                }
+            }
+            let pre = if envs.is_empty() { String::new() } else { format!("env {} ", envs.join(" ")) };
+            let line = cmds.iter().map(|c| pre.clone() + &c.words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join(" | ");
             let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-            let keep = cmds.iter().all(|c| tty_need(&c.words) < 2);
-            if let Some(code) = hook(py, &line, &cwd, keep)? {
+            if let Some(code) = hook(py, &line, &cwd)? {
                 STATUS.store(code, Ordering::SeqCst);
                 return output(py, "", code, true);
             }

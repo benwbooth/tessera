@@ -310,7 +310,7 @@ fn kernel_input(py: Python<'_>, prompt: &str) -> PyResult<String> {
 /// A program that needs a terminal, run in the notebook's: an input request
 /// carrying `tessera_tty` {command, cwd}; the reply is its exit status. None
 /// when this cell can't ask (no stdin).
-fn kernel_tty(py: Python<'_>, command: &str, cwd: &str, keep: bool) -> PyResult<Option<i32>> {
+fn kernel_tty(py: Python<'_>, command: &str, cwd: &str) -> PyResult<Option<i32>> {
     if !STDIN.allowed.load(Ordering::SeqCst) {
         return Ok(None);
     }
@@ -318,7 +318,7 @@ fn kernel_tty(py: Python<'_>, command: &str, cwd: &str, keep: bool) -> PyResult<
     let parent = PARENT.lock().unwrap().clone();
     let ids = STDIN.ids.lock().unwrap().clone();
     if let Some(tx) = STDIN.req.lock().unwrap().as_ref() {
-        let _ = tx.send((ids, parent, json!({"prompt": "", "password": false, "tessera_tty": {"command": command, "cwd": cwd, "keep": keep}})));
+        let _ = tx.send((ids, parent, json!({"prompt": "", "password": false, "tessera_tty": {"command": command, "cwd": cwd}})));
     }
     loop {
         let got = py.detach(|| STDIN.reply.lock().unwrap().as_ref().map(|rx| rx.recv_timeout(std::time::Duration::from_millis(50))));
@@ -581,6 +581,8 @@ pub fn run(conn_file: &str) -> i32 {
             std::env::set_var("MPLBACKEND", "Agg");
             runtime::setenv(py, "MPLBACKEND", Some("Agg"))?;
         }
+        // (What differs from this when a program runs is passed to it.)
+        let _ = runtime::HOOK_ENV.set(std::env::vars().collect());
         loop {
             let job = match py.detach(|| jobs_rx.lock().unwrap().recv()) {
                 Ok(j) => j,
