@@ -77,6 +77,19 @@ pub fn inject(cmd: &mut portable_pty::CommandBuilder) {
     let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
     cmd.env("XDG_DATA_DIRS", format!("{}:{data}", base.display()));
     cmd.env("TESSERA_FISH_DATA_DIR", base.display().to_string());
+    // bash has no startup folder to add to: its first prompt loads the
+    // integration (an exported function in PROMPT_COMMAND, removed as it
+    // runs, not passed on), so a login bash stays one, profile and all (and
+    // a profile that execs zsh still does). An rc that replaces
+    // PROMPT_COMMAND outright goes without.
+    cmd.env("PROMPT_COMMAND", "__tessera_boot");
+    cmd.env(
+        "BASH_FUNC___tessera_boot%%",
+        format!(
+            "() {{ unset -f __tessera_boot; PROMPT_COMMAND=\"${{PROMPT_COMMAND//__tessera_boot/}}\"; PROMPT_COMMAND=\"${{PROMPT_COMMAND#; }}\"; export -n PROMPT_COMMAND; [[ $- == *i* ]] && . {} && __tessera_prompt; }}",
+            shell_words::quote(&base.join("bash/tessera.bash").display().to_string())
+        ),
+    );
 }
 
 const ZSHENV: &str = r#"# Tessera: put ZDOTDIR back, run the user's .zshenv, then load the

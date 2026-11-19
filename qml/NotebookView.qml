@@ -2085,6 +2085,9 @@ FocusScope {
         }
     }
     // ---- ls and cd: the folder, to browse (FileBrowser.qml) ----
+    // A path in the pane's shell's world: on another host, "ssh://<host>/...",
+    // which the controller reads there.
+    function onHost(p) { return sshHost === "" || p.startsWith("ssh://") ? p : "ssh://" + encodeURIComponent(sshHost) + p }
     function localPath(p) { let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x }
     function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
     Component {
@@ -2102,14 +2105,14 @@ FocusScope {
             flagAll: !isCd && args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all")
             flagLong: !isCd && (args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test(words[0]))
             startDir: {
-                const base = nb.localPath(src.cwd)
-                const home = nb.controller ? nb.controller.homeDir() : "~"
+                const base = nb.localPath(src.cwd) || nb.shellDir
+                const home = nb.controller ? (nb.sshHost !== "" ? nb.controller.hostHome(nb.sshHost) : nb.controller.homeDir()) : "~"
                 const a = args.find(x => !x.startsWith("-"))
                 // (cd: where it went. With no folder, home; "cd -" and z: wherever the shell is now.)
-                if (isCd && (!a || a === "-" || words[0] === "z" || words[0] === "zi")) return a || words[0] !== "cd" ? nb.shellDir : home
-                if (!a) return base
+                if (isCd && (!a || a === "-" || words[0] === "z" || words[0] === "zi")) return nb.onHost(a || words[0] !== "cd" ? nb.shellDir : home)
+                if (!a) return nb.onHost(base)
                 const p = a.replace(/^['"]|['"]$/g, "").replace(/^~(?=\/|$)/, home)
-                return p.startsWith("/") ? p : base + "/" + p
+                return nb.onHost(p.startsWith("/") ? p : base + "/" + p)
             }
             refresh: src.tick ? src.tick.length : 0
             kept: nb.fileViews[src.cid] || null

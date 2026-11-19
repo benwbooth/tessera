@@ -24,6 +24,7 @@ mod cells;
 mod client;
 mod complete;
 mod daemon;
+mod files;
 mod find;
 mod grammars;
 mod history;
@@ -44,6 +45,7 @@ mod shellk;
 mod snapshot;
 mod snippets;
 mod syntax;
+mod tables;
 
 fn main() {
     #[cfg(windows)]

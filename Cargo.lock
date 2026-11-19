@@ -1486,6 +1486,7 @@ version = "0.2.2"
 dependencies = [
  "anyhow",
  "base64",
+ "csv",
  "hmac",
  "image",
  "libc",
@@ -1496,6 +1497,7 @@ dependencies = [
  "portable-pty",
  "pulldown-cmark",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

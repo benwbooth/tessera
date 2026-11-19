@@ -307,6 +307,33 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             let names: Vec<String> = serde_json::from_value(p["names"].clone()).unwrap_or_default();
             crate::prompt_widgets::modules(&names, &s("cwd"), p["status"].as_i64().unwrap_or(0) as i32, n("duration"), pid())
         }
+        // ---- files on this host (a remote pane's browser, viewer, tables) ----
+        "files" => {
+            let path = s("path");
+            let out = match s("op").as_str() {
+                "list" => crate::files::list(&path, p["all"].as_bool().unwrap_or(false)),
+                "action" => crate::files::action(&s("action"), &path, &s("arg")),
+                "read_for_edit" => crate::files::read_for_edit(&path),
+                "save_edited" => crate::files::save_edited(&path, &s("text"), p["crlf"].as_bool().unwrap_or(false)),
+                "read_text" => crate::files::read_text(&path),
+                "write_text" => crate::files::write_text(&path, &s("text")),
+                "line_index" => crate::files::line_index(&path),
+                "read_lines" => crate::files::read_lines(&path, n("start") as usize, n("count") as usize),
+                "table_open" => crate::tables::open(&path),
+                "table_query" => crate::tables::query(&path, &s("spec")),
+                "table_edit_cell" => crate::tables::edit_cell(&path, p["row"].as_i64().unwrap_or(0), &s("column"), &s("value")),
+                "table_add_row" => crate::tables::add_row(&path),
+                "table_delete_rows" => crate::tables::delete_rows(&path, &s("rows")),
+                "table_exec" => crate::tables::exec(&path, &s("sql")),
+                "table_save" => crate::tables::save(&path, &s("dest")),
+                "table_close" => {
+                    crate::tables::close(&path);
+                    String::new()
+                }
+                o => return Err(format!("tesserad: no file request {o:?}")),
+            };
+            Value::String(out)
+        }
         // ---- running code and Nix commands ----
         "snippet.command" => json!(crate::snippets::command(&s("lang"), &s("code"), &s("cwd"), &s("shell"))),
         "nix.lookup" => {

@@ -63,7 +63,10 @@ Item {
     }
     function goBack() { if (!back.length) return; forward = [dir].concat(forward); dir = back[back.length - 1]; back = back.slice(0, -1) }
     function goForward() { if (!forward.length) return; back = back.concat([dir]); dir = forward[0]; forward = forward.slice(1) }
-    function up() { const p = dir.replace(/\/[^/]+\/?$/, ""); go(p === "" ? "/" : p) }
+    // (Another host's folder: "ssh://<host>/<path>", its files read there.)
+    readonly property string hostPrefix: (dir.match(/^ssh:\/\/[^/]*/) || [""])[0]
+    readonly property string bareDir: dir.substring(hostPrefix.length) || "/"
+    function up() { const p = bareDir.replace(/\/[^/]+\/?$/, ""); go(hostPrefix + (p === "" ? "/" : p)) }
     onStartDirChanged: { dir = startDir; back = []; forward = [] }
 
     readonly property var raw: { refresh; if (!controller || dir === "") return []; try { return JSON.parse(controller.listDir(dir, showHidden)) } catch (e) { return [] } }
@@ -222,7 +225,14 @@ Item {
         NavButton { text: "↑"; on: fb.dir !== "/"; onClicked: fb.up() }
         Repeater {
             // Each folder of the path, to go back up to.
-            model: { const parts = fb.dir.split("/").filter(p => p !== ""); const out = [{ name: "/", path: "/" }]; let acc = ""; for (const p of parts) { acc += "/" + p; out.push({ name: p, path: acc }) } return out }
+            model: {
+                const parts = fb.bareDir.split("/").filter(p => p !== "")
+                const host = fb.hostPrefix !== "" ? decodeURIComponent(fb.hostPrefix.substring(6)) + ":/" : "/"
+                const out = [{ name: host, path: fb.hostPrefix + "/" }]
+                let acc = ""
+                for (const p of parts) { acc += "/" + p; out.push({ name: p, path: fb.hostPrefix + acc }) }
+                return out
+            }
             delegate: Text {
                 required property var modelData
                 required property int index

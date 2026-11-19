@@ -483,6 +483,9 @@ pub mod ffi {
         fn notebook_read(self: &Controller, host: &QString, session: &QString) -> QString;
         #[qinvokable]
         fn notebook_write(self: &Controller, host: &QString, session: &QString, text: &QString) -> QString;
+        /// `host`'s home folder (its tesserad's HOME), for paths there.
+        #[qinvokable]
+        fn host_home(self: &Controller, host: &QString) -> QString;
         /// The last error setting up the SSH connection to `host` ("" if none).
         #[qinvokable]
         fn host_error(self: &Controller, host: &QString) -> QString;
@@ -783,11 +786,12 @@ impl ffi::Controller {
     }
 
     fn list_dir(&self, path: &ffi::QString, all: bool) -> ffi::QString {
-        qs(&crate::files::list(&local_path(path), all))
+        on_host(path, "list", serde_json::json!({"all": all}), |p| crate::files::list(p, all))
     }
 
     fn file_action(&self, op: &ffi::QString, path: &ffi::QString, arg: &ffi::QString) -> ffi::QString {
-        qs(&crate::files::action(&op.to_string(), &local_path(path), &arg.to_string()))
+        let (op, arg) = (op.to_string(), arg.to_string());
+        on_host(path, "action", serde_json::json!({"action": op, "arg": arg}), |p| crate::files::action(&op, p, &arg))
     }
 
     fn home_dir(&self) -> ffi::QString {
@@ -940,6 +944,11 @@ impl ffi::Controller {
         })
     }
 
+    fn host_home(&self, host: &ffi::QString) -> ffi::QString {
+        let r = crate::client::rpc_within(&host.to_string(), "host.info", serde_json::json!({}), std::time::Duration::from_secs(5));
+        qs(r.ok().as_ref().and_then(|v| v["home"].as_str()).unwrap_or("/"))
+    }
+
     fn host_error(&self, host: &ffi::QString) -> ffi::QString {
         qs(&crate::remote::last_error(&host.to_string()))
     }
@@ -1022,83 +1031,72 @@ impl ffi::Controller {
     }
 
     fn file_read_for_edit(&self, path: &ffi::QString) -> ffi::QString {
-        qs(&crate::files::read_for_edit(&local_path(path)))
+        on_host(path, "read_for_edit", serde_json::json!({}), |p| crate::files::read_for_edit(p))
     }
 
     fn file_save_edited(&self, path: &ffi::QString, text: &ffi::QString, crlf: bool) -> ffi::QString {
-        qs(&crate::files::save_edited(&local_path(path), &text.to_string(), crlf))
+        let text = text.to_string();
+        on_host(path, "save_edited", serde_json::json!({"text": text, "crlf": crlf}), |p| crate::files::save_edited(p, &text, crlf))
     }
 
     fn table_open(&self, path: &ffi::QString) -> ffi::QString {
-        qs(&crate::tables::open(&local_path(path)))
+        on_host(path, "table_open", serde_json::json!({}), |p| crate::tables::open(p))
     }
 
     fn table_query(&self, path: &ffi::QString, spec: &ffi::QString) -> ffi::QString {
-        qs(&crate::tables::query(&local_path(path), &spec.to_string()))
+        let spec = spec.to_string();
+        on_host(path, "table_query", serde_json::json!({"spec": spec}), |p| crate::tables::query(p, &spec))
     }
 
     fn table_edit_cell(&self, path: &ffi::QString, row: i64, column: &ffi::QString, value: &ffi::QString) -> ffi::QString {
-        qs(&crate::tables::edit_cell(&local_path(path), row, &column.to_string(), &value.to_string()))
+        let (column, value) = (column.to_string(), value.to_string());
+        on_host(path, "table_edit_cell", serde_json::json!({"row": row, "column": column, "value": value}), |p| crate::tables::edit_cell(p, row, &column, &value))
     }
 
     fn table_add_row(&self, path: &ffi::QString) -> ffi::QString {
-        qs(&crate::tables::add_row(&local_path(path)))
+        on_host(path, "table_add_row", serde_json::json!({}), |p| crate::tables::add_row(p))
     }
 
     fn table_delete_rows(&self, path: &ffi::QString, rows: &ffi::QString) -> ffi::QString {
-        qs(&crate::tables::delete_rows(&local_path(path), &rows.to_string()))
+        let rows = rows.to_string();
+        on_host(path, "table_delete_rows", serde_json::json!({"rows": rows}), |p| crate::tables::delete_rows(p, &rows))
     }
 
     fn table_exec(&self, path: &ffi::QString, sql: &ffi::QString) -> ffi::QString {
-        qs(&crate::tables::exec(&local_path(path), &sql.to_string()))
+        let sql = sql.to_string();
+        on_host(path, "table_exec", serde_json::json!({"sql": sql}), |p| crate::tables::exec(p, &sql))
     }
 
     fn table_save(&self, path: &ffi::QString, dest: &ffi::QString) -> ffi::QString {
-        let d = dest.to_string();
-        qs(&crate::tables::save(&local_path(path), if d.is_empty() { "" } else { &d }))
+        // (Saved where the table is: a destination on its host.)
+        let d = host_path(&dest.to_string()).1;
+        let d = if dest.to_string().is_empty() { String::new() } else { d };
+        on_host(path, "table_save", serde_json::json!({"dest": d}), |p| crate::tables::save(p, &d))
     }
 
     fn table_close(&self, path: &ffi::QString) {
-        crate::tables::close(&local_path(path))
+        let _ = on_host(path, "table_close", serde_json::json!({}), |p| {
+            crate::tables::close(p);
+            String::new()
+        });
     }
 
     fn file_line_index(&self, path: &ffi::QString) -> ffi::QString {
-        qs(&crate::files::line_index(&local_path(path)))
+        on_host(path, "line_index", serde_json::json!({}), |p| crate::files::line_index(p))
     }
 
     fn file_lines(&self, path: &ffi::QString, start: i32, count: i32) -> ffi::QString {
-        qs(&crate::files::read_lines(&local_path(path), start.max(0) as usize, count.max(0) as usize))
+        let (start, count) = (start.max(0) as usize, count.max(0) as usize);
+        on_host(path, "read_lines", serde_json::json!({"start": start, "count": count}), |p| crate::files::read_lines(p, start, count))
     }
 
     fn read_text_file(&self, path: &ffi::QString) -> ffi::QString {
-        // (The first 3 MB of a big one, said so: the viewer streams the rest.)
-        use std::io::Read;
-        const MAX: u64 = 3_000_000;
-        let v = match std::fs::File::open(local_path(path)) {
-            Ok(f) => {
-                let mut buf = Vec::new();
-                let _ = f.take(MAX + 1).read_to_end(&mut buf);
-                let cut = buf.len() as u64 > MAX;
-                buf.truncate(MAX as usize);
-                serde_json::json!({"text": String::from_utf8_lossy(&buf), "truncated": cut})
-            }
-            Err(e) => serde_json::json!({"error": e.to_string()}),
-        };
-        qs(&v.to_string())
+        on_host(path, "read_text", serde_json::json!({}), |p| crate::files::read_text(p))
     }
 
     fn write_text_file(&self, path: &ffi::QString, text: &ffi::QString) -> ffi::QString {
-        let p = std::path::PathBuf::from(local_path(path));
-        // (Tessera's own files make their folder; a user's file needs it there.)
-        if p.starts_with(crate::settings::state_dir()) {
-            if let Some(d) = p.parent() {
-                let _ = std::fs::create_dir_all(d);
-            }
-        }
-        let mut tmp = p.clone().into_os_string();
-        tmp.push(".tmp");
-        let r = std::fs::write(&tmp, text.to_string()).and_then(|_| std::fs::rename(&tmp, &p));
-        qs(&r.err().map(|e| e.to_string()).unwrap_or_default())
+        let text = text.to_string();
+        on_host(path, "write_text", serde_json::json!({"text": text}), |p| crate::files::write_text(p, &text))
     }
 
     fn ansi_html(&self, text: &ffi::QString) -> ffi::QString {
@@ -1659,6 +1657,55 @@ fn ensure_kernel_events(c: &Pin<&mut ffi::Controller>) {
             let _ = qt.queue(move |c| c.jupyter_event(qs(&k), qs(&j)));
         }));
     });
+}
+
+/// As JavaScript's encodeURIComponent (an SSH host in an ssh:// path).
+fn percent_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// A path the window has: "ssh://<host, URL-encoded>/<path>" for a file on
+/// another host (a remote pane's), else a plain path or file:// URL here.
+/// (host, path), "" host for this computer.
+fn host_path(s: &str) -> (String, String) {
+    if let Some(rest) = s.strip_prefix("ssh://") {
+        let (h, p) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+        return (percent_decode(h), if p.is_empty() { "/".to_string() } else { p.to_string() });
+    }
+    (String::new(), local_path(&qs(s)))
+}
+
+/// A file request: here (`local`), or by the file's host's tesserad (rpc.rs
+/// "files"), which runs the same function there. A few seconds at most over
+/// SSH (it's the window's thread).
+fn on_host(path: &ffi::QString, op: &str, mut params: serde_json::Value, local: impl FnOnce(&str) -> String) -> ffi::QString {
+    let (host, p) = host_path(&path.to_string());
+    if host.is_empty() {
+        return qs(&local(&p));
+    }
+    params["op"] = serde_json::Value::String(op.to_string());
+    params["path"] = serde_json::Value::String(p);
+    match crate::client::rpc_within(&host, "files", params, std::time::Duration::from_secs(10)) {
+        // (A listing's paths are the host's: they stay on it.)
+        Ok(serde_json::Value::String(s)) if op == "list" => {
+            let prefix = format!("ssh://{}", percent_encode(&host));
+            let mut v: serde_json::Value = serde_json::from_str(&s).unwrap_or_default();
+            for e in v.as_array_mut().into_iter().flatten() {
+                if let Some(p) = e["path"].as_str().map(String::from) {
+                    e["path"] = serde_json::Value::String(format!("{prefix}{p}"));
+                }
+            }
+            qs(&v.to_string())
+        }
+        Ok(serde_json::Value::String(s)) => qs(&s),
+        Ok(v) => qs(&v.to_string()),
+        Err(e) => qs(&serde_json::json!({"error": e}).to_string()),
+    }
 }
 
 fn local_path(s: &ffi::QString) -> String {

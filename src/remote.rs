@@ -53,6 +53,8 @@ pub fn connect_ready(host: &str) -> std::io::Result<UnixStream> {
     UnixStream::connect(paths(host).0).map_err(|e| std::io::Error::new(e.kind(), format!("not connected to {host} yet ({e})")))
 }
 
+static CHECKED: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
+
 /// One setup per host at a time (two panes opening together share it).
 fn lock(host: &str) -> std::sync::Arc<Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>>> = OnceLock::new();
@@ -78,14 +80,18 @@ fn fail(host: &str, msg: String) -> std::io::Error {
 /// (and tesserad started or deployed there) when it isn't yet.
 pub fn connect(host: &str) -> std::io::Result<UnixStream> {
     let (local, ctl) = paths(host);
-    if answers(&local) {
+    // (Once per run the whole way, though it answers: tesserad there is
+    // brought up to this build's.)
+    let checked = |h: &str| CHECKED.lock().unwrap().contains(h);
+    if checked(host) && answers(&local) {
         return UnixStream::connect(&local);
     }
     let l = lock(host);
     let _g = l.lock().unwrap();
-    if answers(&local) {
+    if checked(host) && answers(&local) {
         return UnixStream::connect(&local);
     }
+    CHECKED.lock().unwrap().insert(host.to_string());
     setup(host, &local, &ctl)?;
     errors().lock().unwrap().remove(host);
     UnixStream::connect(&local)
@@ -166,12 +172,12 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
         });
     }
     // 2. tesserad there: started (it prints its socket), else deployed.
-    let remote_sock = match start_remote(ctl, host)? {
-        Started::Socket(s) => s,
+    let (remote_sock, which) = match start_remote(ctl, host)? {
+        Started::Socket(s, w) => (s, w),
         Started::Missing { os, arch } => {
             deploy(ctl, host, &os, &arch)?;
             match start_remote(ctl, host)? {
-                Started::Socket(s) => s,
+                Started::Socket(s, w) => (s, w),
                 Started::Missing { .. } => return Err(fail(host, format!("tesserad was copied to {host} but still can't be run there"))),
             }
         }
@@ -204,11 +210,21 @@ fn setup(host: &str, local: &Path, ctl: &Path) -> std::io::Result<()> {
     while !local.exists() && start.elapsed() < Duration::from_secs(5) {
         std::thread::sleep(Duration::from_millis(20));
     }
+    // 4. A tesserad Tessera put there that isn't this build's: the new one
+    // copied over and swapped in (in place: its shells carry on; with
+    // kernels running, once they're done).
+    if let Some((path, sum, os, arch)) = which {
+        if let Err(e) = update(ctl, host, local, &path, &sum, &os, &arch) {
+            eprintln!("tessera: {host}: tesserad not updated: {e}");
+        }
+    }
     Ok(())
 }
 
 enum Started {
-    Socket(String),
+    /// Its socket, and which tesserad runs it: (path, `cksum` "crc size",
+    /// os, arch).
+    Socket(String, Option<(String, String, String, String)>),
     Missing { os: String, arch: String },
 }
 
@@ -217,7 +233,7 @@ enum Started {
 /// `uname -sm` when there's none.
 fn start_script() -> String {
     format!(
-        r#"T=$(command -v tesserad 2>/dev/null); for d in "$HOME/.local/bin" "$HOME"; do [ -z "$T" ] && [ -x "$d/tesserad" ] && T="$d/tesserad"; done; if [ -z "$T" ]; then uname -sm; exit 127; fi; S="{REMOTE_SOCKET}"; mkdir -p "$(dirname "$S")" && chmod 700 "$(dirname "$S")"; TESSERA_REMOTE=1 exec "$T" start --socket "$S""#
+        r#"T=$(command -v tesserad 2>/dev/null); for d in "$HOME/.local/bin" "$HOME"; do [ -z "$T" ] && [ -x "$d/tesserad" ] && T="$d/tesserad"; done; if [ -z "$T" ]; then uname -sm; exit 127; fi; echo "TESSERAD $T $(cksum < "$T") $(uname -sm)"; S="{REMOTE_SOCKET}"; mkdir -p "$(dirname "$S")" && chmod 700 "$(dirname "$S")"; TESSERA_REMOTE=1 exec "$T" start --socket "$S""#
     )
 }
 
@@ -226,13 +242,66 @@ fn start_remote(ctl: &Path, host: &str) -> std::io::Result<Started> {
     let out = ssh(ctl, host).arg("--").arg(format!("{}sh -c {}", remote_env(), shell_words::quote(&start_script()))).output()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     match out.status.code() {
-        Some(0) if !text.is_empty() => Ok(Started::Socket(text.lines().last().unwrap_or("").to_string())),
+        Some(0) if !text.is_empty() => {
+            let which = text.lines().find_map(|l| {
+                let w: Vec<&str> = l.strip_prefix("TESSERAD ")?.split_whitespace().collect();
+                (w.len() >= 5).then(|| (w[0].to_string(), format!("{} {}", w[1], w[2]), w[3].to_string(), w[4].to_string()))
+            });
+            Ok(Started::Socket(text.lines().last().unwrap_or("").to_string(), which))
+        }
         Some(127) => {
             let mut it = text.split_whitespace();
             Ok(Started::Missing { os: it.next().unwrap_or("").to_string(), arch: it.next().unwrap_or("").to_string() })
         }
         _ => Err(fail(host, format!("Couldn't start tesserad on {host}: {}", String::from_utf8_lossy(&out.stderr).trim()))),
     }
+}
+
+/// `cksum`'s "crc size" for a file here.
+fn local_cksum(p: &Path) -> Option<String> {
+    let f = std::fs::File::open(p).ok()?;
+    let out = Command::new("cksum").stdin(f).output().ok()?;
+    let t = String::from_utf8_lossy(&out.stdout);
+    let w: Vec<&str> = t.split_whitespace().collect();
+    (w.len() >= 2).then(|| format!("{} {}", w[0], w[1]))
+}
+
+fn update(ctl: &Path, host: &str, local: &Path, path: &str, sum: &str, os: &str, arch: &str) -> std::io::Result<()> {
+    use crate::proto::*;
+    let Some(bin) = static_build(arch) else { return Ok(()) };
+    if local_cksum(&bin).as_deref() == Some(sum) {
+        return Ok(());
+    }
+    // (Only one Tessera copied there itself: not a tesserad installed another way.)
+    let dir = deploy_dir(ctl, host)?;
+    if path != format!("{dir}/tesserad") {
+        return Ok(());
+    }
+    deploy(ctl, host, os, arch)?;
+    let mut s = UnixStream::connect(local)?;
+    let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+    write_json(&mut s, T_UPGRADE, &serde_json::json!({"exe": path}))?;
+    let _ = read_frame(&mut s);
+    // (The new build answers on the same socket once it has taken over.)
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(10) && !answers(local) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+/// Where Tessera puts tesserad on `host`: ~/.local/bin, or ~ when that
+/// can't be written.
+fn deploy_dir(ctl: &Path, host: &str) -> std::io::Result<String> {
+    let out = ssh(ctl, host)
+        .arg("--")
+        .arg(format!(r#"{}sh -c 'mkdir -p "$HOME/.local/bin" 2>/dev/null; if [ -w "$HOME/.local/bin" ]; then echo "$HOME/.local/bin"; else echo "$HOME"; fi'"#, remote_env()))
+        .output()?;
+    let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if dir.is_empty() {
+        return Err(fail(host, format!("Couldn't find a folder for tesserad on {host}")));
+    }
+    Ok(dir)
 }
 
 /// Copy a static tesserad for `arch` to the host: ~/.local/bin, or ~.
@@ -243,14 +312,7 @@ fn deploy(ctl: &Path, host: &str, os: &str, arch: &str) -> std::io::Result<()> {
     let Some(bin) = static_build(arch) else {
         return Err(fail(host, format!("{host} has no tesserad, and there's no static build of it for {arch} here to copy (set TESSERA_TESSERAD_STATIC to one).")));
     };
-    let dir_out = ssh(ctl, host)
-        .arg("--")
-        .arg(format!(r#"{}sh -c 'mkdir -p "$HOME/.local/bin" 2>/dev/null; if [ -w "$HOME/.local/bin" ]; then echo "$HOME/.local/bin"; else echo "$HOME"; fi'"#, remote_env()))
-        .output()?;
-    let dir = String::from_utf8_lossy(&dir_out.stdout).trim().to_string();
-    if dir.is_empty() {
-        return Err(fail(host, format!("Couldn't find a folder for tesserad on {host}")));
-    }
+    let dir = deploy_dir(ctl, host)?;
     let tmp = format!("{dir}/.tesserad.{}", std::process::id());
     let mut scp = Command::new("scp");
     scp.args(["-q", "-o", "ControlMaster=no", "-o"]).arg(format!("ControlPath={}", ctl.display()));

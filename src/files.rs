@@ -502,3 +502,36 @@ mod tests {
     }
 
 }
+
+/// A text file: {"text"} (the first 3 MB of a big one, "truncated" said so:
+/// the viewer streams the rest) or {"error"}.
+pub fn read_text(path: &str) -> String {
+        // (The first 3 MB of a big one, said so: the viewer streams the rest.)
+        use std::io::Read;
+        const MAX: u64 = 3_000_000;
+        let v = match std::fs::File::open(path) {
+            Ok(f) => {
+                let mut buf = Vec::new();
+                let _ = f.take(MAX + 1).read_to_end(&mut buf);
+                let cut = buf.len() as u64 > MAX;
+                buf.truncate(MAX as usize);
+                serde_json::json!({"text": String::from_utf8_lossy(&buf), "truncated": cut})
+            }
+            Err(e) => serde_json::json!({"error": e.to_string()}),
+        };
+    v.to_string()
+}
+
+/// Write a text file atomically: "" or what went wrong. (Tessera's own
+/// files make their folder; a user's file needs it there.)
+pub fn write_text(path: &str, text: &str) -> String {
+    let p = std::path::PathBuf::from(path);
+    if p.starts_with(crate::settings::state_dir()) {
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+    }
+    let mut tmp = p.clone().into_os_string();
+    tmp.push(".tmp");
+    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &p)).err().map(|e| e.to_string()).unwrap_or_default()
+}
