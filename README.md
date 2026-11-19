@@ -26,7 +26,7 @@ an SSH host.
 - **Native text.** Rows are painted with QPainter (FreeType, glyphs on exact cells) only when they change, then composited as GPU textures. Box drawing and block characters are drawn as shapes, so lines join at any line height; Powerline and Nerd Font symbols keep their colors.
 - **Shells that outlive the window.** `tesserad`, a small backend in the spirit of tmux's server, owns the shells, the notebook kernels, each pane's notebook cells, and Nix runs. Close the window, update, or crash, and the next launch reattaches every shell and notebook — splits, scrollback, screen, running kernels and what they printed meanwhile. After a reboot, tabs come back in their folders under their last screen.
 - **SSH hosts, the same way.** Pick a host from the + menu: its shells and notebook kernels run there, in that host's `tesserad`, reached through one shared SSH connection. A host without `tesserad` gets a static build of it copied over (to `~/.local/bin`, or `~`). Reconnecting attaches to what's still running there. Features that need Nix say how to install it when the host has none.
-- **Shell integration without setup.** zsh and fish load it automatically: command marks, jump between prompts, select a command's output, new tabs in the same folder, and prompts that redraw cleanly when the window or text size changes.
+- **Shell integration without setup.** Every shell Tessera starts loads it automatically (zsh, bash, fish, nushell, xonsh, PowerShell), with no startup file edited: command marks, jump between prompts, select a command's output, new tabs in the same folder, and prompts that redraw cleanly when the window or text size changes.
 - **A modern window.** The tab bar is the title bar, with KDE-style buttons on the right. Tabs drag to reorder, out to a new window, or into another window, shells and all. A split **+** button opens profiles, other shells and SSH hosts from `~/.ssh/config`.
 - **285 color schemes** built in (the permissively licensed part of [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes)), searchable, with separate light and dark themes that follow the desktop. One click fetches the rest of the collection; `.itermcolors` files import.
 - **An editor for commands.** At the prompt, an editor under the terminal: Enter runs, a tap of right Shift adds a line (no need for Shift+Enter), a tap of left Shift takes the grey suggestion from history or the AI; tree-sitter highlighting, your shell's own syntax check (`zsh -n`, `bash -n`, `fish -n`; the chip names your shell) and language-server diagnostics, Emacs/vi/VS Code keys, a dropdown of commands, options and arguments with their man-page and tldr help (aliases followed: `ls` → `lsd`), merged shell history (↑/↓ line by line, PgUp/PgDn a whole entry at a time), and a prompt bar running your Starship. `# what you want` is finished in grey as you type, then becomes a command.
@@ -36,8 +36,9 @@ an SSH host.
 - **ls, cd and env, by mouse.** In the notebook, an `ls` card (lsd, eza, aliases) is a file browser that reads like `ls` output: list, tiles (with thumbnails) or details (`ls -l` columns, colored), sorted as you choose, each card keeping its own view (and the last one becoming the default). A click goes into a folder or opens a file; back, forward and up; a right click has Dolphin's menu (View, Open with its app, cd, insert or copy the path, copy/cut/paste, rename, duplicate, trash, show in the file manager, properties). Files drag out to other apps and in from them (dropped on the editor, their paths are typed). `cd` shows the folder it went to. An `env` card is the shell's variables to edit: a new value exports it, × unsets it. `cd ` completes from frecent folders (zoxide and your history), folders below and `CDPATH`, fuzzily; `ls `, `export ` and `unset ` open their dropdown at once.
 - **View any file.** Right click > View in a listing, or on a path in the terminal, shows it over the pane: pictures fitted (click for actual size), Markdown, JSON, tables, HTML and SVG formatted, code highlighted.
 - **AI, local or cloud.** Ollama, llama.cpp, LM Studio and other OpenAI-compatible servers, or Claude, OpenAI/Codex, Gemini, OpenRouter, Groq, Mistral, DeepSeek, xAI: grey suggestions as you type, `# describe it` → a command, checks before you run, ✦ Fix for a failed command, and an assistant sidebar that runs the commands it suggests when you click Run and reads their output.
-- **Notebooks.** Ctrl+Shift+J shows a pane as a notebook, and it's a Jupyter notebook too. Each command you run becomes a card with its output in its own resizable pane (Expand fills the window), shown for what it is: Markdown as a page or as terminal-style text, JSON, tables, HTML, pictures. You can also write cells there, Markdown between them, and run them in the pane's own shell or a Jupyter kernel (any installed kernel, or Python fetched by Nix with numpy, pandas and matplotlib), with completion from the kernel and plots, tables and colored tracebacks inline. With a kernel picked, the editor at the bottom writes the next cell. A pane's notebook is kept across restarts; Save as .ipynb makes it a file. `.ipynb` files open the same way (Ctrl+O, or `tessera notes.ipynb`). Alt+drag selects a block of output. Cards fill up from the bottom by the editor, like a terminal, the view follows new ones, output lines use the terminal's font and row height, and Shift+Tab gets back to the editor from anywhere (Markdown and HTML views too).
-- **Pictures and rich output.** Kitty and iTerm2 inline images, `cat photo.png` shows the photo, and JSON, CSV, HTML, Markdown and SVG output opens formatted with one click.
+- **Notebooks.** (More in [Notebook mode](#notebook-mode) below.) Ctrl+Shift+J shows a pane as a notebook, and it's a Jupyter notebook too. Each command you run becomes a card with its output in its own resizable pane (Expand fills the window), shown for what it is: Markdown as a page or as terminal-style text, JSON, tables, HTML, pictures. You can also write cells there, Markdown between them, and run them in the pane's own shell or a Jupyter kernel (any installed kernel, or Python fetched by Nix with numpy, pandas and matplotlib), with completion from the kernel and plots, tables and colored tracebacks inline. With a kernel picked, the editor at the bottom writes the next cell. A pane's notebook is kept across restarts; Save as .ipynb makes it a file. `.ipynb` files open the same way (Ctrl+O, or `tessera notes.ipynb`). Alt+drag selects a block of output. Cards fill up from the bottom by the editor, like a terminal, the view follows new ones, output lines use the terminal's font and row height, and Shift+Tab gets back to the editor from anywhere (Markdown and HTML views too).
+- **Pictures and rich output.** Kitty and iTerm2 inline images (Kitty's Unicode placeholders too, as `mdfried` uses), `cat photo.png` shows the photo, and JSON, CSV, HTML, Markdown and SVG output opens formatted with one click.
+- **Screenshots and recordings.** Session › Screenshot of Pane / of Window saves a PNG to `~/Pictures/Screenshots` and copies it; Record Pane (asciicast) records a pane's output to `~/Videos/Tessera/*.cast`, and offers a GIF (agg) when it stops.
 - **iTerm2's feature set:** profiles, find in scrollback (regex, smart case), triggers, minimum contrast, broadcast input, maximize pane, arrangements, snippets, paste history, badges, cursor guide, transparency, session logging, undo close, a rich right-click menu, and momentum scrolling that speeds up as you keep going.
 
 ![The color scheme gallery in Preferences](docs/screenshots/themes.png)
@@ -58,6 +59,84 @@ The macOS app is signed ad hoc, not notarized (the Homebrew cask clears the
 quarantine flag for you). Windows support is new: new tabs run PowerShell;
 the + menu also has cmd.exe and each WSL distribution, and Shell › New
 Administrator Window opens an elevated window.
+
+## Notebook mode
+
+Ctrl+Shift+J (or the input's **Notebook** chip) turns a pane into a notebook:
+the same shell, its commands shown as cards instead of a scrolling screen.
+Switch back at any time; the shell, its scrollback and the cards are all kept
+(in tesserad, so closing the window loses nothing).
+
+**Cards.** Every command becomes a card: a ✓ or ✘ (hover it for the exit
+code and what it means for that program, read from its man page, or asked of
+the AI when the page doesn't say), the shell or kernel that ran it, the
+command, the full folder it ran in, how long it took and when. Its output is
+shown for what it is: a terminal screen, Markdown (as a page or as styled
+text), JSON, CSV/TSV as a table, HTML, SVG, pictures, diffs, `ls` as a file
+browser, `env` as variables to edit. A card's ⋯ menu moves, hides, reruns or
+deletes it; drag its bottom edge to resize, ⤢ Expand to fill the window.
+Full-screen programs (vim, htop, mdfried) take the whole pane while they
+run, then the notebook comes back. Cards fill up from the bottom by the
+input, like a terminal, and a notebook opens scrolled to its newest.
+
+**Kernels.** The input's language list picks what runs the next command:
+the pane's own shell, another shell (bash, zsh, fish, nushell, xonsh,
+PowerShell, elvish, tcsh: run as a kernel kept alive beside the pane, not a
+nested interactive shell), or any language with a Jupyter kernel (Python, R,
+Julia, Rust, C/C++, Haskell, Ruby and more, fetched with Nix or uv the first
+time; Nix environments are built once and cached). Environment variables and
+the current folder carry over between them both ways, so `export X=1` in
+fish is there in zsh next. Each card remembers what ran it. The notebook
+bar's kernel picker sets the default for written cells, and **Kernels** lists
+the running ones with Restart and Stop.
+
+**Writing cells.** + Code and + Markdown add cells to write and run; Enter
+runs and moves on, Ctrl+Enter runs, Alt+Enter runs and adds one below. The
+kernel's completion, `input()` prompts, plots and tracebacks show in the card.
+Save as .ipynb writes a Jupyter notebook; `.ipynb` files open the same way.
+
+**Files.** Clicking a text file in an `ls` card (or Right click › View) opens
+it in a file card: Tessera's own viewer, with line numbers, syntax
+highlighting (tree-sitter; the type chip picks another language), scroll bars
+and paging, streaming so a file of any size opens at once. In the card:
+
+- **✎ Edit** edits it in place with your Emacs, vi or VS Code keys (the keys
+  chip shows which, and vi's NORMAL/INSERT), block cursor, PgUp/PgDn,
+  Ctrl+S to save. ✓ Save writes it, ✕ Discard drops the changes. Line
+  endings (LF/CRLF) are kept, and can be switched.
+- The ⋯ menu has Save as…, Find and replace (Ctrl+F / Ctrl+H, F3 for the
+  next match), Go to line (Ctrl+G), Undo/Redo, Wrap long lines and the
+  line-ending switch; Ctrl+F/H/G also show a bar of them.
+- **Edit in your $EDITOR** opens the file in a small terminal inside the card
+  (`$VISUAL`, then `$EDITOR`, then vi), or pick Vim, Neovim, Emacs, Helix,
+  micro, nano or Kakoune; one that isn't installed runs with
+  `nix run nixpkgs#…`. Quit it and the card shows the file as saved.
+- **CSV and TSV** files open as a table, even huge ones (read into SQLite in
+  the background): sort by a header, filter, drag columns to reorder,
+  hide or show them, and query with SQL (a WHERE clause or a whole SELECT).
+  Double-click a cell to edit it, + Row / − Row, or run UPDATE/INSERT/DELETE;
+  Save writes the file back (Save as… elsewhere).
+
+A remote pane's files are read, edited and saved on that host, through its
+tesserad.
+
+## tesserad
+
+`tesserad` is Tessera's backend, like tmux's server: it owns every shell,
+notebook kernel, card and Nix run, and the window is a client of it. Close
+the window, update Tessera, or let it crash, and everything keeps running;
+the next window reattaches, with the screen, scrollback and whatever was
+printed meanwhile. A new build of tesserad replaces the running one in place
+without dropping the shells.
+
+Over SSH it works the same way. Pick a host from the + menu (or `~/.ssh/config`'s
+hosts listed there): Tessera opens one shared SSH connection, runs that host's
+tesserad and talks to it through a forwarded socket, so the host's shells,
+kernels and notebooks survive the connection dropping and reattach on the next
+one. If the host has no tesserad, a static Linux build is copied there first
+(to `~/.local/bin`, else `~`). Files, tables, completion, the prompt bar and
+exit-code meanings are all read on the host. When a feature needs Nix and the
+host has none, Tessera says how to install it.
 
 ## Like iTerm2
 
