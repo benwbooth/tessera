@@ -1,4 +1,6 @@
 #include <QElapsedTimer>
+#include <QPointer>
+#include <QTimer>
 // Process-wide Qt setup: the application object and QML registration.
 #pragma once
 
@@ -46,7 +48,7 @@ public:
             auto* k = static_cast<QKeyEvent*>(e);
             // (Any other key, wherever it's delivered (the window, or an item,
             // a popup, straight), spoils the tap: Ctrl+Enter, Ctrl+V.)
-            if (k->key() != Qt::Key_Control) { armed = false; return false; }
+            if (k->key() != Qt::Key_Control) { armed = false; pending.clear(); return false; }
             if (!qobject_cast<QQuickWindow*>(o) || k->isAutoRepeat()) return false;
             armed = !(k->modifiers() & ~Qt::ControlModifier & ~Qt::KeypadModifier);
             if (armed) since.start();
@@ -60,9 +62,14 @@ public:
             armed = false;
             // (Held a while: not a tap, someone changed their mind.)
             if (since.elapsed() > 500) return false;
-            // (TEMPORARY: what a tap looked like, for Ben's spurious ones.)
-            qWarning("ctrl-tap: Ctrl down %lld ms, scan %u, modifiers 0x%x", (long long)since.elapsed(), k->nativeScanCode(), unsigned(k->modifiers()));
-            QMetaObject::invokeMethod(w, "toggleEditor");
+            // (Not at once: a key remapper's dual key (keyd's overload(control,
+            // enter): Enter held is Ctrl) sends a Ctrl tap and then the key
+            // itself when it's tapped. A key right after cancels it.)
+            pending = w;
+            QTimer::singleShot(120, this, [this] {
+                if (pending) QMetaObject::invokeMethod(pending.data(), "toggleEditor");
+                pending.clear();
+            });
             return false;
         }
         // (Text from an input method, or a shortcut, between: not a tap.)
@@ -72,6 +79,7 @@ public:
         case QEvent::Wheel:
         case QEvent::FocusOut:
             armed = false;
+            pending.clear();
             return false;
         default:
             return false;
@@ -81,6 +89,7 @@ public:
 private:
     bool armed = false;
     QElapsedTimer since;
+    QPointer<QQuickWindow> pending;   // (a tap waiting to see no key follows)
 };
 
 // A window hidden by the desktop (covered, on another virtual desktop, in
