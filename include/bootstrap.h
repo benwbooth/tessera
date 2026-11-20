@@ -43,24 +43,31 @@ public:
     {
         switch (e->type()) {
         case QEvent::KeyPress: {
-            if (!qobject_cast<QQuickWindow*>(o)) return false;
             auto* k = static_cast<QKeyEvent*>(e);
-            if (k->isAutoRepeat()) return false;
-            armed = k->key() == Qt::Key_Control && !(k->modifiers() & ~Qt::ControlModifier & ~Qt::KeypadModifier);
+            // (Any other key, wherever it's delivered (the window, or an item,
+            // a popup, straight), spoils the tap: Ctrl+Enter, Ctrl+V.)
+            if (k->key() != Qt::Key_Control) { armed = false; return false; }
+            if (!qobject_cast<QQuickWindow*>(o) || k->isAutoRepeat()) return false;
+            armed = !(k->modifiers() & ~Qt::ControlModifier & ~Qt::KeypadModifier);
             if (armed) since.start();
             return false;
         }
         case QEvent::KeyRelease: {
-            auto* w = qobject_cast<QQuickWindow*>(o);
-            if (!w) return false;
             auto* k = static_cast<QKeyEvent*>(e);
-            if (k->isAutoRepeat() || k->key() != Qt::Key_Control || !armed) return false;
+            if (k->key() != Qt::Key_Control) { armed = false; return false; }
+            auto* w = qobject_cast<QQuickWindow*>(o);
+            if (!w || k->isAutoRepeat() || !armed) return false;
             armed = false;
             // (Held a while: not a tap, someone changed their mind.)
             if (since.elapsed() > 500) return false;
+            // (TEMPORARY: what a tap looked like, for Ben's spurious ones.)
+            qWarning("ctrl-tap: Ctrl down %lld ms, scan %u, modifiers 0x%x", (long long)since.elapsed(), k->nativeScanCode(), unsigned(k->modifiers()));
             QMetaObject::invokeMethod(w, "toggleEditor");
             return false;
         }
+        // (Text from an input method, or a shortcut, between: not a tap.)
+        case QEvent::InputMethod:
+        case QEvent::Shortcut:
         case QEvent::MouseButtonPress:
         case QEvent::Wheel:
         case QEvent::FocusOut:
