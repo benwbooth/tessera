@@ -46,6 +46,41 @@ struct DSession {
     lines: u32,
     /// Its notebook cells, kept as the output goes by (attached or not).
     rec: Mutex<crate::cells::Recorder>,
+    /// A notebook card's command moved to the background (jobs.rs): this
+    /// PTY, its shell and the command went with it; the pane got a new shell.
+    job: Mutex<Option<JobLink>>,
+    /// Kept out of the sessions list (a window starting would attach it as
+    /// a tab): a background job's PTY, or a pane's shell set aside while its
+    /// job is in the foreground.
+    hidden: std::sync::atomic::AtomicBool,
+}
+
+/// Where a background job's PTY is: the registry has it under `key` while it
+/// runs in the background, under `pane` (and the pane's new shell under
+/// `key`) while it's in the foreground.
+#[derive(Clone)]
+struct JobLink {
+    job: u64,
+    pane: String,
+    key: String,
+    /// Its command's cell (in this PTY's recorder).
+    tid: u64,
+    fg: bool,
+}
+
+/// What a new session starts with beyond `Create`.
+#[derive(Default)]
+struct Spawn {
+    /// The registry key (default: a new id).
+    key: Option<String>,
+    /// Its environment (default: tesserad's).
+    env: Vec<(String, String)>,
+    /// The window already attached (a pane's new shell after a hand-off).
+    client: Option<(UnixStream, u64)>,
+    /// Its cells are kept with this session's (default: its own), numbered
+    /// from `next_cell` on.
+    rec_session: Option<String>,
+    next_cell: u64,
 }
 
 type Registry = Arc<Mutex<HashMap<String, Arc<DSession>>>>;
@@ -243,7 +278,7 @@ fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -
                     && !crate::rpc::kernels_running();
                 idle = if empty { idle + 1 } else { 0 };
                 #[cfg(unix)]
-                if !crate::rpc::kernels_running() {
+                if !crate::rpc::kernels_running() && !crate::jobs::any_running() {
                     if let Some(exe) = PENDING_UPGRADE.lock().unwrap().take() {
                         let err = upgrade::exec_new_build(&registry, &exe);
                         eprintln!("tesserad: deferred upgrade failed: {err}");
@@ -281,7 +316,7 @@ fn new_id() -> String {
     format!("{:x}-{}-{}", now(), std::process::id(), N.fetch_add(1, Ordering::SeqCst))
 }
 
-fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSession>> {
+fn spawn_session(c: &Create, registry: &Registry, sp: Spawn) -> std::io::Result<Arc<DSession>> {
     let pty = native_pty_system();
     let pair = pty
         .openpty(PtySize { rows: c.rows.max(1), cols: c.cols.max(1), pixel_width: 0, pixel_height: 0 })
@@ -313,12 +348,22 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
     } else {
         std::env::var("HOME").unwrap_or_else(|_| "/".into())
     };
+    for (k, v) in &sp.env {
+        cmd.env(k, v);
+    }
+    if !sp.env.is_empty() {
+        cmd.env("PWD", &cwd);
+    }
     cmd.cwd(cwd);
     cmd.env("TERM", if c.term.is_empty() { "xterm-256color" } else { c.term.as_str() });
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "Tessera");
     cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
     crate::shell_integration::inject(&mut cmd);
+    // (The old shell's ZDOTDIR is the one zsh is put back to.)
+    if let Some((_, v)) = sp.env.iter().find(|(k, _)| k == "ZDOTDIR") {
+        cmd.env("TESSERA_ZDOTDIR", v);
+    }
     // In a Flatpak the shell runs on the host, not in the sandbox.
     if std::env::var_os("FLATPAK_ID").is_some() {
         cmd = host_command(&cmd);
@@ -337,21 +382,29 @@ fn spawn_session(c: &Create, registry: &Registry) -> std::io::Result<Arc<DSessio
         std::thread::spawn(move || emulate(emu_rx, cols, rows, lines));
     }
     let id = new_id();
-    let rec = crate::cells::Recorder::new(&id, shell_pid.unwrap_or(0));
+    let mut rec = crate::cells::Recorder::new(sp.rec_session.as_deref().unwrap_or(&id), shell_pid.unwrap_or(0));
+    rec.skip_ids(sp.next_cell);
+    let key = sp.key.clone().unwrap_or_else(|| id.clone());
+    let (client, client_gen) = match sp.client {
+        Some((c, g)) => (Some(c), g),
+        None => (None, 0),
+    };
     let s = Arc::new(DSession {
         rec: Mutex::new(rec),
+        job: Mutex::new(None),
+        hidden: Default::default(),
         id,
         shell_pid,
         created: now(),
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
-        shared: Mutex::new(Shared { client: None, client_gen: 0 }),
+        shared: Mutex::new(Shared { client, client_gen }),
         emu: Mutex::new(emu_tx),
         size: Mutex::new((c.cols.max(1), c.rows.max(1))),
         lines: if c.scrollback > 0 { c.scrollback } else { 10_000 },
     });
-    registry.lock().unwrap().insert(s.id.clone(), s.clone());
+    registry.lock().unwrap().insert(key, s.clone());
 
     // Reader: PTY output -> replay ring + attached client.
     {
@@ -372,6 +425,26 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
         let mut sh = s.shared.lock().unwrap();
         let _ = s.emu.lock().unwrap().send(Emu::Output(buf[..n].to_vec()));
         let starts = s.rec.lock().unwrap().feed(&buf[..n]);
+        // (A background job's PTY: its command ended? In the foreground the
+        // window gets what came before the end mark, not the old shell's
+        // prompt; then the pane's shell comes back.)
+        let link = s.job.lock().unwrap().clone();
+        if let Some(l) = link {
+            let ended = s.rec.lock().unwrap().cell_state(l.tid).filter(|c| c.1).map(|c| c.2);
+            let fwd = if ended.is_some() { buf[..n].windows(7).position(|w| w == b"\x1b]133;D").unwrap_or(n) } else { n };
+            if l.fg && fwd > 0 {
+                if let Some(c) = sh.client.as_mut() {
+                    if write_frame(c, T_OUTPUT, &buf[..fwd]).is_err() {
+                        sh.client = None;
+                    }
+                }
+            }
+            drop(sh);
+            if let Some(status) = ended {
+                job_ended(&s, &l, status, &registry);
+            }
+            continue;
+        }
         if let Some(c) = sh.client.as_mut() {
             // (Each cell's id just before the output its start mark is in.)
             let mut from = 0;
@@ -398,14 +471,232 @@ fn pump_output(s: Arc<DSession>, mut reader: Box<dyn Read + Send>, registry: Reg
         .wait()
         .map(|st| st.exit_code() as i32)
         .unwrap_or(-1);
-    registry.lock().unwrap().remove(&s.id);
-    crate::rpc::session_ended(&s.id);
+    // (A job's PTY that went before its command was seen to end.)
+    let link = s.job.lock().unwrap().clone();
+    if let Some(l) = link {
+        job_ended(&s, &l, code as i64, &registry);
+    }
+    // (By what it's under now: a job's PTY and the pane's shell trade keys.)
+    let key = {
+        let mut reg = registry.lock().unwrap();
+        let key = reg.iter().find(|(_, v)| Arc::ptr_eq(v, &s)).map(|(k, _)| k.clone());
+        if let Some(k) = &key {
+            reg.remove(k);
+        }
+        key
+    };
+    // (Not for a background job's: the pane it came from is still there.)
+    if let Some(k) = key.filter(|_| !s.hidden.load(Ordering::SeqCst)) {
+        crate::rpc::session_ended(&k);
+    }
     let mut sh = s.shared.lock().unwrap();
     if let Some(c) = sh.client.as_mut() {
         let _ = write_json(c, T_EXITED, &code);
         let _ = c.shutdown(std::net::Shutdown::Both);
     }
     sh.client = None;
+}
+
+// ---- a notebook card's command to the background and back (jobs.rs) ----
+
+/// What the window's terminal is put back to when a pane's PTY changes
+/// under it: off the alternate screen, modes reset, mouse reports off.
+const PANE_RESET: &[u8] = b"\x1b[?1049l\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\r\n";
+
+/// Moves `from`'s attached window to `to`, `prefix` written to it first.
+fn move_client(from: &DSession, to: &DSession, prefix: &[u8]) {
+    let taken = {
+        let mut sh = from.shared.lock().unwrap();
+        let gen = sh.client_gen;
+        sh.client.take().map(|c| (c, gen))
+    };
+    let Some((mut c, gen)) = taken else { return };
+    if !prefix.is_empty() && write_frame(&mut c, T_OUTPUT, prefix).is_err() {
+        return;
+    }
+    let mut sh = to.shared.lock().unwrap();
+    sh.client = Some(c);
+    sh.client_gen = gen;
+}
+
+#[cfg(unix)]
+fn signal_group(pgid: u32, sig: i32) {
+    if pgid > 1 {
+        unsafe {
+            libc::kill(-(pgid as i32), sig);
+        }
+    }
+}
+#[cfg(not(unix))]
+fn signal_group(_pgid: u32, _sig: i32) {}
+
+/// Ends a job's PTY: its old shell (and whatever's left in it) goes.
+fn end_job_pty(s: &DSession) {
+    #[cfg(unix)]
+    {
+        if let Some(pg) = foreground_pgid(s) {
+            signal_group(pg, libc::SIGHUP);
+        }
+        if let Some(p) = s.shell_pid {
+            signal_group(p, libc::SIGHUP);
+            unsafe {
+                libc::kill(p as i32, libc::SIGHUP);
+            }
+        }
+    }
+    let _ = s.child.lock().unwrap().kill();
+}
+
+/// A job's command ended (`status`): kept in jobs.rs; in the foreground the
+/// pane's shell comes back; the PTY goes.
+fn job_ended(s: &Arc<DSession>, l: &JobLink, status: i64, registry: &Registry) {
+    if s.job.lock().unwrap().take().is_none() {
+        return;
+    }
+    let text = s.rec.lock().unwrap().cell_text(l.tid).map(|c| c.0).unwrap_or_default();
+    crate::jobs::tty_ended(l.job, status as i32, text);
+    if l.fg {
+        let spare = registry.lock().unwrap().get(&l.key).cloned();
+        let Some(n) = spare else {
+            // (The pane's other shell is gone: this one carries on in the pane.)
+            s.hidden.store(false, Ordering::SeqCst);
+            return;
+        };
+        {
+            let mut reg = registry.lock().unwrap();
+            reg.remove(&l.key);
+            reg.insert(l.pane.clone(), n.clone());
+        }
+        s.hidden.store(true, Ordering::SeqCst);
+        n.hidden.store(false, Ordering::SeqCst);
+        move_client(s, &n, b"");
+        let size = *s.size.lock().unwrap();
+        resize(&n, size.0, size.1);
+        // (A fresh prompt, as after any command.)
+        let _ = n.writer.lock().unwrap().write_all(b"\r");
+    }
+    end_job_pty(s);
+}
+
+/// The session holding job `job`'s PTY, and its link.
+fn find_job(registry: &Registry, job: u64) -> Option<(Arc<DSession>, JobLink)> {
+    let reg = registry.lock().unwrap();
+    reg.values().find_map(|s| {
+        let l = s.job.lock().unwrap().clone()?;
+        (l.job == job).then(|| (s.clone(), l))
+    })
+}
+
+/// Pane `pane`'s running command becomes job `job`: its PTY (shell and all)
+/// goes on as it is, out of sight, and the pane gets a new shell in the same
+/// folder with the same exports, the window still attached. Gives {key, tid,
+/// pid, command, cwd, exec}.
+pub fn split(pane: &str, job: u64) -> Result<serde_json::Value, String> {
+    let registry = REGISTRY.get().ok_or("tesserad keeps no sessions here")?.clone();
+    let o = registry.lock().unwrap().get(pane).cloned().ok_or_else(|| format!("no session {pane}"))?;
+    if o.job.lock().unwrap().is_some() {
+        return Err("that's a background job already".into());
+    }
+    let pg = foreground_pgid(&o).unwrap_or(0);
+    if pg == 0 || Some(pg) == o.shell_pid {
+        return Err("nothing is running in the pane".into());
+    }
+    let (tid, command, cwd, exec) = o.rec.lock().unwrap().running_info().ok_or("the pane's shell didn't say what it runs (no shell integration?)")?;
+    let shell = o.shell_pid.unwrap_or(0);
+    let dir = {
+        let d = crate::procinfo::cwd(shell);
+        if d.is_empty() { cwd.clone() } else { d }
+    };
+    let mut env = crate::prompt::shell_env(shell).unwrap_or_default();
+    env.retain(|(k, _)| !k.starts_with("BASH_FUNC_") && k != "_" && k != "SHLVL" && !k.starts_with("TESSERA_SHELL_INTEGRATION"));
+    let term = env.iter().find(|(k, _)| k == "TERM").map(|(_, v)| v.clone()).unwrap_or_default();
+    let key = new_id();
+    let client = {
+        let mut sh = o.shared.lock().unwrap();
+        let gen = sh.client_gen;
+        sh.client.take().map(|c| (c, gen))
+    };
+    let mut client = client;
+    if let Some((c, _)) = client.as_mut() {
+        let _ = write_frame(c, T_OUTPUT, PANE_RESET);
+    }
+    *o.job.lock().unwrap() = Some(JobLink { job, pane: pane.to_string(), key: key.clone(), tid, fg: false });
+    o.hidden.store(true, Ordering::SeqCst);
+    {
+        let mut reg = registry.lock().unwrap();
+        reg.remove(pane);
+        reg.insert(key.clone(), o.clone());
+    }
+    let (cols, rows) = *o.size.lock().unwrap();
+    let rec_session = o.rec.lock().unwrap().session().to_string();
+    let next_cell = o.rec.lock().unwrap().next_id();
+    let c = Create { cols, rows, cwd: dir, command: String::new(), term, input: String::new(), scrollback: o.lines };
+    let sp = Spawn { key: Some(pane.to_string()), env, client, rec_session: Some(rec_session), next_cell };
+    if let Err(e) = spawn_session(&c, &registry, sp) {
+        // (No new shell: everything as it was.)
+        let mut reg = registry.lock().unwrap();
+        reg.remove(&key);
+        reg.insert(pane.to_string(), o.clone());
+        o.hidden.store(false, Ordering::SeqCst);
+        *o.job.lock().unwrap() = None;
+        return Err(format!("couldn't start a new shell for the pane: {e}"));
+    }
+    Ok(serde_json::json!({"key": key, "tid": tid, "pid": pg, "command": command, "cwd": cwd, "exec": serde_json::from_str::<serde_json::Value>(&exec).unwrap_or_default()}))
+}
+
+/// Job `job` back in its pane: the pane's PTY again (its shell set aside
+/// until the command ends), a terminal app's screen as it is now.
+pub fn foreground(job: u64) -> Result<(), String> {
+    let registry = REGISTRY.get().ok_or("tesserad keeps no sessions here")?.clone();
+    let (o, l) = find_job(&registry, job).ok_or("that job's terminal is gone")?;
+    if l.fg {
+        return Ok(());
+    }
+    let n = registry.lock().unwrap().get(&l.pane).cloned().ok_or("its pane is gone")?;
+    let pg = foreground_pgid(&n);
+    if pg.is_some() && pg != n.shell_pid {
+        return Err("the pane is running something: wait for it, or move it to the background too".into());
+    }
+    let screen = o.rec.lock().unwrap().cell_state(l.tid).map(|c| c.0).unwrap_or(false);
+    let prefix = if screen {
+        let (tx, rx) = mpsc::channel();
+        let _ = o.emu.lock().unwrap().send(Emu::Snapshot(tx));
+        rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default()
+    } else {
+        b"\r\n".to_vec()
+    };
+    {
+        let mut reg = registry.lock().unwrap();
+        reg.insert(l.pane.clone(), o.clone());
+        reg.insert(l.key.clone(), n.clone());
+    }
+    o.hidden.store(false, Ordering::SeqCst);
+    n.hidden.store(true, Ordering::SeqCst);
+    if let Some(link) = o.job.lock().unwrap().as_mut() {
+        link.fg = true;
+    }
+    move_client(&n, &o, &prefix);
+    let (cols, rows) = *n.size.lock().unwrap();
+    resize(&o, cols, rows);
+    // (It draws itself again, at the window's size.)
+    #[cfg(unix)]
+    if let Some(pg) = foreground_pgid(&o) {
+        signal_group(pg, libc::SIGWINCH);
+    }
+    Ok(())
+}
+
+/// Whether job `job` is in its pane now.
+pub fn job_fg(job: u64) -> bool {
+    REGISTRY.get().and_then(|r| find_job(r, job)).is_some_and(|(_, l)| l.fg)
+}
+
+/// Job `job`'s output so far: (text, on the alternate screen, in the foreground).
+pub fn job_text(job: u64) -> Option<(String, bool, bool)> {
+    let registry = REGISTRY.get()?.clone();
+    let (o, l) = find_job(&registry, job)?;
+    let c = o.rec.lock().unwrap().cell_text(l.tid)?;
+    Some((c.0, c.1, l.fg))
 }
 
 /// The foreground process group's program, when it isn't the shell.
@@ -532,14 +823,16 @@ fn resize(s: &DSession, cols: u16, rows: u16) {
 fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result<()> {
     let (tag, payload) = read_frame(&mut stream)?;
     let reattach = tag == T_ATTACH;
+    let key;
     let session = match tag {
         T_LIST => {
             let list: Vec<SessionInfo> = registry
                 .lock()
                 .unwrap()
-                .values()
-                .map(|s| SessionInfo {
-                    id: s.id.clone(),
+                .iter()
+                .filter(|(_, s)| !s.hidden.load(Ordering::SeqCst))
+                .map(|(id, s)| SessionInfo {
+                    id: id.clone(),
                     attached: s.shared.lock().unwrap().client.is_some(),
                     created: s.created,
                 })
@@ -573,7 +866,7 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
             {
                 // (Kernels can't be handed over: the swap waits until none
                 // runs. The shells don't mind either way.)
-                if crate::rpc::kernels_running() {
+                if crate::rpc::kernels_running() || crate::jobs::any_running() {
                     *PENDING_UPGRADE.lock().unwrap() = Some(up.exe.clone());
                     return write_json(&mut stream, T_UPGRADE_REPLY, &"deferred");
                 }
@@ -603,7 +896,9 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
         }
         T_CREATE => {
             let c: Create = serde_json::from_slice(&payload)?;
-            spawn_session(&c, registry)?
+            let s = spawn_session(&c, registry, Spawn::default())?;
+            key = s.id.clone();
+            s
         }
         T_ATTACH => {
             let a: Attach = serde_json::from_slice(&payload)?;
@@ -612,6 +907,7 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
                 return write_json(&mut stream, T_ERROR, &format!("no session {}", a.id));
             };
             resize(&s, a.cols, a.rows);
+            key = a.id.clone();
             s
         }
         _ => return write_json(&mut stream, T_ERROR, &"expected create, attach or list"),
@@ -627,7 +923,7 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
             let _ = old.shutdown(std::net::Shutdown::Both);
         }
         let mut out = stream.try_clone()?;
-        write_json(&mut out, T_ATTACHED, &session.id)?;
+        write_json(&mut out, T_ATTACHED, &key)?;
         // The screen as it is now (already reflowed to this window's size),
         // not a replay of old output. Output can't slip in between: the pump
         // waits on this lock.
@@ -645,19 +941,22 @@ fn handle_client(mut stream: UnixStream, registry: &Registry) -> std::io::Result
         sh.client = Some(out);
         sh.client_gen = my_gen;
     }
-    attached_loop(&session, stream, my_gen);
+    attached_loop(registry, &key, stream, my_gen);
     Ok(())
 }
 
 static GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// An attached window's input (keys, resizes) until it goes away.
-fn attached_loop(session: &Arc<DSession>, mut stream: UnixStream, my_gen: u64) {
+/// An attached window's input (keys, resizes) until it goes away: to
+/// whichever session is under `key` now (a pane's PTY changes when its
+/// command goes to the background or comes back).
+fn attached_loop(registry: &Registry, key: &str, mut stream: UnixStream, my_gen: u64) {
     loop {
         let (tag, payload) = match read_frame(&mut stream) {
             Ok(f) => f,
             Err(_) => break, // GUI went away: the session stays, detached.
         };
+        let Some(session) = registry.lock().unwrap().get(key).cloned() else { continue };
         match tag {
             T_INPUT => {
                 let _ = session.writer.lock().unwrap().write_all(&payload);
@@ -675,6 +974,7 @@ fn attached_loop(session: &Arc<DSession>, mut stream: UnixStream, my_gen: u64) {
         }
     }
     // Detach only if we're still the attached client.
+    let Some(session) = registry.lock().unwrap().get(key).cloned() else { return };
     let mut sh = session.shared.lock().unwrap();
     if sh.client.is_some() && sh.client_gen == my_gen {
         sh.client = None;
@@ -733,17 +1033,17 @@ mod upgrade {
             return e.to_string();
         }
         let reg = registry.lock().unwrap();
-        let sessions: Vec<Arc<DSession>> = reg.values().cloned().collect();
+        let sessions: Vec<(String, Arc<DSession>)> = reg.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         // Every session's lock stays held to the end: no output is forwarded
         // (or lost) in between; it waits in the PTY for the new build.
         let mut guards = Vec::new();
         let mut states = Vec::new();
-        for s in &sessions {
+        for (key, s) in &sessions {
             let g = s.shared.lock().unwrap();
             let (tx, rx) = mpsc::channel();
             let _ = s.emu.lock().unwrap().send(Emu::Snapshot(tx));
             let snap = rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default();
-            let snap_path = dir.join(format!("{}.vt", s.id));
+            let snap_path = dir.join(format!("{key}.vt"));
             if let Err(e) = std::fs::write(&snap_path, &snap) {
                 return e.to_string();
             }
@@ -755,7 +1055,7 @@ mod upgrade {
             }
             let (cols, rows) = *s.size.lock().unwrap();
             states.push(SessionState {
-                id: s.id.clone(),
+                id: key.clone(),
                 fd,
                 pid: s.shell_pid,
                 created: s.created,
@@ -813,6 +1113,8 @@ mod upgrade {
             });
             let s = Arc::new(DSession {
                 rec: Mutex::new(crate::cells::Recorder::new(&st.id, st.pid.unwrap_or(0))),
+                job: Mutex::new(None),
+                hidden: Default::default(),
                 id: st.id.clone(),
                 shell_pid: st.pid,
                 created: st.created,
@@ -829,10 +1131,10 @@ mod upgrade {
             if let Some(c) = client {
                 if let Ok(input) = c.try_clone() {
                     s.shared.lock().unwrap().client = Some(c);
-                    let s2 = s.clone();
+                    let (reg2, key2) = (registry.clone(), s.id.clone());
                     CONNECTIONS.fetch_add(1, Ordering::SeqCst);
                     std::thread::spawn(move || {
-                        attached_loop(&s2, input, my_gen);
+                        attached_loop(&reg2, &key2, input, my_gen);
                         CONNECTIONS.fetch_sub(1, Ordering::SeqCst);
                     });
                 }

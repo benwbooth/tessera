@@ -31,6 +31,11 @@ struct Job {
     total: u64,
     dropped: u64,
     exec: Value,
+    /// A card's command moved to the background with its terminal (its
+    /// output is that terminal's, read from tesserad's cell for it; `text`
+    /// once it's done).
+    tty: bool,
+    text: String,
 }
 
 #[derive(Default)]
@@ -180,6 +185,8 @@ pub fn start(p: &Value) -> Value {
         total: 0,
         dropped: 0,
         exec: exec.clone(),
+        tty: false,
+        text: String::new(),
     }));
     {
         let mut js = jobs().lock().unwrap();
@@ -221,8 +228,85 @@ pub fn start(p: &Value) -> Value {
 }
 
 fn facts(j: &Job) -> Value {
+    let fg = j.tty && j.status.is_none() && crate::daemon::job_fg(j.id);
     json!({"id": j.id, "owner": j.owner, "cell": j.cell, "command": j.command, "pid": j.pid, "started": j.started,
-           "ended": j.ended, "running": j.status.is_none(), "status": j.status, "size": j.total})
+           "ended": j.ended, "running": j.status.is_none(), "status": j.status, "size": j.total, "tty": j.tty, "fg": fg})
+}
+
+/// A pane's running command (in `session`, the pane's tesserad session) to
+/// the background: {session, owner, cell}. It goes on in its own terminal,
+/// the pane gets a new shell. Gives {id, pid, exec} or {error}.
+pub fn adopt(p: &Value) -> Value {
+    let s = |k: &str| p[k].as_str().unwrap_or("").to_string();
+    let id = {
+        let mut js = jobs().lock().unwrap();
+        js.next += 1;
+        js.next
+    };
+    let job = Arc::new(Mutex::new(Job {
+        id,
+        owner: s("owner"),
+        cell: s("cell"),
+        command: String::new(),
+        pid: 0,
+        started: now_ms(),
+        ended: 0,
+        status: None,
+        out: Vec::new(),
+        total: 0,
+        dropped: 0,
+        exec: Value::Null,
+        tty: true,
+        text: String::new(),
+    }));
+    // (Listed first: its end can come as soon as it's handed over.)
+    jobs().lock().unwrap().list.push(job.clone());
+    match crate::daemon::split(&s("session"), id) {
+        Ok(r) => {
+            let pid = r["pid"].as_u64().unwrap_or(0) as u32;
+            let mut exec = r["exec"].clone();
+            if !exec.is_object() {
+                exec = json!({});
+            }
+            exec["command"] = r["command"].clone();
+            exec["cwd"] = r["cwd"].clone();
+            exec["pid"] = json!(pid);
+            let mut j = job.lock().unwrap();
+            j.pid = pid;
+            j.command = r["command"].as_str().unwrap_or("").to_string();
+            j.exec = exec.clone();
+            json!({"id": id, "pid": pid, "exec": exec})
+        }
+        Err(e) => {
+            jobs().lock().unwrap().list.retain(|j| !Arc::ptr_eq(j, &job));
+            json!({"error": e})
+        }
+    }
+}
+
+/// A terminal job's command ended (tesserad's word, from its terminal).
+pub fn tty_ended(id: u64, status: i32, text: String) {
+    if let Some(job) = find(id) {
+        let mut j = job.lock().unwrap();
+        if j.status.is_none() {
+            j.status = Some(status);
+            j.ended = now_ms();
+        }
+        j.text = text;
+    }
+}
+
+/// A terminal job back in its pane.
+pub fn foreground(id: u64) -> Value {
+    match crate::daemon::foreground(id) {
+        Ok(()) => json!({"ok": true}),
+        Err(e) => json!({"error": e}),
+    }
+}
+
+/// Whether any job still runs (tesserad holds off upgrading: they'd be lost).
+pub fn any_running() -> bool {
+    jobs().lock().unwrap().list.iter().any(|j| j.lock().unwrap().status.is_none())
 }
 
 /// Every job (`owner` given: that notebook's), oldest first.
@@ -248,6 +332,13 @@ pub fn output(id: u64, from: u64, with_exec: bool) -> Value {
         at = end;
     }
     let mut v = facts(&j);
+    if j.tty {
+        // (The whole text each time: a terminal's output can redraw itself.)
+        let (text, screen, fg) = if j.status.is_none() { crate::daemon::job_text(id).unwrap_or_default() } else { (j.text.clone(), false, false) };
+        v["text"] = json!(text);
+        v["screen"] = json!(screen);
+        v["fg"] = json!(fg);
+    }
     v["out"] = Value::Array(out);
     v["next"] = json!(j.total);
     if with_exec {

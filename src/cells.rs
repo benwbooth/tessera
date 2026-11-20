@@ -778,6 +778,36 @@ impl Recorder {
         self.cells.next
     }
 
+    /// The session its cells are kept with.
+    pub fn session(&self) -> &str {
+        &self.session
+    }
+
+    /// Numbers new cells from past `next` (a pane's new shell, whose cells
+    /// are kept with those of the shell it took over from).
+    pub fn skip_ids(&mut self, next: u64) {
+        self.cells.next = self.cells.next.max(next);
+    }
+
+    /// The command running now: (its id, command, folder, what it ran with as JSON).
+    pub fn running_info(&self) -> Option<(u64, String, String, String)> {
+        let c = self.cells.list.iter().rev().find(|c| !c.done)?;
+        Some((c.id, c.command.clone(), c.cwd.clone(), self.cells.exec_json(c.id)))
+    }
+
+    /// Cell `id`'s state: (a terminal app, done, status).
+    pub fn cell_state(&self, id: u64) -> Option<(bool, bool, i64)> {
+        self.cells.get(id).map(|c| (c.screen, c.done, c.status))
+    }
+
+    /// Cell `id`'s output as text so far: (text, a terminal app (alternate
+    /// screen), done, status).
+    pub fn cell_text(&self, id: u64) -> Option<(String, bool, bool, i64)> {
+        let c = self.cells.get(id)?;
+        let text = strip_frame(&strip_zsh_marker(crate::images::plain_text(&c.raw)));
+        Some((text, c.screen, c.done, c.status))
+    }
+
     fn folder(&self) -> String {
         if !self.cwd.is_empty() {
             return self.cwd.clone();

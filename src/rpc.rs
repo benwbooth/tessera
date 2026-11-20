@@ -288,6 +288,8 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
         "job.list" => crate::jobs::list(&s("owner")),
         "job.output" => crate::jobs::output(n("id"), n("from"), p["exec"].as_bool().unwrap_or(false)),
         "job.stop" => json!(crate::jobs::stop(n("id"))),
+        "job.adopt" => crate::jobs::adopt(p),
+        "job.foreground" => crate::jobs::foreground(n("id")),
         "job.forget" => {
             crate::jobs::forget(n("id"));
             Value::Null
