@@ -449,18 +449,23 @@ fn mk_comma(py: Python<'_>) -> PyResult<Py<PyAny>> {
     to_py(py, Form::new(Kind::Comma, None))
 }
 
+/// A Python value as a form: a list, dict, string, number … as the code
+/// that makes it. For macros: quasi $(lift $value).
 #[pyfunction]
 #[pyo3(name = "lift")]
 fn py_lift(py: Python<'_>, v: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     to_py(py, lift(&v)?)
 }
 
+/// A symbol form named `name` (hygienic: it can't clash with the
+/// caller's names unless the macro means it to).
 #[pyfunction]
 #[pyo3(name = "sym")]
 fn py_sym(py: Python<'_>, name: String) -> PyResult<Py<PyAny>> {
     to_py(py, Form::sym(&name))
 }
 
+/// A variable reference form: `var x` is the code `$x`.
 #[pyfunction]
 #[pyo3(name = "var")]
 fn py_var(py: Python<'_>, s: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
@@ -469,6 +474,8 @@ fn py_var(py: Python<'_>, s: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
 
 static GENSYMS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// A fresh symbol no other code uses: _g1_hint, _g2_hint, …. For a macro's
+/// own temporary names.
 #[pyfunction]
 #[pyo3(signature = (hint="g"))]
 fn gensym(py: Python<'_>, hint: &str) -> PyResult<Py<PyAny>> {

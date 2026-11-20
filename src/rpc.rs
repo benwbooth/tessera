@@ -308,6 +308,7 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             let out = crate::complete::complete(&s("text"), n("cursor") as usize, &cwd, &p["aliases"]);
             serde_json::from_str(&out).unwrap_or(Value::String(out))
         }
+        "complete.doc" => json!(crate::complete::item_doc(&s("kind"), &s("label"), &s("line"))),
         "complete.exit_meaning" => json!(crate::complete::exit_meaning(&s("command"), p["status"].as_i64().unwrap_or(0) as i32)),
         "complete.download" => {
             let fish = crate::complete::download_fish_completions();

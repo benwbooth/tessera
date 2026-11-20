@@ -111,9 +111,11 @@ import functools as _ft, itertools as _it
 partial = _ft.partial
 
 def identity(x):
+    """x itself.  map identity $xs"""
     return x
 
 def constantly(x):
+    """A function that always returns x, whatever it's called with."""
     return lambda *a, **k: x
 
 def comp(*fs):
@@ -128,6 +130,7 @@ def comp(*fs):
     return composed
 
 def complement(f):
+    """A function returning not f x.  filter (complement even) $xs"""
     return lambda *a, **k: not f(*a, **k)
 
 def juxt(*fs):
@@ -135,18 +138,23 @@ def juxt(*fs):
     return lambda *a, **k: [f(*a, **k) for f in fs]
 
 def inc(x):
+    """x + 1."""
     return x + 1
 
 def dec(x):
+    """x - 1."""
     return x - 1
 
 def first(xs):
+    """The first item of xs, or None if it's empty.  first [1 2 3] -> 1"""
     return next(iter(xs), None)
 
 def second(xs):
+    """The second item of xs, or None.  second [1 2 3] -> 2"""
     return next(_it.islice(xs, 1, None), None)
 
 def last(xs):
+    """The last item of xs, or None if it's empty.  last [1 2 3] -> 3"""
     if hasattr(xs, "__getitem__") and hasattr(xs, "__len__"):
         return xs[-1] if len(xs) else None
     v = None
@@ -155,21 +163,27 @@ def last(xs):
     return v
 
 def rest(xs):
+    """All of xs but the first, as a list.  rest [1 2 3] -> [2 3]"""
     return list(_it.islice(xs, 1, None))
 
 def butlast(xs):
+    """All of xs but the last, as a list.  butlast [1 2 3] -> [1 2]"""
     return list(xs)[:-1]
 
 def take(n, xs):
+    """The first n items of xs (any iterable, endless ones too), as a list.  take 2 [1 2 3] -> [1 2]"""
     return list(_it.islice(xs, n))
 
 def drop(n, xs):
+    """xs without its first n items, as a list.  drop 1 [1 2 3] -> [2 3]"""
     return list(_it.islice(xs, n, None))
 
 def take_while(pred, xs):
+    """Items of xs from the start while pred is true.  take_while (fn x ($x < 3)) [1 2 3 1] -> [1 2]"""
     return list(_it.takewhile(pred, xs))
 
 def drop_while(pred, xs):
+    """xs from the first item where pred is false.  drop_while (fn x ($x < 3)) [1 2 3 1] -> [3 1]"""
     return list(_it.dropwhile(pred, xs))
 
 def some(pred, xs):
@@ -181,6 +195,7 @@ def some(pred, xs):
     return None
 
 def every(pred, xs):
+    """Whether pred is true for every item of xs (true for none)."""
     return all(pred(x) for x in xs)
 
 def keep(f, xs):
@@ -188,15 +203,18 @@ def keep(f, xs):
     return [v for v in map(f, xs) if v is not None]
 
 def mapcat(f, *xss):
+    """f of each item (of several lists, side by side), the results joined as one list.  mapcat (fn x [$x $x]) [1 2] -> [1 1 2 2]"""
     return [y for ys in map(f, *xss) for y in ys]
 
 def frequencies(xs):
+    """How many times each item appears: {item: count}.  frequencies 'abca' -> {a: 2 b: 1 c: 1}"""
     out = {}
     for x in xs:
         out[x] = out.get(x, 0) + 1
     return out
 
 def group_by(f, xs):
+    """Items grouped by f of each: {f x: [x …]}, in order.  group_by len [a bb c] -> {1: [a c] 2: [bb]}"""
     out = {}
     for x in xs:
         out.setdefault(f(x), []).append(x)
@@ -217,13 +235,16 @@ def partition(n, xs, step=None, pad=None):
     return out
 
 def partition_all(n, xs, step=None):
+    """Lists of n (every step), the last one short if they don't come out even."""
     xs = list(xs)
     return [xs[i:i + n] for i in range(0, len(xs), step or n)]
 
 def partition_by(f, xs):
+    """Runs of xs where f gives the same value, each a list.  partition_by even [1 3 2 4 5] -> [[1 3] [2 4] [5]]"""
     return [list(g) for _, g in _it.groupby(xs, f)]
 
 def interpose(sep, xs):
+    """xs with sep between each two items.  interpose , [a b c] -> [a , b , c]"""
     out = []
     for i, x in enumerate(xs):
         if i:
@@ -232,9 +253,11 @@ def interpose(sep, xs):
     return out
 
 def interleave(*xss):
+    """The first of each list, then the second of each, …, until the shortest runs out.  interleave [1 2] [a b] -> [1 a 2 b]"""
     return [x for xs in zip(*xss) for x in xs]
 
 def distinct(xs):
+    """xs without repeats, in first-seen order.  distinct [1 2 1 3] -> [1 2 3]"""
     return list(dict.fromkeys(xs))
 
 def flatten(xs):
@@ -260,12 +283,15 @@ def repeatedly(f, n=None):
     return (f() for _ in _it.count())
 
 def zipmap(keys, vals):
+    """A dict from keys to vals, side by side.  zipmap [a b] [1 2] -> {a: 1 b: 2}"""
     return dict(zip(keys, vals))
 
 def select_keys(d, keys):
+    """A dict with only those keys of d that it has.  select_keys {a: 1 b: 2} [a] -> {a: 1}"""
     return {k: d[k] for k in keys if k in d}
 
 def merge_with(f, *ds):
+    """The dicts merged; a key in more than one gets f of their values.  merge_with + {a: 1} {a: 2} -> {a: 3}"""
     out = {}
     for d in ds:
         for k, v in d.items():
@@ -1299,6 +1325,28 @@ pub struct Builtin {
 
 #[pymethods]
 impl Builtin {
+    /// Its usage, for help and the completion panel.
+    #[getter]
+    fn _tessh_usage(&self) -> &'static str {
+        match self.name {
+            "cd" => "cd [dir]\n\nGo to dir (home without one; - is the last folder). The folder is this shell's, and every program it runs starts there.",
+            "pushd" => "pushd dir\n\nGo to dir, keeping the folder you were in on the stack (dirs lists it, popd goes back).",
+            "popd" => "popd\n\nBack to the folder on top of the stack (pushd put it there).",
+            "dirs" => "dirs\n\nThe folder stack, the current folder first.",
+            "export" => "export NAME=value …\n\nSet environment variables for this shell and every program it runs. export NAME alone exports the tessh variable $NAME's value.",
+            "unset" => "unset NAME …\n\nRemove environment variables.",
+            "exit" => "exit [status]\n\nEnd tessh (a script, or the REPL) with status, 0 without one.",
+            "source" => "source file\n\nRun a tessh file here: its names and folder changes stay in this shell.",
+            "which" => "which name …\n\nWhere each program is on PATH (name: path, or name: not found); its value is the first path found.",
+            "glob" => "glob pattern …\n\nThe names matching the patterns (*, ?, […]), sorted, as a list.",
+            "jobs" => "jobs\n\nThe background jobs (commands run with a trailing &): [n] running or stopped, and the command.",
+            "fg" => "fg [n]\n\nBring background job n (the latest without one) to the foreground and wait for it.",
+            "bg" => "bg [n]\n\nLet a stopped job n (the latest without one) run on in the background.",
+            "need" => "need package \"package>=version\" …\n\nPyPI packages this script, cell or REPL uses: uv installs them once into a cache, and they import from the next line. Quote a version range, so its > isn't a redirection.",
+            _ => "A tessh builtin.",
+        }
+    }
+
     #[getter]
     fn _tessh_command(&self) -> bool {
         true

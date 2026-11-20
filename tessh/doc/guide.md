@@ -764,7 +764,7 @@ print $d $o.name
 The augmented forms are `+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`.
 
 ## Functions
-<!-- help: functions function def return lambda fn parameters defaults args kwargs implicit -->
+<!-- help: functions function def return lambda fn parameters defaults args kwargs implicit async await -->
 
 `def name params…` with an indented body. The value of the last form is
 returned.

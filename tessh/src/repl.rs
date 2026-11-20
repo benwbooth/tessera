@@ -218,6 +218,73 @@ fn type_word(v: &Bound<'_, PyAny>) -> String {
     }
 }
 
+/// The completion panel's help for a name: its signature and docstring (a
+/// Python value), or the guide's topic for it (a tessh builtin, a keyword).
+fn doc_for(py: Python<'_>, name: &str, v: Option<&Bound<'_, PyAny>>) -> String {
+    const MAX: usize = 20_000;
+    let mut out = String::new();
+    let tessh_own = v.is_none_or(|v| v.get_type().name().is_ok_and(|t| t.to_string() == "Builtin"));
+    if let (Some(v), false) = (v, tessh_own) {
+        if let Ok(inspect) = py.import("inspect") {
+            let callable = v.is_callable();
+            if callable {
+                if let Ok(sig) = inspect.call_method1("signature", (v,)).and_then(|s| s.str()) {
+                    out = format!("{name}{sig}");
+                }
+            }
+            // (A plain value's docstring is its type's: not much use.)
+            let own = callable || v.is_instance_of::<pyo3::types::PyModule>() || v.is_instance_of::<pyo3::types::PyType>();
+            if own {
+                if let Ok(Some(d)) = inspect.call_method1("getdoc", (v,)).and_then(|d| d.extract::<Option<String>>()) {
+                    // (print's doc starts with its signature again.)
+                    let d = d.trim();
+                    let d = match d.split_once("\n\n") {
+                        Some((first, rest)) if !out.is_empty() && first.starts_with(&format!("{name}(")) => rest.trim(),
+                        _ => d,
+                    };
+                    if !out.is_empty() {
+                        out.push_str("\n\n");
+                    }
+                    out.push_str(d);
+                }
+            }
+        }
+    }
+    // (A plain value: what it is.)
+    if let (Some(v), true, false) = (v, out.is_empty(), tessh_own) {
+        if !v.is_callable() {
+            if let Ok(r) = v.repr().map(|r| r.to_string()) {
+                let r: String = r.chars().take(2000).collect();
+                out = format!("{name} = {r}");
+            }
+        }
+    }
+    // (A tessh builtin: its usage, then the guide's part about it.)
+    if let (Some(v), true) = (v, tessh_own) {
+        if let Ok(d) = v.getattr("_tessh_usage").and_then(|d| d.extract::<String>()) {
+            out = d;
+        }
+    }
+    let key = name.to_lowercase();
+    if out.is_empty() || tessh_own {
+        if let Some(t) = crate::help::topics().into_iter().find(|t| t.keys.iter().any(|k| *k == key)) {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str(&t.body);
+        }
+    }
+    if out.len() > MAX {
+        let mut cut = MAX;
+        while !out.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out.truncate(cut);
+        out.push('…');
+    }
+    out
+}
+
 pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor16: usize) -> serde_json::Value {
     let mut pos = text.len();
     let mut n16 = 0;
@@ -253,7 +320,8 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
                     let v = o.getattr(n.as_str()).ok();
                     let callable = v.as_ref().is_some_and(|v| v.is_callable());
                     let detail = v.as_ref().map(type_word).unwrap_or_default();
-                    items.push(serde_json::json!({"insert": format!("{root}.{n}"), "label": n, "kind": if callable { "command" } else { "value" }, "detail": detail}));
+                    let doc = v.as_ref().map(|v| doc_for(py, &n, Some(v))).unwrap_or_default();
+                    items.push(serde_json::json!({"insert": format!("{root}.{n}"), "label": n, "kind": if callable { "command" } else { "value" }, "detail": detail, "doc": doc}));
                 }
             }
         }
@@ -261,7 +329,9 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
     }
     let builtins = py.import("builtins").ok();
     for n in completions(py, ns, word, first, &before[..start]) {
+        let mut doc = String::new();
         let (kind, detail) = if before[..start].trim() == "help" {
+            doc = crate::help::topics().into_iter().find(|t| t.keys.iter().any(|k| *k == n.to_lowercase())).map(|t| t.body).unwrap_or_default();
             ("option", "help topic".to_string())
         } else if n.ends_with('/') {
             ("dir", String::new())
@@ -270,13 +340,15 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
         } else if var {
             ("variable", ns.get_item(n.as_str()).ok().flatten().map(|v| type_word(&v)).unwrap_or_else(|| "environment".into()))
         } else if crate::compiler::BLOCK_SPECIALS.contains(&n.as_str()) || ["return", "import", "from"].contains(&n.as_str()) {
+            doc = doc_for(py, &n, None);
             ("subcommand", "keyword".to_string())
         } else if let Some(v) = ns.get_item(n.as_str()).ok().flatten().or_else(|| builtins.as_ref().and_then(|b| b.getattr(n.as_str()).ok())) {
+            doc = doc_for(py, &n, Some(&v));
             (if v.is_callable() { "command" } else { "value" }, type_word(&v))
         } else {
             ("command", "program".to_string())
         };
-        items.push(serde_json::json!({"insert": n, "label": n, "kind": kind, "detail": detail}));
+        items.push(serde_json::json!({"insert": n, "label": n, "kind": kind, "detail": detail, "doc": doc}));
     }
     serde_json::json!({"start": u16_of(start), "end": u16_of(pos), "items": items})
 }

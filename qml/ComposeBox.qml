@@ -494,9 +494,41 @@ Rectangle {
             else if (inWord && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete() }
         }
     }
+    // ---- the chosen item's help, read in the background ----
+    // (A command's examples and man page, an option's paragraph, a
+    // subcommand's page: what the item doesn't carry itself. Kept by
+    // command line context, item, and kind.)
+    property var fetchedDoc: ({})
+    // (A command with examples of its own: its man page goes under them.)
+    function docFetchable(i) { return !!i && (i.kind === "command" && box.lang !== "tessh" ? true : (i.doc || "") === "") && ["command", "option", "opt", "subcommand"].indexOf(i.kind) >= 0 && i.detail !== "keyword" && i.detail !== "help topic" }
+    function docKind(i) { return i.kind === "command" && (i.doc || "") !== "" ? "man" : i.kind }
+    function docLine() { return edit.text.slice(0, comp.start) }
+    function docKey(i) {
+        // (An option's or subcommand's help depends on the command it's of.)
+        const ctx = i.kind === "command" ? "" : (docLine().split(/[|;&]/).pop().trim().split(/\s+/).filter(w => w.indexOf("=") < 0)[0] || "")
+        return docKind(i) + "\u0001" + ctx + "\u0001" + i.label
+    }
+    Timer {
+        id: docFetch
+        interval: 120
+        onTriggered: {
+            const i = box.comp.items[box.compIndex]
+            if (!box.compOpen || !box.docFetchable(i) || !box.controller) return
+            const k = box.docKey(i)
+            if (box.fetchedDoc[k] !== undefined) return
+            const line = box.docLine(), host = box.sshHost
+            Async.call(box.controller, q => box.controller.itemDoc(q, host, box.docKind(i), i.label, line), doc => {
+                const f = Object.assign({}, box.fetchedDoc); f[k] = doc; box.fetchedDoc = f
+            })
+        }
+    }
+    onCompIndexChanged: docFetch.restart()
+    onCompChanged: docFetch.restart()
     function compKey(e) {
         if (!compOpen || comp.items.length === 0) return false
         const n = comp.items.length
+        // (Shift+PgUp/PgDn: the help over the list.)
+        if ((e.modifiers & Qt.ShiftModifier) && (e.key === Qt.Key_PageDown || e.key === Qt.Key_PageUp)) { compPopup.scrollDoc(e.key === Qt.Key_PageDown ? 1 : -1); return true }
         switch (e.key) {
         case Qt.Key_Down: compIndex = (compIndex + 1) % n; compChosen = true; return true
         case Qt.Key_Up: compIndex = (compIndex - 1 + n) % n; compChosen = true; return true
@@ -1492,7 +1524,7 @@ Rectangle {
         readonly property int rows: Math.max(hist ? 1 : 0, Math.min(hist ? 14 : 10, box.comp.items.length))
         readonly property var anchorRect: edit.positionToRectangle(box.comp.start)
         width: hist ? box.width - 16 : Math.min(box.width - 16, 640)
-        height: (hist ? searchRow.height + 6 : 0) + rows * rowH + 8 + (docText.visible ? docText.height + 12 : 0)
+        height: (hist ? searchRow.height + 6 : 0) + rows * rowH + 8 + (docBox.visible ? docBox.height + 10 : 0)
         x: hist ? 8 : Math.max(8, Math.min(flick.x + anchorRect.x - 28, box.width - width - 8))
         y: -height - 4
         radius: 8
@@ -1567,7 +1599,7 @@ Rectangle {
         }
         ListView {
             id: compList
-            x: 4; y: compPopup.hist ? searchRow.height + 10 : 4
+            x: 4; y: compPopup.hist ? searchRow.height + 10 : docBox.visible ? docBox.height + 14 : 4
             width: parent.width - 8
             height: compPopup.rows * compPopup.rowH
             clip: true
@@ -1661,34 +1693,59 @@ Rectangle {
                 ToolTip.delay: 500
             }
         }
-        // The chosen item's full help, under the list.
-        Text {
-            id: docText
+        // The chosen item's full help, over the list: its signature and
+        // docstring, or a command's examples and man page (read in the
+        // background for whichever is chosen), scrolled with the wheel or
+        // Shift+PgUp/PgDn. One height for the whole list, so moving through
+        // it doesn't make the panel grow and shrink.
+        Rectangle {
+            id: docBox
             readonly property var item: box.comp.items[box.compIndex]
-            // The panel keeps one height for the whole list (moving through
-            // it mustn't make the dropdown grow and shrink): shown when any
-            // item has more to say than fits its row, sized for the longest kind.
-            readonly property bool anyDoc: box.comp.items.some(i => (i.doc || "") !== "")
+            readonly property bool anyDoc: box.comp.items.some(i => (i.doc || "") !== "" || box.docFetchable(i))
             readonly property bool anyLong: anyDoc || box.comp.items.some(i => (i.detail || "").length > 60)
+            readonly property string fetched: item && box.docFetchable(item) ? (box.fetchedDoc[box.docKey(item)] || "") : ""
+            readonly property string text: !item ? "" : (item.doc || "") !== "" ? item.doc + (fetched !== "" ? "\n\n" + fetched : "")
+                                          : box.docFetchable(item) ? (box.fetchedDoc[box.docKey(item)] !== undefined ? box.fetchedDoc[box.docKey(item)] || item.detail || "" : (item.detail || "") + (item.detail ? "\n\n" : "") + "…")
+                                          : item.detail || ""
             visible: !compPopup.hist && anyLong
-            height: visible ? (anyDoc ? 14 : 5) * Math.ceil(docFm.height) : 0
+            x: 6; y: 6
+            width: parent.width - 12
+            height: visible ? (anyDoc ? 13 : 5) * Math.ceil(docFm.height) + 8 : 0
+            radius: 6
+            color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.04 : 0.02)
             FontMetrics { id: docFm; font.pixelSize: 12 }
-            anchors.top: compList.bottom
-            anchors.topMargin: 6
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.margins: 10
-            text: item ? (item.doc || item.detail) : ""
-            wrapMode: Text.Wrap
-            maximumLineCount: anyDoc ? 14 : 5
-            verticalAlignment: Text.AlignTop
-            elide: Text.ElideRight
-            color: Theme.text
-            opacity: 0.85
-            font.pixelSize: 12
-            renderType: Text.NativeRendering
-            Rectangle { anchors.bottom: parent.top; anchors.bottomMargin: 3; width: parent.width; height: 1; color: Theme.divider }
+            onTextChanged: docFlick.contentY = 0
+            Flickable {
+                id: docFlick
+                anchors.fill: parent
+                anchors.margins: 4
+                anchors.topMargin: 4.001
+                anchors.leftMargin: 6.001
+                clip: true
+                contentHeight: docText.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: false
+                ScrollBar.vertical: ScrollBar { policy: docFlick.contentHeight > docFlick.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+                MomentumWheel { flick: docFlick }
+                TextEdit {
+                    id: docText
+                    width: docFlick.width - 12
+                    text: docBox.text
+                    readOnly: true
+                    selectByMouse: true
+                    wrapMode: Text.Wrap
+                    color: Theme.text
+                    selectionColor: Theme.mix(Theme.bg, Theme.accent, 0.45)
+                    // (The code font: signatures, examples and man pages line up.)
+                    font.family: edit.font.family
+                    font.pixelSize: 12
+                    textFormat: TextEdit.PlainText
+                    renderType: Text.NativeRendering
+                }
+            }
+            Rectangle { anchors.top: parent.bottom; anchors.topMargin: 4; width: parent.width; height: 1; color: Theme.divider }
         }
+        function scrollDoc(pages) { docFlick.contentY = Math.max(0, Math.min(docFlick.contentHeight - docFlick.height, docFlick.contentY + pages * (docFlick.height - 20))) }
     }
 
     // The language server's help for a word (pointed at, or F1 at the cursor).

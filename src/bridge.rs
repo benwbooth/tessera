@@ -547,6 +547,11 @@ pub mod ffi {
         /// The shells the one in front (pid) was started in: [{name, pid}].
         #[qinvokable]
         fn shell_chain(self: &Controller, reply: &QString, pid: i32, host: &QString);
+        /// The completion panel's help for an item (complete::item_doc), read
+        /// on `host` ("" here): a command's examples and man page, an option's
+        /// paragraph, a subcommand's page; "" when there's none.
+        #[qinvokable]
+        fn item_doc(self: &Controller, reply: &QString, host: &QString, kind: &QString, label: &QString, line: &QString);
         /// A finished command tesserad kept for `session` ({"id", "status",
         /// "screen"}; "" while it isn't kept, i.e. still running): for a
         /// window that came back while it ran, and never saw it start.
@@ -1124,6 +1129,17 @@ impl ffi::Controller {
         let (host, k) = crate::client::split_key(&key.to_string());
         let cwd = local_path(cwd);
         crate::background::in_order(move || { let _ = crate::client::rpc(&host, "kernel.sync", serde_json::json!({"key": k, "pid": pid.max(0), "cwd": cwd})); });
+    }
+
+    fn item_doc(&self, reply: &ffi::QString, host: &ffi::QString, kind: &ffi::QString, label: &ffi::QString, line: &ffi::QString) {
+        let (host, kind, label, line) = (host.to_string(), kind.to_string(), label.to_string(), line.to_string());
+        self.answer_on(reply, Some("doc"), move || {
+            if host.is_empty() {
+                return crate::complete::item_doc(&kind, &label, &line);
+            }
+            let r = crate::client::rpc_within(&host, "complete.doc", serde_json::json!({"kind": kind, "label": label, "line": line}), std::time::Duration::from_secs(10));
+            r.ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
+        })
     }
 
     fn kept_cell(&self, reply: &ffi::QString, host: &ffi::QString, session: &ffi::QString, id: i32) {

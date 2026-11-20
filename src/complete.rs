@@ -574,6 +574,66 @@ fn man_text(page: &str) -> String {
     text
 }
 
+/// The completion panel's full help for an item: a command's tldr examples
+/// and man page, an option's paragraph from its command's man page, a
+/// subcommand's own page ("cmd-sub", as git's). "" when there's none.
+/// `line`: the command line so far (which command an option is of).
+pub fn item_doc(kind: &str, label: &str, line: &str) -> String {
+    const MAX: usize = 200_000;
+    let prog = line
+        .split(|c: char| c == '|' || c == ';' || c == '&')
+        .last()
+        .unwrap_or("")
+        .split_whitespace()
+        .find(|w| !w.contains('=') && !matches!(*w, "sudo" | "env" | "time" | "nice" | "command" | "exec" | "doas"))
+        .unwrap_or("")
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let page = |name: &str| -> String {
+        if name.is_empty() || name.starts_with('-') || name.contains(['/', ' ']) {
+            return String::new();
+        }
+        let mut out = String::new();
+        if let Some((desc, examples)) = tldr_page(name) {
+            if !desc.is_empty() {
+                out.push_str(&desc);
+                out.push_str("\n\n");
+            }
+            for (what, cmd) in examples {
+                out.push_str(&format!("{what}:\n    {cmd}\n"));
+            }
+            if !out.is_empty() {
+                out.push('\n');
+            }
+        }
+        out.push_str(man_text(name).trim());
+        out
+    };
+    let mut doc = match kind {
+        "command" | "program" => page(label),
+        // (Its examples shown already: the man page alone.)
+        "man" if !label.is_empty() && !label.starts_with('-') && !label.contains(['/', ' ']) => man_text(label).trim().to_string(),
+        "subcommand" if !prog.is_empty() => {
+            page(&format!("{prog}-{label}"))
+        }
+        "option" | "opt" if !prog.is_empty() => {
+            let flag = label.split(['=', ' ', ',']).next().unwrap_or(label);
+            man_options(&prog).into_iter().find(|(f, _)| f.split([',', ' ', '=', '[']).any(|x| x == flag)).map(|(f, d)| format!("{f}\n\n{d}")).unwrap_or_default()
+        }
+        _ => String::new(),
+    };
+    if doc.len() > MAX {
+        let mut cut = MAX;
+        while !doc.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        doc.truncate(cut);
+    }
+    doc
+}
+
 /// What an exit status means for a command: the shell's own (not found,
 /// a signal), else what its man page says (EXIT STATUS and the like).
 pub fn exit_meaning(command: &str, status: i32) -> String {
