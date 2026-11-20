@@ -138,6 +138,7 @@ Item {
     // having said so since: nothing running in front of it counts as that,
     // until the shell integration says otherwise.)
     property bool idleShell: false
+    onPreferEditorChanged: console.warn("focus-trace: preferEditor " + preferEditor + "\n" + new Error().stack)   // (TEMPORARY)
     // Switching the pane's shell (the editor's language list): to one it was
     // started from, the ones above it are left (exit), what they changed
     // handed down; to another, it's started in the current one. (Which shell
@@ -260,6 +261,8 @@ Item {
         // pane remembers which, and goes back to it when it gets the keys
         // again (switching tabs or panes).
         onActiveFocusChanged: {
+            // (TEMPORARY, to find what takes the keys from the editor: see the journal.)
+            if (pane.editorOn) console.warn("focus-trace: terminal " + (activeFocus ? "took" : "lost") + " the keys; preferEditor " + pane.preferEditor + ", editor text " + JSON.stringify(compose.text) + "\n" + new Error().stack)
             if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
             // (A notebook over it takes the keys, when the editor doesn't.)
             else if (activeFocus && notebook.visible && pane.termSlot === null && !pane.runningLong) Qt.callLater(() => notebook.forceActiveFocus())
