@@ -322,6 +322,7 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
         "daemon.upgrade" => upgrade_now(),
         "job.adopt" => crate::jobs::adopt(p),
         "job.foreground" => crate::jobs::foreground(n("id")),
+        "job.background" => crate::jobs::background(n("id")),
         "job.forget" => {
             crate::jobs::forget(n("id"));
             Value::Null

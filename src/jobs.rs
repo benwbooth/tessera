@@ -304,6 +304,13 @@ pub fn foreground(id: u64) -> Value {
     }
 }
 
+pub fn background(id: u64) -> Value {
+    match crate::daemon::background(id) {
+        Ok(()) => json!({"ok": true}),
+        Err(e) => json!({"error": e}),
+    }
+}
+
 /// Whether any job still runs (tesserad holds off upgrading: they'd be lost).
 pub fn any_running() -> bool {
     jobs().lock().unwrap().list.iter().any(|j| j.lock().unwrap().status.is_none())

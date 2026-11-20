@@ -506,6 +506,21 @@ pub fn sync_daemon() -> &'static str {
     "current"
 }
 
+/// Whether the running daemon is this build (false: another, or none).
+pub fn daemon_current() -> bool {
+    let Ok(exe) = daemon_exe() else { return true };
+    let ask = || -> Option<String> {
+        let mut s = UnixStream::connect(socket_path()).ok()?;
+        s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+        write_json(&mut s, T_VERSION, &()).ok()?;
+        match read_frame(&mut s) {
+            Ok((T_VERSION_REPLY, p)) => serde_json::from_slice(&p).ok(),
+            _ => None,
+        }
+    };
+    ask().is_some_and(|id| id == exe_identity_of(&exe))
+}
+
 /// End the daemon (and its shells): for a build too old to upgrade itself.
 pub fn stop_daemon() -> bool {
     #[cfg(target_os = "linux")]

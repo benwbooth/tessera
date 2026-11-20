@@ -1658,52 +1658,34 @@ ApplicationWindow {
             }
         }
     }
-    // tesserad (here or on a host) has a newer build waiting: it swaps
-    // itself in once no kernel or background job runs. Asked once per build
-    // whether to stop them now.
+    // A notebook found tesserad (here or on a host) too old for what it
+    // asked (moving a card to the background, a background job): asked
+    // whether to update it now. (A newer build alone isn't asked about: the
+    // devloop makes one every few minutes; it swaps itself in once no kernel
+    // or job runs.) Once it's updated every notebook is told
+    // (daemon.updated): their kernels start again.
     Connections {
         target: controller
         function onJupyterEvent(key, json) {
             if (key !== "tesserad" && !key.endsWith("//tesserad")) return
             let e
             try { e = JSON.parse(json) } catch (x) { return }
+            if (e.type !== "daemon.old") return
             const host = key === "tesserad" ? "" : key.slice(0, -"//tesserad".length)
-            // (A notebook found tesserad too old for what it asked: a build
-            // from before it said it had a newer one waiting.)
-            if (e.type === "daemon.old") {
-                const done = r => controller.jupyterEvent(key, JSON.stringify({ type: "daemon.updated", ok: !!r.ok, error: r.error || "" }))
-                sheet.ask({
-                    title: "Update tesserad?",
-                    message: "Tessera's background process (tesserad" + (host ? " on " + host : "") + ") is an older build, from before " + (e.feature || "this") + ". "
-                           + "It updates itself to this build in place, keeping your shells, but only once no kernel runs in it.\n\n"
-                           + "Updating now stops its kernels (they lose their variables), then " + (e.retry || "carries on") + ".",
-                    okText: "Stop Kernels and Update",
-                    destructive: true,
-                    onAccept: () => Async.call(controller, k => controller.updateDaemon(k, host), json => {
-                        let r = {}
-                        try { r = JSON.parse(json) } catch (x) {}
-                        done(r)
-                    })
-                })
-                // (Test hook: TESSERA_TEST_UPDATE_ACCEPT says yes.)
-                if (controller.testEnv("UPDATE_ACCEPT") !== "") Qt.callLater(sheet.accept)
-                return
-            }
-            if (e.type !== "daemon.update") return
-            const n = (c, one) => c + " " + one + (c === 1 ? "" : "s")
-            let busy = []
-            if (e.kernels > 0) busy.push(n(e.kernels, "kernel"))
-            if (e.jobs > 0) busy.push(n(e.jobs, "background job"))
-            if (!busy.length) return
             sheet.ask({
                 title: "Update tesserad?",
-                message: "Tessera's background process (tesserad" + (host ? " on " + host : "") + "), which runs your shells and kernels, has a newer build. "
-                       + "It updates itself in place, keeping your shells, as soon as nothing else runs in it. Running now: " + busy.join(" and ") + ".\n\n"
-                       + "Updating now stops them: kernels lose their variables, background jobs end. Cancel to let it update once they finish.",
+                message: "Tessera's background process (tesserad" + (host ? " on " + host : "") + ") is an older build, from before " + (e.feature || "this") + ". "
+                       + "It updates itself to this build in place, keeping your shells, but only once no kernel or background job runs in it.\n\n"
+                       + "Updating now stops them (kernels start again after, without their variables; background jobs end), then " + (e.retry || "carries on") + ".",
                 okText: "Stop and Update",
                 destructive: true,
-                onAccept: () => Async.call(controller, k => controller.jobCall(k, host, "daemon.upgrade", "{}"), () => {})
+                onAccept: () => Async.call(controller, k => controller.updateDaemon(k, host), json => {
+                    let r = {}
+                    try { r = JSON.parse(json) } catch (x) {}
+                    controller.jupyterEvent(key, JSON.stringify({ type: "daemon.updated", ok: !!r.ok, error: r.error || "" }))
+                })
             })
+            // (Test hook: TESSERA_TEST_UPDATE_ACCEPT says yes.)
             if (controller.testEnv("UPDATE_ACCEPT") !== "") Qt.callLater(sheet.accept)
         }
     }

@@ -732,6 +732,33 @@ pub fn foreground(job: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// Job `job`, brought to the foreground, back out of its pane: the pane's
+/// own shell (set aside meanwhile) has it again.
+pub fn background(job: u64) -> Result<(), String> {
+    let registry = REGISTRY.get().ok_or("tesserad keeps no sessions here")?.clone();
+    let (o, l) = find_job(&registry, job).ok_or("that job's terminal is gone")?;
+    if !l.fg {
+        return Ok(());
+    }
+    let n = registry.lock().unwrap().get(&l.key).cloned().ok_or("the pane's own shell is gone")?;
+    {
+        let mut reg = registry.lock().unwrap();
+        reg.insert(l.pane.clone(), n.clone());
+        reg.insert(l.key.clone(), o.clone());
+    }
+    o.hidden.store(true, Ordering::SeqCst);
+    n.hidden.store(false, Ordering::SeqCst);
+    if let Some(link) = o.job.lock().unwrap().as_mut() {
+        link.fg = false;
+    }
+    move_client(&o, &n, PANE_RESET);
+    let size = *o.size.lock().unwrap();
+    resize(&n, size.0, size.1);
+    // (A fresh prompt, as after any command.)
+    let _ = n.writer.lock().unwrap().write_all(b"\r");
+    Ok(())
+}
+
 /// Whether job `job` is in its pane now.
 pub fn job_fg(job: u64) -> bool {
     REGISTRY.get().and_then(|r| find_job(r, job)).is_some_and(|(_, l)| l.fg)

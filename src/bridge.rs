@@ -963,23 +963,29 @@ impl ffi::Controller {
         let host = host.to_string();
         self.answer(reply, false, move || {
             use serde_json::json;
-            let kernels = crate::client::rpc(&host, "kernel.running", json!({})).unwrap_or_default();
-            for k in kernels.as_array().into_iter().flatten().filter_map(|k| k["key"].as_str()) {
-                let _ = crate::client::rpc(&host, "kernel.stop", json!({"key": k}));
+            // (A build that knows it has a newer one waiting stops its kernels
+            // and jobs itself and swaps in; one from before, its kernels
+            // stopped here, is sent this build.)
+            let knows = crate::client::rpc(&host, "daemon.upgrade", json!({})).is_ok();
+            if !knows {
+                let kernels = crate::client::rpc(&host, "kernel.running", json!({})).unwrap_or_default();
+                for k in kernels.as_array().into_iter().flatten().filter_map(|k| k["key"].as_str()) {
+                    let _ = crate::client::rpc(&host, "kernel.stop", json!({"key": k}));
+                }
             }
-            // (Another host's swaps in the build it was sent once they're gone.)
             if !host.is_empty() {
-                std::thread::sleep(std::time::Duration::from_secs(2));
+                std::thread::sleep(std::time::Duration::from_secs(4));
                 return json!({"ok": true}).to_string();
             }
             let start = std::time::Instant::now();
-            while start.elapsed() < std::time::Duration::from_secs(10) {
-                match crate::client::sync_daemon() {
-                    "current" | "upgraded" => return json!({"ok": true}).to_string(),
-                    // (None: it's between builds, not answering yet.)
-                    "outdated" => break,
-                    _ => std::thread::sleep(std::time::Duration::from_millis(300)),
+            while start.elapsed() < std::time::Duration::from_secs(20) {
+                if crate::client::daemon_current() {
+                    return json!({"ok": true}).to_string();
                 }
+                if !knows && crate::client::sync_daemon() == "outdated" {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(300));
             }
             json!({"ok": false, "error": "tesserad didn't update"}).to_string()
         });
@@ -1222,7 +1228,7 @@ impl ffi::Controller {
         let (host, method) = (host.to_string(), method.to_string());
         let params: serde_json::Value = serde_json::from_str(&params.to_string()).unwrap_or_default();
         self.answer(reply, false, move || {
-            if !method.starts_with("job.") && method != "daemon.upgrade" {
+            if !method.starts_with("job.") {
                 return serde_json::json!({"error": "not a job request"}).to_string();
             }
             match crate::client::rpc(&host, &method, params) {

@@ -229,16 +229,15 @@ FocusScope {
         }
         function onJupyterEvent(key, json) {
             if (key === "tesserad" || key.endsWith("//tesserad")) {
-                if (!nb.updateRetry) return
                 let ue
                 try { ue = JSON.parse(json) } catch (x) { return }
-                if (ue.type !== "daemon.updated") return
+                if (ue.type !== "daemon.updated" || key !== (nb.sshHost ? nb.sshHost + "//tesserad" : "tesserad")) return
                 const retry = nb.updateRetry
                 nb.updateRetry = null
-                if (!ue.ok) { nb.kernelMessage = "tesserad didn't update: " + (ue.error || "no answer"); return }
-                // (Its kernel was stopped for the update: back, as before it.)
+                if (!ue.ok) { if (retry) nb.kernelMessage = "tesserad didn't update: " + (ue.error || "no answer"); return }
+                // (The kernels were stopped for the update: back, as before it.)
                 if (nb.kernelState === "dead" && !nb.viaShell) { nb.kernelState = ""; nb.startKernel() }
-                retry()
+                if (retry) retry()
                 return
             }
             if (key.startsWith(nb.key + "~")) {
@@ -366,7 +365,7 @@ FocusScope {
         return { cid: "c" + (nextId++) + "-" + Math.random().toString(36).slice(2, 8), nbid: Math.random().toString(36).slice(2, 10),
                  type: type, source: source || "", tid: 0, mine: false, outputs: "[]", count: -1, running: false, failed: false,
                  started: 0, ended: 0, cwd: "", status: 0, tkind: "", tsize: 0,
-                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "", viewLang: "", execs: "[]", job: 0, jobAt: 0, jobTty: false }
+                 editing: false, meta: "{}", clearPending: false, hideOutput: false, lang: "", ranIn: "", viewPath: "", viewLang: "", execs: "[]", job: 0, jobAt: 0, jobTty: false, bgHidden: false }
     }
     function insertCell(at, type, edit) {
         at = Math.max(0, Math.min(cells.count, at))
@@ -466,6 +465,7 @@ FocusScope {
         cells.setProperty(i, "job", 0)
         cells.setProperty(i, "jobAt", 0)
         cells.setProperty(i, "jobTty", false)
+        cells.setProperty(i, "bgHidden", false)
         cells.setProperty(i, "running", true)
         cells.setProperty(i, "failed", false)
         cells.setProperty(i, "status", 0)
@@ -540,6 +540,7 @@ FocusScope {
             }
             cells.setProperty(j, "job", r.id)
             cells.setProperty(j, "execs", JSON.stringify([r.exec]))
+            hideJob(j, true)
             touch()
             refreshJobs()
         })
@@ -550,6 +551,8 @@ FocusScope {
     // the notebook carries on. Foreground gives it the pane again.
     property string fgJob: ""           // the card whose job has the pane now
     function canBg(c) {
+        // (One brought to the foreground goes back.)
+        if (c && c.job > 0 && c.jobTty && c.running && fgJob === c.cid) return true
         if (!c || !c.running || c.job > 0 || !view || storeKey === "") return false
         return c.tid > 0 || (ttyRun !== null && ttyRun.cid === c.cid && ttyRun.tid > 0)
     }
@@ -567,9 +570,37 @@ FocusScope {
         updateRetry = retry
         controller.jupyterEvent(sshHost ? sshHost + "//tesserad" : "tesserad", JSON.stringify({ type: "daemon.old", feature: feature, retry: retryText }))
     }
+    // Cards whose job is in the background are in the Jobs list, out of the
+    // notebook (Show or Foreground there brings one back).
+    function hiddenAt(i) { const c = cells.get(i); return !!c && c.job > 0 && c.bgHidden }
+    function step(i, d) {
+        let j = i + d
+        while (j >= 0 && j < cells.count && hiddenAt(j)) j += d
+        return j < 0 || j >= cells.count ? i : j
+    }
+    function hideJob(i, on) {
+        if (!cells.get(i) || cells.get(i).job <= 0) return
+        cells.setProperty(i, "bgHidden", on)
+        if (on && current === i) current = step(i, 1) !== i ? step(i, 1) : step(i, -1)
+        touch()
+    }
+    function backgroundJob(i) {
+        const c = cells.get(i), cid = c.cid
+        Async.call(controller, k => controller.jobCall(k, sshHost, "job.background", JSON.stringify({ id: c.job })), json => {
+            let r = {}
+            try { r = JSON.parse(json) } catch (e) {}
+            const j = indexOf(cid)
+            if (!r.ok) { if (j >= 0) addOutput(j, { output_type: "stream", name: "stderr", text: "Couldn't move it to the background: " + (r.error || "tesserad didn't answer") + "\n" }); return }
+            if (fgJob === cid) fgJob = ""
+            updateOwnRun()
+            refreshJobs()
+            if (j >= 0) hideJob(j, true)
+        })
+    }
     function moveToBg(i, retried) {
         const c = cells.get(i)
         if (!canBg(c)) return
+        if (c.job > 0) { backgroundJob(i); return }
         const cid = c.cid, tty = ttyRun && ttyRun.cid === cid ? ttyRun : null
         Async.call(controller, k => controller.jobCall(k, sshHost, "job.adopt", JSON.stringify({ session: storeKey, owner: key, cell: cid })), json => {
             const j = indexOf(cid)
@@ -606,6 +637,7 @@ FocusScope {
             if (r.exec) cells.setProperty(j, "execs", JSON.stringify([r.exec]))
             if (!/ \u00b7 bg$/.test(cells.get(j).ranIn)) cells.setProperty(j, "ranIn", cells.get(j).ranIn + " \u00b7 bg")
             cells.setProperty(j, "running", true)
+            hideJob(j, true)
             updateOwnRun()
             updateJobsRunning()
             refreshJobs()
@@ -624,7 +656,7 @@ FocusScope {
             fgJob = cid
             updateOwnRun()
             refreshJobs()
-            if (j >= 0) { current = j; findLive(); Qt.callLater(followLive) }
+            if (j >= 0) { cells.setProperty(j, "bgHidden", false); current = j; findLive(); Qt.callLater(followLive) }
             if (view) Qt.callLater(() => view.forceActiveFocus())
         })
     }
@@ -703,15 +735,29 @@ FocusScope {
         Async.call(controller, k => controller.jobCall(k, sshHost, "job.list", "{}"), json => {
             let r = []
             try { r = JSON.parse(json) } catch (e) {}
-            if (Array.isArray(r)) hostJobs = r
+            if (!Array.isArray(r)) return
+            hostJobs = r
+            // (A job cleared from the list: its card is back in the notebook.)
+            for (let i = 0; i < cells.count; ++i) {
+                const c = cells.get(i)
+                if (c.job > 0 && c.bgHidden && !r.some(j => j.id === c.job && j.owner === key)) hideJob(i, false)
+            }
         })
     }
     Timer { interval: 2000; repeat: true; running: nb.visible && (nb.jobsActive > 0 || jobsPop.opened); onTriggered: nb.refreshJobs() }
+    // The Jobs list: open, or closed when it's open. (A click outside it
+    // closes it first: the badge's click right after is that same click.)
+    function toggleJobs() {
+        if (jobsPop.opened || Date.now() - jobsPop.closedAt < 300) { jobsPop.close(); return }
+        refreshJobs()
+        jobsPop.open()
+    }
     function showJobCell(cid) {
         const i = indexOf(cid)
         if (i < 0) return
+        if (cells.get(i).bgHidden) cells.setProperty(i, "bgHidden", false)
         current = i
-        list.positionViewAtIndex(i, ListView.Beginning)
+        Qt.callLater(() => list.positionViewAtIndex(i, ListView.Beginning))
     }
 
     function runAll() { for (let i = 0; i < cells.count; ++i) if (cells.get(i).type === "code") run(i) }
@@ -1466,7 +1512,7 @@ FocusScope {
             if (tm.cwd) x.cwd = tm.cwd
             if (!(tm.tid > 0) && tm.started > 1) { x.started = tm.started; x.ended = tm.started + (tm.duration_ms || 0); x.failed = !!tm.failed }
             if (keepTids && !(tm.tid > 0) && tm.cid) { x.cid = tm.cid; if (tm.running) { x.running = true; x.ended = 0 } }
-            if (keepTids && tm.job > 0) { x.job = tm.job; x.jobAt = tm.job_at || 0; x.jobTty = !!tm.job_tty }
+            if (keepTids && tm.job > 0) { x.job = tm.job; x.jobAt = tm.job_at || 0; x.jobTty = !!tm.job_tty; x.bgHidden = !!tm.bg_hidden }
             if (tm.lang) x.lang = tm.lang
             if (tm.ran_in) x.ranIn = tm.ran_in
             if (tm.view) x.viewPath = tm.view
@@ -1723,7 +1769,7 @@ FocusScope {
                     // comes after a restart, and whether it was still running.)
                     if (kept) meta.tessera = Object.assign({}, meta.tessera || {}, { cid: c.cid, running: !!c.running })
                     // (A background job: which, and how much of its output is in.)
-                    if (kept && c.job > 0) meta.tessera = Object.assign({}, meta.tessera || {}, { job: c.job, job_at: c.jobAt, job_tty: c.jobTty })
+                    if (kept && c.job > 0) meta.tessera = Object.assign({}, meta.tessera || {}, { job: c.job, job_at: c.jobAt, job_tty: c.jobTty, bg_hidden: c.bgHidden })
                 }
                 if (c.lang !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { lang: c.lang })
                 if (c.ranIn !== "") meta.tessera = Object.assign({}, meta.tessera || {}, { ran_in: c.ranIn })
@@ -1845,7 +1891,7 @@ FocusScope {
     Shortcut { sequence: "Ctrl+Alt+X"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.clearOutputs() }
     Shortcut { sequence: "Ctrl+Alt+K"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.refreshKernels(); kernelsPop.open() } }
     Shortcut { sequence: "Ctrl+Alt+Z"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { const i = nb.bgTarget(); if (i >= 0) nb.moveToBg(i) } }
-    Shortcut { sequence: "Ctrl+Alt+J"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.refreshJobs(); jobsPop.open() } }
+    Shortcut { sequence: "Ctrl+Alt+J"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.toggleJobs() }
     Shortcut { sequence: "Ctrl+Alt+B"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "code") }
     Shortcut { sequence: "Ctrl+Alt+M"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "markdown") }
     Shortcut { sequence: "Ctrl+Alt+P"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.listKernels(); kernelBox.popup.open() } }
@@ -1874,6 +1920,9 @@ FocusScope {
     // NB_CELL2=<ms>:<code> runs another cell then.)
     Timer { interval: nb.controller ? parseInt(nb.controller.testEnv("NB_BG") || "0") : 0; running: interval > 0
             onTriggered: { const i = nb.bgTarget(); console.log("nb bg test: card " + i); if (i >= 0) nb.moveToBg(i) } }
+    // (NB_BG2: again, later: a card brought to the foreground goes back.)
+    Timer { interval: nb.controller ? parseInt(nb.controller.testEnv("NB_BG2") || "0") : 0; running: interval > 0
+            onTriggered: { const i = nb.bgTarget(); console.log("nb bg2 test: card " + i); if (i >= 0) nb.moveToBg(i) } }
     Timer { interval: nb.controller ? parseInt(nb.controller.testEnv("NB_FG") || "0") : 0; running: interval > 0
             onTriggered: { for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).job > 0 && cells.get(i).jobTty) { console.log("nb fg test: card " + i); nb.foregroundJob(i); break } } }
     Timer { interval: nb.controller ? parseInt((nb.controller.testEnv("NB_CELL2") || "0").split(":")[0]) : 0; running: interval > 0
@@ -2030,9 +2079,11 @@ FocusScope {
             }
             Tool {
                 visible: nb.hostJobs.length > 0
-                label: (nb.narrow ? "\u29d7 " : "Jobs ") + nb.jobsActive + (nb.hostJobs.length > nb.jobsActive ? "/" + nb.hostJobs.length : "")
-                tip: "Background jobs (running/all): their output, status, Stop (Ctrl+Alt+J)"
-                onClicked: { nb.refreshJobs(); jobsPop.open() }
+                // (A badge while any runs.)
+                base: nb.jobsActive > 0 ? Theme.mix(Theme.panel, Theme.accent, 0.3) : Theme.panel
+                label: (nb.narrow ? "\u29d7 " : "Background jobs ") + nb.jobsActive + (nb.hostJobs.length > nb.jobsActive ? "/" + nb.hostJobs.length : "")
+                tip: "Background jobs (running/all): show or hide the list: their output, status, Foreground, Stop (Ctrl+Alt+J)"
+                onClicked: nb.toggleJobs()
             }
             Rectangle { width: 1; height: 14; color: Theme.divider }
             Tool { label: nb.narrow ? "+" : "+ Code"; tip: "Add a code cell below (Ctrl+Alt+B)"; onClicked: nb.insertCell(nb.current + 1, "code") }
@@ -2183,11 +2234,11 @@ FocusScope {
             const i = nb.current
             const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
             const enter = e.key === Qt.Key_Return || e.key === Qt.Key_Enter
-            if (enter && (e.modifiers & Qt.ShiftModifier)) { nb.run(i); nb.focusCell(Math.min(cells.count - 1, i + 1), false); e.accepted = true }
+            if (enter && (e.modifiers & Qt.ShiftModifier)) { nb.run(i); nb.focusCell(nb.step(i, 1), false); e.accepted = true }
             else if (enter && (e.modifiers & Qt.ControlModifier)) { nb.run(i); e.accepted = true }
             else if (enter) { nb.focusCell(i, true); e.accepted = true }
-            else if ((e.key === Qt.Key_Up || e.key === Qt.Key_K) && plain) { nb.focusCell(Math.max(0, i - 1), false); e.accepted = true }
-            else if ((e.key === Qt.Key_Down || e.key === Qt.Key_J) && plain) { nb.focusCell(Math.min(cells.count - 1, i + 1), false); e.accepted = true }
+            else if ((e.key === Qt.Key_Up || e.key === Qt.Key_K) && plain) { nb.focusCell(nb.step(i, -1), false); e.accepted = true }
+            else if ((e.key === Qt.Key_Down || e.key === Qt.Key_J) && plain) { nb.focusCell(nb.step(i, 1), false); e.accepted = true }
             else if (e.key === Qt.Key_A && plain) { nb.insertCell(i, "code"); e.accepted = true }
             else if (e.key === Qt.Key_B && plain) { nb.insertCell(i + 1, "code"); e.accepted = true }
             else if (e.key === Qt.Key_M && plain) { nb.setType(i, "markdown"); e.accepted = true }
@@ -2226,6 +2277,7 @@ FocusScope {
             required property string execs     // what its programs ran with: [{command, line, argv, cwd, user, env}]
             required property int job          // a background job running it (tesserad's id), or 0
             required property bool jobTty      // it's a command moved to the background with its terminal
+            required property bool bgHidden    // its job is in the background: it's in the Jobs list, not here
             readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
@@ -2245,7 +2297,7 @@ FocusScope {
             // One card expanded fills the list, held there; the others stay as
             // they are, out of sight: folding them all to nothing brought every
             // card into the list at once, and Expand took a second.)
-            readonly property bool wanted: true
+            readonly property bool wanted: !(job > 0 && bgHidden)
             visible: wanted
             height: !wanted ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
                      + (hasOutput ? (hideOutput ? 22 : body.height + (body.live ? 14 : 12)) : 4) + (ask ? askBox.height + 6 : 0))
@@ -2460,12 +2512,16 @@ FocusScope {
                 Chip { visible: cell.job > 0 && cell.running; base: cell.color; label: "\u25a0 Stop"; tip: "Stop it (TERM, then KILL after 3 s)"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.stopJob(cell.index) }
                 // (Running in the pane: to the background; a background one with its terminal: back.)
-                Chip { visible: cell.running && cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) && nb.canBg(cells.get(cell.index)); base: cell.color; label: "\u2198 bg"
+                Chip { visible: cell.running && (cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) || nb.fgJob === cell.cid) && nb.canBg(cells.get(cell.index)); base: cell.color; label: "\u2198 bg"
                        tip: "Move to the background (Ctrl+Alt+Z): it goes on as a job, the notebook carries on"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.moveToBg(cell.index) }
                 Chip { visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; base: cell.color; label: "\u2196 Foreground"
                        tip: "Bring to the foreground: it takes the pane again (a terminal app gets its screen back here)"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.foregroundJob(cell.index) }
+                // (A background job's card shown from the Jobs list: back there.)
+                Chip { visible: cell.job > 0 && !cell.bgHidden && nb.fgJob !== cell.cid; base: cell.color; label: "Hide"
+                       tip: "Back to the Jobs list (Ctrl+Alt+J): it's out of the notebook while it's a background job"
+                       Layout.minimumWidth: implicitWidth; onClicked: nb.hideJob(cell.index, true) }
                 // (What it ran with: command line, folder, user, environment.)
                 Chip { visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.ended > 0 || cell.running || cell.execs !== "[]")
                        base: cell.color; label: "\u24d8"; tip: "Details: the command line as run, folder, user and environment"
@@ -2552,7 +2608,7 @@ FocusScope {
                 SlimMenuItem { text: "\u24d8 Details (command line, environment)"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.showExec(cell.index) }
                 SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
                 SlimMenuItem { text: "Run in the background"; visible: cell.code && cell.viewPath === "" && !cell.running && nb.bgLang(cells.get(cell.index)) !== ""; onTriggered: nb.run(cell.index, true) }
-                SlimMenuItem { text: "Move to the background\tCtrl+Alt+Z"; visible: cell.running && cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) && nb.canBg(cells.get(cell.index)); onTriggered: nb.moveToBg(cell.index) }
+                SlimMenuItem { text: "Move to the background\tCtrl+Alt+Z"; visible: cell.running && (cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) || nb.fgJob === cell.cid) && nb.canBg(cells.get(cell.index)); onTriggered: nb.moveToBg(cell.index) }
                 SlimMenuItem { text: "Bring to the foreground"; visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; onTriggered: nb.foregroundJob(cell.index) }
                 SlimMenuItem { text: "Stop the background job"; visible: cell.job > 0 && cell.running; onTriggered: nb.stopJob(cell.index) }
                 SlimMenuItem { text: "Run the cells above"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.runAbove(cell.index) }
@@ -3222,6 +3278,8 @@ FocusScope {
         topPadding: 8.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         property real now: Date.now()
+        property double closedAt: 0
+        onClosed: closedAt = Date.now()
         Timer { interval: 1000; repeat: true; running: jobsPop.opened; onTriggered: jobsPop.now = Date.now() }
         contentItem: ColumnLayout {
             spacing: 4
@@ -3264,7 +3322,7 @@ FocusScope {
                         text: "pid " + modelData.pid + " \u00b7 " + (modelData.running ? nb.ago(jobsPop.now - modelData.started) : "exit " + modelData.status + " \u00b7 " + nb.ago(modelData.ended - modelData.started))
                         color: Theme.textDim; font.pixelSize: 11; topPadding: 0.001
                     }
-                    Chip { base: Theme.panel; label: "Show"; visible: mine; tip: "Go to its card"; onClicked: { nb.showJobCell(modelData.cell); jobsPop.close() } }
+                    Chip { base: Theme.panel; label: "Show"; visible: mine; tip: "Show its card in the notebook (Hide on it puts it back here)"; onClicked: { nb.showJobCell(modelData.cell); jobsPop.close() } }
                     Chip { base: Theme.panel; label: "\u2196 Foreground"; visible: mine && modelData.running && !!modelData.tty && !modelData.fg
                            tip: "Bring it to the foreground: its card takes the pane again"
                            onClicked: { const i = nb.indexOf(modelData.cell); if (i >= 0) nb.foregroundJob(i); jobsPop.close() } }
