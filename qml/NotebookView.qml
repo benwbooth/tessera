@@ -807,6 +807,49 @@ FocusScope {
         touch()
         follow()
     }
+    // A link in a file card's page (a Markdown file's): another file opens
+    // in the same card, with Back and Forward (fileHist: cid -> {back, fwd},
+    // paths); a folder, outside.
+    property var fileHist: ({})
+    property var fileAnchors: ({})      // cid -> the #part to scroll to once the page is drawn
+    function takeAnchor(cid) { const m = Object.assign({}, fileAnchors); delete m[cid]; fileAnchors = m }
+    function followFileLink(cid, u, page) {
+        const m = /^file:\/\/([^#?]*)(?:\?[^#]*)?(?:#(.*))?$/.exec(String(u))
+        if (!m) { Qt.openUrlExternally(u); return }
+        let p = m[1]
+        try { p = decodeURIComponent(p) } catch (e) {}
+        p = p.replace(/^localhost(?=\/)/, "")
+        const i = indexOf(cid)
+        if (i < 0) return
+        const cur = cells.get(i).viewPath
+        // (An SSH file's links are on that host.)
+        const host = (/^ssh:\/\/[^\/]*/.exec(cur) || [""])[0]
+        if (host + p === cur) { if (page) page.scrollTo(m[2] || ""); return }
+        if (p === "" || p.endsWith("/")) { Qt.openUrlExternally(u); return }
+        const h = fileHist[cid] || { back: [], fwd: [] }
+        setFileHist(cid, { back: h.back.concat([cur]), fwd: [] })
+        showInCard(i, host + p, m[2] || "")
+    }
+    function showInCard(i, p, anchor) {
+        const cid = cells.get(i).cid
+        cells.setProperty(i, "viewPath", p)
+        cells.setProperty(i, "source", p)
+        cells.setProperty(i, "viewLang", "")
+        cells.setProperty(i, "cwd", p.replace(/\/[^\/]*$/, "") || "/")
+        if (kinds[cid] === "mdtext") { const k = Object.assign({}, kinds); delete k[cid]; kinds = k }
+        const a = Object.assign({}, fileAnchors); a[cid] = anchor; fileAnchors = a
+        touch()
+    }
+    function setFileHist(cid, h) { const m = Object.assign({}, fileHist); m[cid] = h; fileHist = m }
+    function fileBack(i, forward) {
+        const c = cells.get(i)
+        const h = fileHist[c.cid]
+        if (!h || (forward ? h.fwd : h.back).length === 0) return
+        const to = forward ? h.fwd[h.fwd.length - 1] : h.back[h.back.length - 1]
+        setFileHist(c.cid, forward ? { back: h.back.concat([c.viewPath]), fwd: h.fwd.slice(0, -1) }
+                                   : { back: h.back.slice(0, -1), fwd: h.fwd.concat([c.viewPath]) })
+        showInCard(i, to, "")
+    }
     // (Cards made before the shell's name was known get it now.)
     onShellNameChanged: if (shellName !== "") for (let i = 0; i < cells.count; ++i) if (cells.get(i).tid > 0 && cells.get(i).ranIn === "") cells.setProperty(i, "ranIn", shellName)
     // What a cell's exit status means: the shell's codes or the command's man
@@ -895,49 +938,6 @@ FocusScope {
         // (No list yet: run once it's in.)
         if (kernels.length === 0 && !listed) { listKernels(() => runLang(cid, l, true)); return }
         const e = langKernels[l]
-    // A link in a file card's page (a Markdown file's): another file opens
-    // in the same card, with Back and Forward (fileHist: cid -> {back, fwd},
-    // paths); a folder, outside.
-    property var fileHist: ({})
-    property var fileAnchors: ({})      // cid -> the #part to scroll to once the page is drawn
-    function takeAnchor(cid) { const m = Object.assign({}, fileAnchors); delete m[cid]; fileAnchors = m }
-    function followFileLink(cid, u, page) {
-        const m = /^file:\/\/([^#?]*)(?:\?[^#]*)?(?:#(.*))?$/.exec(String(u))
-        if (!m) { Qt.openUrlExternally(u); return }
-        let p = m[1]
-        try { p = decodeURIComponent(p) } catch (e) {}
-        p = p.replace(/^localhost(?=\/)/, "")
-        const i = indexOf(cid)
-        if (i < 0) return
-        const cur = cells.get(i).viewPath
-        // (An SSH file's links are on that host.)
-        const host = (/^ssh:\/\/[^\/]*/.exec(cur) || [""])[0]
-        if (host + p === cur) { if (page) page.scrollTo(m[2] || ""); return }
-        if (p === "" || p.endsWith("/")) { Qt.openUrlExternally(u); return }
-        const h = fileHist[cid] || { back: [], fwd: [] }
-        setFileHist(cid, { back: h.back.concat([cur]), fwd: [] })
-        showInCard(i, host + p, m[2] || "")
-    }
-    function showInCard(i, p, anchor) {
-        const cid = cells.get(i).cid
-        cells.setProperty(i, "viewPath", p)
-        cells.setProperty(i, "source", p)
-        cells.setProperty(i, "viewLang", "")
-        cells.setProperty(i, "cwd", p.replace(/\/[^\/]*$/, "") || "/")
-        if (kinds[cid] === "mdtext") { const k = Object.assign({}, kinds); delete k[cid]; kinds = k }
-        const a = Object.assign({}, fileAnchors); a[cid] = anchor; fileAnchors = a
-        touch()
-    }
-    function setFileHist(cid, h) { const m = Object.assign({}, fileHist); m[cid] = h; fileHist = m }
-    function fileBack(i, forward) {
-        const c = cells.get(i)
-        const h = fileHist[c.cid]
-        if (!h || (forward ? h.fwd : h.back).length === 0) return
-        const to = forward ? h.fwd[h.fwd.length - 1] : h.back[h.back.length - 1]
-        setFileHist(c.cid, forward ? { back: h.back.concat([c.viewPath]), fwd: h.fwd.slice(0, -1) }
-                                   : { back: h.back.slice(0, -1), fwd: h.fwd.concat([c.viewPath]) })
-        showInCard(i, to, "")
-    }
         if (e && (e.state === "idle" || e.state === "busy")) { execLang(cid, l); return }
         setLang(l, { queue: ((e && e.queue) || []).concat([cid]) })
         if (e && e.state === "starting") return
@@ -1321,6 +1321,7 @@ FocusScope {
         if (i === liveIndex && liveWanted && view) Qt.callLater(() => view.forceActiveFocus())
     }
     function isMarkdownFile(p) { return /\.(md|markdown|mdx)$/i.test(p || "") }
+    function isPictureFile(p) { return !/^ssh:/.test(p || "") && /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p || "") }
     function followLive() { if (liveIndex >= 0) { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
     property int termRev: 0             // the terminal's cells came back: read outputs again
     Timer { interval: 400; repeat: true; running: nb.visible && nb.ownRunOrAny; onTriggered: nb.tick++ }
@@ -1806,8 +1807,8 @@ FocusScope {
     Shortcut { sequence: "Ctrl+Alt+R"; enabled: nb.keysHere && !nb.viaShell; context: Qt.WindowShortcut; onActivated: nb.restartKernel() }
     Shortcut { sequence: "Ctrl+Alt+X"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.clearOutputs() }
     Shortcut { sequence: "Ctrl+Alt+K"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.refreshKernels(); kernelsPop.open() } }
-    Shortcut { sequence: "Ctrl+Alt+J"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.refreshJobs(); jobsPop.open() } }
     Shortcut { sequence: "Ctrl+Alt+Z"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { const i = nb.bgTarget(); if (i >= 0) nb.moveToBg(i) } }
+    Shortcut { sequence: "Ctrl+Alt+J"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.refreshJobs(); jobsPop.open() } }
     Shortcut { sequence: "Ctrl+Alt+B"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "code") }
     Shortcut { sequence: "Ctrl+Alt+M"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "markdown") }
     Shortcut { sequence: "Ctrl+Alt+P"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.listKernels(); kernelBox.popup.open() } }
@@ -1831,7 +1832,6 @@ FocusScope {
     Timer { interval: 9500; running: nb.controller !== null && nb.controller.testEnv("NB_KERNEL") !== ""
             onTriggered: nb.listKernels(() => { nb.changeKernel(nb.controller.testEnv("NB_KERNEL")); console.log("nb kernel test: " + nb.kernels.length + " in the list, picked " + nb.kernelName + " oneShot " + nb.oneShot) }) }
     Timer { interval: 11000; running: nb.controller !== null && nb.controller.testEnv("NB_CELL") !== ""; onTriggered: nb.submit(nb.controller.testEnv("NB_CELL").replace(/\\n/g, "\n")) }
-    // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s, as
     // (Test hooks: TESSERA_TEST_NB_BG=<ms> moves the running card to the
     // background then; NB_FG=<ms> brings the last job card back;
     // NB_CELL2=<ms>:<code> runs another cell then.)
@@ -1841,6 +1841,7 @@ FocusScope {
             onTriggered: { for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).job > 0 && cells.get(i).jobTty) { console.log("nb fg test: card " + i); nb.foregroundJob(i); break } } }
     Timer { interval: nb.controller ? parseInt((nb.controller.testEnv("NB_CELL2") || "0").split(":")[0]) : 0; running: interval > 0
             onTriggered: nb.submit(nb.controller.testEnv("NB_CELL2").replace(/^[0-9]+:/, "")) }
+    // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s, as
     // its Expand button does, focus taken first as a click takes it.)
     Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") !== ""; onTriggered: if (cells.count > 0) { list.forceActiveFocus(); nb.toggleExpand(cells.count - 1) } }
     // (TESSERA_TEST_EXPAND_CYCLE=n: Expand/Restore the last card n times, every 1.5 s from 12 s.)
@@ -1853,6 +1854,10 @@ FocusScope {
     Timer { interval: 19000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") === "restore"; onTriggered: if (nb.expandedId !== "") { list.forceActiveFocus(); nb.toggleExpand(nb.indexOf(nb.expandedId)) } }
     // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
     Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
+    // (TESSERA_TEST_FILE_LINK=<url>[|back]: that link followed in the last card at 14 s, then Back at 17 s.)
+    Timer { interval: 14000; running: nb.controller !== null && nb.controller.testEnv("FILE_LINK") !== ""
+            onTriggered: { const l = nb.controller.testEnv("FILE_LINK").split("|"); nb.followFileLink(cells.get(cells.count - 1).cid, l[0], null); if (l[1] === "back") backHook.start() } }
+    Timer { id: backHook; interval: 3000; onTriggered: nb.fileBack(cells.count - 1, false) }
     // (Test hook: TESSERA_TEST_EDIT_FILE: the last card edited at 12 s, saved at 20 s.)
     function lastViewer() { const it = list.itemAtIndex(cells.count - 1); if (it) for (let k = 0; k < it.children.length; ++k) { const c = it.children[k]; if (c.objectName === "cardBody") return c.viewer } return null }
     Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("EDIT_FILE") !== ""; onTriggered: { const v = nb.lastViewer(); if (v) v.startEdit() } }
@@ -1943,10 +1948,6 @@ FocusScope {
     // ---- the strip: running, the kernel, saving -------------------------------------------
     component Tool: Chip {
         base: Theme.panel
-    // (TESSERA_TEST_FILE_LINK=<url>[|back]: that link followed in the last card at 14 s, then Back at 17 s.)
-    Timer { interval: 14000; running: nb.controller !== null && nb.controller.testEnv("FILE_LINK") !== ""
-            onTriggered: { const l = nb.controller.testEnv("FILE_LINK").split("|"); nb.followFileLink(cells.get(cells.count - 1).cid, l[0], null); if (l[1] === "back") backHook.start() } }
-    Timer { id: backHook; interval: 3000; onTriggered: nb.fileBack(cells.count - 1, false) }
         Layout.minimumWidth: implicitWidth
     }
     readonly property bool narrow: width < 900
@@ -2187,8 +2188,8 @@ FocusScope {
             required property string viewLang  // and the language picked for it ("": by its name, "-": none)
             required property string execs     // what its programs ran with: [{command, line, argv, cwd, user, env}]
             required property int job          // a background job running it (tesserad's id), or 0
-            readonly property var ask: nb.asking[cid] || null
             required property bool jobTty      // it's a command moved to the background with its terminal
+            readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
             readonly property bool code: type !== "markdown"
@@ -2364,6 +2365,37 @@ FocusScope {
                     SlimMenuItem { text: "VS Code"; checkable: true; checked: nb.editorKeys === "vscode"; onTriggered: nb.editorKeysPicked("vscode") }
                     SlimMenuItem { text: "vi"; checkable: true; checked: nb.editorKeys === "vi"; onTriggered: nb.editorKeysPicked("vi") }
                 }
+                // (A Markdown file: its formatted page or its highlighted text.)
+                Chip {
+                    visible: header.fileView !== null && !header.fileView.editing && nb.isMarkdownFile(cell.viewPath)
+                    base: cell.color
+                    Layout.minimumWidth: implicitWidth
+                    label: nb.kinds[cell.cid] === "mdtext" ? "\u2261 Text \u2192 Formatted" : "\u00b6 Formatted \u2192 Text"
+                    tip: nb.kinds[cell.cid] === "mdtext" ? "Showing the Markdown as highlighted text: click for the formatted page"
+                                                          : "Showing the formatted page: click for the Markdown as highlighted text"
+                    onClicked: { const k = Object.assign({}, nb.kinds); if (k[cell.cid] === "mdtext") delete k[cell.cid]; else k[cell.cid] = "mdtext"; nb.kinds = k; nb.touch() }
+                }
+                // (A file card that followed a link: back and forward.)
+                Chip {
+                    readonly property var hist: nb.fileHist[cell.cid]
+                    visible: cell.viewPath !== "" && !!hist && (hist.back.length > 0 || hist.fwd.length > 0)
+                    enabled: !!hist && hist.back.length > 0
+                    opacity: enabled ? 1 : 0.45
+                    base: cell.color
+                    label: "\u25c0"
+                    tip: "Back" + (hist && hist.back.length ? " to " + hist.back[hist.back.length - 1].replace(/^.*\//, "") : "")
+                    onClicked: nb.fileBack(cell.index, false)
+                }
+                Chip {
+                    readonly property var hist: nb.fileHist[cell.cid]
+                    visible: cell.viewPath !== "" && !!hist && (hist.back.length > 0 || hist.fwd.length > 0)
+                    enabled: !!hist && hist.fwd.length > 0
+                    opacity: enabled ? 1 : 0.45
+                    base: cell.color
+                    label: "\u25b6"
+                    tip: "Forward" + (hist && hist.fwd.length ? " to " + hist.fwd[hist.fwd.length - 1].replace(/^.*\//, "") : "")
+                    onClicked: nb.fileBack(cell.index, true)
+                }
                 // (A file card: the language it's highlighted as, to change.)
                 Chip {
                     id: typeChip
@@ -2390,6 +2422,13 @@ FocusScope {
                        Layout.minimumWidth: implicitWidth; onClicked: { nb.refreshJobs(); jobsPop.open() } }
                 Chip { visible: cell.job > 0 && cell.running; base: cell.color; label: "\u25a0 Stop"; tip: "Stop it (TERM, then KILL after 3 s)"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.stopJob(cell.index) }
+                // (Running in the pane: to the background; a background one with its terminal: back.)
+                Chip { visible: cell.running && cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) && nb.canBg(cells.get(cell.index)); base: cell.color; label: "\u2198 bg"
+                       tip: "Move to the background (Ctrl+Alt+Z): it goes on as a job, the notebook carries on"
+                       Layout.minimumWidth: implicitWidth; onClicked: nb.moveToBg(cell.index) }
+                Chip { visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; base: cell.color; label: "\u2196 Foreground"
+                       tip: "Bring to the foreground: it takes the pane again (a terminal app gets its screen back here)"
+                       Layout.minimumWidth: implicitWidth; onClicked: nb.foregroundJob(cell.index) }
                 // (What it ran with: command line, folder, user, environment.)
                 Chip { visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.ended > 0 || cell.running || cell.execs !== "[]")
                        base: cell.color; label: "\u24d8"; tip: "Details: the command line as run, folder, user and environment"
@@ -2422,13 +2461,6 @@ FocusScope {
             SlimMenu {
                 id: kindMenu
                 Repeater {
-                // (Running in the pane: to the background; a background one with its terminal: back.)
-                Chip { visible: cell.running && cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) && nb.canBg(cells.get(cell.index)); base: cell.color; label: "\u2198 bg"
-                       tip: "Move to the background (Ctrl+Alt+Z): it goes on as a job, the notebook carries on"
-                       Layout.minimumWidth: implicitWidth; onClicked: nb.moveToBg(cell.index) }
-                Chip { visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; base: cell.color; label: "\u2196 Foreground"
-                       tip: "Bring to the foreground: it takes the pane again (a terminal app gets its screen back here)"
-                       Layout.minimumWidth: implicitWidth; onClicked: nb.foregroundJob(cell.index) }
                     model: nb.viewNames
                     delegate: SlimMenuItem {
                         required property var modelData
@@ -2462,27 +2494,6 @@ FocusScope {
                             required property var modelData
                             text: modelData[1]
                             checkable: true
-                // (A file card that followed a link: back and forward.)
-                Chip {
-                    readonly property var hist: nb.fileHist[cell.cid]
-                    visible: cell.viewPath !== "" && !!hist && (hist.back.length > 0 || hist.fwd.length > 0)
-                    enabled: !!hist && hist.back.length > 0
-                    opacity: enabled ? 1 : 0.45
-                    base: cell.color
-                    label: "\u25c0"
-                    tip: "Back" + (hist && hist.back.length ? " to " + hist.back[hist.back.length - 1].replace(/^.*\//, "") : "")
-                    onClicked: nb.fileBack(cell.index, false)
-                }
-                Chip {
-                    readonly property var hist: nb.fileHist[cell.cid]
-                    visible: cell.viewPath !== "" && !!hist && (hist.back.length > 0 || hist.fwd.length > 0)
-                    enabled: !!hist && hist.fwd.length > 0
-                    opacity: enabled ? 1 : 0.45
-                    base: cell.color
-                    label: "\u25b6"
-                    tip: "Forward" + (hist && hist.fwd.length ? " to " + hist.fwd[hist.fwd.length - 1].replace(/^.*\//, "") : "")
-                    onClicked: nb.fileBack(cell.index, true)
-                }
                             checked: header.fileView !== null && header.fileView.termEditor === modelData[0]
                             onTriggered: header.fileView.openInTerminal(modelData[0])
                         }
@@ -2504,6 +2515,8 @@ FocusScope {
                 SlimMenuItem { text: "\u24d8 Details (command line, environment)"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.showExec(cell.index) }
                 SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
                 SlimMenuItem { text: "Run in the background"; visible: cell.code && cell.viewPath === "" && !cell.running && nb.bgLang(cells.get(cell.index)) !== ""; onTriggered: nb.run(cell.index, true) }
+                SlimMenuItem { text: "Move to the background\tCtrl+Alt+Z"; visible: cell.running && cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) && nb.canBg(cells.get(cell.index)); onTriggered: nb.moveToBg(cell.index) }
+                SlimMenuItem { text: "Bring to the foreground"; visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; onTriggered: nb.foregroundJob(cell.index) }
                 SlimMenuItem { text: "Stop the background job"; visible: cell.job > 0 && cell.running; onTriggered: nb.stopJob(cell.index) }
                 SlimMenuItem { text: "Run the cells above"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.runAbove(cell.index) }
                 SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; visible: cell.viewPath === ""; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
@@ -2515,8 +2528,6 @@ FocusScope {
                 SlimMenuItem { text: "Delete"; onTriggered: nb.deleteCell(cell.index) }
             }
 
-                SlimMenuItem { text: "Move to the background\tCtrl+Alt+Z"; visible: cell.running && cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) && nb.canBg(cells.get(cell.index)); onTriggered: nb.moveToBg(cell.index) }
-                SlimMenuItem { text: "Bring to the foreground"; visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; onTriggered: nb.foregroundJob(cell.index) }
             // ---- the code (or Markdown) being written ----
             Rectangle {
                 id: editorBox
@@ -3217,6 +3228,9 @@ FocusScope {
                         color: Theme.textDim; font.pixelSize: 11; topPadding: 0.001
                     }
                     Chip { base: Theme.panel; label: "Show"; visible: mine; tip: "Go to its card"; onClicked: { nb.showJobCell(modelData.cell); jobsPop.close() } }
+                    Chip { base: Theme.panel; label: "\u2196 Foreground"; visible: mine && modelData.running && !!modelData.tty && !modelData.fg
+                           tip: "Bring it to the foreground: its card takes the pane again"
+                           onClicked: { const i = nb.indexOf(modelData.cell); if (i >= 0) nb.foregroundJob(i); jobsPop.close() } }
                     Chip { base: Theme.panel; label: "\u24d8"; tip: "What it ran with"
                            onClicked: Async.call(nb.controller, k => nb.controller.jobCall(k, nb.sshHost, "job.output", JSON.stringify({ id: modelData.id, from: 1e15, exec: true })), json => {
                                let r = {}
@@ -3228,9 +3242,6 @@ FocusScope {
                 }
             }
         }
-                    Chip { base: Theme.panel; label: "\u2196 Foreground"; visible: mine && modelData.running && !!modelData.tty && !modelData.fg
-                           tip: "Bring it to the foreground: its card takes the pane again"
-                           onClicked: { const i = nb.indexOf(modelData.cell); if (i >= 0) nb.foregroundJob(i); jobsPop.close() } }
     }
     // ---- a card's details: what its programs ran with ----
     // Command line (typed, and as run), folder, user and environment: a shell
@@ -3455,17 +3466,24 @@ FocusScope {
             anchors.fill: parent
             // A Markdown file: drawn as a page over it (⋯ → Show the source:
             // its text, highlighted; Edit shows the text too).
-            readonly property bool mdRendered: nb.isMarkdownFile(path) && (langOverride === "" || langOverride === "markdown") && !editing && !inTerm && nb.kinds[src.cid] !== "mdtext"
+            // (A picture, a link from a Markdown file followed here: shown as one.)
+            readonly property bool picture: nb.isPictureFile(path) && !editing && !inTerm
+            readonly property bool mdRendered: picture || nb.isMarkdownFile(path) && (langOverride === "" || langOverride === "markdown") && !editing && !inTerm && nb.kinds[src.cid] !== "mdtext"
+            fullHeight: picture
             property string mdText: ""
             function readMd() {
+                if (picture) { mdText = "![" + path.replace(/^.*\//, "") + "](" + encodeURI(path.replace(/^.*\//, "")) + ")"; return }
                 if (!mdRendered || !nb.controller) return
                 const p = path
                 Async.call(nb.controller, k => nb.controller.readTextFile(k, p), r => { try { const o = JSON.parse(r); if (p === fcv.path) fcv.mdText = o.text || "" } catch (e) {} })
             }
-            onMdRenderedChanged: readMd()
-            onPathChanged: readMd()
+            // (Once the bindings have caught up with the new path: read at
+            // once, they could still say what the last file was.)
+            onMdRenderedChanged: Qt.callLater(readMd)
+            onPathChanged: Qt.callLater(readMd)
             Component.onCompleted: readMd()
             Loader {
+                id: mdLoader
                 anchors.fill: parent
                 z: 20
                 active: fcv.mdRendered
@@ -3473,7 +3491,20 @@ FocusScope {
                 onLoaded: {
                     item.md = Qt.binding(() => fcv.mdText)
                     item.baseDir = Qt.binding(() => fcv.path.replace(/\/[^/]*$/, ""))
+                    item.baseFile = Qt.binding(() => fcv.path.startsWith("ssh://") ? "" : fcv.path)
                     item.scrolls = true
+                    item.inPlace = true
+                    item.pendingAnchor = nb.fileAnchors[fcv.src.cid] || ""
+                    if (nb.fileAnchors[fcv.src.cid] !== undefined) Qt.callLater(nb.takeAnchor, fcv.src.cid)
+                    item.linkClicked.connect(u => nb.followFileLink(fcv.src.cid, u, item))
+                }
+                // (A link to a part of another Markdown file: scrolled to once it's drawn.)
+                Connections {
+                    target: nb
+                    function onFileAnchorsChanged() {
+                        const a = nb.fileAnchors[fcv.src.cid]
+                        if (a !== undefined && mdLoader.item) { mdLoader.item.pendingAnchor = a; nb.takeAnchor(fcv.src.cid) }
+                    }
                 }
             }
             controller: nb.controller
@@ -3569,7 +3600,6 @@ FocusScope {
                         background: Rectangle { radius: 4; color: vf.activeFocus ? Theme.bg : "transparent"; border.color: vf.activeFocus ? Theme.accent : "transparent" }
                         Component.onCompleted: cursorPosition = 0
                         onActiveFocusChanged: if (!activeFocus) cursorPosition = 0
-                id: mdLoader
                         // (Enter: export it with the new value.)
                         onAccepted: if (text !== modelData.v) nb.commandRequested("export " + modelData.k + "=" + nb.shq(text))
                     }
@@ -3577,20 +3607,7 @@ FocusScope {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "×"
                         color: xh.hovered ? nb.ansi(1, "#e06c75") : Theme.textDim
-                    item.baseFile = Qt.binding(() => fcv.path.startsWith("ssh://") ? "" : fcv.path)
                         font.pixelSize: 14
-                    item.inPlace = true
-                    item.pendingAnchor = nb.fileAnchors[fcv.src.cid] || ""
-                    if (nb.fileAnchors[fcv.src.cid] !== undefined) Qt.callLater(nb.takeAnchor, fcv.src.cid)
-                    item.linkClicked.connect(u => nb.followFileLink(fcv.src.cid, u, item))
-                }
-                // (A link to a part of another Markdown file: scrolled to once it's drawn.)
-                Connections {
-                    target: nb
-                    function onFileAnchorsChanged() {
-                        const a = nb.fileAnchors[fcv.src.cid]
-                        if (a !== undefined && mdLoader.item) { mdLoader.item.pendingAnchor = a; nb.takeAnchor(fcv.src.cid) }
-                    }
                         renderType: Text.NativeRendering
                         HoverHandler { id: xh; cursorShape: Qt.PointingHandCursor }
                         TapHandler { onTapped: nb.commandRequested("unset " + modelData.k) }
@@ -3724,6 +3741,7 @@ FocusScope {
                 if (r.status === WebEngineView.LoadSucceededStatus)
                     runJavaScript("Math.ceil(document.body ? document.body.getBoundingClientRect().height + 24 : 0)", (h) => { if (h > 0) web.implicitHeight = Math.max(60, h) })
             }
+            WebKicker {}
             onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
         }
     }
@@ -3736,8 +3754,23 @@ FocusScope {
             property string md: ""
             property string html: ""
             property string baseDir: ""
+            // (A file's page: links resolve from the file itself, so #part
+            // links stay on it.)
+            property string baseFile: ""
             property bool asText: false
             property bool scrolls: false    // its own scrollbar (an output), or as tall as it is (a cell)
+            // (A file card's page: links to files go to linkClicked, to open
+            // in the card; others open outside.)
+            property bool inPlace: false
+            property string pendingAnchor: ""
+            signal linkClicked(url u)
+            // To a #part: the element with that id or name, else the heading
+            // whose GitHub-style slug it is ("" = the top).
+            function scrollTo(frag) {
+                runJavaScript("(function(f){try{f=decodeURIComponent(f)}catch(x){}f=f.toLowerCase();var e=f?(document.getElementById(f)||document.getElementsByName(f)[0]):null;"
+                              + "if(!e&&f){var hs=document.querySelectorAll('h1,h2,h3,h4,h5,h6');for(var i=0;i<hs.length;i++){var s=hs[i].textContent.trim().toLowerCase().replace(/[^\\w\\- ]+/g,'').replace(/ /g,'-');if(s===f){e=hs[i];break}}}"
+                              + "if(e)e.scrollIntoView();else window.scrollTo(0,0)})(" + JSON.stringify(frag || "") + ")", WebEngineScript.ApplicationWorld)
+            }
             implicitHeight: 40
             backgroundColor: "transparent"
             settings.javascriptEnabled: false
@@ -3752,10 +3785,12 @@ FocusScope {
                          baseFile !== "" ? "file://" + encodeURI(baseFile) : "file://" + (baseDir || "/") + "/")
             }
             Timer { id: again; interval: 60; onTriggered: mp.show() }
+            WebKicker {}
             onMdChanged: again.restart()
             onHtmlChanged: again.restart()
             onAsTextChanged: again.restart()
             onBaseDirChanged: again.restart()
+            onBaseFileChanged: again.restart()
             Component.onCompleted: again.restart()
             // (Its height: measured a few times as it lays out, fonts and pictures coming in.)
             onLoadingChanged: (r) => {
@@ -3788,6 +3823,31 @@ FocusScope {
                 Qt.openUrlExternally(req.url)
             }
         }
+    }
+
+    // A browser view drawn afresh (it could stay black after the desktop
+    // hid the window and showed it again unfocused): kicked when the window
+    // is shown again, when the app is in use again (twice, a little apart),
+    // and now and then while it isn't. An invisible layer over the page has
+    // its opacity changed and back, which composites the whole page anew,
+    // with no change of size (no flicker). (As Almanac's message pane.)
+    component WebKicker: Item {
+        id: kicker
+        readonly property var web: parent
+        property int passes: 0
+        function kickNow() {
+            if (!web || !web.visible) return
+            web.runJavaScript("(function(d){if(!d||!document.body)return;var k=document.getElementById('tessera-kick');if(!k){k=document.createElement('div');k.id='tessera-kick';"
+                              + "k.style.cssText='position:fixed;left:0;top:0;right:0;bottom:0;pointer-events:none;background:rgba(0,0,0,0.002);opacity:1;will-change:opacity;z-index:2147483647';document.body.appendChild(k)}"
+                              + "k.style.opacity='0.999';d.style.outline='0 solid transparent';requestAnimationFrame(function(){k.style.opacity='1';d.style.outline=''})})(document.documentElement)",
+                              WebEngineScript.ApplicationWorld)
+            web.update()
+        }
+        function kick() { passes = 2; pass.interval = 50; pass.restart() }
+        Timer { id: pass; interval: 50; onTriggered: { kicker.kickNow(); if (--kicker.passes > 0) { interval = 350; restart() } } }
+        Connections { target: kicker.Window.window; ignoreUnknownSignals: true; function onReexposed() { kicker.kick() } }
+        Connections { target: Qt.application; function onStateChanged() { if (Qt.application.state === Qt.ApplicationActive) kicker.kick() } }
+        Timer { interval: 15000; repeat: true; running: kicker.web.visible && !!kicker.Window.window && !kicker.Window.window.active; onTriggered: kicker.kickNow() }
     }
 
     // ---- a Jupyter cell's outputs ----------------------------------------------------------
@@ -3851,23 +3911,8 @@ FocusScope {
                 Text { topPadding: 0.001;
                     visible: jf.src.outs.length === 0
                     text: jf.src.running ? "" : "(no output)"
-            // (A file's page: links resolve from the file itself, so #part
-            // links stay on it.)
-            property string baseFile: ""
                     color: Theme.textDim
                     font.pixelSize: 11
-            // (A file card's page: links to files go to linkClicked, to open
-            // in the card; others open outside.)
-            property bool inPlace: false
-            property string pendingAnchor: ""
-            signal linkClicked(url u)
-            // To a #part: the element with that id or name, else the heading
-            // whose GitHub-style slug it is ("" = the top).
-            function scrollTo(frag) {
-                runJavaScript("(function(f){try{f=decodeURIComponent(f)}catch(x){}f=f.toLowerCase();var e=f?(document.getElementById(f)||document.getElementsByName(f)[0]):null;"
-                              + "if(!e&&f){var hs=document.querySelectorAll('h1,h2,h3,h4,h5,h6');for(var i=0;i<hs.length;i++){var s=hs[i].textContent.trim().toLowerCase().replace(/[^\\w\\- ]+/g,'').replace(/ /g,'-');if(s===f){e=hs[i];break}}}"
-                              + "if(e)e.scrollIntoView();else window.scrollTo(0,0)})(" + JSON.stringify(frag || "") + ")", WebEngineScript.ApplicationWorld)
-            }
                 }
             }
         }
@@ -3886,7 +3931,6 @@ FocusScope {
             radius: 4
             // (Where it came from, in the margin: stderr and errors red, stdout plain.)
             Rectangle {
-            onBaseFileChanged: again.restart()
                 visible: tbox.stream
                 width: 3
                 height: parent.height
@@ -3959,6 +4003,7 @@ FocusScope {
                 const d = o.data || {}
                 loadHtml(nb.htmlPage(d["text/html"] !== undefined ? d["text/html"] : d["image/svg+xml"]), "about:blank")
             }
+            WebKicker {}
             onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus) measure.start() }
             // (Plots draw after loading: measured again shortly.)
             Timer {

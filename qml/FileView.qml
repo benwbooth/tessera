@@ -20,8 +20,13 @@ Item {
     property var themeData: ({})
     // (How tall it would like to be: all its lines, up to `maxHeight`.)
     property real maxHeight: 460
-    implicitHeight: inTerm ? maxHeight : editing ? Math.min(maxHeight, Math.max(exLine.kind !== "" || exLine.message.indexOf("\n") >= 0 ? 230 : 0, editBar.height + Math.max(3, editor.lineCount) * fm.lineSpacing + 14 + (exLine.visible ? exLine.height : 0)))
-                  : lines === 0 ? 40 : Math.min(maxHeight, lines * fm.lineSpacing + 14)
+    // (Drawn over by something as tall as it may be: a picture.)
+    property bool fullHeight: false
+    implicitHeight: inTerm || fullHeight ? maxHeight : editing ? Math.min(maxHeight, Math.max(exLine.kind !== "" || exLine.message.indexOf("\n") >= 0 ? 230 : 0, editBar.height + Math.max(3, editor.lineCount) * fm.lineSpacing + 14 + (exLine.visible ? exLine.height : 0)))
+                  : lines === 0 ? (heldHeight > 0 ? heldHeight : 40) : Math.min(maxHeight, lines * fm.lineSpacing + 14)
+    // (Its height while another file loads in it: the last one's, so the card
+    // doesn't fold to nothing and back, moving the whole notebook.)
+    property real heldHeight: 0
 
     readonly property int block: 500
     // A scroll bar that shows while it scrolls by the wheel or keys too (they
@@ -62,6 +67,7 @@ Item {
     onPathChanged: load()
     onControllerChanged: load()
     function load() {
+        heldHeight = lines > 0 || heldHeight > 0 ? implicitHeight : 0
         lines = 0
         counted = false
         size = 0
@@ -392,8 +398,9 @@ Item {
             if (n !== pollSeq || p !== path) return
             let r = {}
             try { r = JSON.parse(res) } catch (e) {}
-            if (r.error) { problem = r.error; counted = true; return }
+            if (r.error) { problem = r.error; counted = true; heldHeight = 0; return }
             lines = r.lines || 0
+            if (counted || lines > 0 || r.done) heldHeight = 0
             size = r.size || 0
             counted = !!r.done
             // (A NUL in the start: binary.)

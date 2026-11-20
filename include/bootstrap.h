@@ -2,6 +2,7 @@
 // Process-wide Qt setup: the application object and QML registration.
 #pragma once
 
+#include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -53,6 +54,40 @@ public:
     }
 };
 
+// A window hidden by the desktop (covered, on another virtual desktop, in
+// the overview) stops being drawn; shown again without the focus, nothing
+// told the browser views (a Markdown file's card, HTML output) and they
+// stayed black until clicked. This keeps each window's graphics while it's
+// hidden and tells it when it's back (its QML `reexposed()` signal), so they
+// draw again. (As Almanac's message pane.)
+class TesseraExposeWatch : public QObject {
+public:
+    using QObject::QObject;
+    bool eventFilter(QObject* o, QEvent* e) override
+    {
+        if (e->type() != QEvent::Expose) return false;
+        auto* w = qobject_cast<QQuickWindow*>(o);
+        if (!w) return false;
+        if (!w->property("_tesseraPersistent").toBool()) {
+            w->setProperty("_tesseraPersistent", true);
+            w->setPersistentGraphics(true);
+            w->setPersistentSceneGraph(true);
+        }
+        const bool now = w->isExposed();
+        const QVariant was = w->property("_tesseraExposed");
+        w->setProperty("_tesseraExposed", now);
+        if (now && was.isValid() && !was.toBool()) {
+            // (A burst of them counts once.)
+            const qint64 ms = QDateTime::currentMSecsSinceEpoch();
+            if (ms - w->property("_tesseraToldAt").toLongLong() >= 300 && w->metaObject()->indexOfSignal("reexposed()") >= 0) {
+                w->setProperty("_tesseraToldAt", ms);
+                QMetaObject::invokeMethod(w, "reexposed", Qt::QueuedConnection);
+            }
+        }
+        return false;
+    }
+};
+
 inline void tessera_create_app(const QString& session)
 {
     // Native (FreeType/platform) text for the whole UI; Qt Quick's default
@@ -88,6 +123,7 @@ inline void tessera_create_app(const QString& session)
         else qunsetenv("QT_PLUGIN_PATH");
     }
     qApp->installEventFilter(new TesseraBacktab(qApp));
+    qApp->installEventFilter(new TesseraExposeWatch(qApp));
     QApplication::setApplicationName(QStringLiteral("tessera"));
     QApplication::setApplicationDisplayName(QStringLiteral("Tessera"));
     QApplication::setOrganizationName(QStringLiteral("tessera"));

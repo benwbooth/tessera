@@ -9,6 +9,8 @@ import Tessera.Native
 
 ApplicationWindow {
     id: win
+    // Shown again by the desktop (include/bootstrap.h): browser views redraw.
+    signal reexposed()
     width: 1100
     height: 700
     // Shown from C++ once named, so the desktop can put it back where it was.
