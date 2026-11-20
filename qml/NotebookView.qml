@@ -3448,9 +3448,13 @@ FocusScope {
                 columnSpacing: 8
                 rowSpacing: 4
                 Text { text: execPop.rec.cell ? "Code (no programs)" : "Command line"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                // (Laid out and colored as treetop's process details: a line a
+                // word when it's long; Copy takes it as one line.)
                 TextEdit {
-                    objectName: "execLine"; text: execPop.ran
-                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                    objectName: "execLine"
+                    text: nb.controller && !execPop.rec.cell ? nb.controller.prettyCommand(execPop.ran, execPop.rec.argv ? JSON.stringify(execPop.rec.argv) : "", Theme.dark, String(Theme.text))
+                                                            : execPop.ran.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
+                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.RichText
                     color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
                     topPadding: 3.001; Layout.fillWidth: true
                 }

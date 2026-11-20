@@ -322,6 +322,11 @@ pub mod ffi {
         /// [[start, length, message]] (UTF-16), [] when it parses.
         #[qinvokable]
         fn shell_syntax(self: &Controller, shell: &QString, text: &QString) -> QString;
+        /// A command line laid out and colored for a card's details, as Qt
+        /// rich text (src/cmdline.rs); argv_json: tessh's [[program, args...]]
+        /// or "". Pure text work (no files, no processes).
+        #[qinvokable]
+        fn pretty_command(self: &Controller, line: &QString, argv_json: &QString, dark: bool, text_color: &QString) -> QString;
         /// The input editor's language for the program at the prompt.
         #[qinvokable]
         fn language_for(self: &Controller, program: &QString) -> QString;
@@ -1743,6 +1748,10 @@ impl ffi::Controller {
 
     fn grammar_count(&self) -> i32 {
         crate::grammars::count() as i32
+    }
+
+    fn pretty_command(&self, line: &ffi::QString, argv_json: &ffi::QString, dark: bool, text_color: &ffi::QString) -> ffi::QString {
+        qs(&crate::cmdline::pretty_html(&line.to_string(), &argv_json.to_string(), dark, &text_color.to_string()))
     }
 
     fn shell_syntax(&self, shell: &ffi::QString, text: &ffi::QString) -> ffi::QString {

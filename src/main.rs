@@ -5,6 +5,7 @@ mod bridge;
 mod cells;
 mod chats;
 mod client;
+mod cmdline;
 mod complete;
 mod contrast;
 mod daemon;
