@@ -103,6 +103,10 @@ pub fn subscribe(mut stream: UnixStream) -> std::io::Result<()> {
     let id = NEXT_SUB.fetch_add(1, Ordering::SeqCst);
     write_json(&mut stream, T_SUBSCRIBED, &id)?;
     hub().lock().unwrap().subs.insert(id, stream.try_clone()?);
+    // (A newer build waiting: this window asks whether to make way for it.)
+    if crate::daemon::upgrade_pending() {
+        broadcast_to(Some(id), crate::daemon::upgrade_event());
+    }
     // (Nothing comes from the window on it: a read ends when it closes.)
     let _ = read_frame(&mut stream);
     let mut h = hub().lock().unwrap();
@@ -113,6 +117,33 @@ pub fn subscribe(mut stream: UnixStream) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// tesserad's own news (a newer build waiting), to every window; its key
+/// is "tesserad".
+pub fn broadcast(v: Value) {
+    broadcast_to(None, v)
+}
+
+fn broadcast_to(only: Option<u64>, v: Value) {
+    let mut h = hub().lock().unwrap();
+    let frame = json!({"key": "tesserad", "event": v});
+    h.subs.retain(|id, s| only.is_some_and(|o| o != *id) || write_json(s, T_EVENT, &frame).is_ok());
+}
+
+pub fn kernel_count() -> usize {
+    running().as_array().map_or(0, |a| a.len())
+}
+
+/// Make way for the newer build now: its kernels and jobs stopped (it's
+/// swapped in a second later). Nothing waiting: nothing stopped.
+fn upgrade_now() -> Value {
+    if !crate::daemon::upgrade_pending() {
+        return json!({"pending": false});
+    }
+    stop_all_kernels();
+    crate::jobs::stop_all();
+    json!({"pending": true})
 }
 
 /// Whether any kernel runs (tesserad stays up for them).
@@ -288,6 +319,7 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
         "job.list" => crate::jobs::list(&s("owner")),
         "job.output" => crate::jobs::output(n("id"), n("from"), p["exec"].as_bool().unwrap_or(false)),
         "job.stop" => json!(crate::jobs::stop(n("id"))),
+        "daemon.upgrade" => upgrade_now(),
         "job.adopt" => crate::jobs::adopt(p),
         "job.foreground" => crate::jobs::foreground(n("id")),
         "job.forget" => {

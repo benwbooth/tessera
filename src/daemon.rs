@@ -124,12 +124,30 @@ static PENDING_UPGRADE: Mutex<Option<String>> = Mutex::new(None);
 
 /// This daemon's build (see proto::exe_identity), fixed at startup.
 static IDENTITY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+/// Where this build was started from: a rebuild (devloop, a package
+/// manager) puts the next one there, and it's swapped in.
+static START_EXE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn start_exe() -> &'static str {
+    START_EXE.get_or_init(|| std::env::current_exe().map(|p| p.display().to_string().trim_end_matches(" (deleted)").to_string()).unwrap_or_default())
+}
+
+/// Whether a newer build waits to be swapped in (for kernels or jobs).
+pub fn upgrade_pending() -> bool {
+    PENDING_UPGRADE.lock().unwrap().is_some()
+}
+
+/// What the windows are told while a newer build waits: what's in its way.
+pub fn upgrade_event() -> serde_json::Value {
+    serde_json::json!({"type": "daemon.update", "kernels": crate::rpc::kernel_count(), "jobs": crate::jobs::running_count()})
+}
 /// The listening socket's fd (handed to the next build on an upgrade).
 #[cfg(unix)]
 static LISTENER_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
 pub fn run() -> std::io::Result<()> {
     IDENTITY.get_or_init(exe_identity);
+    start_exe();
     let path = socket_path();
     // Started by the previous build's upgrade: take over its sockets and shells.
     #[cfg(unix)]
@@ -270,6 +288,12 @@ fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -
         let path = path.clone();
         std::thread::spawn(move || {
             let mut idle = 0;
+            // (The build on disk last second: a new one is taken once it has
+            // stayed put a second; one that failed to start isn't retried;
+            // the windows are told once what a waiting one waits for.)
+            let mut seen = String::new();
+            let mut failed = String::new();
+            let mut told = String::new();
             loop {
                 std::thread::sleep(Duration::from_secs(1));
                 // (Kernels keep it running too: a notebook's, its window closed.)
@@ -278,10 +302,32 @@ fn serve(listener: UnixListener, registry: Registry, path: std::path::PathBuf) -
                     && !crate::rpc::kernels_running();
                 idle = if empty { idle + 1 } else { 0 };
                 #[cfg(unix)]
-                if !crate::rpc::kernels_running() && !crate::jobs::any_running() {
-                    if let Some(exe) = PENDING_UPGRADE.lock().unwrap().take() {
-                        let err = upgrade::exec_new_build(&registry, &exe);
-                        eprintln!("tesserad: deferred upgrade failed: {err}");
+                {
+                    let disk = exe_identity_of(std::path::Path::new(start_exe()));
+                    let mine = IDENTITY.get_or_init(exe_identity);
+                    let mtime = |id: &str| id.split(':').nth(1).and_then(|m| m.parse::<u128>().ok()).unwrap_or(0);
+                    if !disk.is_empty() && !mine.is_empty() && disk == seen && disk != *mine && disk != failed && mtime(&disk) > mtime(mine) {
+                        let mut p = PENDING_UPGRADE.lock().unwrap();
+                        if p.is_none() {
+                            eprintln!("tesserad: a newer build is at {}", start_exe());
+                            *p = Some(start_exe().to_string());
+                        }
+                    }
+                    seen = disk;
+                    let pending = PENDING_UPGRADE.lock().unwrap().clone();
+                    if let Some(exe) = pending {
+                        if !crate::rpc::kernels_running() && !crate::jobs::any_running() {
+                            PENDING_UPGRADE.lock().unwrap().take();
+                            let err = upgrade::exec_new_build(&registry, &exe);
+                            eprintln!("tesserad: deferred upgrade failed: {err}");
+                            failed = exe_identity_of(std::path::Path::new(&exe));
+                        } else {
+                            let id = exe_identity_of(std::path::Path::new(&exe));
+                            if id != told {
+                                told = id;
+                                crate::rpc::broadcast(upgrade_event());
+                            }
+                        }
                     }
                 }
                 if idle >= 5 {

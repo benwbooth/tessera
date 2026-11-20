@@ -1191,7 +1191,7 @@ impl ffi::Controller {
         let (host, method) = (host.to_string(), method.to_string());
         let params: serde_json::Value = serde_json::from_str(&params.to_string()).unwrap_or_default();
         self.answer(reply, false, move || {
-            if !method.starts_with("job.") {
+            if !method.starts_with("job.") && method != "daemon.upgrade" {
                 return serde_json::json!({"error": "not a job request"}).to_string();
             }
             match crate::client::rpc(&host, &method, params) {

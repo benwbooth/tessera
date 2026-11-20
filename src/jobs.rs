@@ -309,6 +309,18 @@ pub fn any_running() -> bool {
     jobs().lock().unwrap().list.iter().any(|j| j.lock().unwrap().status.is_none())
 }
 
+pub fn running_count() -> usize {
+    jobs().lock().unwrap().list.iter().filter(|j| j.lock().unwrap().status.is_none()).count()
+}
+
+/// Stop every running job (making way for a newer tesserad).
+pub fn stop_all() {
+    let ids: Vec<u64> = jobs().lock().unwrap().list.iter().map(|j| j.lock().unwrap()).filter(|j| j.status.is_none()).map(|j| j.id).collect();
+    for id in ids {
+        stop(id);
+    }
+}
+
 /// Every job (`owner` given: that notebook's), oldest first.
 pub fn list(owner: &str) -> Value {
     let js = jobs().lock().unwrap();

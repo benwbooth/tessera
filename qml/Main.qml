@@ -1658,6 +1658,33 @@ ApplicationWindow {
             }
         }
     }
+    // tesserad (here or on a host) has a newer build waiting: it swaps
+    // itself in once no kernel or background job runs. Asked once per build
+    // whether to stop them now.
+    Connections {
+        target: controller
+        function onJupyterEvent(key, json) {
+            if (key !== "tesserad" && !key.endsWith("//tesserad")) return
+            let e
+            try { e = JSON.parse(json) } catch (x) { return }
+            if (e.type !== "daemon.update") return
+            const host = key === "tesserad" ? "" : key.slice(0, -"//tesserad".length)
+            const n = (c, one) => c + " " + one + (c === 1 ? "" : "s")
+            let busy = []
+            if (e.kernels > 0) busy.push(n(e.kernels, "kernel"))
+            if (e.jobs > 0) busy.push(n(e.jobs, "background job"))
+            if (!busy.length) return
+            sheet.ask({
+                title: "Update tesserad?",
+                message: "Tessera's background process (tesserad" + (host ? " on " + host : "") + "), which runs your shells and kernels, has a newer build. "
+                       + "It updates itself in place, keeping your shells, as soon as nothing else runs in it. Running now: " + busy.join(" and ") + ".\n\n"
+                       + "Updating now stops them: kernels lose their variables, background jobs end. Cancel to let it update once they finish.",
+                okText: "Stop and Update",
+                destructive: true,
+                onAccept: () => Async.call(controller, k => controller.jobCall(k, host, "daemon.upgrade", "{}"), () => {})
+            })
+        }
+    }
     // Shells in a daemon from before in-place upgrades: it can't take this
     // build's changes (shell integration, the input editor, ...) without a
     // restart. Asked once per start, after the window is up.
