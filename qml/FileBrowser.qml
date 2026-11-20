@@ -277,9 +277,22 @@ Item {
     }
 
     // ---- the entries ----------------------------------------------------
+    // (Scrolled in the room it's given: a card shorter than the folder's
+    // list, or one dragged smaller, cut it off with no way to the rest.)
+    Flickable {
+        id: bodyScroll
+        y: fb.headerH + 4
+        width: parent.width
+        height: Math.max(0, Math.min(fb.bodyH, fb.height - fb.headerH - 8))
+        contentWidth: width
+        contentHeight: fb.bodyH
+        clip: contentHeight > height
+        interactive: false   // (a drag is a file's: the wheel and the bar scroll)
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: bodyScroll.contentHeight > bodyScroll.height + 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+        MomentumWheel { flick: bodyScroll; enabled: bodyScroll.contentHeight > bodyScroll.height + 1 }
     Item {
         id: body
-        y: fb.headerH + 4
         width: parent.width
         height: fb.bodyH
         // (A right click on nothing: the folder's own menu.)
@@ -406,6 +419,7 @@ Item {
                 }
             }
         }
+    }
     }
     Text {
         visible: fb.error !== ""
