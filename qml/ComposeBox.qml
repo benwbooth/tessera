@@ -993,10 +993,10 @@ Rectangle {
     }
 
     Text {
-        // Empty: a hint of what this is.
-        anchors.left: flick.left
-        anchors.verticalCenter: flick.verticalCenter
-        anchors.verticalCenterOffset: 0.001
+        // Empty: a hint of what this is, on the first line as typed text
+        // and the prompt character are (centred in the box it sat lower).
+        x: flick.x + 0.001
+        y: flick.y + 0.001
         visible: edit.text === "" && !(box.keys === "vi" && box.viNormal)
         width: flick.width
         elide: Text.ElideRight
