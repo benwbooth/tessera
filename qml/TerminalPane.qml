@@ -245,7 +245,6 @@ Item {
         anchors.bottom: pane.editorOn ? compose.top : parent.bottom
     }
     TerminalView {
-        property bool keepsBacktab: true    // (it decides: the editor at a prompt, else the program)
         id: term
         ready: pane.hostUp
         // (Ctrl+click on a path in another host's output: Tessera's viewer, read there.)
@@ -270,14 +269,6 @@ Item {
         focusOnCursorLineOnly: pane.editorOn
         onCursorLineClicked: pane.preferEditor = false
         onOffCursorLineClicked: { pane.preferEditor = true; compose.focusEditor() }
-        // Shift+Tab at a prompt: back to the editor (elsewhere it goes to the program).
-        Keys.onPressed: (e) => {
-            if (e.key === Qt.Key_Backtab && pane.editorOn && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
-                pane.preferEditor = true
-                compose.focusEditor()
-                e.accepted = true
-            }
-        }
     }
 
     ComposeBox {

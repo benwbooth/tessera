@@ -31,27 +31,49 @@
 
 inline void tessera_webengine_initialize() { QtWebEngineQuick::initialize(); }
 
-// Shift+Tab: back to the pane's input editor from wherever the keys are (a
-// notebook card, a Markdown or HTML view, which would take it to move their
-// own focus), caught at the window before anything below it. What has a
-// use for it keeps it: an item with keepsBacktab (the editor itself, a
-// cell's editor, the terminal). The window's backToEditor() decides.
-class TesseraBacktab : public QObject {
+// Ctrl tapped on its own (pressed and let go, nothing else in between):
+// between the pane's input editor and its terminal, from wherever the keys
+// are. A terminal program never sees a lone Ctrl, so it takes nothing from
+// them. Seen at the window, before anything below it; the window's
+// toggleEditor() decides.
+class TesseraCtrlTap : public QObject {
 public:
     using QObject::QObject;
     bool eventFilter(QObject* o, QEvent* e) override
     {
-        if (e->type() != QEvent::KeyPress) return false;
-        auto* w = qobject_cast<QQuickWindow*>(o);
-        if (!w) return false;
-        auto* k = static_cast<QKeyEvent*>(e);
-        if (k->key() != Qt::Key_Backtab || (k->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) return false;
-        for (QQuickItem* i = w->activeFocusItem(); i; i = i->parentItem())
-            if (i->property("keepsBacktab").toBool()) return false;
-        QVariant done;
-        if (!QMetaObject::invokeMethod(w, "backToEditor", Q_RETURN_ARG(QVariant, done))) return false;
-        return done.toBool();
+        switch (e->type()) {
+        case QEvent::KeyPress: {
+            if (!qobject_cast<QQuickWindow*>(o)) return false;
+            auto* k = static_cast<QKeyEvent*>(e);
+            if (k->isAutoRepeat()) return false;
+            armed = k->key() == Qt::Key_Control && !(k->modifiers() & ~Qt::ControlModifier & ~Qt::KeypadModifier);
+            if (armed) since.start();
+            return false;
+        }
+        case QEvent::KeyRelease: {
+            auto* w = qobject_cast<QQuickWindow*>(o);
+            if (!w) return false;
+            auto* k = static_cast<QKeyEvent*>(e);
+            if (k->isAutoRepeat() || k->key() != Qt::Key_Control || !armed) return false;
+            armed = false;
+            // (Held a while: not a tap, someone changed their mind.)
+            if (since.elapsed() > 500) return false;
+            QMetaObject::invokeMethod(w, "toggleEditor");
+            return false;
+        }
+        case QEvent::MouseButtonPress:
+        case QEvent::Wheel:
+        case QEvent::FocusOut:
+            armed = false;
+            return false;
+        default:
+            return false;
+        }
     }
+
+private:
+    bool armed = false;
+    QElapsedTimer since;
 };
 
 // A window hidden by the desktop (covered, on another virtual desktop, in
@@ -122,7 +144,7 @@ inline void tessera_create_app(const QString& session)
         if (hadPath) qputenv("QT_PLUGIN_PATH", oldPath);
         else qunsetenv("QT_PLUGIN_PATH");
     }
-    qApp->installEventFilter(new TesseraBacktab(qApp));
+    qApp->installEventFilter(new TesseraCtrlTap(qApp));
     qApp->installEventFilter(new TesseraExposeWatch(qApp));
     QApplication::setApplicationName(QStringLiteral("tessera"));
     QApplication::setApplicationDisplayName(QStringLiteral("Tessera"));

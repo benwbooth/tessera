@@ -86,8 +86,15 @@ ApplicationWindow {
     Binding { target: Theme; property: "term"; value: win.themeFor(win.activeProfile) }
 
     function setSetting(key, value) { controller.setSetting(key, JSON.stringify(value)) }
-    // Shift+Tab from anywhere that doesn't keep it (include/bootstrap.h
-    // TesseraBacktab): the active pane's input editor, when it's up.
+    // Ctrl tapped on its own (include/bootstrap.h TesseraCtrlTap): over to
+    // the active pane's terminal from its input editor, else to the editor
+    // (when it's up: at a prompt).
+    function toggleEditor() {
+        const p = activePane
+        if (!p || !p.editorOn) return
+        if (p.compose.editing) { p.compose.handBack(); return }
+        backToEditor()
+    }
     function backToEditor() {
         const p = activePane
         if (!p || !p.editorOn) return false
@@ -1766,7 +1773,7 @@ ApplicationWindow {
             const k = keysTestTimer.keys.shift()
             if (k === "wait") { if (activePane) console.log("key test: wait ghost=" + JSON.stringify(activePane.compose.ghost) + " ready=" + activePane.compose.inlineReady); return }   // (a pause: let the AI answer)
             const named = { space: [Qt.Key_Space, 0, " ", 65], tab: [Qt.Key_Tab, 0, "\t", 23], bs: [Qt.Key_Backspace, 0, "\b", 22], enter: [Qt.Key_Return, 0, "\r", 36],
-                            lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62], esc: [Qt.Key_Escape, 0, "\x1b", 9], stab: [Qt.Key_Backtab, Qt.ShiftModifier, "", 23],
+                            lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62], esc: [Qt.Key_Escape, 0, "\x1b", 9], ctrl: [Qt.Key_Control, 0, "", 37], stab: [Qt.Key_Backtab, Qt.ShiftModifier, "", 23],
                             up: [Qt.Key_Up, 0, "", 111], down: [Qt.Key_Down, 0, "", 116],
                             pgup: [Qt.Key_PageUp, 0, "", 112], pgdn: [Qt.Key_PageDown, 0, "", 117] }
             // (ca:x: Ctrl+Alt+x; ca:enter for Return.)

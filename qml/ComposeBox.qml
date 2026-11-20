@@ -127,7 +127,7 @@ Rectangle {
     property int jobsRunning: 0
     property int jobsAll: 0
     signal jobsToggled()
-    signal handBack()                  // Shift+Tab: type into the terminal instead
+    signal handBack()                  // Ctrl tapped: type into the terminal instead
 
     readonly property alias text: edit.text
     readonly property bool editing: edit.activeFocus
@@ -795,7 +795,6 @@ Rectangle {
 
         TextEdit {
             id: edit
-            property bool keepsBacktab: true   // (its own Shift+Tab: to the terminal, or outdent)
             width: flick.width
             wrapMode: TextEdit.Wrap
             textFormat: TextEdit.PlainText
@@ -902,11 +901,6 @@ Rectangle {
                 if (e.key === Qt.Key_Shift && !e.isAutoRepeat) { shiftSide = shiftSideOf(e); shiftAt = Date.now() }
                 else shiftSide = 0
                 let done = false
-                // Shift+Tab: over to the terminal (several lines selected: outdent them).
-                if (e.key === Qt.Key_Backtab && !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier))
-                        && selectedText.indexOf("\u2029") < 0 && selectedText.indexOf("\n") < 0) {
-                    box.closeComp(); box.ghost = ""; box.handBack(); e.accepted = true; return
-                }
                 const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
                 if (box.ghost !== "" && box.atSuggestEnd && plain
                         && (e.key === Qt.Key_Right || e.key === Qt.Key_End))
@@ -1013,7 +1007,7 @@ Rectangle {
         ToolTip.text: "Enter runs the command\n"
                       + "Tap right Shift (or Shift+Enter) for a new line\n"
                       + "Tap left Shift to take the grey suggestion (from history or the AI)\n"
-                      + "Tab completes; Ctrl+R searches history\nShift+Tab switches between this editor and the terminal"
+                      + "Tab completes (in the indentation: indents; Shift+Tab outdents); Ctrl+R searches history\nTap Ctrl to switch between this editor and the terminal"
                       + (box.aiNL && box.chatReady ? "\n# then what you want, in words: the AI writes the command for you to check and run" : "")
         color: Theme.textDim
         opacity: 0.55
