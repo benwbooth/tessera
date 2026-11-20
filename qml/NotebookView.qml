@@ -392,6 +392,8 @@ FocusScope {
     }
     function setType(i, type) {
         if (cells.get(i).type === type) return
+        // (A file's card stays one: M on it made it a Markdown cell of its path.)
+        if (cells.get(i).viewPath !== "") return
         if (cells.get(i).tid > 0) retire(cells.get(i).tid)
         cells.setProperty(i, "type", type)
         cells.setProperty(i, "tid", 0)
