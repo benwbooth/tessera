@@ -42,6 +42,95 @@ fn err<T>(msg: impl Into<String>, f: Option<&Form>) -> R<T> {
     Err(CompileError { msg: msg.into(), pos: f.and_then(|f| f.pos) })
 }
 
+// ---- a loop variable written bare ----------------------------------------------------
+// `for x in $xs` makes x; reading it is `$x`. A bare `x` where it's read is
+// the text "x", and Python habit ([x * 2 for x in xs]) gave ['xx', 'xx']
+// without a word: those are errors, with the fix.
+
+/// The names a for's target binds (x, or [k v], or a, b).
+fn bound_names(target: &[Form]) -> Vec<String> {
+    let mut out = vec![];
+    for t in target {
+        match &t.kind {
+            Kind::Sym { name, .. } if crate::reader::is_ident(name) => out.push(name.clone()),
+            Kind::Group { items, .. } => out.extend(bound_names(items)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A bare word naming one of `names` where it would be read as text: an
+/// argument, a list item, an operand. Not a command's own name (head), not
+/// what an assignment or a nested for binds, not inside a def or the like
+/// (their own names).
+fn bare_read<'a>(items: &'a [Form], names: &[String], head_ok: bool) -> Option<&'a Form> {
+    if names.is_empty() {
+        return None;
+    }
+    // (An expression, with operators: every item is a value; a call or a
+    // command: its first item is the name of what runs.)
+    let has_op = items.iter().any(|x| matches!(x.kind, Kind::Op { .. }));
+    let assign_at = items.iter().position(|x| matches!(&x.kind, Kind::Op { name, .. } if ASSIGN_OPS.iter().any(|(o, _)| o == name)));
+    let mut skip_to_in = false;
+    for (i, x) in items.iter().enumerate() {
+        if skip_to_in {
+            if x.is_sym("in") {
+                skip_to_in = false;
+            }
+            continue;
+        }
+        if x.is_sym("for") {
+            skip_to_in = true;
+            continue;
+        }
+        if assign_at.is_some_and(|a| i < a) {
+            continue;
+        }
+        if i == 0 && head_ok && !has_op {
+            continue;
+        }
+        if let Some(f) = bare_in(x, names) {
+            return Some(f);
+        }
+    }
+    None
+}
+
+fn bare_in<'a>(x: &'a Form, names: &[String]) -> Option<&'a Form> {
+    match &x.kind {
+        Kind::Sym { name, .. } if names.iter().any(|n| n == name) => Some(x),
+        Kind::Group { open, items } => bare_read(items, names, *open == '('),
+        Kind::Line { items, children } => {
+            const OWN_NAMES: &[&str] = &["def", "fn", "lambda", "class", "defmacro", "import", "from", "quasi", "async"];
+            if items.first().and_then(|h| h.sym_name()).is_some_and(|h| OWN_NAMES.contains(&h)) {
+                return None;
+            }
+            bare_read(items, names, true).or_else(|| children.iter().find_map(|c| bare_in(c, names)))
+        }
+        Kind::Unary { operand, .. } => bare_in(operand, names),
+        Kind::Index { obj, items } => bare_in(obj, names).or_else(|| bare_read(items, names, false)),
+        Kind::Attr { obj, .. } => bare_in(obj, names),
+        Kind::KwArg { value, .. } | Kind::Splat { value, .. } => bare_in(value, names),
+        _ => None,
+    }
+}
+
+fn bare_loop_var<T>(f: &Form) -> R<T> {
+    let n = f.sym_name().unwrap_or("");
+    err(format!("`{n}` is the loop's variable here, but a bare word is text: write ${n} (or '{n}' for the text)"), Some(f))
+}
+
+/// `for x in xs`: the letters of "xs", never what was meant.
+fn bare_iterable(iter: &[Form]) -> R<()> {
+    if let [one] = iter {
+        if let Some(n) = one.sym_name().filter(|n| crate::reader::is_ident(n)) {
+            return err(format!("`{n}` here is the text '{n}' (it would loop over its letters): write ${n} for the variable, or '{n}' for the text"), Some(one));
+        }
+    }
+    Ok(())
+}
+
 const RT: &str = "__tessh__";
 const FM: &str = "__tessh_forms__";
 
@@ -2208,6 +2297,27 @@ impl<'py, 's> Compiler<'py, 's> {
                 c.1.push(x.clone());
             }
         }
+        // (Its variables, read bare in its element, its ifs or a later for's
+        // iterable.)
+        {
+            let mut names: Vec<String> = vec![];
+            for (kind, body) in &clauses {
+                if *kind == "for" {
+                    if let Some(ins) = body.iter().position(|y| y.is_sym("in")) {
+                        bare_iterable(&body[ins + 1..])?;
+                        if let Some(f) = bare_read(&body[ins + 1..], &names, false) {
+                            return bare_loop_var(f);
+                        }
+                        names.extend(bound_names(&body[..ins]));
+                    }
+                } else if let Some(f) = bare_read(body, &names, false) {
+                    return bare_loop_var(f);
+                }
+            }
+            if let Some(f) = bare_read(elt_items, &names, false) {
+                return bare_loop_var(f);
+            }
+        }
         self.push("comp");
         let result = (|| -> R<(Vec<Obj<'py>>, Vec<Obj<'py>>)> {
             let mut gens: Vec<Obj<'py>> = vec![];
@@ -2775,6 +2885,10 @@ impl<'py, 's> Compiler<'py, 's> {
 
     fn sf_for(&mut self, items: &[Form], children: &[Form], conts: &[Form], is_async: bool) -> R<Res<'py>> {
         let Some(k) = items.iter().position(|x| x.is_sym("in")) else { return err("for name in iterable", Some(&items[0])) };
+        bare_iterable(&items[k + 1..])?;
+        if let Some(f) = children.iter().find_map(|c| bare_in(c, &bound_names(&items[1..k]))) {
+            return bare_loop_var(f);
+        }
         let it = self.compile_expr(&items[k + 1..], Ctx::Value, &[])?;
         let target = self.make_target(&items[1..k], &items[0], false, false)?;
         let body = self.branch(children, Ctx::Stmt, &None)?;

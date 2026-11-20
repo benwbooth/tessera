@@ -64,6 +64,23 @@ fn comprehensions() {
 }
 
 #[test]
+fn bare_loop_variables() {
+    // (Python habit: a bare word is text, so these said nothing and gave
+    // ['xx', 'xx']; now each is an error with its fix.)
+    let e = check_one("xs = [1 2]\nprint [x * 2 for x in $xs]");
+    assert!(e[0].3.contains("write $x"), "{:?}", e);
+    let e = check_one("xs = [1 2]\nprint [$x for x in xs]");
+    assert!(e[0].3.contains("write $xs"), "{:?}", e);
+    let e = check_one("xs = [1 2]\nprint [$x for x in $xs if x > 1]");
+    assert!(e[0].3.contains("write $x"), "{:?}", e);
+    let e = check_one("for x in [1 2]\n  print x");
+    assert!(e[0].3.contains("write $x"), "{:?}", e);
+    // (Its own names elsewhere, a dict key, a nested for's: fine.)
+    assert!(check_one("for x in [1 2]\n  def g x\n    $x\n  print {x: $x} ([$y for y in [$x]])").is_empty());
+    assert!(check_one("print [[$i $j] for i in [1 2] for j in [a b]]").is_empty());
+}
+
+#[test]
 fn indexing_and_slices() {
     let (ns, _) = run("xs = [1 2 3 4 5]\na = $xs[1:3]\nb = $xs[-1]\nn = 2\nc = $xs[:$n]\nd = {k: 1}\ne = $d[k]");
     assert_eq!(repr(&ns, "a"), "[2, 3]");

@@ -1005,6 +1005,11 @@ print [[$i $j] for i in [1 2] for j in [a b]]
 [[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']]
 ```
 
+As everywhere, a name is bare where it's made (`for x`) and has `$` where
+it's read (`$x`, `$xs`). Python's `[x * 2 for x in xs]` is an error saying
+so: a bare `x` or `xs` would be the text, and the same goes for a `for`
+loop's body.
+
 ## Classes
 <!-- help: classes class self methods inheritance dataclass -->
 
