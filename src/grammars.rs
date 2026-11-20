@@ -84,9 +84,43 @@ pub fn is_known(name: &str) -> bool {
     include_str!("helix_languages.txt").lines().any(|l| l == name) || grammar_file(name).is_some()
 }
 
-/// The languages whose grammar is here now.
+/// The languages whose grammar is here now, with its highlight rules (and
+/// those they inherit).
 pub fn available() -> Vec<String> {
-    installed()
+    installed().into_iter().filter(|n| queries_here(query_name(n), 0)).collect()
+}
+
+/// The folder of a grammar's queries in Helix's runtime: its language's
+/// name, which for these isn't the grammar's (QML's grammar is qmljs, its
+/// queries are qml's: looked for as qmljs, QML was never highlighted).
+fn query_name(grammar: &str) -> &str {
+    match grammar {
+        "qmljs" => "qml",
+        "gitattributes" => "git-attributes",
+        "gitcommit" => "git-commit",
+        "gitignore" => "git-ignore",
+        "janet-simple" => "janet",
+        "jinja2" => "jinja",
+        "markdown_inline" => "markdown.inline",
+        "proto" => "protobuf",
+        "ql" => "codeql",
+        "query" => "tsq",
+        "embedded-template" => "erb",
+        other => other,
+    }
+}
+
+/// Its highlights query and every one it inherits are here. (A grammar
+/// alone highlights nothing: one unpacked while another language's was
+/// clobbered its queries, and the language stayed plain for good.)
+fn queries_here(name: &str, depth: usize) -> bool {
+    if depth > 6 {
+        return true;
+    }
+    let Some(text) = runtime_dirs().iter().find_map(|d| std::fs::read_to_string(d.join("queries").join(name).join("highlights.scm")).ok()) else {
+        return false;
+    };
+    text.lines().filter_map(|l| l.trim().strip_prefix("; inherits:")).all(|ps| ps.split(',').all(|p| queries_here(p.trim(), depth + 1)))
 }
 
 fn installed() -> Vec<String> {
@@ -180,7 +214,10 @@ fn unpack(archive: &Path, members: &[String]) -> Result<(), String> {
     if members.is_empty() {
         return Ok(());
     }
-    let tmp = cache_dir().join(format!("helix-unpack-{}", std::process::id()));
+    // (Its own folder: two languages unpacked at once shared one, and each
+    // removed it under the other.)
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = cache_dir().join(format!("helix-unpack-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let ok = std::process::Command::new("tar").arg("-xf").arg(archive).arg("-C").arg(&tmp).args(members).status().map_err(|e| e.to_string())?;
@@ -206,7 +243,7 @@ fn unpack(archive: &Path, members: &[String]) -> Result<(), String> {
 /// they inherit) from Helix's archive, fetching that first if need be.
 /// Ok(true) when something was added.
 pub fn ensure(name: &str) -> Result<bool, String> {
-    if grammar_file(name).is_some() {
+    if grammar_file(name).is_some() && queries_here(query_name(name), 0) {
         return Ok(false);
     }
     if !is_known(name) {
@@ -215,14 +252,14 @@ pub fn ensure(name: &str) -> Result<bool, String> {
     let archive = archive()?;
     let index = archive_index(&archive)?;
     let mut want: Vec<String> = Vec::new();
-    let mut queue = vec![name.to_string()];
+    let mut queue = vec![query_name(name).to_string()];
     let mut seen = std::collections::HashSet::new();
     while let Some(lang) = queue.pop() {
         if !seen.insert(lang.clone()) {
             continue;
         }
         for m in &index {
-            let is_grammar = lang == name && (m.ends_with(&format!("/runtime/grammars/{lang}.so")) || m.ends_with(&format!("/runtime/grammars/{lang}.dll")) || m.ends_with(&format!("/runtime/grammars/{lang}.dylib")));
+            let is_grammar = lang == query_name(name) && (m.ends_with(&format!("/runtime/grammars/{name}.so")) || m.ends_with(&format!("/runtime/grammars/{name}.dll")) || m.ends_with(&format!("/runtime/grammars/{name}.dylib")));
             if is_grammar || (m.contains(&format!("/runtime/queries/{lang}/")) && !m.ends_with('/')) {
                 want.push(m.clone());
             }
@@ -238,7 +275,7 @@ pub fn ensure(name: &str) -> Result<bool, String> {
         }
     }
     unpack(&archive, &want)?;
-    Ok(grammar_file(name).is_some())
+    Ok(grammar_file(name).is_some() && queries_here(query_name(name), 0))
 }
 
 /// Everything at once (for working offline): every grammar and query.
@@ -273,7 +310,7 @@ pub fn highlights(name: &str) -> String {
         out.push('\n');
     }
     let mut out = String::new();
-    read(name, 0, &mut out);
+    read(query_name(name), 0, &mut out);
     out
 }
 

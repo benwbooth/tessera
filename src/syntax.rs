@@ -254,6 +254,9 @@ fn kind_of(name: &str) -> &str {
 
 /// {"spans": [[start, length, kind]], "errors": [[start, length, message]]}
 pub fn analyze(lang_name: &str, text: &str) -> String {
+    if lang_name == "markdown" {
+        return markdown_analysis(text);
+    }
     let Some(l) = lang(lang_name) else { return json!({"spans": [], "errors": []}).to_string() };
     thread_local! { static PARSER: RefCell<Parser> = RefCell::new(Parser::new()); }
     let Some(tree) = PARSER.with(|p| {
@@ -279,6 +282,15 @@ pub fn analyze(lang_name: &str, text: &str) -> String {
     };
 
     let mut spans = Vec::new();
+    // (QML: the JavaScript in it, which Helix's rules leave to an injection.)
+    if lang_name == "qmljs" {
+        js_by_kind(tree.root_node(), &mut |node, kind| {
+            let (s, len) = range(node);
+            if len > 0 {
+                spans.push(json!([s, len, kind]));
+            }
+        });
+    }
     let names = l.query.capture_names();
     let mut cursor = QueryCursor::new();
     let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
@@ -306,6 +318,330 @@ pub fn analyze(lang_name: &str, text: &str) -> String {
     json!({"spans": spans, "errors": errors}).to_string()
 }
 
+/// A language's highlight spans as byte ranges: (start, end, kind). None
+/// when there's no grammar for it here.
+fn byte_spans(lang_name: &str, text: &str) -> Option<Vec<(usize, usize, &'static str)>> {
+    let l = lang(lang_name)?;
+    let mut p = Parser::new();
+    p.set_language(&l.language).ok()?;
+    let tree = p.parse(text, None)?;
+    let names = l.query.capture_names();
+    let mut out = Vec::new();
+    let mut cursor = QueryCursor::new();
+    let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
+    while let Some((m, i)) = caps.next() {
+        let c = m.captures()[*i];
+        let k = kind_of(names[c.index as usize]);
+        if c.node.end_byte() > c.node.start_byte() {
+            // (Kinds as 'static: the highlighter's known names.)
+            let k: &'static str = KINDS.iter().find(|x| **x == k).copied().unwrap_or("");
+            if !k.is_empty() {
+                out.push((c.node.start_byte(), c.node.end_byte(), k));
+            }
+        }
+    }
+    Some(out)
+}
+
+const KINDS: &[&str] = &["keyword", "string", "comment", "number", "constant", "function", "operator", "property", "variable",
+                         "embedded", "type", "constructor", "punctuation", "escape", "attribute", "tag", "label", "namespace", "special"];
+
+/// The language a fenced code block's info string names ("sh", "js",
+/// "rust,ignore", ...): one there's a grammar for, or None. One Helix has
+/// but isn't here yet is unpacked in the background, for next time.
+fn fence_language(info: &str) -> Option<String> {
+    let w = info.split(|c: char| c.is_whitespace() || c == ',' || c == '{').next().unwrap_or("").trim_start_matches('.').to_lowercase();
+    let name = match w.as_str() {
+        "" => return None,
+        "sh" | "shell" | "zsh" | "console" | "shellsession" | "bash" => "bash",
+        "js" | "mjs" | "cjs" | "jsx" | "javascript" => "javascript",
+        "ts" | "typescript" => "typescript",
+        "py" | "python3" | "python" => "python",
+        "rs" | "rust" => "rust",
+        "yml" | "yaml" => "yaml",
+        "c++" | "cc" | "cxx" | "hpp" | "cpp" => "cpp",
+        "h" => "c",
+        "rb" => "ruby",
+        "golang" => "go",
+        "qml" => "qmljs",
+        "htm" => "html",
+        "jsonc" | "json5" => "json",
+        "md" | "markdown" => return None,
+        "ps1" | "pwsh" => "powershell",
+        "kt" => "kotlin",
+        "cs" | "csharp" => "c-sharp",
+        "hs" => "haskell",
+        "ex" | "exs" => "elixir",
+        "dockerfile" | "docker" => "dockerfile",
+        "make" | "makefile" => "make",
+        "tex" | "latex" => "latex",
+        other => other,
+    };
+    if is_builtin(name) || crate::grammars::available().iter().any(|n| n == name) {
+        return Some(name.to_string());
+    }
+    if crate::grammars::is_known(name) {
+        static ASKED: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+        if ASKED.get_or_init(Default::default).lock().unwrap().insert(name.to_string()) {
+            let n = name.to_string();
+            std::thread::spawn(move || {
+                let _ = crate::grammars::ensure(&n);
+            });
+        }
+    }
+    None
+}
+
+/// Markdown as text, highlighted for reading: headings bold and colored by
+/// level (their # marks dim), **bold**, *italic* and ~~struck~~ drawn so,
+/// `code` and links colored (links underlined, their addresses dim), list,
+/// quote and table marks colored, HTML as HTML, and fenced code in its own
+/// language. Style-only kinds ("=bold", "=italic", "=strike",
+/// "=underline") go over the colors (include/syntax_highlighter.h).
+fn markdown_analysis(text: &str) -> String {
+    use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser as Md, Tag, TagEnd};
+    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_FOOTNOTES | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS;
+    let b = text.as_bytes();
+    let mut spans: Vec<(usize, usize, &str)> = Vec::new();
+    let mut styles: Vec<(usize, usize, &str)> = Vec::new();
+    // (Embedded code: a language's spans over its range.)
+    let embed = |spans: &mut Vec<(usize, usize, &str)>, lang: &str, s: usize, e: usize| {
+        if let Some(inner) = text.get(s..e).and_then(|t| byte_spans(lang, t)) {
+            spans.extend(inner.into_iter().map(|(a, z, k)| (s + a, s + z, k)));
+        }
+    };
+    let mut code: Option<(usize, usize, Option<String>, usize, usize)> = None; // (block start, block end, lang, first text, last text)
+    let mut meta: Option<(usize, usize)> = None;
+    for (ev, r) in Md::new_ext(text, opts).into_offset_iter() {
+        match ev {
+            Event::Start(Tag::Heading { level, .. }) => {
+                let kind = match level { HeadingLevel::H1 => "keyword", HeadingLevel::H2 => "function", HeadingLevel::H3 => "property", _ => "type" };
+                spans.push((r.start, r.end, kind));
+                styles.push((r.start, r.end, "=bold"));
+                // (ATX: the leading #s and any closing ones are dim; setext: the underline.)
+                let t = &text[r.clone()];
+                let hashes = t.len() - t.trim_start_matches('#').len();
+                if hashes > 0 {
+                    spans.push((r.start, r.start + hashes, "punctuation"));
+                    let tail = t.trim_end();
+                    let close = tail.len() - tail.trim_end_matches('#').len();
+                    if close > 0 && close < tail.len() - hashes {
+                        spans.push((r.start + tail.len() - close, r.start + tail.len(), "punctuation"));
+                    }
+                } else if let Some(nl) = t.trim_end().rfind('\n') {
+                    spans.push((r.start + nl + 1, r.end, "punctuation"));
+                }
+            }
+            Event::Start(Tag::Strong) => {
+                styles.push((r.start, r.end, "=bold"));
+                spans.push((r.start, (r.start + 2).min(r.end), "punctuation"));
+                spans.push((r.end.saturating_sub(2).max(r.start), r.end, "punctuation"));
+            }
+            Event::Start(Tag::Emphasis) => {
+                styles.push((r.start, r.end, "=italic"));
+                spans.push((r.start, (r.start + 1).min(r.end), "punctuation"));
+                spans.push((r.end.saturating_sub(1).max(r.start), r.end, "punctuation"));
+            }
+            Event::Start(Tag::Strikethrough) => {
+                styles.push((r.start, r.end, "=strike"));
+                spans.push((r.start, r.end, "comment"));
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                spans.push((r.start, r.end, "comment"));
+                styles.push((r.start, r.end, "=italic"));
+                // (Each line's ">" marks.)
+                let mut at = r.start;
+                for line in text[r.clone()].split_inclusive('\n') {
+                    let lead = line.len() - line.trim_start_matches([' ', '>']).len();
+                    if line.trim_start().starts_with('>') {
+                        spans.push((at, at + lead, "operator"));
+                    }
+                    at += line.len();
+                }
+            }
+            Event::Start(Tag::Item) => {
+                // (The bullet or number at its start.)
+                let t = &text[r.clone()];
+                let m = t.find(|c: char| c.is_whitespace()).unwrap_or(0);
+                if m > 0 {
+                    spans.push((r.start, r.start + m, "operator"));
+                }
+            }
+            Event::TaskListMarker(_) => spans.push((r.start, r.end, "constant")),
+            Event::Start(Tag::Link { .. }) | Event::Start(Tag::Image { .. }) => {
+                let image = matches!(ev, Event::Start(Tag::Image { .. }));
+                let t = &text[r.clone()];
+                if t.starts_with('<') {
+                    // (An autolink.)
+                    spans.push((r.start, r.end, "function"));
+                    styles.push((r.start + 1, r.end.saturating_sub(1), "=underline"));
+                } else {
+                    // [text](url) / ![alt](src) / [text][ref]: the text colored and
+                    // underlined, the brackets and the address dim.
+                    let lb = if image { 1 } else { 0 };
+                    let close = t.rfind("](").or_else(|| t.rfind("][")).unwrap_or(t.len().saturating_sub(1));
+                    spans.push((r.start, r.end, "comment"));
+                    spans.push((r.start + lb + 1, r.start + close, if image { "attribute" } else { "function" }));
+                    styles.push((r.start + lb + 1, r.start + close, "=underline"));
+                    if image {
+                        spans.push((r.start, r.start + 1, "operator"));
+                    }
+                }
+            }
+            Event::Code(_) => {
+                spans.push((r.start, r.end, "string"));
+                let t = &text[r.clone()];
+                let ticks = t.len() - t.trim_start_matches('`').len();
+                spans.push((r.start, r.start + ticks, "punctuation"));
+                spans.push((r.end - ticks.min(r.end - r.start), r.end, "punctuation"));
+            }
+            Event::Html(_) | Event::InlineHtml(_) => {
+                // (Its text as text: the grammar colors the tags and attributes.)
+                spans.push((r.start, r.end, "variable"));
+                embed(&mut spans, "html", r.start, r.end);
+            }
+            Event::Start(Tag::CodeBlock(kind)) => {
+                let lang = match &kind { CodeBlockKind::Fenced(info) => fence_language(info), CodeBlockKind::Indented => None };
+                spans.push((r.start, r.end, "string"));
+                if let CodeBlockKind::Fenced(info) = &kind {
+                    // (The fences dim, the language name as a type.)
+                    let first = text[r.clone()].find('\n').map(|i| r.start + i).unwrap_or(r.end);
+                    spans.push((r.start, first, "punctuation"));
+                    if let Some(i) = text[r.start..first].find(info.as_ref()).filter(|_| !info.is_empty()) {
+                        spans.push((r.start + i, r.start + i + info.len(), "type"));
+                    }
+                    let body = text[r.clone()].trim_end_matches(['\n', '\r', ' ']);
+                    if let Some(nl) = body.rfind('\n') {
+                        let last = &body[nl + 1..];
+                        if last.trim_start().starts_with("```") || last.trim_start().starts_with("~~~") {
+                            spans.push((r.start + nl + 1, r.start + body.len(), "punctuation"));
+                        }
+                    }
+                }
+                code = Some((r.start, r.end, lang, usize::MAX, 0));
+            }
+            Event::Text(_) if code.is_some() => {
+                if let Some(c) = code.as_mut() {
+                    c.3 = c.3.min(r.start);
+                    c.4 = c.4.max(r.end);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some((_, _, Some(lang), s, e)) = code.take() {
+                    if s < e {
+                        // (Its code back to plain first: unmatched parts read as text.)
+                        spans.push((s, e, "variable"));
+                        embed(&mut spans, &lang, s, e);
+                    }
+                }
+            }
+            Event::Start(Tag::MetadataBlock(_)) => meta = Some((r.start, r.end)),
+            Event::End(TagEnd::MetadataBlock(_)) => {
+                if let Some((s, e)) = meta.take() {
+                    spans.push((s, e, "punctuation"));
+                    let body_s = text[s..e].find('\n').map(|i| s + i + 1).unwrap_or(e);
+                    let body_e = text[s..e].trim_end().rfind('\n').map(|i| s + i).unwrap_or(e);
+                    if body_s < body_e {
+                        spans.push((body_s, body_e, "variable"));
+                        embed(&mut spans, "yaml", body_s, body_e);
+                    }
+                }
+            }
+            Event::Start(Tag::Table(_)) => {
+                // (Every pipe, and the row of dashes under the head.)
+                for (i, c) in text[r.clone()].char_indices() {
+                    if c == '|' && (i == 0 || b[r.start + i - 1] != b'\\') {
+                        spans.push((r.start + i, r.start + i + 1, "punctuation"));
+                    }
+                }
+                let t = &text[r.clone()];
+                if let Some(nl) = t.find('\n') {
+                    let end = t[nl + 1..].find('\n').map(|j| nl + 1 + j).unwrap_or(t.len());
+                    spans.push((r.start + nl + 1, r.start + end, "punctuation"));
+                }
+            }
+            Event::Start(Tag::TableHead) => styles.push((r.start, r.end, "=bold")),
+            Event::Rule => spans.push((r.start, r.end, "punctuation")),
+            Event::FootnoteReference(_) => spans.push((r.start, r.end, "constant")),
+            Event::Start(Tag::FootnoteDefinition(_)) => {
+                let t = &text[r.clone()];
+                if let Some(i) = t.find("]:") {
+                    spans.push((r.start, r.start + i + 2, "constant"));
+                }
+            }
+            Event::Text(_) => {
+                // (Backslash escapes: \* \_ \# ...)
+                let t = &b[r.clone()];
+                // (An escape's text can start just after its backslash.)
+                if r.start > 0 && b[r.start - 1] == b'\\' && t.first().is_some_and(|c| c.is_ascii_punctuation()) {
+                    spans.push((r.start - 1, r.start + 1, "escape"));
+                }
+                let mut i = 0;
+                while i + 1 < t.len() {
+                    if t[i] == b'\\' && t[i + 1].is_ascii_punctuation() {
+                        spans.push((r.start + i, r.start + i + 2, "escape"));
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // Byte offsets -> UTF-16 offsets.
+    let mut u16_at = vec![0u32; text.len() + 1];
+    let mut n = 0u32;
+    for (i, c) in text.char_indices() {
+        for k in 0..c.len_utf8() {
+            u16_at[i + k] = n;
+        }
+        n += c.len_utf16() as u32;
+    }
+    u16_at[text.len()] = n;
+    let to = |(s, e, k): (usize, usize, &str)| {
+        let (s, e) = (s.min(text.len()), e.min(text.len()));
+        (e > s).then(|| json!([u16_at[s], u16_at[e] - u16_at[s], k]))
+    };
+    let out: Vec<serde_json::Value> = spans.into_iter().chain(styles).filter_map(to).collect();
+    json!({"spans": out, "errors": []}).to_string()
+}
+
+/// JavaScript's pieces by their node kinds (strings, numbers, constants,
+/// calls, keywords), for a grammar built on JavaScript's whose own rules
+/// don't color them (QML's).
+fn js_by_kind<'a>(node: Node<'a>, f: &mut dyn FnMut(Node<'a>, &'static str)) {
+    const KEYWORDS: &[&str] = &["if", "else", "return", "const", "let", "var", "function", "for", "while", "do", "break", "continue", "new",
+                                "typeof", "instanceof", "in", "of", "try", "catch", "finally", "throw", "switch", "case", "default", "delete", "void", "this"];
+    let kind = node.kind();
+    let k: Option<&'static str> = match kind {
+        "string" | "template_string" | "regex" => Some("string"),
+        "number" => Some("number"),
+        "true" | "false" | "null" | "undefined" => Some("constant"),
+        "comment" => Some("comment"),
+        _ if !node.is_named() && KEYWORDS.contains(&kind) => Some("keyword"),
+        _ => None,
+    };
+    if let Some(k) = k {
+        f(node, k);
+        if k != "string" {
+            return;
+        }
+    }
+    if kind == "call_expression" {
+        if let Some(func) = node.child_by_field_name("function") {
+            let name = if func.kind() == "member_expression" { func.child_by_field_name("property") } else { Some(func) };
+            if let Some(n) = name.filter(|n| matches!(n.kind(), "identifier" | "property_identifier")) {
+                f(n, "function");
+            }
+        }
+    }
+    let mut c = node.walk();
+    for child in node.children(&mut c) {
+        js_by_kind(child, f);
+    }
+}
+
 fn collect_errors(node: Node, f: &mut dyn FnMut(Node)) {
     if node.is_error() || node.is_missing() {
         f(node);
@@ -323,6 +659,14 @@ fn collect_errors(node: Node, f: &mut dyn FnMut(Node)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_reads_well() {
+        let out = super::analyze("markdown", "## Two\n\n**b** *i* ~~s~~ `c` [l](u) \\*\n\n```rust\nfn f() {}\n```\n");
+        for want in ["\"function\"", "\"=bold\"", "\"=italic\"", "\"=strike\"", "\"=underline\"", "\"string\"", "\"escape\"", "\"keyword\"", "\"punctuation\""] {
+            assert!(out.contains(want), "{want} in {out}");
+        }
+    }
 
     #[test]
     fn markdown_has_colors() {

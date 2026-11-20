@@ -75,6 +75,7 @@ protected:
         };
         for (const QJsonValue& v : m_spans) {
             const QJsonArray s = v.toArray();
+            if (s.at(2).toString().startsWith(u'=')) continue;
             const QVariant color = m_colors.value(s.at(2).toString());
             if (!color.isValid()) continue;
             QTextCharFormat f;
@@ -82,6 +83,23 @@ protected:
             if (s.at(2).toString() == u"keyword") f.setFontWeight(QFont::DemiBold);
             if (s.at(2).toString() == u"comment") f.setFontItalic(true);
             clip(s.at(0).toInt(), s.at(1).toInt(), [&](int a, int n) { setFormat(a, n, f); });
+        }
+        // Styles over the colors ("=bold", "=italic", "=strike", "=underline":
+        // Markdown's), each character keeping its color.
+        for (const QJsonValue& v : m_spans) {
+            const QJsonArray s = v.toArray();
+            const QString k = s.at(2).toString();
+            if (!k.startsWith(u'=')) continue;
+            clip(s.at(0).toInt(), s.at(1).toInt(), [&](int a, int n) {
+                for (int i = a; i < a + n; ++i) {
+                    QTextCharFormat f = format(i);
+                    if (k == u"=bold") f.setFontWeight(QFont::Bold);
+                    else if (k == u"=italic") f.setFontItalic(true);
+                    else if (k == u"=strike") f.setFontStrikeOut(true);
+                    else if (k == u"=underline") f.setFontUnderline(true);
+                    setFormat(i, 1, f);
+                }
+            });
         }
         for (const QJsonValue& v : m_errors) {
             const QJsonArray e = v.toArray();

@@ -1854,8 +1854,8 @@ FocusScope {
     }
     // (TESSERA_TEST_EXPAND_LAST=restore: and back to its own size at 19 s.)
     Timer { interval: 19000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") === "restore"; onTriggered: if (nb.expandedId !== "") { list.forceActiveFocus(); nb.toggleExpand(nb.indexOf(nb.expandedId)) } }
-    // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s.)
-    Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: nb.addFileCard(nb.controller.testEnv("FILE_CARD")) }
+    // (Test hook: TESSERA_TEST_FILE_CARD=<path>: a file card for it at 10 s; MD_TEXT=1: shown as text.)
+    Timer { interval: 10000; running: nb.controller !== null && nb.controller.testEnv("FILE_CARD") !== ""; onTriggered: { nb.addFileCard(nb.controller.testEnv("FILE_CARD")); if (nb.controller.testEnv("MD_TEXT") !== "") { const k = Object.assign({}, nb.kinds); k[cells.get(cells.count - 1).cid] = "mdtext"; nb.kinds = k } } }
     // (TESSERA_TEST_FILE_LINK=<url>[|back]: that link followed in the last card at 14 s, then Back at 17 s.)
     Timer { interval: 14000; running: nb.controller !== null && nb.controller.testEnv("FILE_LINK") !== ""
             onTriggered: { const l = nb.controller.testEnv("FILE_LINK").split("|"); nb.followFileLink(cells.get(cells.count - 1).cid, l[0], null); if (l[1] === "back") backHook.start() } }
