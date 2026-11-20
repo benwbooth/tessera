@@ -1181,6 +1181,7 @@ FocusScope {
         // clicked; a :q typed then went nowhere and it ran on.)
         if (i === liveIndex && liveWanted && view) Qt.callLater(() => view.forceActiveFocus())
     }
+    function isMarkdownFile(p) { return /\.(md|markdown|mdx)$/i.test(p || "") }
     function followLive() { if (liveIndex >= 0) { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
     property int termRev: 0             // the terminal's cells came back: read outputs again
     Timer { interval: 400; repeat: true; running: nb.visible && nb.ownRunOrAny; onTriggered: nb.tick++ }
@@ -2269,6 +2270,9 @@ FocusScope {
                 id: moreMenu
                 // (A file card: the file's own; a cell: its code.)
                 SlimMenuItem { text: "Edit the file"; visible: header.fileView !== null && !header.fileView.editing && !header.fileView.inTerm; onTriggered: header.fileView.startEdit() }
+                // (A Markdown file: as a page, or its text.)
+                SlimMenuItem { text: nb.kinds[cell.cid] === "mdtext" ? "Show it rendered" : "Show the source"; visible: header.fileView !== null && !header.fileView.editing && nb.isMarkdownFile(cell.viewPath); height: visible ? implicitHeight : 0
+                               onTriggered: { const k = Object.assign({}, nb.kinds); if (k[cell.cid] === "mdtext") delete k[cell.cid]; else k[cell.cid] = "mdtext"; nb.kinds = k; nb.touch() } }
                 SlimMenuItem { text: "Edit in " + (header.fileView ? nb.termEditorName(header.fileView.termEditor) : ""); visible: header.fileView !== null && !header.fileView.inTerm; onTriggered: header.fileView.openInTerminal() }
                 SlimMenu {
                     title: "Edit in another terminal editor ▸"
@@ -3242,8 +3246,32 @@ FocusScope {
     Component {
         id: fileCardView
         FileView {
+            id: fcv
             readonly property var src: parent
             anchors.fill: parent
+            // A Markdown file: drawn as a page over it (⋯ → Show the source:
+            // its text, highlighted; Edit shows the text too).
+            readonly property bool mdRendered: nb.isMarkdownFile(path) && (langOverride === "" || langOverride === "markdown") && !editing && !inTerm && nb.kinds[src.cid] !== "mdtext"
+            property string mdText: ""
+            function readMd() {
+                if (!mdRendered || !nb.controller) return
+                const p = path
+                Async.call(nb.controller, k => nb.controller.readTextFile(k, p), r => { try { const o = JSON.parse(r); if (p === fcv.path) fcv.mdText = o.text || "" } catch (e) {} })
+            }
+            onMdRenderedChanged: readMd()
+            onPathChanged: readMd()
+            Component.onCompleted: readMd()
+            Loader {
+                anchors.fill: parent
+                z: 20
+                active: fcv.mdRendered
+                sourceComponent: markdownPage
+                onLoaded: {
+                    item.md = Qt.binding(() => fcv.mdText)
+                    item.baseDir = Qt.binding(() => fcv.path.replace(/\/[^/]*$/, ""))
+                    item.scrolls = true
+                }
+            }
             controller: nb.controller
             path: src.viewPath
             langOverride: src.viewLang
@@ -3254,7 +3282,7 @@ FocusScope {
             pointSize: nb.outputPointSize
             themeData: nb.themeData
             property int rev: nb.fileRev
-            onRevChanged: reload()
+            onRevChanged: { reload(); readMd() }
         }
     }
 

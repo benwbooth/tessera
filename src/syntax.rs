@@ -216,7 +216,7 @@ pub fn highlight_html(lang_name: &str, text: &str) -> String {
     let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
     while let Some((m, i)) = caps.next() {
         let c = m.captures()[*i];
-        let k = names[c.index as usize].split('.').next().unwrap_or("");
+        let k = kind_of(names[c.index as usize]);
         for b in c.node.start_byte()..c.node.end_byte().min(text.len()) {
             kind[b] = Some(k);
         }
@@ -236,6 +236,20 @@ pub fn highlight_html(lang_name: &str, text: &str) -> String {
         i = j;
     }
     out
+}
+
+/// A capture's color kind: its first part ("keyword.control" is a
+/// keyword), but prose markup (Markdown's headings, code, links), which
+/// has no color of its own, as the code kind it reads like.
+fn kind_of(name: &str) -> &str {
+    match name {
+        "text.title" | "markup.heading" => "keyword",
+        "text.literal" | "markup.raw" | "markup.raw.block" => "string",
+        "text.uri" | "text.reference" | "markup.link" | "markup.link.url" | "markup.link.label" => "function",
+        "text.emphasis" | "text.strong" | "markup.italic" | "markup.bold" => "attribute",
+        "markup.list" | "markup.quote" => "punctuation",
+        _ => name.split('.').next().unwrap_or(""),
+    }
 }
 
 /// {"spans": [[start, length, kind]], "errors": [[start, length, message]]}
@@ -270,7 +284,7 @@ pub fn analyze(lang_name: &str, text: &str) -> String {
     let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
     while let Some((m, i)) = caps.next() {
         let c = m.captures()[*i];
-        let kind = names[c.index as usize].split('.').next().unwrap_or("");
+        let kind = kind_of(names[c.index as usize]);
         let (s, len) = range(c.node);
         if len > 0 {
             spans.push(json!([s, len, kind]));
@@ -309,6 +323,14 @@ fn collect_errors(node: Node, f: &mut dyn FnMut(Node)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_has_colors() {
+        let out = super::analyze("markdown", "# Title\n\n```\ncode\n```\n");
+        assert!(out.contains("\"keyword\""), "{out}");
+        assert!(out.contains("\"string\""), "{out}");
+        assert!(!out.contains("\"text\""), "{out}");
+    }
 
     #[test]
     fn bash_spans_and_errors() {

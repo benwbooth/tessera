@@ -284,7 +284,7 @@ Item {
         height: fb.bodyH
         // (A right click on nothing: the folder's own menu.)
         // (Only on nothing: a click on an entry reaches these too, after it.)
-        TapHandler { acceptedButtons: Qt.RightButton; onTapped: Qt.callLater(() => { if (Date.now() - fb.entryTapAt > 300) { fb.menuEntry = null; folderMenu.popup() } }) }
+        TapHandler { acceptedButtons: Qt.RightButton; onTapped: (pt) => { const x = pt.position.x, y = pt.position.y; Qt.callLater(() => { if (Date.now() - fb.entryTapAt > 300) { fb.menuEntry = null; folderMenu.popup(parent, x, y) } }) } }
         TapHandler { onTapped: Qt.callLater(() => { if (Date.now() - fb.entryTapAt > 300) fb.selected = "" }) }
         Text {
             visible: fb.entries.length === 0
@@ -331,7 +331,9 @@ Item {
                     // (One click: a folder goes in, a file opens with its app.)
                     onTapped: { fb.entryTapAt = Date.now(); fb.selected = ent.e.path; fb.openEntry(ent.e) }
                 }
-                TapHandler { acceptedButtons: Qt.RightButton; onTapped: { fb.entryTapAt = Date.now(); fb.selected = ent.e.path; fb.menuEntry = ent.e; itemMenu.popup() } }
+                // (At the click: popup() with no place put it at the far left
+                // in a notebook card.)
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: (pt) => { fb.entryTapAt = Date.now(); fb.selected = ent.e.path; fb.menuEntry = ent.e; itemMenu.popup(ent, pt.position.x, pt.position.y) } }
                 ToolTip.visible: eh.hovered && fb.view !== "details"
                 ToolTip.delay: 900
                 ToolTip.text: ent.e.mode + "  " + ent.e.user + " " + ent.e.group + "  " + fb.sizeText(ent.e) + "\n" + fb.when(ent.e.mtime) + (ent.e.link ? "\n→ " + ent.e.target : "")

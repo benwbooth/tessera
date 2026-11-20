@@ -38,7 +38,9 @@ Rectangle {
     // The text, unless it's an image or too big or binary.
     property string text: ""
     property string problem: ""
-    onPathChanged: load()
+    // (A moment later: name, ext and richKind follow path, and read now they
+    // could still be the last path's; README.md read as nothing at all.)
+    onPathChanged: { text = ""; problem = ""; reading = path !== ""; Qt.callLater(load) }
     property int loadSeq: 0
     property bool reading: false        // (asked, not in yet: not "(empty)")
     function load() {
