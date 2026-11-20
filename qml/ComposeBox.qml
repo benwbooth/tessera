@@ -96,7 +96,7 @@ Rectangle {
     function detectLang() {
         {
             const t = edit.text
-            if (box.autoLang !== "bash" || box.langOverride !== "" || box.contentLang !== "" || t.trim() === "" || t.startsWith("#")) { box.aiLang = ""; return }
+            if (!box.controller || box.autoLang !== "bash" || box.langOverride !== "" || box.contentLang !== "" || t.trim() === "" || t.startsWith("#")) { box.aiLang = ""; return }
             if (!box.controller.shellDoubt(t, box.view ? box.view.aliases : "{}")) { box.aiLang = ""; box.langAsked = ""; return }
             if (t === box.langAsked) return
             // (The plainest marks at once; the AI's answer, when it comes, decides.)

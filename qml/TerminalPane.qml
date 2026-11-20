@@ -323,7 +323,14 @@ Item {
                 if (cmd !== "") { term.pasteText(cmd); term.sendText("\r"); term.scrollToBottom(); return }
                 otherwise()
             })
+            // (In the terminal, a shell's language — tessh, fish, nu, ... —
+            // runs there, by that shell (tessh -c ...), with the terminal for
+            // what it starts: claude, vim. Its notebook kernel is for the
+            // notebook; going there took `claude` off to a kernel cell.)
+            const inTerm = pane.viewMode !== "notebook"
+            const shellLang = (l) => ["tessh", "fish", "nu", "powershell", "elvish", "xonsh"].indexOf(l) >= 0
             const asLang = () => {
+                if (inTerm && shellLang(L) && controller) { snippet(L, plain); return }
                 if (pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
                     pane.viewMode = "notebook"
                     notebook.submitLang(t, L)
@@ -333,7 +340,7 @@ Item {
                 plain()
             }
             if (S !== "" && controller) {
-                if (notebook.hasKernelFor(S)) { pane.viewMode = "notebook"; notebook.submitLang(t, S); return }
+                if (!inTerm && notebook.hasKernelFor(S)) { pane.viewMode = "notebook"; notebook.submitLang(t, S); return }
                 snippet(S, asLang)
                 return
             }
