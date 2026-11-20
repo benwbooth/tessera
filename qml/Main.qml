@@ -1709,7 +1709,7 @@ ApplicationWindow {
     }
     // (Test hook: TESSERA_TEST_RESTART_DAEMON restarts tesserad at 6 s.)
     Timer { interval: 6000; running: controller.testEnv("RESTART_DAEMON") !== ""; onTriggered: win.restartDaemon() }
-    // Test hook: TESSERA_TEST_KEYS="term|editor|away:key,key,..." (tab, bs, enter,
+    // Test hook: TESSERA_TEST_KEYS="term|editor|away:key,key,..." (ca:x is Ctrl+Alt+x; tab, bs, enter,
     // lshift, rshift, or text), one key every 150 ms after the window settles.
     Timer {
         id: keysTestTimer
@@ -1717,7 +1717,7 @@ ApplicationWindow {
         property var keys: []
         onTriggered: {
             const spec = controller.testEnv("KEYS")
-            const [target, list] = spec.split(":")
+            const target = spec.slice(0, spec.indexOf(":")), list = spec.slice(spec.indexOf(":") + 1)
             if (target === "away") rootLayout.forceActiveFocus()   // (somewhere that doesn't keep Shift+Tab)
             else if (target === "keep") {}                          // (wherever the keys are)
             else if (activePane) { if (target === "term") { activePane.preferEditor = false; activePane.view.forceActiveFocus() } else activePane.compose.focusEditor() }
@@ -1736,7 +1736,11 @@ ApplicationWindow {
                             lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62], esc: [Qt.Key_Escape, 0, "\x1b", 9], stab: [Qt.Key_Backtab, Qt.ShiftModifier, "", 23],
                             up: [Qt.Key_Up, 0, "", 111], down: [Qt.Key_Down, 0, "", 116],
                             pgup: [Qt.Key_PageUp, 0, "", 112], pgdn: [Qt.Key_PageDown, 0, "", 117] }
-            const d = named[k] || [k.toUpperCase().charCodeAt(0), 0, k, 0]
+            // (ca:x: Ctrl+Alt+x; ca:enter for Return.)
+            const ca = k.startsWith("ca:")
+            const kk = ca ? k.slice(3) : k
+            const d0 = named[kk] || [kk.toUpperCase().charCodeAt(0), 0, kk, 0]
+            const d = ca ? [d0[0], Qt.ControlModifier | Qt.AltModifier, "", d0[3]] : d0
             controller.testKey(d[0], d[1], d[2], d[3])
             if (activePane) console.log("key test: after " + k + " termFocus=" + activePane.view.activeFocus + " editorFocus=" + activePane.compose.editing + " focusItem=" + win.activeFocusItem + " editor=" + JSON.stringify(activePane.compose.text) + " ghost=" + JSON.stringify(activePane.compose.ghost) + " dropdown=" + activePane.compose.compOpen)
         }

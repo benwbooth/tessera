@@ -1658,6 +1658,23 @@ FocusScope {
         onAccepted: nb.writeTo(decodeURIComponent(String(selectedFile).replace(/^file:\/\//, "")))
     }
     Shortcut { sequence: "Ctrl+S"; enabled: nb.visible && nb.activeFocus; context: Qt.WindowShortcut; onActivated: nb.save() }
+    // The toolbar's, while this notebook is the window's active pane's (its
+    // tooltips say them). Ctrl+Alt: free in shells and editors; not L or T,
+    // which the desktop takes.
+    readonly property bool keysHere: nb.visible && view !== null && Window.window !== null && Window.window.activePane !== null && Window.window.activePane !== undefined && Window.window.activePane.view === view
+    Shortcut { sequence: "Ctrl+Alt+Return"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.runAll() }
+    Shortcut { sequence: "Ctrl+Alt+C"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.interrupt() }
+    Shortcut { sequence: "Ctrl+Alt+R"; enabled: nb.keysHere && !nb.viaShell; context: Qt.WindowShortcut; onActivated: nb.restartKernel() }
+    Shortcut { sequence: "Ctrl+Alt+X"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.clearOutputs() }
+    Shortcut { sequence: "Ctrl+Alt+K"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.refreshKernels(); kernelsPop.open() } }
+    Shortcut { sequence: "Ctrl+Alt+J"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.refreshJobs(); jobsPop.open() } }
+    Shortcut { sequence: "Ctrl+Alt+B"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "code") }
+    Shortcut { sequence: "Ctrl+Alt+M"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "markdown") }
+    Shortcut { sequence: "Ctrl+Alt+P"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.listKernels(); kernelBox.popup.open() } }
+    // (Expand or Restore: the expanded card, else the chosen one, else a
+    // running terminal app's, else the last.)
+    Shortcut { sequence: "Ctrl+Alt+F"; enabled: nb.keysHere && cells.count > 0; context: Qt.WindowShortcut
+               onActivated: nb.toggleExpand(nb.expandedId !== "" ? nb.indexOf(nb.expandedId) : nb.current >= 0 && nb.current < cells.count ? nb.current : nb.liveIndex >= 0 ? nb.liveIndex : cells.count - 1) }
 
     // (Test hook: TESSERA_TEST_OPEN_GUIDE opens the guide's tab at 8 s.)
     Timer { interval: 8000; running: nb.controller !== null && nb.path === "" && nb.controller.testEnv("OPEN_GUIDE") !== ""; onTriggered: nb.openGuide() }
@@ -1809,26 +1826,26 @@ FocusScope {
                 HoverHandler { id: nameHover }
             }
             Item { width: 2; visible: !nb.tiny }
-            Tool { label: nb.narrow ? "▶▶" : "▶▶ Run All"; tip: "Run every cell, top to bottom"; onClicked: nb.runAll() }
-            Tool { label: "■"; tip: "Interrupt"; onClicked: nb.interrupt() }
-            Tool { visible: !nb.viaShell; label: nb.narrow ? "↻" : "↻ Restart"; tip: "Restart the kernel (its variables are lost)"; onClicked: nb.restartKernel() }
-            Tool { label: nb.narrow ? "⌫" : "Clear"; tip: "Clear every cell's output"; onClicked: nb.clearOutputs() }
+            Tool { label: nb.narrow ? "▶▶" : "▶▶ Run All"; tip: "Run every cell, top to bottom (Ctrl+Alt+Enter)"; onClicked: nb.runAll() }
+            Tool { label: "■"; tip: "Interrupt (Ctrl+Alt+C)"; onClicked: nb.interrupt() }
+            Tool { visible: !nb.viaShell; label: nb.narrow ? "↻" : "↻ Restart"; tip: "Restart the kernel: its variables are lost (Ctrl+Alt+R)"; onClicked: nb.restartKernel() }
+            Tool { label: nb.narrow ? "⌫" : "Clear"; tip: "Clear every cell's output (Ctrl+Alt+X)"; onClicked: nb.clearOutputs() }
             Tool {
                 id: kernelsTool
                 visible: nb.runningKernels.length > 0
                 label: (nb.narrow ? "\u2699 " : "Kernels ") + nb.runningKernels.length
-                tip: "The kernels running (every notebook's): see, restart or stop them"
+                tip: "The kernels running (every notebook's): see, restart or stop them (Ctrl+Alt+K)"
                 onClicked: { nb.refreshKernels(); kernelsPop.open() }
             }
             Tool {
                 visible: nb.hostJobs.length > 0
                 label: (nb.narrow ? "\u29d7 " : "Jobs ") + nb.jobsActive + (nb.hostJobs.length > nb.jobsActive ? "/" + nb.hostJobs.length : "")
-                tip: "Background jobs (running/all): their output, status, Stop"
+                tip: "Background jobs (running/all): their output, status, Stop (Ctrl+Alt+J)"
                 onClicked: { nb.refreshJobs(); jobsPop.open() }
             }
             Rectangle { width: 1; height: 14; color: Theme.divider }
-            Tool { label: nb.narrow ? "+" : "+ Code"; tip: "Add a code cell below (B)"; onClicked: nb.insertCell(nb.current + 1, "code") }
-            Tool { label: nb.narrow ? "+M↓" : "+ Markdown"; tip: "Add a Markdown cell below"; onClicked: nb.insertCell(nb.current + 1, "markdown") }
+            Tool { label: nb.narrow ? "+" : "+ Code"; tip: "Add a code cell below (Ctrl+Alt+B)"; onClicked: nb.insertCell(nb.current + 1, "code") }
+            Tool { label: nb.narrow ? "+M↓" : "+ Markdown"; tip: "Add a Markdown cell below (Ctrl+Alt+M)"; onClicked: nb.insertCell(nb.current + 1, "markdown") }
             Item { Layout.fillWidth: true }
             // The kernel: which, and how it's doing.
             Rectangle {
@@ -1859,7 +1876,7 @@ FocusScope {
                 onPressedChanged: if (pressed) nb.listKernels()
                 ToolTip.visible: hovered && !popup.visible
                 ToolTip.delay: 500
-                ToolTip.text: "What runs the code cells: this pane's shell, or a Jupyter kernel"
+                ToolTip.text: "What runs the code cells: this pane's shell, or a Jupyter kernel (Ctrl+Alt+P)"
             }
             Tool {
                 visible: nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")
@@ -1869,7 +1886,7 @@ FocusScope {
             }
             Tool {
                 label: nb.path === "" ? (nb.narrow ? "Save…" : "Save as .ipynb…") : nb.dirty ? "Save" : "Saved"
-                tip: nb.path === "" ? "Save as a Jupyter notebook (a file to run again or share)" : "Save the notebook (Ctrl+S)"
+                tip: (nb.path === "" ? "Save as a Jupyter notebook (a file to run again or share)" : "Save the notebook") + " (Ctrl+S in the notebook)"
                 onClicked: nb.save()
             }
             Tool { visible: nb.view !== null; label: ">_"; tip: "Show the terminal (Ctrl+Shift+J)"; onClicked: nb.terminalRequested() }
@@ -2236,7 +2253,7 @@ FocusScope {
                     base: cell.color
                     Layout.minimumWidth: implicitWidth
                     label: cell.expanded ? "⤡ Restore" : "⤢ Expand"
-                    tip: cell.expanded ? "Back to its own size" : "Fill the window with this output"
+                    tip: (cell.expanded ? "Back to its own size" : "Fill the window with this output") + " (Ctrl+Alt+F)"
                     onClicked: nb.toggleExpand(cell.index)
                 }
                 Chip { id: moreChip; base: cell.color; label: "⋯"; tip: "More"; Layout.minimumWidth: implicitWidth

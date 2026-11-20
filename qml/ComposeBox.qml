@@ -524,6 +524,12 @@ Rectangle {
     }
     onCompIndexChanged: docFetch.restart()
     onCompChanged: docFetch.restart()
+    // (The bar's chips, by key while this is the active pane's input; their
+    // tooltips say them.)
+    function openLanguages() { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
+    readonly property bool keysHere: box.visible && Window.window !== null && Window.window.activePane !== null && Window.window.activePane !== undefined && Window.window.activePane.compose === box
+    Shortcut { sequence: "Ctrl+Alt+I"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); box.openLanguages() } }
+    Shortcut { sequence: "Ctrl+Alt+E"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { const order = ["emacs", "vi", "vscode"]; box.keysPicked(order[(order.indexOf(box.keys) + 1) % order.length]) } }
     function compKey(e) {
         if (!compOpen || comp.items.length === 0) return false
         const n = comp.items.length
@@ -1099,8 +1105,8 @@ Rectangle {
             base: box.color
             // (Shell code: the shell's own name, zsh, fish.)
             label: (box.runShell !== "" ? box.shellNames[box.runShell] : box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
-            tip: "Input language (highlighting, checks, completion)"
-            onClicked: { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
+            tip: "Input language: highlighting, checks, completion (Ctrl+Alt+I)"
+            onClicked: box.openLanguages()
         }
         Chip {
             base: box.color
@@ -1122,7 +1128,7 @@ Rectangle {
             base: box.color
             label: box.keys === "vi" ? "vi \u00b7 " + (box.viNormal ? "normal" : "insert")
                  : (({ emacs: "Emacs", vscode: "VS Code" })[box.keys] || box.keys)
-            tip: "Editor keys: click for the next (Emacs, vi, VS Code)"
+            tip: "Editor keys: click for the next, Emacs, vi, VS Code (Ctrl+Alt+E)"
             onClicked: {
                 const order = ["emacs", "vi", "vscode"]
                 box.keysPicked(order[(order.indexOf(box.keys) + 1) % order.length])
@@ -1138,7 +1144,9 @@ Rectangle {
         padding: 6
         topPadding: 6.001   // (off the half pixel: 130% scale smears native text there)
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
-        onOpened: { langFilter.text = ""; langFilter.forceActiveFocus() }
+        onOpened: { langFilter.text = ""; sel = 0; langFilter.forceActiveFocus() }
+        // (The one Enter picks: Up/Down move it, typing starts over at the top.)
+        property int sel: 0
         onClosed: edit.forceActiveFocus()
         // (The shells by name, this pane's first: picking another runs the
         // input in it, in the pane's folder and environment.)
@@ -1158,11 +1166,14 @@ Rectangle {
             TextField {
                 id: langFilter
                 width: parent.width
-                placeholderText: "Search " + box.languages.length + " languages"
+                placeholderText: "Search " + box.languages.length + " languages (\u2191\u2193, Enter)"
                 color: Theme.text
                 font.pixelSize: 12
                 background: Rectangle { radius: 6; color: Theme.bg; border.color: langFilter.activeFocus ? Theme.accent : Theme.divider }
-                Keys.onReturnPressed: if (langPop.shown.length > 0) { box.pickLanguage(langPop.shown[0][0]); langPop.close() }
+                onTextChanged: langPop.sel = 0
+                Keys.onReturnPressed: if (langPop.shown.length > 0) { box.pickLanguage(langPop.shown[Math.min(langPop.sel, langPop.shown.length - 1)][0]); langPop.close() }
+                Keys.onDownPressed: { langPop.sel = Math.min(langPop.shown.length - 1, langPop.sel + 1); langList.positionViewAtIndex(langPop.sel, ListView.Contain) }
+                Keys.onUpPressed: { langPop.sel = Math.max(0, langPop.sel - 1); langList.positionViewAtIndex(langPop.sel, ListView.Contain) }
                 Keys.onEscapePressed: langPop.close()
             }
             ListView {
@@ -1176,10 +1187,11 @@ Rectangle {
                 MomentumWheel { flick: langList }
                 delegate: Rectangle {
                     required property var modelData
+                    required property int index
                     width: langList.width
                     height: 24
                     radius: 5
-                    color: lh.hovered ? Theme.tabHover : (langPop.isPicked(modelData[0]) ? Theme.mix(Theme.bg, Theme.accent, 0.25) : "transparent")
+                    color: index === langPop.sel ? Theme.mix(Theme.bg, Theme.accent, 0.35) : lh.hovered ? Theme.tabHover : (langPop.isPicked(modelData[0]) ? Theme.mix(Theme.bg, Theme.accent, 0.25) : "transparent")
                     Text { x: 8; anchors.verticalCenter: parent.verticalCenter; text: modelData[1]; color: Theme.text; font.pixelSize: 12 }
                     HoverHandler { id: lh }
                     TapHandler { onTapped: { box.pickLanguage(modelData[0]); langPop.close() } }
