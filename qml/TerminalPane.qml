@@ -354,6 +354,21 @@ Item {
         onOpenRich: pane.openRich()
         viewMode: pane.viewMode
         onViewModePicked: (m) => pane.viewMode = m
+        jobsRunning: notebook.jobsActive
+        jobsAll: notebook.hostJobs.length
+        // (The jobs are the notebook's, out of sight: shown there; shown
+        // again, back to where it was, the terminal too.)
+        onJobsToggled: {
+            if (notebook.jobsView && pane.viewMode === "notebook") {
+                notebook.setJobsView(false)
+                if (pane.jobsFromTerminal) pane.viewMode = "terminal"
+                pane.jobsFromTerminal = false
+            } else {
+                pane.jobsFromTerminal = pane.viewMode !== "notebook"
+                pane.viewMode = "notebook"
+                notebook.setJobsView(true)
+            }
+        }
         onEditingChanged: if (editing) pane.preferEditor = true
     }
 
@@ -581,6 +596,7 @@ Item {
             }
         }
     }
+    property bool jobsFromTerminal: false   // the jobs were shown from the terminal
     NotebookView {
         id: notebook
         z: 15

@@ -452,6 +452,8 @@ FocusScope {
 
     // ---- running ------------------------------------------------------------------
     function run(i, bg, retried) {
+        // (A card run is the notebook's again: shown there.)
+        if (jobsView) setJobsView(false)
         const c = cells.get(i)
         if (!c) return
         if (c.type === "markdown") { if (c.source.trim() !== "") cells.setProperty(i, "editing", false); return }
@@ -656,7 +658,7 @@ FocusScope {
             fgJob = cid
             updateOwnRun()
             refreshJobs()
-            if (j >= 0) { cells.setProperty(j, "bgHidden", false); current = j; findLive(); Qt.callLater(followLive) }
+            if (j >= 0) { cells.setProperty(j, "bgHidden", false); jobsView = false; current = j; findLive(); Qt.callLater(followLive) }
             if (view) Qt.callLater(() => view.forceActiveFocus())
         })
     }
@@ -744,18 +746,29 @@ FocusScope {
             }
         })
     }
-    Timer { interval: 2000; repeat: true; running: nb.visible && (nb.jobsActive > 0 || jobsPop.opened); onTriggered: nb.refreshJobs() }
-    // The Jobs list: open, or closed when it's open. (A click outside it
-    // closes it first: the badge's click right after is that same click.)
-    function toggleJobs() {
-        if (jobsPop.opened || Date.now() - jobsPop.closedAt < 300) { jobsPop.close(); return }
+    // (Every 10 s otherwise: the input bar's jobs badge counts them in the
+    // terminal too, jobs started in other windows with them.)
+    Timer { interval: nb.jobsActive > 0 || nb.jobsView ? 2000 : 10000; repeat: true; running: nb.controller !== null; onTriggered: nb.refreshJobs() }
+    // The background jobs: a notebook of their own, out of sight. Shown, the
+    // notebook has only their cards (live output, Stop, Foreground), with
+    // other notebooks' jobs listed over them; shown again, the notebook as it was.
+    property bool jobsView: false
+    property real jobsNow: Date.now()
+    Timer { interval: 1000; repeat: true; running: nb.jobsView && nb.visible; onTriggered: nb.jobsNow = Date.now() }
+    function toggleJobs() { setJobsView(!jobsView) }
+    function setJobsView(on) {
+        if (on === jobsView) return
+        jobsView = on
         refreshJobs()
-        jobsPop.open()
+        Qt.callLater(() => list.positionViewAtEnd())
     }
+    // (Jobs this notebook has no card for: other notebooks', other windows'.)
+    readonly property var otherJobs: hostJobs.filter(j => !(j.owner === key && indexOf(j.cell) >= 0)).reverse()
     function showJobCell(cid) {
         const i = indexOf(cid)
         if (i < 0) return
         if (cells.get(i).bgHidden) cells.setProperty(i, "bgHidden", false)
+        jobsView = false
         current = i
         Qt.callLater(() => list.positionViewAtIndex(i, ListView.Beginning))
     }
@@ -2082,7 +2095,7 @@ FocusScope {
                 // (A badge while any runs.)
                 base: nb.jobsActive > 0 ? Theme.mix(Theme.panel, Theme.accent, 0.3) : Theme.panel
                 label: (nb.narrow ? "\u29d7 " : "Background jobs ") + nb.jobsActive + (nb.hostJobs.length > nb.jobsActive ? "/" + nb.hostJobs.length : "")
-                tip: "Background jobs (running/all): show or hide the list: their output, status, Foreground, Stop (Ctrl+Alt+J)"
+                tip: "Background jobs (running/all): show them (their cards, live) or the notebook again (Ctrl+Alt+J)"
                 onClicked: nb.toggleJobs()
             }
             Rectangle { width: 1; height: 14; color: Theme.divider }
@@ -2197,9 +2210,74 @@ FocusScope {
         enabled: nb.expandedId !== ""
         function onContentHeightChanged() { const i = nb.indexOf(nb.expandedId); if (i >= 0) Qt.callLater(() => list.positionViewAtIndex(i, ListView.Beginning)) }
     }
+    // The jobs view's head: what's there, other notebooks' jobs, the way back.
+    Rectangle {
+        id: jobsHead
+        anchors.top: banner.bottom
+        width: parent.width
+        visible: nb.jobsView
+        height: visible ? jobsCol.implicitHeight + 14 : 0
+        z: 2
+        color: Theme.mix(Theme.panel, Theme.accent, 0.12)
+        ColumnLayout {
+            id: jobsCol
+            x: 12
+            y: 7
+            width: parent.width - 24
+            spacing: 4
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Text {
+                    text: "Background jobs" + (nb.sshHost !== "" ? " on " + nb.sshHost : "") + " \u00b7 " + nb.jobsActive + " running"
+                        + (nb.hostJobs.length > nb.jobsActive ? ", " + (nb.hostJobs.length - nb.jobsActive) + " done" : "")
+                    color: Theme.text; font.pixelSize: 12; font.weight: Font.DemiBold; topPadding: 0.001; Layout.fillWidth: true
+                }
+                Chip { base: jobsHead.color; label: "Clear finished"; visible: nb.hostJobs.some(j => !j.running)
+                       tip: "Take the finished jobs off the list (their cards go back to the notebook)"
+                       onClicked: { for (const j of nb.hostJobs) if (!j.running) nb.controller.jobCall("", nb.sshHost, "job.forget", JSON.stringify({ id: j.id })); Qt.callLater(nb.refreshJobs) } }
+                Chip { base: jobsHead.color; label: "\u2190 Notebook"; tip: "Back to the notebook (Ctrl+Alt+J)"; onClicked: nb.setJobsView(false) }
+            }
+            Text {
+                visible: nb.hostJobs.length === 0
+                text: "None. End a shell or tessh line with & (or \u22ef \u2192 Run in the background), or move a running card there (Ctrl+Alt+Z)."
+                color: Theme.textDim; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true; topPadding: 0.001
+            }
+            Repeater {
+                model: nb.jobsView ? nb.otherJobs.slice(0, 8) : []
+                delegate: RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Text {
+                        text: modelData.running ? "\u25cf" : modelData.status === 0 ? "\u2713" : "\u2718"
+                        color: modelData.running ? Theme.accent : modelData.status === 0 ? nb.ansi(2, "#98c379") : nb.ansi(1, "#e06c75")
+                        font.pixelSize: 12; font.weight: Font.Bold; topPadding: 0.001
+                    }
+                    Text {
+                        text: modelData.command
+                        color: Theme.text; font.family: nb.fontFamily; font.pixelSize: 12; topPadding: 0.001
+                        elide: Text.ElideRight; Layout.fillWidth: true
+                    }
+                    Text {
+                        text: "another notebook \u00b7 pid " + modelData.pid + " \u00b7 " + (modelData.running ? nb.ago(nb.jobsNow - modelData.started) : "exit " + modelData.status)
+                        color: Theme.textDim; font.pixelSize: 11; topPadding: 0.001
+                    }
+                    Chip { base: jobsHead.color; label: "\u24d8"; tip: "What it ran with"
+                           onClicked: Async.call(nb.controller, k => nb.controller.jobCall(k, nb.sshHost, "job.output", JSON.stringify({ id: modelData.id, from: 1e15, exec: true })), json => {
+                               let r = {}
+                               try { r = JSON.parse(json) } catch (e) {}
+                               if (!r.exec) return
+                               execPop.records = [r.exec]; execPop.sel = 0; execPop.note = ""; execPop.open()
+                           }) }
+                    Chip { base: jobsHead.color; label: "\u25a0 Stop"; visible: modelData.running; onClicked: { nb.controller.jobCall("", nb.sshHost, "job.stop", JSON.stringify({ id: modelData.id })); Qt.callLater(nb.refreshJobs) } }
+                }
+            }
+        }
+    }
     ListView {
         id: list
-        anchors.top: banner.bottom
+        anchors.top: jobsHead.bottom
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -2297,7 +2375,7 @@ FocusScope {
             // One card expanded fills the list, held there; the others stay as
             // they are, out of sight: folding them all to nothing brought every
             // card into the list at once, and Expand took a second.)
-            readonly property bool wanted: !(job > 0 && bgHidden)
+            readonly property bool wanted: nb.jobsView ? job > 0 : !(job > 0 && bgHidden)
             visible: wanted
             height: !wanted ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
                      + (hasOutput ? (hideOutput ? 22 : body.height + (body.live ? 14 : 12)) : 4) + (ask ? askBox.height + 6 : 0))
@@ -2508,7 +2586,7 @@ FocusScope {
                 Chip { visible: cell.job > 0; base: cell.color
                        label: "bg" + (cell.running ? " \u00b7 pid " + (((nb.parseList(cell.execs)[0] || {}).pid) || "") : "")
                        tip: "Running in the background (it goes on when the window closes): see every job"
-                       Layout.minimumWidth: implicitWidth; onClicked: { nb.refreshJobs(); jobsPop.open() } }
+                       Layout.minimumWidth: implicitWidth; onClicked: nb.setJobsView(true) }
                 Chip { visible: cell.job > 0 && cell.running; base: cell.color; label: "\u25a0 Stop"; tip: "Stop it (TERM, then KILL after 3 s)"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.stopJob(cell.index) }
                 // (Running in the pane: to the background; a background one with its terminal: back.)
@@ -2519,7 +2597,7 @@ FocusScope {
                        tip: "Bring to the foreground: it takes the pane again (a terminal app gets its screen back here)"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.foregroundJob(cell.index) }
                 // (A background job's card shown from the Jobs list: back there.)
-                Chip { visible: cell.job > 0 && !cell.bgHidden && nb.fgJob !== cell.cid; base: cell.color; label: "Hide"
+                Chip { visible: !nb.jobsView && cell.job > 0 && !cell.bgHidden && nb.fgJob !== cell.cid; base: cell.color; label: "Hide"
                        tip: "Back to the Jobs list (Ctrl+Alt+J): it's out of the notebook while it's a background job"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.hideJob(cell.index, true) }
                 // (What it ran with: command line, folder, user, environment.)
@@ -3266,78 +3344,6 @@ FocusScope {
         const s = Math.max(0, Math.round(ms / 1000))
         return s < 60 ? s + " s" : s < 3600 ? Math.floor(s / 60) + " min " + (s % 60) + " s" : Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min"
     }
-    // ---- every background job on this host ----
-    Popup {
-        id: jobsPop
-        parent: nb
-        x: Math.max(8, nb.width - width - 8)
-        y: 36
-        width: Math.min(nb.width - 16, 640)
-        height: Math.min(nb.height - 50, implicitHeight)
-        padding: 8
-        topPadding: 8.001   // (off the half pixel: 130% scale smears native text there)
-        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
-        property real now: Date.now()
-        property double closedAt: 0
-        onClosed: closedAt = Date.now()
-        Timer { interval: 1000; repeat: true; running: jobsPop.opened; onTriggered: jobsPop.now = Date.now() }
-        contentItem: ColumnLayout {
-            spacing: 4
-            RowLayout {
-                Layout.fillWidth: true
-                Text { text: "Background jobs" + (nb.sshHost !== "" ? " on " + nb.sshHost : ""); color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                Chip { base: Theme.panel; label: "Clear finished"; visible: nb.hostJobs.some(j => !j.running)
-                       onClicked: { for (const j of nb.hostJobs) if (!j.running) nb.controller.jobCall("", nb.sshHost, "job.forget", JSON.stringify({ id: j.id })); Qt.callLater(nb.refreshJobs) } }
-            }
-            Text {
-                visible: nb.hostJobs.length === 0
-                text: "None. End a shell or tessh line with & (or \u22ef \u2192 Run in the background) to run it on its own."
-                color: Theme.textDim; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true
-            }
-            ListView {
-                id: jobsList
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(contentHeight, 360)
-                clip: true
-                model: nb.hostJobs.slice().reverse()
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
-                delegate: RowLayout {
-                    required property var modelData
-                    readonly property bool mine: modelData.owner === nb.key && nb.indexOf(modelData.cell) >= 0
-                    width: jobsList.width - 10
-                    height: 28
-                    spacing: 6
-                    Text {
-                        text: modelData.running ? "\u25cf" : modelData.status === 0 ? "\u2713" : "\u2718"
-                        color: modelData.running ? Theme.accent : modelData.status === 0 ? nb.ansi(2, "#98c379") : nb.ansi(1, "#e06c75")
-                        font.pixelSize: 12; font.weight: Font.Bold; topPadding: 0.001
-                    }
-                    Text {
-                        text: modelData.command
-                        color: Theme.text; font.family: nb.fontFamily; font.pixelSize: 12; topPadding: 0.001
-                        elide: Text.ElideRight; Layout.fillWidth: true
-                    }
-                    Text {
-                        text: "pid " + modelData.pid + " \u00b7 " + (modelData.running ? nb.ago(jobsPop.now - modelData.started) : "exit " + modelData.status + " \u00b7 " + nb.ago(modelData.ended - modelData.started))
-                        color: Theme.textDim; font.pixelSize: 11; topPadding: 0.001
-                    }
-                    Chip { base: Theme.panel; label: "Show"; visible: mine; tip: "Show its card in the notebook (Hide on it puts it back here)"; onClicked: { nb.showJobCell(modelData.cell); jobsPop.close() } }
-                    Chip { base: Theme.panel; label: "\u2196 Foreground"; visible: mine && modelData.running && !!modelData.tty && !modelData.fg
-                           tip: "Bring it to the foreground: its card takes the pane again"
-                           onClicked: { const i = nb.indexOf(modelData.cell); if (i >= 0) nb.foregroundJob(i); jobsPop.close() } }
-                    Chip { base: Theme.panel; label: "\u24d8"; tip: "What it ran with"
-                           onClicked: Async.call(nb.controller, k => nb.controller.jobCall(k, nb.sshHost, "job.output", JSON.stringify({ id: modelData.id, from: 1e15, exec: true })), json => {
-                               let r = {}
-                               try { r = JSON.parse(json) } catch (e) {}
-                               if (!r.exec) return
-                               execPop.records = [r.exec]; execPop.sel = 0; execPop.note = ""; execPop.open()
-                           }) }
-                    Chip { base: Theme.panel; label: "\u25a0 Stop"; visible: modelData.running; onClicked: { nb.controller.jobCall("", nb.sshHost, "job.stop", JSON.stringify({ id: modelData.id })); Qt.callLater(nb.refreshJobs) } }
-                }
-            }
-        }
-    }
     // ---- a card's details: what its programs ran with ----
     // Command line (typed, and as run), folder, user and environment: a shell
     // card's from shell integration, a tessh card's from its kernel, one per
@@ -3354,7 +3360,7 @@ FocusScope {
         return xs
     }
     // (Test hook: TESSERA_TEST_NB_JOBS=<ms>: the Jobs list opened then.)
-    Timer { interval: nb.controller ? +nb.controller.testEnv("NB_JOBS") || 1 : 1; running: nb.controller !== null && nb.controller.testEnv("NB_JOBS") !== ""; onTriggered: { nb.refreshJobs(); jobsPop.open() } }
+    Timer { interval: nb.controller ? +nb.controller.testEnv("NB_JOBS") || 1 : 1; running: nb.controller !== null && nb.controller.testEnv("NB_JOBS") !== ""; onTriggered: nb.setJobsView(true) }
     // (Test hook: TESSERA_TEST_NB_DETAILS=<n>[,ms]: the nth card's details (1 the first, -1 the last) at 14 s (or ms).)
     Timer {
         readonly property var arg: nb.controller ? nb.controller.testEnv("NB_DETAILS").split(",") : [""]

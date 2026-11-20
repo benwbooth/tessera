@@ -122,6 +122,11 @@ Rectangle {
     signal openRich()                  // show the last output's rich view
     property string viewMode: "terminal"
     signal viewModePicked(string mode) // "terminal" or "notebook"
+    // Background jobs on this pane's host (the notebook keeps count): the
+    // badge shows how many run; a click shows or hides their list.
+    property int jobsRunning: 0
+    property int jobsAll: 0
+    signal jobsToggled()
     signal handBack()                  // Shift+Tab: type into the terminal instead
 
     readonly property alias text: edit.text
@@ -1123,6 +1128,13 @@ Rectangle {
             onClicked: box.viewModePicked(box.viewMode === "notebook" ? "terminal" : "notebook")
         }
         Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
+        Chip {
+            visible: box.jobsAll > 0
+            base: box.jobsRunning > 0 ? Theme.mix(box.color, Theme.accent, 0.35) : box.color
+            label: "\u29d7 Jobs " + box.jobsRunning
+            tip: box.jobsRunning + " background job" + (box.jobsRunning === 1 ? "" : "s") + " running (" + box.jobsAll + " in all): click to show or hide them (Ctrl+Alt+J)"
+            onClicked: box.jobsToggled()
+        }
         Chip {
             id: keysChip
             base: box.color
