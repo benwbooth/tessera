@@ -235,7 +235,10 @@ FocusScope {
                 if (ue.type !== "daemon.updated") return
                 const retry = nb.updateRetry
                 nb.updateRetry = null
-                if (ue.ok) retry()
+                if (!ue.ok) { nb.kernelMessage = "tesserad didn't update: " + (ue.error || "no answer"); return }
+                // (Its kernel was stopped for the update: back, as before it.)
+                if (nb.kernelState === "dead" && !nb.viaShell) { nb.kernelState = ""; nb.startKernel() }
+                retry()
                 return
             }
             if (key.startsWith(nb.key + "~")) {
@@ -575,7 +578,15 @@ FocusScope {
             if (!r.id) {
                 if (/no request/.test(r.error || "")) {
                     r.error = "tesserad here is an older build, from before moving a running command to the background."
-                    if (!retried) askUpdate("moving a running command to the background", "moves this one to the background", () => { const t = indexOf(cid); if (t >= 0) moveToBg(t, true) })
+                    // (Stopping the kernels ends its cell here, not the command:
+                    // the card runs again, a tessh cell's program back with it.)
+                    if (!retried) askUpdate("moving a running command to the background", "moves this one to the background", () => {
+                        const t = indexOf(cid)
+                        if (t < 0) return
+                        if (tty && !ttyRun) ttyRun = tty
+                        cells.setProperty(t, "running", true)
+                        moveToBg(t, true)
+                    })
                 }
                 if (j >= 0) addOutput(j, { output_type: "stream", name: "stderr", text: "Couldn't move it to the background: " + (r.error || "tesserad didn't answer") + "\n" })
                 return

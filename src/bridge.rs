@@ -976,7 +976,8 @@ impl ffi::Controller {
             while start.elapsed() < std::time::Duration::from_secs(10) {
                 match crate::client::sync_daemon() {
                     "current" | "upgraded" => return json!({"ok": true}).to_string(),
-                    "outdated" | "none" => break,
+                    // (None: it's between builds, not answering yet.)
+                    "outdated" => break,
                     _ => std::thread::sleep(std::time::Duration::from_millis(300)),
                 }
             }
