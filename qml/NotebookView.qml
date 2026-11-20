@@ -1137,7 +1137,14 @@ FocusScope {
         for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).running) { n = i; break }
         liveIndex = n
     }
-    onLiveWantedChanged: { findLive(); if (liveWanted) Qt.callLater(followLive) }
+    // (The terminal app ended with its card expanded: the card goes back to its
+    // own size.)
+    onLiveWantedChanged: {
+        const was = liveIndex >= 0 && liveIndex < cells.count ? cells.get(liveIndex).cid : ""
+        findLive()
+        if (liveWanted) Qt.callLater(followLive)
+        else if (was !== "" && expandedId === was) toggleExpand(indexOf(was))
+    }
     Timer { interval: 150; repeat: true; running: nb.liveWanted; onTriggered: { nb.findLive(); nb.placeLive() } }
     function placeLive() {
         if (!liveBox || !liveBox.visible) { liveHost.visible = false; return }
@@ -1146,8 +1153,23 @@ FocusScope {
         liveHost.width = liveBox.width; liveHost.height = liveBox.height
         liveHost.visible = true
     }
+    // (Test hook, with EXPAND_CYCLE: each frame's time after a toggle.)
+    property real expandT: 0
+    property int expandFrames: -1
+    property real expandLast: 0
+    Connections {
+        target: nb.Window.window
+        enabled: nb.expandFrames >= 0
+        function onFrameSwapped() {
+            const t = Date.now() - nb.expandT
+            if (t > 2500) { nb.expandFrames = -1; return }
+            if (t - nb.expandLast > 40 || nb.expandFrames === 0) console.log("expand: frame " + nb.expandFrames + " at +" + t + " ms (gap " + (t - nb.expandLast) + ")")
+            nb.expandFrames++; nb.expandLast = t
+        }
+    }
     // Expand (fill the notebook with card i) or Restore.
     function toggleExpand(i) {
+        if (controller && controller.testEnv("EXPAND_CYCLE") !== "") { expandT = Date.now(); expandFrames = 0; expandLast = 0 }
         const cid = cells.get(i).cid
         expandedId = expandedId === cid ? "" : cid
         cells.setProperty(i, "hideOutput", false)
@@ -1909,6 +1931,12 @@ FocusScope {
         Item { id: liveHost; visible: false }
     }
     Connections { target: list; function onContentYChanged() { if (nb.liveWanted) nb.placeLive() } }
+    // (An expanded card stays where it fills the list as the others change.)
+    Connections {
+        target: list
+        enabled: nb.expandedId !== ""
+        function onContentHeightChanged() { const i = nb.indexOf(nb.expandedId); if (i >= 0) Qt.callLater(() => list.positionViewAtIndex(i, ListView.Beginning)) }
+    }
     ListView {
         id: list
         anchors.top: banner.bottom
@@ -1921,16 +1949,16 @@ FocusScope {
         // like a terminal; a document starts at the top.)
         topMargin: nb.expandedId !== "" ? 4 : nb.path === "" ? Math.max(10, height - contentHeight - bottomMargin) : 10
         bottomMargin: nb.expandedId !== "" ? 4 : 10
-        spacing: nb.expandedId !== "" ? 0 : 12
+        spacing: 12
         model: cells
         clip: true
         focus: true
         cacheBuffer: 1500
         interactive: false   // (a drag selects text; the wheel, touchpad and bar scroll)
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar { id: listBar; onPressedChanged: if (pressed) nb.sticking = false }
+        ScrollBar.vertical: ScrollBar { id: listBar; visible: nb.expandedId === ""; onPressedChanged: if (pressed) nb.sticking = false }
         // (A wheel or touchpad scroll up lets go of the end; cards laying out don't.)
-        MomentumWheel { id: listWheel; flick: list }
+        MomentumWheel { id: listWheel; flick: list; enabled: nb.expandedId === "" }
         Connections { target: listWheel; function onWheel(w) { if (w.angleDelta.y > 0 || w.pixelDelta.y > 0) nb.sticking = false } }
         property real lastY: 0
         property real lastH: 0
@@ -2001,14 +2029,16 @@ FocusScope {
             readonly property bool expanded: nb.expandedId === cid
             readonly property bool plainMd: !code && !editing
             width: list.width - 12
-            // (One card expanded: it's the only one, filling the notebook.)
             // (Its own say, not `visible`, which a tab in the background turns
             // off too: its cards mustn't fold to nothing there, or every one is
-            // laid out again and the list rebuilt when the tab comes back.)
-            readonly property bool wanted: nb.expandedId === "" || expanded
+            // laid out again and the list rebuilt when the tab comes back.
+            // One card expanded fills the list, held there; the others stay as
+            // they are, out of sight: folding them all to nothing brought every
+            // card into the list at once, and Expand took a second.)
+            readonly property bool wanted: true
             visible: wanted
             height: !wanted ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
-                     + (hasOutput ? (hideOutput ? 22 : body.height + 12) : 4) + (ask ? askBox.height + 6 : 0))
+                     + (hasOutput ? (hideOutput ? 22 : body.height + (body.live ? 14 : 12)) : 4) + (ask ? askBox.height + 6 : 0))
             radius: 8
             color: plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
             border.color: selected && list.activeFocus ? Theme.mix(Theme.divider, Theme.accent, 0.55)
@@ -2353,7 +2383,9 @@ FocusScope {
                 readonly property bool wanted: (cell.hasOutput || live) && !cell.hideOutput
                 visible: wanted
                 anchors.top: cell.editing ? editorBox.bottom : header.bottom
-                anchors.topMargin: cell.editing ? 6 : 0
+                // (A terminal app: as much room above it as under it, where
+                // the grip is.)
+                anchors.topMargin: cell.editing || live ? 6 : 0
                 x: 10
                 width: parent.width - 20
                 // Its natural size up to 460 px, or what it was dragged to, or the
