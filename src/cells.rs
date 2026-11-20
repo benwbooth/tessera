@@ -732,6 +732,41 @@ pub fn strip_zsh_marker(mut text: String) -> String {
     text
 }
 
+/// A command running when tesserad swaps in a new build: its cell goes on
+/// in the new one (moved to the background, its end recorded).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RunningCell {
+    pub id: u64,
+    pub command: String,
+    pub cwd: String,
+    pub started: u64,
+    pub screen: bool,
+}
+
+impl RunningCell {
+    /// What the shell `pid`'s terminal runs in the foreground, when that
+    /// isn't the shell (a build from before handed nothing over). Its id is
+    /// the one after the kept cells', as that build numbered it.
+    #[cfg(target_os = "linux")]
+    pub fn of_shell(pid: u32) -> Option<RunningCell> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        // (Fields after the command's closing paren: state ppid pgrp session tty_nr tpgid.)
+        let tpgid: i64 = stat.rsplit_once(')')?.1.split_whitespace().nth(5)?.parse().ok()?;
+        if tpgid <= 0 || tpgid == pid as i64 {
+            return None;
+        }
+        let argv = std::fs::read(format!("/proc/{tpgid}/cmdline")).ok()?;
+        let command = argv.split(|b| *b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect::<Vec<_>>().join(" ");
+        let cwd = std::fs::read_link(format!("/proc/{tpgid}/cwd")).map(|p| p.display().to_string()).unwrap_or_default();
+        Some(RunningCell { id: 0, command, cwd, started: now_ms(), screen: false })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn of_shell(_pid: u32) -> Option<RunningCell> {
+        None
+    }
+}
+
 /// tesserad's side of the cells: it reads every byte the shell prints, so
 /// it keeps each session's cells (their file) whether a window is attached
 /// or not, numbering them for the window too (T_CELL).
@@ -787,6 +822,27 @@ impl Recorder {
     /// are kept with those of the shell it took over from).
     pub fn skip_ids(&mut self, next: u64) {
         self.cells.next = self.cells.next.max(next);
+    }
+
+    /// The command running now, for the next build (an upgrade).
+    pub fn running_cell(&self) -> Option<RunningCell> {
+        let c = self.cells.list.iter().rev().find(|c| !c.done)?;
+        Some(RunningCell { id: c.id, command: c.command.clone(), cwd: c.cwd.clone(), started: c.started, screen: c.screen })
+    }
+
+    /// The last build's running command (see running_cell) goes on here: its
+    /// cell, with its id (0: the one after the kept ones).
+    pub fn resume_running(&mut self, r: RunningCell) {
+        if r.id > 0 {
+            self.cells.given = Some(r.id);
+        }
+        let id = self.cells.start(r.command, r.cwd);
+        if let Some(c) = self.cells.list.iter_mut().find(|c| c.id == id) {
+            c.started = r.started;
+            c.screen = r.screen;
+        }
+        // (Its output goes on to it, and its end mark is seen.)
+        self.cmd_out = Some(Vec::new());
     }
 
     /// The command running now: (its id, command, folder, what it ran with as JSON).

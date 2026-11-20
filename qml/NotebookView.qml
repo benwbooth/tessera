@@ -228,6 +228,16 @@ FocusScope {
             nb.listKernels()
         }
         function onJupyterEvent(key, json) {
+            if (key === "tesserad" || key.endsWith("//tesserad")) {
+                if (!nb.updateRetry) return
+                let ue
+                try { ue = JSON.parse(json) } catch (x) { return }
+                if (ue.type !== "daemon.updated") return
+                const retry = nb.updateRetry
+                nb.updateRetry = null
+                if (ue.ok) retry()
+                return
+            }
             if (key.startsWith(nb.key + "~")) {
                 let le
                 try { le = JSON.parse(json) } catch (x) { return }
@@ -439,7 +449,7 @@ FocusScope {
     }
 
     // ---- running ------------------------------------------------------------------
-    function run(i, bg) {
+    function run(i, bg, retried) {
         const c = cells.get(i)
         if (!c) return
         if (c.type === "markdown") { if (c.source.trim() !== "") cells.setProperty(i, "editing", false); return }
@@ -469,7 +479,7 @@ FocusScope {
         // (In the background: a line ending in &, or asked for. It runs on its
         // own, in tesserad, and the notebook carries on.)
         const bl = bgLang(c)
-        if (bl !== "" && (bg || isBgLine(c.source))) { runJob(i, c.source.trim().replace(/\s*&$/, ""), bl); return }
+        if (bl !== "" && (bg || isBgLine(c.source))) { runJob(i, c.source.trim().replace(/\s*&$/, ""), bl, retried); return }
         // (A cell in another language: that language's kernel.)
         if (c.lang !== "" && !sameLang(c.lang, runsIn)) { runLang(c.cid, c.lang); return }
         if (shellKernel) { shellRun(c.cid, c.source); return }
@@ -504,7 +514,7 @@ FocusScope {
         return ""
     }
     function isBgLine(src) { const t = src.trim(); return t.indexOf("\n") < 0 && /[^&]&$/.test(t) }
-    function runJob(i, command, lang) {
+    function runJob(i, command, lang, retried) {
         const cid = cells.get(i).cid
         cells.setProperty(i, "ranIn", (lang === "tessh" ? "tessh" : (shellName || "shell")) + " \u00b7 bg")
         Async.call(controller, k => controller.jobCall(k, sshHost, "job.start", JSON.stringify({ command: command, lang: lang, cwd: shellDir, pid: shellPid, owner: key, cell: cid })), json => {
@@ -513,8 +523,12 @@ FocusScope {
             let r = {}
             try { r = JSON.parse(json) } catch (e) {}
             if (!r.id) {
-                // (A tesserad from before jobs: it swaps in the new build once its kernels are done.)
-                if (/no request/.test(r.error || "")) r.error = "tesserad here is an older build, from before background jobs. It upgrades itself once no kernels are running: stop them (Kernels \u2192 Stop all), then run this again."
+                // (A tesserad from before jobs: asked whether to update it now,
+                // and run again once it has.)
+                if (/no request/.test(r.error || "")) {
+                    r.error = "tesserad here is an older build, from before background jobs."
+                    if (!retried) askUpdate("background jobs", "runs this one in the background", () => { const t = indexOf(cid); if (t >= 0) run(t, true, true) })
+                }
                 cells.setProperty(j, "running", false)
                 cells.setProperty(j, "failed", true)
                 cells.setProperty(j, "ended", Date.now())
@@ -543,7 +557,14 @@ FocusScope {
         for (let i = cells.count - 1; i >= 0; --i) if (canBg(cells.get(i))) return i
         return -1
     }
-    function moveToBg(i) {
+    // tesserad too old for what was asked: the window asks whether to update
+    // it (Main.qml); once it has, `retry`.
+    property var updateRetry: null
+    function askUpdate(feature, retryText, retry) {
+        updateRetry = retry
+        controller.jupyterEvent(sshHost ? sshHost + "//tesserad" : "tesserad", JSON.stringify({ type: "daemon.old", feature: feature, retry: retryText }))
+    }
+    function moveToBg(i, retried) {
         const c = cells.get(i)
         if (!canBg(c)) return
         const cid = c.cid, tty = ttyRun && ttyRun.cid === cid ? ttyRun : null
@@ -552,7 +573,10 @@ FocusScope {
             let r = {}
             try { r = JSON.parse(json) } catch (e) {}
             if (!r.id) {
-                if (/no request/.test(r.error || "")) r.error = "tesserad here is an older build. It upgrades itself once no kernels are running: stop them (Kernels \u2192 Stop all)."
+                if (/no request/.test(r.error || "")) {
+                    r.error = "tesserad here is an older build, from before moving a running command to the background."
+                    if (!retried) askUpdate("moving a running command to the background", "moves this one to the background", () => { const t = indexOf(cid); if (t >= 0) moveToBg(t, true) })
+                }
                 if (j >= 0) addOutput(j, { output_type: "stream", name: "stderr", text: "Couldn't move it to the background: " + (r.error || "tesserad didn't answer") + "\n" })
                 return
             }

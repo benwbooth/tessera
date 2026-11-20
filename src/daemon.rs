@@ -1053,6 +1053,9 @@ mod upgrade {
         lines: u32,
         snapshot: String,
         client_fd: Option<RawFd>,
+        /// The command running in it (its cell carries on in the new build).
+        #[serde(default)]
+        running: Option<crate::cells::RunningCell>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -1100,7 +1103,9 @@ mod upgrade {
                 set_cloexec(c, false);
             }
             let (cols, rows) = *s.size.lock().unwrap();
+            let running = s.rec.lock().unwrap().running_cell();
             states.push(SessionState {
+                running,
                 id: key.clone(),
                 fd,
                 pid: s.shell_pid,
@@ -1158,7 +1163,15 @@ mod upgrade {
                 unsafe { UnixStream::from_raw_fd(c) }
             });
             let s = Arc::new(DSession {
-                rec: Mutex::new(crate::cells::Recorder::new(&st.id, st.pid.unwrap_or(0))),
+                rec: Mutex::new({
+                    let mut rec = crate::cells::Recorder::new(&st.id, st.pid.unwrap_or(0));
+                    // (A build from before said nothing of it: the shell's
+                    // terminal says whether something runs.)
+                    if let Some(r) = st.running.clone().or_else(|| st.pid.and_then(crate::cells::RunningCell::of_shell)) {
+                        rec.resume_running(r);
+                    }
+                    rec
+                }),
                 job: Mutex::new(None),
                 hidden: Default::default(),
                 id: st.id.clone(),

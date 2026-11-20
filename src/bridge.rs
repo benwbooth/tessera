@@ -653,6 +653,11 @@ pub mod ffi {
         /// End an outdated daemon (and its shells). False if it couldn't be.
         #[qinvokable]
         fn stop_daemon(self: &Controller, reply: &QString);
+        /// Bring `host`'s tesserad, an older build that hasn't swapped itself
+        /// in (kernels kept it), up to this one: its kernels stopped, then the
+        /// upgrade. {"ok"} or {"ok": false, "error"}.
+        #[qinvokable]
+        fn update_daemon(self: &Controller, reply: &QString, host: &QString);
         /// Windows: open an elevated window (the UAC prompt first).
         #[qinvokable]
         fn new_admin_window(self: &Controller);
@@ -952,6 +957,31 @@ impl ffi::Controller {
 
     fn daemon_state(&self) -> ffi::QString {
         qs(&std::env::var("TESSERA_DAEMON_STATE").unwrap_or_default())
+    }
+
+    fn update_daemon(&self, reply: &ffi::QString, host: &ffi::QString) {
+        let host = host.to_string();
+        self.answer(reply, false, move || {
+            use serde_json::json;
+            let kernels = crate::client::rpc(&host, "kernel.running", json!({})).unwrap_or_default();
+            for k in kernels.as_array().into_iter().flatten().filter_map(|k| k["key"].as_str()) {
+                let _ = crate::client::rpc(&host, "kernel.stop", json!({"key": k}));
+            }
+            // (Another host's swaps in the build it was sent once they're gone.)
+            if !host.is_empty() {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                return json!({"ok": true}).to_string();
+            }
+            let start = std::time::Instant::now();
+            while start.elapsed() < std::time::Duration::from_secs(10) {
+                match crate::client::sync_daemon() {
+                    "current" | "upgraded" => return json!({"ok": true}).to_string(),
+                    "outdated" | "none" => break,
+                    _ => std::thread::sleep(std::time::Duration::from_millis(300)),
+                }
+            }
+            json!({"ok": false, "error": "tesserad didn't update"}).to_string()
+        });
     }
 
     fn stop_daemon(&self, reply: &ffi::QString) {

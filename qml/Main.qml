@@ -1667,8 +1667,29 @@ ApplicationWindow {
             if (key !== "tesserad" && !key.endsWith("//tesserad")) return
             let e
             try { e = JSON.parse(json) } catch (x) { return }
-            if (e.type !== "daemon.update") return
             const host = key === "tesserad" ? "" : key.slice(0, -"//tesserad".length)
+            // (A notebook found tesserad too old for what it asked: a build
+            // from before it said it had a newer one waiting.)
+            if (e.type === "daemon.old") {
+                const done = r => controller.jupyterEvent(key, JSON.stringify({ type: "daemon.updated", ok: !!r.ok, error: r.error || "" }))
+                sheet.ask({
+                    title: "Update tesserad?",
+                    message: "Tessera's background process (tesserad" + (host ? " on " + host : "") + ") is an older build, from before " + (e.feature || "this") + ". "
+                           + "It updates itself to this build in place, keeping your shells, but only once no kernel runs in it.\n\n"
+                           + "Updating now stops its kernels (they lose their variables), then " + (e.retry || "carries on") + ".",
+                    okText: "Stop Kernels and Update",
+                    destructive: true,
+                    onAccept: () => Async.call(controller, k => controller.updateDaemon(k, host), json => {
+                        let r = {}
+                        try { r = JSON.parse(json) } catch (x) {}
+                        done(r)
+                    })
+                })
+                // (Test hook: TESSERA_TEST_UPDATE_ACCEPT says yes.)
+                if (controller.testEnv("UPDATE_ACCEPT") !== "") Qt.callLater(sheet.accept)
+                return
+            }
+            if (e.type !== "daemon.update") return
             const n = (c, one) => c + " " + one + (c === 1 ? "" : "s")
             let busy = []
             if (e.kernels > 0) busy.push(n(e.kernels, "kernel"))
@@ -1683,6 +1704,7 @@ ApplicationWindow {
                 destructive: true,
                 onAccept: () => Async.call(controller, k => controller.jobCall(k, host, "daemon.upgrade", "{}"), () => {})
             })
+            if (controller.testEnv("UPDATE_ACCEPT") !== "") Qt.callLater(sheet.accept)
         }
     }
     // Shells in a daemon from before in-place upgrades: it can't take this
