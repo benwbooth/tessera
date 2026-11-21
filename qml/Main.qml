@@ -1780,6 +1780,15 @@ ApplicationWindow {
             onAccept: win.restartDaemon
         })
     }
+    // (Test hook: TESSERA_TEST_GUIDE="text" opens the tessh guide at 3 s and finds the text in it.)
+    Timer {
+        interval: 3000; running: controller.testEnv("GUIDE") !== ""
+        onTriggered: { win.openGuide(); guideFind.start() }
+    }
+    Timer {
+        id: guideFind; interval: 2500
+        onTriggered: { const t = win.tabs[win.currentTab]; if (t && t.pageItem) t.pageItem.find(controller.testEnv("GUIDE")) }
+    }
     // (Test hook: TESSERA_TEST_RESTART_DAEMON restarts tesserad at 6 s.)
     Timer { interval: 6000; running: controller.testEnv("RESTART_DAEMON") !== ""; onTriggered: win.restartDaemon() }
     // Test hook: TESSERA_TEST_KEYS="term|editor|away:key,key,..." (ca:x is Ctrl+Alt+x; tab, bs, enter,

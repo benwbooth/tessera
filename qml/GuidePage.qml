@@ -40,6 +40,7 @@ Rectangle {
             + ".t-number,.t-constant,.t-attribute{color:" + col(3, "#e5c07b") + "}.t-function{color:" + col(4, "#61afef") + "}"
             + ".t-comment{color:" + col(8, "#5c6370") + ";font-style:italic}.t-operator,.t-property{color:" + col(6, "#56b6c2") + "}"
             + ".t-variable{color:" + col(1, "#e06c75") + "}.t-punctuation{color:" + c(Theme.textDim) + "}"
+            + ".t-embedded{color:" + col(13, "#c678dd") + ";font-weight:bold}.t-escape{color:" + col(6, "#56b6c2") + "}"
             + "h1:target,h2:target{color:" + c(Theme.accent) + "}"
     }
     // (The page is made in the background, then shown.)

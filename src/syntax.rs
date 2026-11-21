@@ -211,13 +211,8 @@ pub fn highlight_html(lang_name: &str, text: &str) -> String {
     let Some(tree) = p.parse(text, None) else { return esc(text) };
     // (The innermost capture wins: kinds by byte, later captures over earlier.)
     let mut kind: Vec<Option<&str>> = vec![None; text.len()];
-    let names = l.query.capture_names();
-    let mut cursor = QueryCursor::new();
-    let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
-    while let Some((m, i)) = caps.next() {
-        let c = m.captures()[*i];
-        let k = kind_of(names[c.index as usize]);
-        for b in c.node.start_byte()..c.node.end_byte().min(text.len()) {
+    for (s, e, k) in capture_spans(lang_name, l, tree.root_node(), text) {
+        for b in s..e {
             kind[b] = Some(k);
         }
     }
@@ -291,15 +286,10 @@ pub fn analyze(lang_name: &str, text: &str) -> String {
             }
         });
     }
-    let names = l.query.capture_names();
-    let mut cursor = QueryCursor::new();
-    let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
-    while let Some((m, i)) = caps.next() {
-        let c = m.captures()[*i];
-        let kind = kind_of(names[c.index as usize]);
-        let (s, len) = range(c.node);
-        if len > 0 {
-            spans.push(json!([s, len, kind]));
+    for (s, e, kind) in capture_spans(lang_name, l, tree.root_node(), text) {
+        let (s, e) = (u16_at[s], u16_at[e]);
+        if e > s {
+            spans.push(json!([s, e - s, kind]));
         }
     }
 
@@ -325,22 +315,201 @@ fn byte_spans(lang_name: &str, text: &str) -> Option<Vec<(usize, usize, &'static
     let mut p = Parser::new();
     p.set_language(&l.language).ok()?;
     let tree = p.parse(text, None)?;
+    // (Kinds as 'static: the highlighter's known names.)
+    Some(capture_spans(lang_name, l, tree.root_node(), text)
+        .into_iter()
+        .filter_map(|(s, e, k)| KINDS.iter().find(|x| **x == k).map(|k| (s, e, *k)))
+        .collect())
+}
+
+/// A tree's highlight captures as byte ranges (start, end, kind), later
+/// over earlier; tessh's "…" strings split so what they interpolate reads
+/// as code.
+fn capture_spans(lang_name: &str, l: &'static Lang, root: Node, text: &str) -> Vec<(usize, usize, &'static str)> {
     let names = l.query.capture_names();
     let mut out = Vec::new();
     let mut cursor = QueryCursor::new();
-    let mut caps = cursor.captures(&l.query, tree.root_node(), text.as_bytes());
+    let mut caps = cursor.captures(&l.query, root, text.as_bytes());
     while let Some((m, i)) = caps.next() {
         let c = m.captures()[*i];
-        let k = kind_of(names[c.index as usize]);
-        if c.node.end_byte() > c.node.start_byte() {
-            // (Kinds as 'static: the highlighter's known names.)
-            let k: &'static str = KINDS.iter().find(|x| **x == k).copied().unwrap_or("");
-            if !k.is_empty() {
-                out.push((c.node.start_byte(), c.node.end_byte(), k));
-            }
+        let (s, e) = (c.node.start_byte(), c.node.end_byte().min(text.len()));
+        if e > s {
+            out.push((s, e, kind_of(names[c.index as usize])));
         }
     }
-    Some(out)
+    if lang_name == "tessh" {
+        out = out.into_iter().flat_map(|(s, e, k)| if k == "string" { tessh_string(text, s, e) } else { vec![(s, e, k)] }).collect();
+    }
+    out
+}
+
+/// tessh code inside a string (text[s..e]), highlighted on its own.
+fn tessh_code(text: &str, s: usize, e: usize) -> Vec<(usize, usize, &'static str)> {
+    let Some(l) = lang("tessh") else { return vec![] };
+    let mut p = Parser::new();
+    let inner = &text[s..e];
+    let Some(tree) = p.set_language(&l.language).ok().and_then(|_| p.parse(inner, None)) else { return vec![] };
+    capture_spans("tessh", l, tree.root_node(), inner).into_iter().map(|(a, b, k)| (a + s, b + s, k)).collect()
+}
+
+/// Where the `close` that ends a group opened just before `from` is, in
+/// b[..end]: brackets nest and quotes hide.
+fn group_end(b: &[u8], from: usize, end: usize, close: u8) -> Option<usize> {
+    let (mut depth, mut quote, mut i) = (0i32, None::<u8>, from);
+    while i < end {
+        let c = b[i];
+        if let Some(q) = quote {
+            if c == b'\\' {
+                i += 1;
+            } else if c == q {
+                quote = None;
+            }
+        } else if c == close && depth == 0 {
+            return Some(i);
+        } else if c == b'"' || c == b'\'' {
+            quote = Some(c);
+        } else if b"([{".contains(&c) {
+            depth += 1;
+        } else if b")]}".contains(&c) {
+            depth -= 1;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// A tessh string's spans. Double quotes (no prefix) interpolate: `$name`,
+/// `$name.attr[i]`, `$(form)` and `${expr!r:spec}` are code there, their
+/// `$(` `)` `${` `}` marked (embedded), and escapes are escapes.
+fn tessh_string(text: &str, s: usize, e: usize) -> Vec<(usize, usize, &'static str)> {
+    let t = &text[s..e];
+    let q = if t.len() >= 6 && t.starts_with("\"\"\"") && t.ends_with("\"\"\"") {
+        3
+    } else if t.len() >= 2 && t.starts_with('"') && t.ends_with('"') {
+        1
+    } else {
+        return vec![(s, e, "string")];
+    };
+    let b = text.as_bytes();
+    let end = e - q;
+    let word = |j: usize| j < end && (b[j].is_ascii_alphabetic() || b[j] == b'_');
+    let word_end = |mut j: usize| {
+        while j < end && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+            j += 1;
+        }
+        j
+    };
+    let mut out = vec![];
+    let mut lit = s; // (where the text being read began)
+    let mut i = s + q;
+    while i < end {
+        let start = i;
+        let mut code: Vec<(usize, usize, &'static str)> = vec![];
+        if b[i] == b'\\' {
+            let n = text[i + 1..].chars().next().map_or(0, |c| c.len_utf8());
+            i = (i + 1 + n).min(end);
+            code.push((start, i, "escape"));
+        } else if b[i] == b'$' && i + 1 < end && (b[i + 1] == b'(' || b[i + 1] == b'{') {
+            let braced = b[i + 1] == b'{';
+            let Some(j) = group_end(b, i + 2, end, if braced { b'}' } else { b')' }) else {
+                i += 1;
+                continue;
+            };
+            code.push((i, i + 2, "embedded"));
+            let mut x = j;
+            if braced {
+                // (As the reader splits it: the expression, then !r and :spec.)
+                let body = &text[i + 2..j];
+                let mut cut = body.len();
+                let mut depth = 0;
+                let mut quote = None;
+                for (k, c) in body.char_indices() {
+                    match (quote, c) {
+                        (Some(qc), c) if c == qc => quote = None,
+                        (Some(_), _) => {}
+                        (None, '"' | '\'') => quote = Some(c),
+                        (None, '(' | '[' | '{') => depth += 1,
+                        (None, ')' | ']' | '}') => depth -= 1,
+                        (None, ':') if depth == 0 && !body[k + 1..].starts_with('=') => {
+                            cut = k;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                let expr = body[..cut].trim_end();
+                let expr = match expr.len().checked_sub(2).map(|k| &expr[k..]) {
+                    Some("!r" | "!s" | "!a") => &expr[..expr.len() - 2],
+                    _ => expr,
+                };
+                x = i + 2 + expr.len();
+                // (A name alone is the variable's value; anything else a form.)
+                let lead = expr.len() - expr.trim_start().len();
+                let name = expr.trim();
+                if !name.is_empty() && name.split('.').all(|p| p.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')) {
+                    code.push((i + 2 + lead, i + 2 + lead + name.len(), "variable"));
+                } else {
+                    code.extend(tessh_code(text, i + 2, x));
+                }
+                let tail = x + (j - x - text[x..j].trim_start().len());
+                if tail < j {
+                    code.push((tail, j, "attribute"));
+                }
+            } else {
+                code.extend(tessh_code(text, i + 2, x));
+            }
+            code.push((j, j + 1, "embedded"));
+            i = j + 1;
+        } else if b[i] == b'$' {
+            // $name, then .attr and [index] glued on; $? and $%….
+            let mut j = i + 1;
+            if j < end && b[j] == b'?' {
+                j += 1;
+            } else if j < end && b[j] == b'%' {
+                j += 1;
+                if j < end && b"123456789&".contains(&b[j]) {
+                    j += 1;
+                }
+            } else if word(j) {
+                j = word_end(j);
+                loop {
+                    if j < end && b[j] == b'.' && word(j + 1) {
+                        j = word_end(j + 1);
+                    } else if j < end && b[j] == b'[' {
+                        let Some(k) = group_end(b, j + 1, end, b']') else { break };
+                        code.push((i, j, "variable"));
+                        code.push((j, j + 1, "punctuation"));
+                        code.extend(tessh_code(text, j + 1, k));
+                        code.push((k, k + 1, "punctuation"));
+                        i = k + 1;
+                        j = i;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if j == start + 1 {
+                i += 1;
+                continue;
+            }
+            if j > i {
+                code.push((i, j, "variable"));
+            }
+            i = j;
+        } else {
+            i += 1;
+            continue;
+        }
+        if start > lit {
+            out.push((lit, start, "string"));
+        }
+        out.extend(code);
+        lit = i;
+    }
+    if e > lit {
+        out.push((lit, e, "string"));
+    }
+    out
 }
 
 const KINDS: &[&str] = &["keyword", "string", "comment", "number", "constant", "function", "operator", "property", "variable",
@@ -665,6 +834,21 @@ mod tests {
         let out = super::analyze("markdown", "## Two\n\n**b** *i* ~~s~~ `c` [l](u) \\*\n\n```rust\nfn f() {}\n```\n");
         for want in ["\"function\"", "\"=bold\"", "\"=italic\"", "\"=strike\"", "\"=underline\"", "\"string\"", "\"escape\"", "\"keyword\"", "\"punctuation\""] {
             assert!(out.contains(want), "{want} in {out}");
+        }
+    }
+
+    #[test]
+    fn tessh_interpolation_is_code() {
+        let h = super::highlight_html("tessh", r#"print "a $name b $(len $xs) ${n:.2f} ${f}.txt $self.x \n" 'raw $n'"#);
+        for want in [
+            r#"<span class="t-string">"a </span><span class="t-variable">$name</span>"#,
+            r#"<span class="t-embedded">$(</span><span class="t-function">len</span> <span class="t-variable">$xs</span><span class="t-embedded">)</span>"#,
+            r#"<span class="t-embedded">${</span><span class="t-variable">n</span><span class="t-attribute">:.2f</span><span class="t-embedded">}</span>"#,
+            r#"<span class="t-embedded">}</span><span class="t-string">.txt </span><span class="t-variable">$self.x</span>"#,
+            r#"<span class="t-escape">\n</span><span class="t-string">"</span>"#,
+            r#"<span class="t-string">'raw $n'</span>"#,
+        ] {
+            assert!(h.contains(want), "{want}\n in\n{h}");
         }
     }
 
