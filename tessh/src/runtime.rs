@@ -121,7 +121,7 @@ def _shown_len(s):
     return len(re.sub("\x1b\\[[0-9;]*m", "", s))
 
 def _kind(x):
-    import dataclasses
+    import dataclasses, os, pathlib, collections
     t = type(x)
     if t in (list, tuple, set, frozenset, dict):
         return t.__name__
@@ -129,7 +129,15 @@ def _kind(x):
         return "record"
     if dataclasses.is_dataclass(x) and not isinstance(x, type) and t.__dataclass_params__.repr:
         return "record"
+    # (The environment: its variables, as a dict.)
+    if t.__name__ == "Env" and t.__module__ == "__tessh__" or x is os.environ:
+        return "env"
+    if t in (collections.Counter, collections.OrderedDict, collections.defaultdict, collections.deque, range) or isinstance(x, pathlib.PurePath):
+        return "call"
     return None
+
+class _Name(str):
+    """A function's name, shown as its variable: (defaultdict $list {…})."""
 
 def _str_lit(x):
     """A str as tessh reads it back: 'raw' when it can be, else "escaped"."""
@@ -202,6 +210,28 @@ def pretty(x, color=None, width=None, indent=0):
             return c("punct", "(") + c("name", "frozenset") + " " + c("punct", "{"), [(None, v) for v in items], c("punct", "})"), False
         if k == "dict":
             return c("punct", "{"), [(("key", kk), v) for kk, v in x.items()], c("punct", "}"), False
+        if k == "env":
+            return c("punct", "{"), [(("key", kk), v) for kk, v in sorted(x.items())], c("punct", "}"), False
+        if k == "call":
+            import collections, pathlib
+            t = type(x)
+            if isinstance(x, pathlib.PurePath):
+                name, args = "Path", [str(x)]
+            elif t is range:
+                name, args = "range", ([x.start] if x.start else []) + [x.stop] + ([x.step] if x.step != 1 else [])
+                if x.step != 1 and not x.start:
+                    args = [0] + args
+            elif t is collections.deque:
+                name, args = "deque", [list(x)] + ([x.maxlen] if x.maxlen is not None else [])
+            elif t is collections.defaultdict:
+                f = x.default_factory
+                fname = getattr(f, "__name__", None) if f is not None else "None"
+                if f is not None and (fname is None or fname == "<lambda>"):
+                    return None
+                name, args = "defaultdict", [_Name(fname), dict(x)]
+            else:
+                name, args = t.__name__, [dict(x)]
+            return c("punct", "(") + c("name", name), [(None, v) for v in args], c("punct", ")"), "record"
         if k == "record":
             import dataclasses
             if dataclasses.is_dataclass(x):
@@ -221,6 +251,8 @@ def pretty(x, color=None, width=None, indent=0):
             return c("punct", "(") + "float " + c("str", "'" + repr(x) + "'") + c("punct", ")")
         if type(x) is complex:
             return c("punct", "(") + "complex " + c("num", repr(x.real)) + " " + c("num", repr(x.imag)) + c("punct", ")")
+        if type(x) is _Name:
+            return c("name", "$" + x if x != "None" else x)
         if type(x) is str:
             return c("str", _str_lit(x))
         if type(x) is bytes:
