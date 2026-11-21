@@ -163,7 +163,11 @@ fn enters_alt_screen(before: &[u8], data: &[u8]) -> bool {
     let mut buf = Vec::with_capacity(tail.len() + data.len());
     buf.extend_from_slice(tail);
     buf.extend_from_slice(data);
-    [b"\x1b[?1049h".as_slice(), b"\x1b[?1047h", b"\x1b[?47h"].iter().any(|s| buf.windows(s.len()).any(|w| w == *s))
+    // (And a terminal app drawn in place, not on the alternate screen
+    // (claude, fzf, a REPL): it turns on bracketed paste or focus reports.)
+    [b"\x1b[?1049h".as_slice(), b"\x1b[?1047h", b"\x1b[?47h", b"\x1b[?2004h", b"\x1b[?1004h"]
+        .iter()
+        .any(|s| buf.windows(s.len()).any(|w| w == *s))
 }
 
 const MAX_CELLS: usize = 400;

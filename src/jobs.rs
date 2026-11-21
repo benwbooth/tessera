@@ -392,6 +392,28 @@ pub fn stop(id: u64) -> bool {
     true
 }
 
+/// Signal `name` to a running job's process group.
+pub fn signal(id: u64, name: &str) -> bool {
+    let Some(job) = find(id) else { return false };
+    let (pid, running) = {
+        let j = job.lock().unwrap();
+        (j.pid, j.status.is_none())
+    };
+    if !running {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        let Some(sig) = crate::procinfo::signal_number(name) else { return false };
+        unsafe { libc::kill(-(pid as i32), sig) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, name);
+        false
+    }
+}
+
 /// Let a finished one go.
 pub fn forget(id: u64) {
     jobs().lock().unwrap().list.retain(|j| {

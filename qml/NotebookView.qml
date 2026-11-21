@@ -880,6 +880,49 @@ FocusScope {
 
     function runAll() { for (let i = 0; i < cells.count; ++i) if (cells.get(i).type === "code") run(i) }
     function runAbove(n) { for (let i = 0; i < n; ++i) if (cells.get(i).type === "code") run(i) }
+    // ---- signals to a running card ----
+    // (A command in the pane's terminal, a tessh cell's program there, or a
+    // job brought to the front: whatever is in front of the shell. A
+    // background job: its own process group. A kernel's cell: interrupt only.)
+    function signalWay(i) {
+        const c = cells.get(i)
+        if (!c || !c.running) return ""
+        if (c.job > 0 && fgJob !== c.cid) return "job"
+        if (c.tid > 0 || (ttyRun && ttyRun.cid === c.cid) || fgJob === c.cid || viaShell) return "term"
+        return "kernel"
+    }
+    function signalCell(i, sig) {
+        const c = cells.get(i), way = signalWay(i)
+        if (way === "job") controller.jobCall("", sshHost, "job.signal", JSON.stringify({ id: c.job, sig: sig }))
+        else if (way === "term")
+            Async.call(controller, k => controller.jobCall(k, sshHost, "job.signal_front", JSON.stringify({ pid: shellPid, sig: sig })), r => {
+                // (Nothing in front of the shell to signal: Ctrl+C to the terminal.)
+                if (r !== "true" && sig === "INT" && view) view.sendText("\x03")
+            })
+        else if (way === "kernel" && sig === "INT") interrupt()
+    }
+    readonly property var signalNames: [
+        ["INT", "Interrupt (SIGINT, Ctrl+C)"], ["TERM", "Terminate (SIGTERM)"], ["KILL", "Kill (SIGKILL): can't be caught"],
+        ["HUP", "Hang up (SIGHUP)"], ["QUIT", "Quit (SIGQUIT, Ctrl+\\)"], ["TSTP", "Suspend (SIGTSTP, Ctrl+Z)"],
+        ["STOP", "Stop (SIGSTOP): can't be caught"], ["CONT", "Continue (SIGCONT)"], ["USR1", "SIGUSR1"], ["USR2", "SIGUSR2"],
+        ["WINCH", "Window size changed (SIGWINCH)"]]
+    SlimMenu {
+        id: sigMenu
+        property int row: -1
+        Repeater {
+            model: nb.signalNames
+            delegate: SlimMenuItem {
+                required property var modelData
+                text: modelData[1]
+                enabled: sigMenu.row >= 0 && (nb.signalWay(sigMenu.row) !== "kernel" || modelData[0] === "INT")
+                onTriggered: nb.signalCell(sigMenu.row, modelData[0])
+            }
+        }
+    }
+    // (Test hook: TESSERA_TEST_SIGNAL=<name>[,ms] sends it to the running card at 16 s, or ms.)
+    Timer { interval: Number((nb.controller ? nb.controller.testEnv("SIGNAL") : "").split(",")[1] || 16000)
+            running: nb.controller !== null && nb.controller.testEnv("SIGNAL") !== ""
+            onTriggered: { for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).running) { console.warn("test signal " + nb.signalWay(i)); nb.signalCell(i, nb.controller.testEnv("SIGNAL").split(",")[0]); return } } }
     function interrupt() {
         if (viaShell) { if (view) view.sendText("\x03"); return }
         if (ttyRun && view) view.sendText("\x03")
@@ -2832,6 +2875,9 @@ FocusScope {
                 Chip { visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.ended > 0 || cell.running || cell.execs !== "[]")
                        base: cell.color; label: "\u24d8"; tip: "Details: the command line as run, folder, user and environment"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.showExec(cell.index) }
+                Chip { id: sigChip; visible: cell.running; base: cell.color; label: "\u26a1 Signal"; Layout.minimumWidth: implicitWidth
+                       tip: "Send it a signal: interrupt, terminate, kill, hang up, suspend, continue, ..."
+                       onClicked: { sigMenu.row = cell.index; sigMenu.popup(sigChip, 0, sigChip.height + 2) } }
                 Chip { visible: cell.hasOutput; base: cell.color; label: "Copy"; tip: "Copy the output"; Layout.minimumWidth: implicitWidth
                        onClicked: { const c = cells.get(cell.index)
                                     // (A file card's text: read now, then copied.)
@@ -2920,6 +2966,7 @@ FocusScope {
                 SlimMenuItem { text: "Move to the background\tCtrl+Alt+Z"; visible: cell.running && (cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) || nb.fgJob === cell.cid) && nb.canBg(cells.get(cell.index)); onTriggered: nb.moveToBg(cell.index) }
                 SlimMenuItem { text: "Bring to the foreground"; visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; onTriggered: nb.foregroundJob(cell.index) }
                 SlimMenuItem { text: "Stop the background job"; visible: cell.job > 0 && cell.running; onTriggered: nb.stopJob(cell.index) }
+                SlimMenuItem { text: "Send a signal\u2026"; visible: cell.running; onTriggered: { sigMenu.row = cell.index; Qt.callLater(() => sigMenu.popup()) } }
                 SlimMenuItem { text: "Run the cells above"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.runAbove(cell.index) }
                 SlimMenuItem { text: cell.code ? "Make it Markdown" : "Make it code"; visible: cell.viewPath === ""; onTriggered: nb.setType(cell.index, cell.code ? "markdown" : "code") }
                 SlimMenuItem { text: cell.hideOutput ? "Show the output" : "Hide the output"; visible: cell.hasOutput; onTriggered: { cells.setProperty(cell.index, "hideOutput", !cell.hideOutput); nb.touch() } }

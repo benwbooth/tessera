@@ -1706,8 +1706,17 @@ impl Session {
         crate::image_places::rgba(&self.term, id)
     }
 
+    /// A terminal app has the screen: on the alternate screen (vim, less,
+    /// htop), or, while a command runs, one drawn in place that takes keys of
+    /// its own (claude, fzf, a REPL): bracketed paste or focus reports turned
+    /// on after the shell gave the line up (the shell's own come back with
+    /// its prompt).
     pub fn full_screen(&self) -> bool {
-        matches!(self.term.active_screen(), Ok(Screen::Alternate))
+        if matches!(self.term.active_screen(), Ok(Screen::Alternate)) {
+            return true;
+        }
+        self.mark == b'C'
+            && (self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false) || self.term.mode(Mode::FOCUS_EVENT).unwrap_or(false))
     }
 
     pub fn wants_mouse(&self, qt_mods: u32) -> bool {

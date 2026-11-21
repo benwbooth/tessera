@@ -91,6 +91,70 @@ pub fn shell_chain(pid: u32) -> String {
     serde_json::Value::Array(chain).to_string()
 }
 
+/// A signal by name ("INT", "TERM", "KILL", ...), for a card's Signal menu.
+#[cfg(unix)]
+pub fn signal_number(name: &str) -> Option<i32> {
+    Some(match name.trim_start_matches("SIG") {
+        "HUP" => libc::SIGHUP,
+        "INT" => libc::SIGINT,
+        "QUIT" => libc::SIGQUIT,
+        "KILL" => libc::SIGKILL,
+        "USR1" => libc::SIGUSR1,
+        "USR2" => libc::SIGUSR2,
+        "TERM" => libc::SIGTERM,
+        "CONT" => libc::SIGCONT,
+        "STOP" => libc::SIGSTOP,
+        "TSTP" => libc::SIGTSTP,
+        "WINCH" => libc::SIGWINCH,
+        _ => return None,
+    })
+}
+
+/// The program in front in process `pid`'s terminal (the terminal's
+/// foreground process group), sent signal `name`; `pid` is any process on
+/// it (the shell, or what it runs). False when the shell (the terminal's
+/// session leader) is in front, or the signal isn't known.
+pub fn signal_foreground(pid: u32, name: &str) -> bool {
+    #[cfg(unix)]
+    {
+        let Some(sig) = signal_number(name) else { return false };
+        let Some((leader, tpgid)) = groups(pid) else { return false };
+        if tpgid <= 1 || tpgid == leader {
+            return false;
+        }
+        unsafe { libc::kill(-tpgid, sig) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, name);
+        false
+    }
+}
+
+/// Process `pid`'s session (its leader: the terminal's shell) and its
+/// terminal's foreground group.
+#[cfg(unix)]
+fn groups(pid: u32) -> Option<(i32, i32)> {
+    #[cfg(target_os = "linux")]
+    {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        // (After the name in parentheses: state ppid pgrp session tty_nr tpgid.)
+        let f: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().collect();
+        Some((f.get(3)?.parse().ok()?, f.get(5)?.parse().ok()?))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = ps(pid, "sess=,tpgid=");
+        let mut it = out.split_whitespace().map(|v| v.parse::<i32>().ok());
+        Some((it.next()??, it.next()??))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// TESSERA_CHAIN_PID=<pid>: prints its chain (--ignored --nocapture).
