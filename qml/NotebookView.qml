@@ -406,7 +406,7 @@ FocusScope {
         touch()
     }
 
-    // ---- picking several cards: Ctrl+click, Shift+click, the ○ in a card's header ----
+    // ---- picking several cards: Ctrl+click, Shift+click ----
     property var picked: ({})           // cid -> true
     readonly property int pickedCount: Object.keys(picked).length
     function isPicked(cid) { return picked[cid] === true }
@@ -434,7 +434,7 @@ FocusScope {
         return out.length > 0 ? out : (cells.get(current) ? [current] : [])
     }
     // Move cards (kept in their order) to just before row `to` (cells.count: the end).
-    function moveCells(idxs, to) {
+    function moveCells(idxs, to, quiet) {
         idxs = idxs.slice().sort((a, b) => a - b)
         if (idxs.length === 0) return
         const ids = idxs.map(i => cells.get(i).cid)
@@ -447,6 +447,7 @@ FocusScope {
             if (cur < dest) cells.move(cur, dest - 1, 1); else if (cur > dest) cells.move(cur, dest, 1)
         }
         current = indexOf(ids[0])
+        if (quiet) return
         touch()
         Qt.callLater(() => list.positionViewAtIndex(current, ListView.Contain))
     }
@@ -457,8 +458,48 @@ FocusScope {
         else if (t[t.length - 1] < cells.count - 1) moveCells(t, t[t.length - 1] + 2)
     }
     // A card dragged by its grip: where it would land (a row, or -1).
-    property int dropAt: -1
+    property point dragScene: Qt.point(0, 0)
+    // The dragged card (and the picked ones with it) moves as the pointer
+    // passes the middle of the card next to it.
+    function dragStep() {
+        if (dragCid === "") return
+        const pl = list.mapFromItem(null, dragScene.x, dragScene.y)
+        dragScroll.dir = pl.y < 30 ? -1 : pl.y > list.height - 30 ? 1 : 0
+        const pc = list.contentItem.mapFromItem(null, dragScene.x, dragScene.y)
+        const set = isPicked(dragCid) && pickedCount > 1 ? targets() : [indexOf(dragCid)]
+        const first = set[0], last = set[set.length - 1]
+        const above = first > 0 ? list.itemAtIndex(first - 1) : null
+        const below = last < cells.count - 1 ? list.itemAtIndex(last + 1) : null
+        if (above && pc.y < above.y + above.height / 2) moveCells(set, first - 1, true)
+        else if (below && pc.y > below.y + below.height / 2) moveCells(set, last + 2, true)
+    }
     property string dragCid: ""
+    // (Test hook: TESSERA_TEST_DRAGCARD="a,b" drags card a's grip down/up to
+    // a quarter of the way into card b at 12 s, in steps, and holds it 1 s before letting go.)
+    Timer {
+        interval: 12000
+        running: nb.controller !== null && nb.controller.testEnv("DRAGCARD") !== ""
+        onTriggered: {
+            const ab = nb.controller.testEnv("DRAGCARD").split(",").map(Number)
+            const A = list.itemAtIndex(ab[0]), B = list.itemAtIndex(ab[1])
+            if (!A || !B) return
+            const g = A.gripPos(), t = B.mapToItem(null, 0, B.height / 4)
+            dragDrive.p = [g.x, g.y, g.x, t.y]; dragDrive.step = 0; dragDrive.start()
+        }
+    }
+    Timer {
+        id: dragDrive
+        property var p: []
+        property int step: 0
+        interval: 40; repeat: true
+        onTriggered: {
+            const [x, y1, x2, y2] = p
+            if (step === 0) nb.controller.testMouse(0, x, y1, 1, 0)
+            else if (step <= 20) nb.controller.testMouse(1, x, y1 + (y2 - y1) * step / 20, 1, 0)
+            else if (step === 45) { nb.controller.testMouse(2, x, y2, 1, 0); stop() }
+            ++step
+        }
+    }
     // (Test hook: TESSERA_TEST_PICK picks the first and third cards at 12 s,
     // moves them to the end at 15 s, and deletes them at 18 s; =menu opens
     // their menu instead.)
@@ -2394,27 +2435,12 @@ FocusScope {
         SlimMenuItem { text: "Unpick all"; onTriggered: nb.clearPicks() }
         SlimMenuItem { text: "Delete them\tDelete"; onTriggered: nb.deleteCells(nb.targets()) }
     }
-    // Where a dragged card lands: a line between cards.
-    Rectangle {
-        id: dropLine
-        z: 5
-        visible: nb.dropAt >= 0
-        x: list.x + 4; width: list.width - 20; height: 3; radius: 1.5
-        color: Theme.accent
-        y: {
-            if (nb.dropAt < 0) return 0
-            const last = nb.dropAt >= cells.count
-            const it = list.itemAtIndex(last ? cells.count - 1 : nb.dropAt)
-            if (!it) return -10
-            return list.y + (last ? it.y + it.height + list.spacing / 2 : it.y - list.spacing / 2) - list.contentY - 1.5
-        }
-    }
     // (Dragged near the top or bottom: the list scrolls.)
     Timer {
         id: dragScroll
         property real dir: 0
-        interval: 30; repeat: true; running: nb.dropAt >= 0 && dir !== 0
-        onTriggered: list.contentY = Math.max(list.originY - list.topMargin, Math.min(list.contentY + dir * 14, list.originY + list.contentHeight + list.bottomMargin - list.height))
+        interval: 30; repeat: true; running: nb.dragCid !== "" && dir !== 0
+        onTriggered: { list.contentY = Math.max(list.originY - list.topMargin, Math.min(list.contentY + dir * 14, list.originY + list.contentHeight + list.bottomMargin - list.height)); nb.dragStep() }
     }
     ListView {
         id: list
@@ -2430,6 +2456,9 @@ FocusScope {
         bottomMargin: nb.expandedId !== "" ? 4 : 10
         spacing: 12
         model: cells
+        // (A card dragged past another slides it out of the way.)
+        move: Transition { NumberAnimation { property: "y"; duration: 120; easing.type: Easing.OutQuad } }
+        moveDisplaced: Transition { NumberAnimation { property: "y"; duration: 120; easing.type: Easing.OutQuad } }
         clip: true
         focus: true
         cacheBuffer: 1500
@@ -2532,12 +2561,17 @@ FocusScope {
                      + (hasOutput ? (hideOutput ? 22 : body.height + (body.live ? 14 : 12)) : 4) + (ask ? askBox.height + 6 : 0))
             radius: 8
             color: picked ? Theme.mix(Theme.bg, Theme.accent, 0.12) : plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
-            opacity: nb.dragCid !== "" && (nb.dragCid === cid || (picked && nb.isPicked(nb.dragCid))) ? 0.5 : 1
+            readonly property bool dragged: nb.dragCid !== "" && (nb.dragCid === cid || (picked && nb.isPicked(nb.dragCid)))
+            z: dragged ? 3 : 0
+            scale: dragged ? 1.01 : 1
             border.width: picked ? 2 : 1
             border.color: picked ? Theme.accent : selected && list.activeFocus ? Theme.mix(Theme.divider, Theme.accent, 0.55)
                         : plainMd ? (cellHover.hovered || selected ? Theme.divider : "transparent") : Theme.divider
             function focusEditor() { if (editorLoader.item) editorLoader.item.focusIn() }
+            function gripPos() { return moveGrip.mapToItem(null, moveGrip.width / 2, moveGrip.height / 2) }
             HoverHandler { id: cellHover }
+            // (Ctrl+click picks or unpicks a card, Shift+click a range; a plain
+            // click unpicks them all.)
             TapHandler { acceptedModifiers: Qt.NoModifier; onTapped: { nb.clearPicks(); nb.current = cell.index; if (!(editorLoader.item && editorLoader.item.hasFocus)) list.forceActiveFocus() } }
             TapHandler { acceptedModifiers: Qt.ControlModifier; onTapped: { nb.pickToggle(cell.index); list.forceActiveFocus() } }
             // (Right-click: the picked cards' menu on one of them; on any other
@@ -2566,7 +2600,7 @@ FocusScope {
                     topPadding: 0.001
                     text: "\u283f"
                     color: gripDragC.active || gripHoverC.hovered ? Theme.accent : Theme.textDim
-                    opacity: cellHover.hovered || gripDragC.active || cell.picked ? 1 : 0.35
+                    opacity: cellHover.hovered || gripDragC.active ? 1 : 0.35
                     font.pixelSize: 14
                     Layout.minimumWidth: 10
                     HoverHandler { id: gripHoverC; cursorShape: gripDragC.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
@@ -2578,39 +2612,17 @@ FocusScope {
                         target: null
                         cursorShape: Qt.ClosedHandCursor
                         onActiveChanged: {
-                            if (active) { nb.dragCid = cell.cid; nb.current = cell.index; nb.sticking = false; return }
-                            const to = nb.dropAt, cid = nb.dragCid
-                            nb.dropAt = -1; nb.dragCid = ""; dragScroll.dir = 0
-                            if (to < 0) return
-                            const i = nb.indexOf(cid)
-                            nb.moveCells(nb.isPicked(cid) ? nb.targets() : [i], to)
+                            if (active) {
+                                nb.dragCid = cell.cid; nb.current = cell.index; nb.sticking = false
+                                // (Picked cards travel together: gathered by this one first.)
+                                if (cell.picked && nb.pickedCount > 1) nb.moveCells(nb.targets(), nb.targets()[0], true)
+                                return
+                            }
+                            nb.dragCid = ""; dragScroll.dir = 0
+                            nb.touch()
                         }
-                        onCentroidChanged: {
-                            if (!active) return
-                            const pl = moveGrip.mapToItem(list, centroid.position.x, centroid.position.y)
-                            dragScroll.dir = pl.y < 30 ? -1 : pl.y > list.height - 30 ? 1 : 0
-                            const pc = moveGrip.mapToItem(list.contentItem, centroid.position.x, centroid.position.y)
-                            let at = list.indexAt(20, pc.y)
-                            if (at < 0) { nb.dropAt = pc.y < list.contentItem.childrenRect.y + 20 ? 0 : cells.count; return }
-                            const it = list.itemAtIndex(at)
-                            nb.dropAt = it && pc.y > it.y + it.height / 2 ? at + 1 : at
-                        }
+                        onCentroidChanged: if (active) { nb.dragScene = centroid.scenePosition; nb.dragStep() }
                     }
-                }
-                // Pick it (Ctrl+click or Shift+click on the card does too).
-                Rectangle {
-                    visible: cellHover.hovered || nb.pickedCount > 0
-                    width: 14; height: 14; radius: 7
-                    Layout.alignment: Qt.AlignVCenter
-                    color: cell.picked ? Theme.accent : "transparent"
-                    border.width: 1.5
-                    border.color: cell.picked || pickHover.hovered ? Theme.accent : Theme.textDim
-                    Text { anchors.centerIn: parent; visible: cell.picked; text: "\u2713"; color: Theme.bg; font.pixelSize: 10; font.weight: Font.Bold; topPadding: 0.001 }
-                    HoverHandler { id: pickHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: { nb.pickToggle(cell.index); list.forceActiveFocus() } }
-                    ToolTip.visible: pickHover.hovered
-                    ToolTip.delay: 600
-                    ToolTip.text: (cell.picked ? "Unpick" : "Pick") + " this card, to move or delete several at once (Ctrl+click, Shift+click a range)"
                 }
                 // Status; a click runs it (or stops it). (The spinner turns on its
                 // own, so the mark after it is never left at an angle.)

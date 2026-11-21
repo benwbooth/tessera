@@ -1807,6 +1807,21 @@ ApplicationWindow {
         const n = flickFrames++, tag = flickTag
         rootLayout.grabToImage(r => r.saveToFile(controller.testEnv("FLICKER") + "/" + tag + "-" + (n < 10 ? "0" : "") + n + ".png"))
     }
+    // (Test hook: TESSERA_TEST_CLICKS="x,y;x,y;..." moves to each and left-clicks
+    // it, from 12 s, 1.5 s apart.)
+    Timer {
+        interval: 750; repeat: true
+        running: controller.testEnv("CLICKS") !== ""
+        property var pts: controller.testEnv("CLICKS").split(";").map(q => q.split(",").map(Number))
+        property int n: -16
+        onTriggered: {
+            if (++n < 0) return
+            const q = pts[n >> 1]
+            if (!q) { stop(); return }
+            if (n % 2 === 0) { controller.testMouse(3, q[0] - 1, q[1], 0, 0); controller.testMouse(3, q[0], q[1], 0, 0) }
+            else { controller.testMouse(0, q[0], q[1], 1, 0); controller.testMouse(2, q[0], q[1], 1, 0) }
+        }
+    }
     // (Test hook: TESSERA_TEST_DRAG="x1,y1,x2,y2,mods[,right]" drags (or right-clicks) after 12 s.)
     Timer {
         id: dragTestTimer
