@@ -305,6 +305,9 @@ pub mod ffi {
         /// "duplicate", "copy"/"move" (arg: to folder). "" or the error.
         #[qinvokable]
         fn file_action(self: &Controller, reply: &QString, op: &QString, path: &QString, arg: &QString);
+        /// A program on this computer's PATH: its path, or "" (in the background).
+        #[qinvokable]
+        fn find_program(self: &Controller, reply: &QString, name: &QString);
         /// The desktop's apps for a file's kind: {"mime", "apps": [{id, name,
         /// icon, default}]} (none for another host's file).
         #[qinvokable]
@@ -881,6 +884,16 @@ impl ffi::Controller {
     fn file_action(&self, reply: &ffi::QString, op: &ffi::QString, path: &ffi::QString, arg: &ffi::QString) {
         let (op, path, arg) = (op.to_string(), path.to_string(), arg.to_string());
         self.answer_on(reply, Some("files"), move || file_action_now(op, &path, arg))
+    }
+
+    fn find_program(&self, reply: &ffi::QString, name: &ffi::QString) {
+        let name = name.to_string();
+        self.answer_on(reply, Some("files"), move || {
+            std::env::var_os("PATH")
+                .and_then(|p| std::env::split_paths(&p).map(|d| d.join(&name)).find(|f| f.is_file()))
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default()
+        })
     }
 
     fn file_apps(&self, reply: &ffi::QString, path: &ffi::QString) {

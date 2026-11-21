@@ -552,12 +552,15 @@ Item {
         Async.call(controller, k => controller.fileApps(k, path), r => { try { const j = JSON.parse(r); apps = j.apps || []; appsMime = j.mime || "" } catch (x) {} })
     }
     readonly property bool isArchive: !!(menuEntry && !menuEntry.dir && /\.(tar(\.(gz|xz|bz2|zst))?|tgz|zip|7z|rar)$/i.test(menuEntry.name))
-    // (Disk use, to look through and clean up: gdu (or ncdu), a TUI, in the
-    // card's live terminal; neither installed: gdu from Nix.)
+    // (Disk use, to look through and clean up: gdu, a TUI, in the card's
+    // live terminal; from Nix when it isn't installed.)
     function diskUsage(path) {
         const q = shq(path)
-        commandRequested("if command -v gdu >/dev/null; then gdu " + q + "; elif command -v ncdu >/dev/null; then ncdu " + q + "; else nix run nixpkgs#gdu -- " + q + "; fi")
+        // (Another host's folder: its gdu, else Nix's there, decided by its shell.)
+        if (hostPrefix !== "") { commandRequested("if command -v gdu >/dev/null; then gdu " + shq(bareOf(path)) + "; else nix run nixpkgs#gdu -- " + shq(bareOf(path)) + "; fi"); return }
+        Async.call(controller, k => controller.findProgram(k, "gdu"), found => commandRequested(found !== "" ? "gdu " + q : "nix run nixpkgs#gdu -- " + q))
     }
+    function bareOf(p) { return p.replace(/^ssh:\/\/[^/]*/, "") || "/" }
     SlimMenu {
         id: itemMenu
         readonly property var e: fb.menuEntry || ({ dir: false, exec: false, path: "", name: "" })
@@ -729,7 +732,7 @@ Item {
             }
         }
     }
-    // (Test hook: TESSERA_TEST_FB=go:<name> | menu:<name> | view:<name> | folder | tiles | details | bar.)
+    // (Test hook: TESSERA_TEST_FB=go:<name> | menu:<name> | view:<name> | folder | tiles | details | bar | du.)
     // (…@<folder> only for the card of that folder; …#<ms> after that long.)
     Timer {
         readonly property string spec: fb.controller ? fb.controller.testEnv("FB") : ""
@@ -743,6 +746,7 @@ Item {
             else if (t.startsWith("view:") && e) fb.viewRequested(e.path)
             else if (t === "folder") folderMenu.popup(fb, 40, 30)
             else if (t === "tiles" || t === "details" || t === "list") fb.setView(t)
+            else if (t === "du") fb.diskUsage(fb.dir)
             // (apps:<name> logs its apps; act:<op>:<name>[:<arg>] does op on it;
             // paste:<name> copies it to the desktop's clipboard, then pastes into <name>.d.)
             else if (t.startsWith("apps:") && e) { fb.loadApps(e.path); fb.later(1500, () => console.log("fb test apps: " + fb.appsMime + " " + JSON.stringify(fb.apps.map(a => a.name + (a.default ? "*" : ""))))) }

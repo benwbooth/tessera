@@ -310,7 +310,7 @@ Item {
             // once); the pane's own shell picked: the terminal, a card of its own.)
             if (forNotebook) {
                 const pickL = compose.runShellUsed !== "" ? compose.runShellUsed : compose.runLang
-                if (compose.runShellUsed === "" && compose.langOverride === "bash" && pickL === "bash") {
+                if (compose.commandRun || (compose.runShellUsed === "" && compose.langOverride === "bash" && pickL === "bash")) {
                     if (t.indexOf("\n") < 0) term.sendText(t + "\r"); else { term.pasteText(t); term.sendText("\r") }
                     return
                 }

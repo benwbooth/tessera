@@ -203,7 +203,9 @@ Rectangle {
     }
     // A command from Tessera itself (a prompt widget's choice, a file or
     // variable clicked in the notebook): run as if typed, in the shell.
-    function runCommand(c) { runLang = "bash"; runShellUsed = ""; box.submitted(c) }
+    // (commandRun: while it's submitted, so a notebook runs it in the terminal too.)
+    property bool commandRun: false
+    function runCommand(c) { runLang = "bash"; runShellUsed = ""; commandRun = true; box.submitted(c); commandRun = false }
     function historyStep(d) {
         const h = box.history
         if (h.length === 0) return
