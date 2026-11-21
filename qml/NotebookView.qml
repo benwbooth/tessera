@@ -376,32 +376,94 @@ FocusScope {
         touch()
         if (edit !== false) Qt.callLater(focusCell, at, true)
     }
-    function deleteCell(i) {
-        if (i < 0 || i >= cells.count) return
-        const c = cells.get(i)
-        undoCell = { at: i, cell: JSON.parse(JSON.stringify(c)) }
-        if (c.tid > 0) retire(c.tid)
-        cells.remove(i)
-        current = Math.max(0, Math.min(i, cells.count - 1))
+    function deleteCell(i) { deleteCells([i]) }
+    // (Several at once, the picked cards; Z brings the last lot back.)
+    function deleteCells(idxs) {
+        idxs = idxs.filter(i => i >= 0 && i < cells.count).sort((a, b) => b - a)
+        if (idxs.length === 0) return
+        const gone = []
+        for (const i of idxs) {
+            const c = cells.get(i)
+            gone.unshift({ at: i, cell: JSON.parse(JSON.stringify(c)) })
+            if (c.tid > 0) retire(c.tid)
+            cells.remove(i)
+        }
+        undoCells = gone
+        picked = ({})
+        current = Math.max(0, Math.min(idxs[idxs.length - 1], cells.count - 1))
         touch()
         Qt.callLater(focusCell, current, false)
     }
-    property var undoCell: null
+    property var undoCells: []
     function undoDelete() {
-        if (!undoCell) return
-        cells.insert(Math.min(undoCell.at, cells.count), undoCell.cell)
-        if (undoCell.cell.tid > 0) { retired = retired.filter(t => t !== undoCell.cell.tid); link(undoCell.cell.tid, undoCell.cell.cid) }
-        current = undoCell.at
-        undoCell = null
+        if (undoCells.length === 0) return
+        for (const u of undoCells) {
+            cells.insert(Math.min(u.at, cells.count), u.cell)
+            if (u.cell.tid > 0) { retired = retired.filter(t => t !== u.cell.tid); link(u.cell.tid, u.cell.cid) }
+        }
+        current = undoCells[0].at
+        undoCells = []
         touch()
     }
-    function moveCell(i, d) {
-        const j = i + d
-        if (j < 0 || j >= cells.count) return
-        cells.move(i, j, 1)
-        current = j
-        touch()
+
+    // ---- picking several cards: Ctrl+click, Shift+click, the ○ in a card's header ----
+    property var picked: ({})           // cid -> true
+    readonly property int pickedCount: Object.keys(picked).length
+    function isPicked(cid) { return picked[cid] === true }
+    function pickToggle(i) {
+        const c = cells.get(i); if (!c) return
+        const m = Object.assign({}, picked)
+        if (m[c.cid]) delete m[c.cid]; else m[c.cid] = true
+        picked = m
+        current = i
     }
+    function pickRange(i) {
+        if (!cells.get(i)) return
+        const m = Object.assign({}, picked)
+        const a = Math.min(current, i), b = Math.max(current, i)
+        for (let k = a; k <= b; ++k) if (cells.get(k)) m[cells.get(k).cid] = true
+        picked = m
+        current = i
+    }
+    function pickAll() { const m = {}; for (let k = 0; k < cells.count; ++k) m[cells.get(k).cid] = true; picked = m }
+    function clearPicks() { if (pickedCount > 0) picked = ({}) }
+    // (What a move or delete acts on: the picked cards, else the current one.)
+    function targets() {
+        const out = []
+        for (let k = 0; k < cells.count; ++k) if (picked[cells.get(k).cid]) out.push(k)
+        return out.length > 0 ? out : (cells.get(current) ? [current] : [])
+    }
+    // Move cards (kept in their order) to just before row `to` (cells.count: the end).
+    function moveCells(idxs, to) {
+        idxs = idxs.slice().sort((a, b) => a - b)
+        if (idxs.length === 0) return
+        const ids = idxs.map(i => cells.get(i).cid)
+        const inSet = {}; for (const id of ids) inSet[id] = true
+        while (to < cells.count && inSet[cells.get(to).cid]) ++to
+        const anchor = to < cells.count ? cells.get(to).cid : ""
+        for (const id of ids) {
+            const cur = indexOf(id)
+            const dest = anchor !== "" ? indexOf(anchor) : cells.count
+            if (cur < dest) cells.move(cur, dest - 1, 1); else if (cur > dest) cells.move(cur, dest, 1)
+        }
+        current = indexOf(ids[0])
+        touch()
+        Qt.callLater(() => list.positionViewAtIndex(current, ListView.Contain))
+    }
+    function moveTargets(d) {
+        const t = targets()
+        if (t.length === 0) return
+        if (d < 0) { if (t[0] > 0) moveCells(t, t[0] - 1) }
+        else if (t[t.length - 1] < cells.count - 1) moveCells(t, t[t.length - 1] + 2)
+    }
+    // A card dragged by its grip: where it would land (a row, or -1).
+    property int dropAt: -1
+    property string dragCid: ""
+    // (Test hook: TESSERA_TEST_PICK picks the first and third cards at 12 s,
+    // moves them to the end at 15 s, and deletes them at 18 s.)
+    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("PICK") !== ""; onTriggered: { nb.pickToggle(0); nb.pickToggle(2); pickStep.start() } }
+    Timer { id: pickStep; interval: 3000; property int n: 0; onTriggered: { if (n++ === 0) { nb.moveCells(nb.targets(), cells.count); start() } else nb.deleteCells(nb.targets()) } }
+    function moveCell(i, d) { moveCells([i], d < 0 ? i - 1 : i + 2) }
     function setType(i, type) {
         if (cells.get(i).type === type) return
         // (A file's card stays one: M on it made it a Markdown cell of its path.)
@@ -513,6 +575,7 @@ FocusScope {
     // comes, its pid and status, and Stop; the Jobs list has them all.
     // What runs it: "shell" (the pane's shell), "tessh", or "" (can't).
     function bgLang(c) {
+        if (!c) return ""
         const L = c.lang !== "" ? c.lang : shellKernel ? "shell" : language
         if (L === "tessh") return "tessh"
         if (L === "shell" || ["bash", "zsh", "sh", "fish"].indexOf(L) >= 0) return view || L !== "shell" ? "shell" : ""
@@ -2274,9 +2337,54 @@ FocusScope {
             }
         }
     }
+    // Picked cards: how many, and what to do with them.
+    Rectangle {
+        id: pickBar
+        anchors.top: jobsHead.bottom
+        width: parent.width
+        visible: nb.pickedCount > 0 && !nb.jobsView
+        height: visible ? 34 : 0
+        z: 2
+        color: Theme.mix(Theme.panel, Theme.accent, 0.12)
+        RowLayout {
+            x: 12; width: parent.width - 24
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
+            Text { text: nb.pickedCount + (nb.pickedCount === 1 ? " card" : " cards") + " picked"; color: Theme.text; font.pixelSize: 12; font.weight: Font.DemiBold; topPadding: 0.001; Layout.fillWidth: true }
+            Chip { base: pickBar.color; label: "\u2191 Up"; tip: "Move them up a card (Alt+Up)"; onClicked: nb.moveTargets(-1) }
+            Chip { base: pickBar.color; label: "\u2193 Down"; tip: "Move them down a card (Alt+Down)"; onClicked: nb.moveTargets(1) }
+            Chip { base: pickBar.color; label: "\u2912 Top"; tip: "Move them to the top"; onClicked: nb.moveCells(nb.targets(), 0) }
+            Chip { base: pickBar.color; label: "\u2913 Bottom"; tip: "Move them to the end"; onClicked: nb.moveCells(nb.targets(), cells.count) }
+            Chip { base: pickBar.color; label: "\u2715 Delete"; tip: "Delete them (Delete; Z brings them back)"; onClicked: nb.deleteCells(nb.targets()) }
+            Chip { base: pickBar.color; label: "All"; tip: "Pick every card (Ctrl+A)"; onClicked: nb.pickAll() }
+            Chip { base: pickBar.color; label: "None"; tip: "Unpick them all"; onClicked: nb.clearPicks() }
+        }
+    }
+    // Where a dragged card lands: a line between cards.
+    Rectangle {
+        id: dropLine
+        z: 5
+        visible: nb.dropAt >= 0
+        x: list.x + 4; width: list.width - 20; height: 3; radius: 1.5
+        color: Theme.accent
+        y: {
+            if (nb.dropAt < 0) return 0
+            const last = nb.dropAt >= cells.count
+            const it = list.itemAtIndex(last ? cells.count - 1 : nb.dropAt)
+            if (!it) return -10
+            return list.y + (last ? it.y + it.height + list.spacing / 2 : it.y - list.spacing / 2) - list.contentY - 1.5
+        }
+    }
+    // (Dragged near the top or bottom: the list scrolls.)
+    Timer {
+        id: dragScroll
+        property real dir: 0
+        interval: 30; repeat: true; running: nb.dropAt >= 0 && dir !== 0
+        onTriggered: list.contentY = Math.max(list.originY - list.topMargin, Math.min(list.contentY + dir * 14, list.originY + list.contentHeight + list.bottomMargin - list.height))
+    }
     ListView {
         id: list
-        anchors.top: jobsHead.bottom
+        anchors.top: pickBar.bottom
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -2314,6 +2422,15 @@ FocusScope {
             if (enter && (e.modifiers & Qt.ShiftModifier)) { nb.run(i); nb.focusCell(nb.step(i, 1), false); e.accepted = true }
             else if (enter && (e.modifiers & Qt.ControlModifier)) { nb.run(i); e.accepted = true }
             else if (enter) { nb.focusCell(i, true); e.accepted = true }
+            // (Alt+Up/Down moves the card, or the picked ones; Shift+Up/Down picks
+            // as it goes; Ctrl+A picks them all.)
+            else if ((e.key === Qt.Key_Up || e.key === Qt.Key_Down) && (e.modifiers & Qt.AltModifier) && !(e.modifiers & Qt.ControlModifier)) { nb.moveTargets(e.key === Qt.Key_Up ? -1 : 1); e.accepted = true }
+            else if ((e.key === Qt.Key_Up || e.key === Qt.Key_Down) && (e.modifiers & Qt.ShiftModifier) && plain) {
+                const j = nb.step(i, e.key === Qt.Key_Up ? -1 : 1)
+                if (nb.pickedCount === 0) nb.pickToggle(i)
+                nb.pickRange(j); nb.focusCell(j, false); e.accepted = true
+            }
+            else if (e.key === Qt.Key_A && (e.modifiers & Qt.ControlModifier)) { nb.pickAll(); e.accepted = true }
             else if ((e.key === Qt.Key_Up || e.key === Qt.Key_K) && plain) { nb.focusCell(nb.step(i, -1), false); e.accepted = true }
             else if ((e.key === Qt.Key_Down || e.key === Qt.Key_J) && plain) { nb.focusCell(nb.step(i, 1), false); e.accepted = true }
             else if (e.key === Qt.Key_A && plain) { nb.insertCell(i, "code"); e.accepted = true }
@@ -2323,9 +2440,9 @@ FocusScope {
             else if (e.key === Qt.Key_Z && plain) { nb.undoDelete(); e.accepted = true }
             else if (e.key === Qt.Key_O && plain && cells.get(i)) { cells.setProperty(i, "hideOutput", !cells.get(i).hideOutput); nb.touch(); e.accepted = true }
             else if (e.key === Qt.Key_D && plain) {
-                if (nb.dPending) { nb.dPending = false; nb.deleteCell(i) } else { nb.dPending = true; dTimer.restart() }
+                if (nb.dPending) { nb.dPending = false; nb.deleteCells(nb.targets()) } else { nb.dPending = true; dTimer.restart() }
                 e.accepted = true
-            } else if (e.key === Qt.Key_Delete && plain) { nb.deleteCell(i); e.accepted = true }
+            } else if (e.key === Qt.Key_Delete && plain) { nb.deleteCells(nb.targets()); e.accepted = true }
         }
 
         delegate: Rectangle {
@@ -2358,6 +2475,7 @@ FocusScope {
             readonly property var ask: nb.asking[cid] || null
             readonly property var langKernel: lang !== "" ? nb.langKernels[lang] || null : null
             readonly property bool selected: nb.current === index
+            readonly property bool picked: nb.isPicked(cid)
             readonly property bool code: type !== "markdown"
             readonly property bool fromTerm: tid > 0
             readonly property var outs: { try { return JSON.parse(outputs) } catch (e) { return [] } }
@@ -2379,12 +2497,16 @@ FocusScope {
             height: !wanted ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
                      + (hasOutput ? (hideOutput ? 22 : body.height + (body.live ? 14 : 12)) : 4) + (ask ? askBox.height + 6 : 0))
             radius: 8
-            color: plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
-            border.color: selected && list.activeFocus ? Theme.mix(Theme.divider, Theme.accent, 0.55)
+            color: picked ? Theme.mix(Theme.bg, Theme.accent, 0.12) : plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
+            opacity: nb.dragCid !== "" && (nb.dragCid === cid || (picked && nb.isPicked(nb.dragCid))) ? 0.5 : 1
+            border.width: picked ? 2 : 1
+            border.color: picked ? Theme.accent : selected && list.activeFocus ? Theme.mix(Theme.divider, Theme.accent, 0.55)
                         : plainMd ? (cellHover.hovered || selected ? Theme.divider : "transparent") : Theme.divider
             function focusEditor() { if (editorLoader.item) editorLoader.item.focusIn() }
             HoverHandler { id: cellHover }
-            TapHandler { onTapped: { nb.current = cell.index; if (!(editorLoader.item && editorLoader.item.hasFocus)) list.forceActiveFocus() } }
+            TapHandler { acceptedModifiers: Qt.NoModifier; onTapped: { nb.clearPicks(); nb.current = cell.index; if (!(editorLoader.item && editorLoader.item.hasFocus)) list.forceActiveFocus() } }
+            TapHandler { acceptedModifiers: Qt.ControlModifier; onTapped: { nb.pickToggle(cell.index); list.forceActiveFocus() } }
+            TapHandler { acceptedModifiers: Qt.ShiftModifier; onTapped: { if (nb.pickedCount === 0) nb.pickToggle(nb.current); nb.pickRange(cell.index); list.forceActiveFocus() } }
 
             // ---- header: status, the code, folder, time, view ----
             RowLayout {
@@ -2395,6 +2517,58 @@ FocusScope {
                 // (Taller when a path in it needs two lines: paths are shown whole.)
                 height: Math.max(26, implicitHeight + 6)
                 spacing: 6
+                // Drag to move the card (the picked ones with it, if it's picked).
+                Text {
+                    id: moveGrip
+                    topPadding: 0.001
+                    text: "\u283f"
+                    color: gripDragC.active || gripHoverC.hovered ? Theme.accent : Theme.textDim
+                    opacity: cellHover.hovered || gripDragC.active || cell.picked ? 1 : 0.35
+                    font.pixelSize: 14
+                    Layout.minimumWidth: 10
+                    HoverHandler { id: gripHoverC; cursorShape: gripDragC.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor }
+                    ToolTip.visible: gripHoverC.hovered && !gripDragC.active
+                    ToolTip.delay: 600
+                    ToolTip.text: "Drag to move the card" + (nb.pickedCount > 0 ? " (the picked ones go together)" : "")
+                    DragHandler {
+                        id: gripDragC
+                        target: null
+                        cursorShape: Qt.ClosedHandCursor
+                        onActiveChanged: {
+                            if (active) { nb.dragCid = cell.cid; nb.current = cell.index; nb.sticking = false; return }
+                            const to = nb.dropAt, cid = nb.dragCid
+                            nb.dropAt = -1; nb.dragCid = ""; dragScroll.dir = 0
+                            if (to < 0) return
+                            const i = nb.indexOf(cid)
+                            nb.moveCells(nb.isPicked(cid) ? nb.targets() : [i], to)
+                        }
+                        onCentroidChanged: {
+                            if (!active) return
+                            const pl = moveGrip.mapToItem(list, centroid.position.x, centroid.position.y)
+                            dragScroll.dir = pl.y < 30 ? -1 : pl.y > list.height - 30 ? 1 : 0
+                            const pc = moveGrip.mapToItem(list.contentItem, centroid.position.x, centroid.position.y)
+                            let at = list.indexAt(20, pc.y)
+                            if (at < 0) { nb.dropAt = pc.y < list.contentItem.childrenRect.y + 20 ? 0 : cells.count; return }
+                            const it = list.itemAtIndex(at)
+                            nb.dropAt = it && pc.y > it.y + it.height / 2 ? at + 1 : at
+                        }
+                    }
+                }
+                // Pick it (Ctrl+click or Shift+click on the card does too).
+                Rectangle {
+                    visible: cellHover.hovered || nb.pickedCount > 0
+                    width: 14; height: 14; radius: 7
+                    Layout.alignment: Qt.AlignVCenter
+                    color: cell.picked ? Theme.accent : "transparent"
+                    border.width: 1.5
+                    border.color: cell.picked || pickHover.hovered ? Theme.accent : Theme.textDim
+                    Text { anchors.centerIn: parent; visible: cell.picked; text: "\u2713"; color: Theme.bg; font.pixelSize: 10; font.weight: Font.Bold; topPadding: 0.001 }
+                    HoverHandler { id: pickHover; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { onTapped: { nb.pickToggle(cell.index); list.forceActiveFocus() } }
+                    ToolTip.visible: pickHover.hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: (cell.picked ? "Unpick" : "Pick") + " this card, to move or delete several at once (Ctrl+click, Shift+click a range)"
+                }
                 // Status; a click runs it (or stops it). (The spinner turns on its
                 // own, so the mark after it is never left at an angle.)
                 Text { topPadding: 0.001;
@@ -2622,8 +2796,8 @@ FocusScope {
                 Chip { id: moreChip; base: cell.color; label: "⋯"; tip: "More"; Layout.minimumWidth: implicitWidth
                        onClicked: moreMenu.popup(moreChip, 0, moreChip.height + 2) }
                 // (Delete in reach, not in the menu: Z in the notebook brings it back.)
-                Chip { base: cell.color; label: "\u2715"; tip: "Delete this card (Z brings it back)"; Layout.minimumWidth: implicitWidth
-                       onClicked: nb.deleteCell(cell.index) }
+                Chip { base: cell.color; label: "\u2715"; tip: cell.picked && nb.pickedCount > 1 ? "Delete the " + nb.pickedCount + " picked cards (Z brings them back)" : "Delete this card (Z brings it back)"; Layout.minimumWidth: implicitWidth
+                       onClicked: cell.picked ? nb.deleteCells(nb.targets()) : nb.deleteCell(cell.index) }
                 // (Test hook: TESSERA_TEST_EXPAND_CELL fills the window with the first cell.)
                 Timer { interval: 2500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("EXPAND_CELL") !== ""; onTriggered: nb.expandedId = cell.cid }
                 // (Test hook: TESSERA_TEST_OPEN_MORE_MENU opens the first card's ⋯ menu.)
