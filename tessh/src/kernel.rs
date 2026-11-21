@@ -178,8 +178,8 @@ fn py_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> Value {
 fn mimebundle(py: Python<'_>, obj: &Bound<'_, PyAny>) -> (Map<String, Value>, Map<String, Value>) {
     let mut data = Map::new();
     let mut meta = Map::new();
-    if let Ok(r) = obj.repr() {
-        data.insert("text/plain".into(), Value::String(r.to_string()));
+    if let Ok(r) = runtime::pretty_text(py, obj, Some(true)).or_else(|_| obj.repr().map(|r| r.to_string())) {
+        data.insert("text/plain".into(), Value::String(r));
     }
     if let Ok(f) = obj.getattr("_repr_mimebundle_") {
         if let Ok(b) = f.call0() {
@@ -600,6 +600,7 @@ pub fn run(conn_file: &str) -> i32 {
             publish("tessera_exec", v)
         });
         runtime::set_display(wrap_pyfunction!(display_hook, py)?.into_any().unbind());
+        runtime::set_notebook(py)?;
         let sys = py.import("sys")?;
         for s in ["stdout", "stderr"] {
             let kw = PyDict::new(py);

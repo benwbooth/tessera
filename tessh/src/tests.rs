@@ -432,3 +432,19 @@ fn cd_takes_bash_options() {
     assert_eq!(lines[4], format!("{d}/cp/proj"), "popd +1 drops one");
     assert_eq!(&lines[5..], [format!("{d}/cp/proj").as_str()], "dirs -l -p");
 }
+
+#[test]
+fn print_lays_out_values() {
+    let (_, out) = run("print small [1 2] {a: 1} (1,)\nxs = [1 2]\n$xs.append $xs\nprint $xs\nprint (pretty {k: [(str $i) for i in (range 30)]} width=40 color=False)");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "small [1, 2] {'a': 1} (1,)", "short values stay on one line, text as text");
+    assert_eq!(lines[1], "[1, 2, [...]]");
+    assert_eq!(lines[2..5], ["{", "  'k': [", "    '0', '1', '2', '3', '4', '5', '6',"], "long ones break, indented, plain values packed");
+    assert_eq!(lines[lines.len() - 2..], ["  ],", "}"]);
+    Python::attach(|py| {
+        let v = pyo3::types::PyDict::new(py);
+        v.set_item("a", vec![1, 2]).unwrap();
+        let c = crate::runtime::pretty_text(py, v.as_any(), Some(true)).unwrap();
+        assert!(c.contains("\x1b[36m'a'\x1b[0m") && c.contains("\x1b[33m1\x1b[0m"), "{c:?}");
+    });
+}

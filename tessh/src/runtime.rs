@@ -88,6 +88,149 @@ class Output(str):
         r = str.__repr__(self)
         return r if self.code == 0 else f"Output({r}, code={self.code})"
 
+# ---- pretty printing ------------------------------------------------------
+
+_notebook = False   # (the kernel sets it: cards show color)
+
+def _wants_color(f=None):
+    import os, sys
+    if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+        return False
+    if _notebook:
+        return True
+    f = f if f is not None else sys.stdout
+    try:
+        return f.isatty()
+    except Exception:
+        return False
+
+def _width():
+    import os, shutil
+    try:
+        return int(os.environ["COLUMNS"])
+    except (KeyError, ValueError):
+        pass
+    return shutil.get_terminal_size((100, 24)).columns if not _notebook else 100
+
+_COLORS = {"str": "32", "num": "33", "key": "36", "const": "35", "punct": "90", "name": "34"}
+
+def _shown_len(s):
+    import re
+    return len(re.sub("\x1b\\[[0-9;]*m", "", s))
+
+def _kind(x):
+    import dataclasses
+    t = type(x)
+    if t in (list, tuple, set, frozenset, dict):
+        return t.__name__
+    if isinstance(x, tuple) and hasattr(t, "_fields"):
+        return "record"
+    if dataclasses.is_dataclass(x) and not isinstance(x, type) and t.__dataclass_params__.repr:
+        return "record"
+    return None
+
+def pretty(x, color=None, width=None, indent=0):
+    """x as text to read: lists, dicts, sets, tuples and records (dataclasses,
+    namedtuples) laid out over indented lines when they don't fit on one,
+    colored by type (strings, numbers, keys, None/True/False) when color is
+    true; None (the default) colors when the output is a terminal or a
+    notebook.  print uses it for these.  pretty {a: [1 2]} -> "{'a': [1, 2]}" """
+    if color is None:
+        color = _wants_color()
+    if width is None:
+        width = _width()
+    def c(kind, t):
+        return f"\x1b[{_COLORS[kind]}m{t}\x1b[0m" if color else t
+    def parts(x):
+        """(name, open, [(key or None, value)], close) for a container, else None."""
+        k = _kind(x)
+        if k == "list":
+            return "", "[", [(None, v) for v in x], "]"
+        if k == "tuple":
+            return "", "(", [(None, v) for v in x], ",)" if len(x) == 1 else ")"
+        if k in ("set", "frozenset"):
+            if not x:
+                return k, "(", [], ")"
+            try:
+                items = sorted(x)
+            except TypeError:
+                items = list(x)
+            return ("", "{", [(None, v) for v in items], "}") if k == "set" else ("frozenset", "({", [(None, v) for v in items], "})")
+        if k == "dict":
+            return "", "{", [(("key", kk), v) for kk, v in x.items()], "}"
+        if k == "record":
+            import dataclasses
+            if dataclasses.is_dataclass(x):
+                fs = [(("field", f.name), getattr(x, f.name)) for f in dataclasses.fields(x) if f.repr]
+            else:
+                fs = [(("field", n), getattr(x, n)) for n in type(x)._fields]
+            return type(x).__name__, "(", fs, ")"
+        return None
+    def scalar(x):
+        if x is None or x is True or x is False or x is Ellipsis:
+            return c("const", repr(x))
+        if type(x) in (int, float, complex):
+            return c("num", repr(x))
+        if isinstance(x, (str, bytes)):
+            return c("str", repr(x))
+        return repr(x)
+    def key(k):
+        kind, v = k
+        if kind == "field":
+            return c("key", v) + c("punct", "=")
+        return (c("key", repr(v)) if isinstance(v, str) else scalar(v)) + c("punct", ": ")
+    seen = set()
+    def flat(x):
+        p = parts(x)
+        if p is None:
+            return scalar(x)
+        n, o, items, e = p
+        if id(x) in seen:
+            return c("punct", o + "..." + e)
+        seen.add(id(x))
+        inner = c("punct", ", ").join((key(k) if k else "") + flat(v) for k, v in items)
+        seen.discard(id(x))
+        return (c("name", n) if n else "") + c("punct", o) + inner + c("punct", e)
+    def lay(x, at, col):
+        """x with its lines indented by at, starting at column col."""
+        one = flat(x)
+        p = parts(x)
+        if p is None or col + _shown_len(one) < width or not p[2] or id(x) in seen:
+            return one
+        seen.add(id(x))
+        n, o, items, e = p
+        pad = " " * (at + 2)
+        lines = []
+        # (Plain values with no keys: as many to a line as fit.)
+        if all(k is None and parts(v) is None for k, v in items):
+            row = ""
+            for _, v in items:
+                t = scalar(v) + c("punct", ",")
+                if row and _shown_len(pad + row + " " + t) > width:
+                    lines.append(pad + row)
+                    row = ""
+                row = row + " " + t if row else t
+            lines.append(pad + row)
+            items = []
+        for k, v in items:
+            head = key(k) if k else ""
+            lines.append(pad + head + lay(v, at + 2, at + 2 + _shown_len(head) + 1) + c("punct", ","))
+        seen.discard(id(x))
+        return (c("name", n) if n else "") + c("punct", o) + "\n" + "\n".join(lines) + "\n" + " " * at + c("punct", e)
+    return lay(x, indent, indent)
+
+def print(*args, sep=" ", end="\n", file=None, flush=False):
+    """print: values separated by spaces and a newline after them, as
+    Python's print; lists, dicts, sets, tuples and records are laid out by
+    pretty (indented over lines when long, colored on a terminal or in a
+    notebook).  print $config"""
+    import builtins, sys
+    out = file if file is not None else sys.stdout
+    if file is None or file is sys.stdout:
+        color = _wants_color(out)
+        args = [pretty(a, color=color) if _kind(a) else a for a in args]
+    builtins.print(*args, sep=sep, end=end, file=out, flush=flush)
+
 class _Glob(str):
     pass
 
@@ -417,11 +560,23 @@ fn show(py: Python<'_>, v: Bound<'_, PyAny>) -> PyResult<()> {
         }
         None => {
             py.import("builtins")?.setattr("_", &v)?;
-            let r = v.repr()?.to_string();
+            let r = pretty_text(py, &v, None)?;
             py.import("builtins")?.getattr("print")?.call1((r,))?;
         }
     }
     Ok(())
+}
+
+/// A value as pretty shows it (color: None for "when it's a terminal or notebook").
+pub fn pretty_text(py: Python<'_>, v: &Bound<'_, PyAny>, color: Option<bool>) -> PyResult<String> {
+    let kw = PyDict::new(py);
+    kw.set_item("color", color)?;
+    prelude(py)?.getattr("pretty")?.call((v,), Some(&kw))?.extract()
+}
+
+/// In the kernel: values go to notebook cards, which show color.
+pub fn set_notebook(py: Python<'_>) -> PyResult<()> {
+    prelude(py)?.setattr("_notebook", true)
 }
 
 fn is_attached_output(v: &Bound<'_, PyAny>) -> bool {
@@ -1796,6 +1951,8 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     for n in CORE {
         m.add(*n, prelude(py)?.getattr(*n)?)?;
     }
+    m.add("print", prelude(py)?.getattr("print")?)?;
+    m.add("pretty", prelude(py)?.getattr("pretty")?)?;
     m.add("env", Py::new(py, Env)?)?;
     for n in COMMAND_BUILTINS {
         m.add(*n, Py::new(py, Builtin { name: n })?)?;
@@ -1808,7 +1965,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help"].iter()).chain(CORE.iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help", "print", "pretty"].iter()).chain(CORE.iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }

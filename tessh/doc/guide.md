@@ -967,7 +967,7 @@ ended at 0
 ```
 
 ## Collections
-<!-- help: collections list lists dict dicts set tuple slices slice literals -->
+<!-- help: collections list lists dict dicts set tuple slices slice literals pretty pprint print -->
 
 `[1 2 3]` is a list; with commas each part is an expression. `{a: 1}` is a
 dict with string keys from barewords, `{$k: 1}` uses a variable. `{1 2}` is a
@@ -984,6 +984,12 @@ print $xs[2:5] $xs[::3] $xs[-2:] $xs[:2]
 [1, 2, 3] [2, 3] {'a': 1, 'b': [2, 3]} {'key': 1} {1, 2} () (1, 2) {}
 [2, 3, 4] [0, 3, 6, 9] [8, 9] [0, 1]
 ```
+
+`print` lays out a list, dict, set, tuple or record (a dataclass or
+namedtuple) that doesn't fit on a line over indented lines, and colors it
+by type on a terminal or in a notebook (not when piped, or with `NO_COLOR`).
+A cell's or the REPL's value is shown the same way. `pretty x` gives the
+text, with `width=` and `color=` to choose.
 
 ## Comprehensions
 <!-- help: comprehensions comprehension generator genexpr -->
