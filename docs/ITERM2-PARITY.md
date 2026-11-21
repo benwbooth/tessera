@@ -179,7 +179,7 @@ click in a terminal opens a context menu.
 | Setting | | Notes |
 |---|---|---|
 | Theme (window chrome) | ✅ | follows the terminal theme, light or dark |
-| Unified title bar (Minimal/Compact themes) | ✅ | the tab bar is the title bar: KDE Breeze buttons on Linux, Windows buttons on Windows, native traffic lights on macOS |
+| Unified title bar (Minimal/Compact themes) | ✅ | the tab bar is the title bar: KDE Breeze buttons (minimize, maximize, close) on the right on every platform |
 | Tab bar location | ✅ | top or bottom (left/right 🔜) |
 | Show tab bar with one tab | ✅ | |
 | Show tab numbers | ✅ | |

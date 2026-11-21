@@ -32,18 +32,16 @@ ApplicationWindow {
     objectName: "tessera-main"
     property bool showAtStart: true
     color: useTransparency && activeProfile.transparency > 0 ? "transparent" : Theme.bg
-    // A unified title bar: the tab strip *is* the title bar. macOS keeps its
-    // own traffic lights inside it; elsewhere the window has no system frame
-    // and the bar draws KDE (Breeze) or Windows buttons and moves the window.
-    readonly property bool macOS: Qt.platform.os === "osx"
+    // A unified title bar: the tab strip *is* the title bar. The window has
+    // no system frame; the bar draws KDE Breeze buttons on the right and
+    // moves the window.
     palette.toolTipBase: Theme.panel
     palette.toolTipText: Theme.text
     palette.highlight: Theme.mix(Theme.panel, Theme.accent, 0.35)
     palette.highlightedText: Theme.text
     palette.light: Theme.mix(Theme.panel, Theme.accent, 0.22)
     palette.midlight: Theme.mix(Theme.panel, Theme.accent, 0.35)
-    flags: macOS ? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
-                 : (Qt.Window | Qt.FramelessWindowHint)
+    flags: Qt.Window | Qt.FramelessWindowHint
     title: (controller.isAdmin() ? "Administrator: " : "")
            + (customTitle !== "" ? customTitle : (activeView && activeView.title ? activeView.title : "Tessera"))
 
@@ -2348,7 +2346,7 @@ ApplicationWindow {
             BarButton {
                 id: menuButton
                 anchors.left: parent.left
-                anchors.leftMargin: win.macOS ? 78 : 6
+                anchors.leftMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 icon: "menu"
                 tip: "Menu"
@@ -2414,7 +2412,11 @@ ApplicationWindow {
             Text {
                 visible: !(showTabs && !tabsAtBottom)
                 anchors.centerIn: parent
+                anchors.verticalCenterOffset: 0.001
+                anchors.horizontalCenterOffset: 0.001
                 width: Math.min(implicitWidth, parent.width - 2 * (controls.width + 60))
+                horizontalAlignment: Text.AlignHCenter
+                renderType: Text.NativeRendering
                 text: win.title
                 color: win.active ? Theme.text : Theme.textDim
                 font.pixelSize: 13
@@ -2424,8 +2426,6 @@ ApplicationWindow {
 
             WindowControls {
                 id: controls
-                visible: !win.macOS
-                width: win.macOS ? 0 : implicitWidth
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
@@ -2491,7 +2491,7 @@ ApplicationWindow {
         id: edges
         anchors.fill: parent
         z: 10000
-        visible: !win.macOS && win.visibility !== Window.Maximized && win.visibility !== Window.FullScreen
+        visible: win.visibility !== Window.Maximized && win.visibility !== Window.FullScreen
         readonly property int grip: 5
         component Edge: MouseArea {
             property int edgesToMove
