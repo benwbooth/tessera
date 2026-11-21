@@ -25,16 +25,25 @@ QtObject {
     function isWord(c) { return /[A-Za-z0-9_]/.test(c) }
     function lineStart(p) { return edit.text.lastIndexOf("\n", p - 1) + 1 }
     function lineEnd(p) { const i = edit.text.indexOf("\n", p); return i < 0 ? edit.text.length : i }
+    // (As VS Code moves by word: past spaces, then one run, either word
+    // characters or punctuation ("${ is one), never over a line's end. Bash's
+    // readline skips all punctuation, so print "${ went in one go.)
+    function isSpace(c) { return c === " " || c === "\t" }
+    function isBreak(c) { return c === "\n" || c === "\u2029" }
     function wordRight(p) {
-        const t = edit.text
-        while (p < t.length && !isWord(t[p])) p++
-        while (p < t.length && isWord(t[p])) p++
+        const t = edit.text, s = p
+        while (p < t.length && isSpace(t[p])) p++
+        if (p < t.length && isBreak(t[p])) return p > s ? p : p + 1
+        if (p < t.length && isWord(t[p])) { while (p < t.length && isWord(t[p])) p++ }
+        else { while (p < t.length && !isWord(t[p]) && !isSpace(t[p]) && !isBreak(t[p])) p++ }
         return p
     }
     function wordLeft(p) {
-        const t = edit.text
-        while (p > 0 && !isWord(t[p - 1])) p--
-        while (p > 0 && isWord(t[p - 1])) p--
+        const t = edit.text, s = p
+        while (p > 0 && isSpace(t[p - 1])) p--
+        if (p > 0 && isBreak(t[p - 1])) return p < s ? p : p - 1
+        if (p > 0 && isWord(t[p - 1])) { while (p > 0 && isWord(t[p - 1])) p-- }
+        else { while (p > 0 && !isWord(t[p - 1]) && !isSpace(t[p - 1]) && !isBreak(t[p - 1])) p-- }
         return p
     }
     function wordEnd(p) {

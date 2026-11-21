@@ -228,16 +228,25 @@ Rectangle {
     function lineStart(p) { return edit.text.lastIndexOf("\n", p - 1) + 1 }
     function lineEnd(p) { const i = edit.text.indexOf("\n", p); return i < 0 ? edit.text.length : i }
     function isWord(c) { return /[A-Za-z0-9_]/.test(c) }
+    // (As VS Code moves by word: past spaces, then one run, either word
+    // characters or punctuation ("${ is one), never over a line's end. Bash's
+    // readline skips all punctuation, so print "${ went in one go.)
+    function isSpace(c) { return c === " " || c === "\t" }
+    function isBreak(c) { return c === "\n" || c === "\u2029" }
     function wordRight(p) {
-        const t = edit.text
-        while (p < t.length && !isWord(t[p])) p++
-        while (p < t.length && isWord(t[p])) p++
+        const t = edit.text, s = p
+        while (p < t.length && isSpace(t[p])) p++
+        if (p < t.length && isBreak(t[p])) return p > s ? p : p + 1
+        if (p < t.length && isWord(t[p])) { while (p < t.length && isWord(t[p])) p++ }
+        else { while (p < t.length && !isWord(t[p]) && !isSpace(t[p]) && !isBreak(t[p])) p++ }
         return p
     }
     function wordLeft(p) {
-        const t = edit.text
-        while (p > 0 && !isWord(t[p - 1])) p--
-        while (p > 0 && isWord(t[p - 1])) p--
+        const t = edit.text, s = p
+        while (p > 0 && isSpace(t[p - 1])) p--
+        if (p > 0 && isBreak(t[p - 1])) return p < s ? p : p - 1
+        if (p > 0 && isWord(t[p - 1])) { while (p > 0 && isWord(t[p - 1])) p-- }
+        else { while (p > 0 && !isWord(t[p - 1]) && !isSpace(t[p - 1]) && !isBreak(t[p - 1])) p-- }
         return p
     }
     function wordEnd(p) {
@@ -258,6 +267,43 @@ Rectangle {
     // ---- VS Code-style editing: indentation, pairs -------------------------
     readonly property string indentUnit: lang === "python" ? "    " : "  "
     readonly property var pairs: ({ "(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'", "`": "`" })
+    // As VS Code does it: a pair is typed only before whitespace, the line's
+    // end or one of these (autoCloseBefore), a quote not inside a string or
+    // after a word; the closers it put in (and only those) are typed over and
+    // go with their opener on Backspace, until the cursor leaves the pair.
+    readonly property string closeBefore: ";:.,=}])> \t\n"
+    property var autoPairs: []          // [{open, close}]: the pairs typed for you, by position
+    function trackPairs(was, now) {
+        if (autoPairs.length === 0) return
+        // (What changed: the same start and end, the middle replaced.)
+        let a = 0
+        const n = Math.min(was.length, now.length)
+        while (a < n && was[a] === now[a]) ++a
+        let b = 0
+        while (b < n - a && was[was.length - 1 - b] === now[now.length - 1 - b]) ++b
+        const endWas = was.length - b, delta = now.length - was.length
+        const out = []
+        for (const q of autoPairs) {
+            const o = q.open < a ? q.open : q.open >= endWas ? q.open + delta : -1
+            const c = q.close < a ? q.close : q.close >= endWas ? q.close + delta : -1
+            if (o >= 0 && c > o) out.push({ open: o, close: c })
+        }
+        autoPairs = out
+    }
+    function prunePairs() { const c = edit.cursorPosition; if (autoPairs.length) autoPairs = autoPairs.filter(q => c > q.open && c <= q.close) }
+    function autoPairAt(close) { return autoPairs.findIndex(q => q.close === close) }
+    // (Inside a string on this line, before p: a quote opened and not closed.)
+    function inString(p) {
+        const t = edit.text, a = lineStart(p)
+        let q = ""
+        for (let i = a; i < p; ++i) {
+            const c = t[i]
+            if (q !== "") { if (c === "\\") ++i; else if (c === q) q = "" }
+            else if (c === "\"" || c === "'" || c === "`") q = c
+            else if (c === "#" && lang !== "javascript" && lang !== "typescript") break   // (a comment)
+        }
+        return q !== ""
+    }
     function indentOf(p) {
         const a = lineStart(p)
         let i = a
@@ -379,7 +425,8 @@ Rectangle {
         if (e.key === Qt.Key_Backspace && p > 0 && !edit.selectedText) {
             // Between a pair: remove both. In indentation: a whole level.
             const o = t[p - 1]
-            if (pairs[o] && t[p] === pairs[o]) { edit.remove(p - 1, p + 1); return true }
+            const k = autoPairAt(p)
+            if (pairs[o] && t[p] === pairs[o] && k >= 0 && autoPairs[k].open === p - 1) { edit.remove(p - 1, p + 1); return true }
             const lead = t.substring(lineStart(p), p)
             if (lead.length > 0 && /^ +$/.test(lead)) {
                 const n = ((lead.length - 1) % indentUnit.length) + 1
@@ -390,10 +437,16 @@ Rectangle {
         }
         const ch = e.text
         if (ch.length !== 1) return false
-        // Over a closer that's already there: step past it.
+        // Over a closer typed for you: step past it (one typed by hand isn't
+        // skipped: the new one goes in).
         if (")]}\"'`".indexOf(ch) >= 0 && t[p] === ch && !edit.selectedText) {
-            const quote = "\"'`".indexOf(ch) >= 0
-            if (!quote || t[p - 1] !== "\\") { edit.cursorPosition = p + 1; return true }
+            const k = autoPairAt(p)
+            if (k >= 0) {
+                autoPairs = autoPairs.filter((q, i) => i !== k)
+                edit.cursorPosition = p + 1
+                return true
+            }
+            if ("\"'`".indexOf(ch) >= 0) return false   // (a quote: typed, closing its string)
         }
         if (pairs[ch]) {
             const sel = edit.selectedText
@@ -406,12 +459,14 @@ Rectangle {
                 return true
             }
             const quote = "\"'`".indexOf(ch) >= 0
-            const prev = t[p - 1] || " ", next = t[p] || " "
-            // Quotes pair only between word boundaries (not it's, not $'x).
-            if (quote && (/[A-Za-z0-9_\\$]/.test(prev) || /[A-Za-z0-9_]/.test(next))) return false
-            if (!quote && /[A-Za-z0-9_]/.test(next)) return false
+            const prev = t[p - 1] || " ", next = t[p] === undefined ? "\n" : t[p] === "\u2029" ? "\n" : t[p]
+            // (Before something else: just the opener, as typed.)
+            if (closeBefore.indexOf(next) < 0) return false
+            // (A quote: not after a word (it's, $'x), and not closing a string.)
+            if (quote && (/[A-Za-z0-9_\\$]/.test(prev) || inString(p))) return false
             insert(ch + pairs[ch])
             edit.cursorPosition = p + 1
+            autoPairs = autoPairs.concat([{ open: p, close: p + 1 }])
             return true
         }
         return false
@@ -842,10 +897,14 @@ Rectangle {
                 interval: 550
                 onTriggered: if (wordHover.hovered) box.hoverAtPosition(edit.positionAt(wordHover.point.position.x, wordHover.point.position.y))
             }
+            // (A pair typed for you is forgotten once the cursor leaves it.)
+            // (After the edit that moved it is counted: an insert moves the cursor first.)
+            onCursorPositionChanged: if (box.autoPairs.length) Qt.callLater(box.prunePairs)
             // (Re-coloring also signals a change: react to real edits only.)
             property string seen: ""
             onTextChanged: {
                 if (text === seen) return
+                box.trackPairs(seen, text)
                 seen = text
                 idle.restart()
                 box.contentLang = box.controller && (text.indexOf("\n") >= 0 || /^\s*[{\[]|^#!/.test(text)) ? box.controller.detectLanguage(text) : ""
