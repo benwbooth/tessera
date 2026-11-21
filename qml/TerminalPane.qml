@@ -305,7 +305,19 @@ Item {
         // (A shell picked: its kernel starts now, ready by the first Enter.)
         onRunShellChanged: if (runShell !== "" && notebook.hasKernelFor(runShell)) notebook.warmLang(runShell)
         onSubmitted: (t) => {
-            if (forNotebook) { notebook.submit(t); return }
+            // (A notebook: its kernel's language, unless another is picked or
+            // recognised in the editor: that one's kernel (or its program,
+            // once); the pane's own shell picked: the terminal, a card of its own.)
+            if (forNotebook) {
+                const pickL = compose.runShellUsed !== "" ? compose.runShellUsed : compose.runLang
+                if (compose.runShellUsed === "" && compose.langOverride === "bash" && pickL === "bash") {
+                    if (t.indexOf("\n") < 0) term.sendText(t + "\r"); else { term.pasteText(t); term.sendText("\r") }
+                    return
+                }
+                if (pickL !== "" && !notebook.sameLang(pickL, notebook.language)) { notebook.submitLang(t, pickL); return }
+                notebook.submit(t)
+                return
+            }
             // (Code in another language than the shell's: its Jupyter kernel,
             // kept alive in the pane's notebook, if there's one; else run by
             // its interpreter, once.)
