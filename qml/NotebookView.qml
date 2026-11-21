@@ -460,8 +460,9 @@ FocusScope {
     property int dropAt: -1
     property string dragCid: ""
     // (Test hook: TESSERA_TEST_PICK picks the first and third cards at 12 s,
-    // moves them to the end at 15 s, and deletes them at 18 s.)
-    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("PICK") !== ""; onTriggered: { nb.pickToggle(0); nb.pickToggle(2); pickStep.start() } }
+    // moves them to the end at 15 s, and deletes them at 18 s; =menu opens
+    // their menu instead.)
+    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("PICK") !== ""; onTriggered: { nb.pickToggle(0); nb.pickToggle(2); if (nb.controller.testEnv("PICK") === "menu") pickMenu.popup(list, 200, 120); else pickStep.start() } }
     Timer { id: pickStep; interval: 3000; property int n: 0; onTriggered: { if (n++ === 0) { nb.moveCells(nb.targets(), cells.count); start() } else nb.deleteCells(nb.targets()) } }
     function moveCell(i, d) { moveCells([i], d < 0 ? i - 1 : i + 2) }
     function setType(i, type) {
@@ -2358,7 +2359,40 @@ FocusScope {
             Chip { base: pickBar.color; label: "\u2715 Delete"; tip: "Delete them (Delete; Z brings them back)"; onClicked: nb.deleteCells(nb.targets()) }
             Chip { base: pickBar.color; label: "All"; tip: "Pick every card (Ctrl+A)"; onClicked: nb.pickAll() }
             Chip { base: pickBar.color; label: "None"; tip: "Unpick them all"; onClicked: nb.clearPicks() }
+            Chip { id: pickMore; base: pickBar.color; label: "\u22ef"; tip: "Everything for the picked cards (right-click a picked card too)"; onClicked: pickMenu.popup(pickMore, 0, pickMore.height + 2) }
         }
+    }
+    // What can be done to the picked cards together: a right-click on one of
+    // them, or the bar's ⋯.
+    function pickedCells() { return targets().map(i => cells.get(i)).filter(c => c) }
+    function copyPicked(what) {
+        const parts = []
+        for (const i of targets()) {
+            const c = cells.get(i)
+            if (what === "code") parts.push(c.source)
+            else if (what === "output") parts.push(outputText(i))
+            else parts.push((c.type === "markdown" ? "" : "$ ") + c.source + (c.type === "markdown" ? "" : "\n" + outputText(i)))
+        }
+        copyText(parts.join("\n\n"))
+    }
+    function setPickedOutputHidden(h) { for (const i of targets()) cells.setProperty(i, "hideOutput", h); touch() }
+    function runPicked() { for (const i of targets()) if (cells.get(i).type === "code" && cells.get(i).viewPath === "" && !cells.get(i).running) run(i) }
+    SlimMenu {
+        id: pickMenu
+        SlimMenuItem { text: nb.pickedCount + (nb.pickedCount === 1 ? " card picked" : " cards picked"); enabled: false }
+        SlimMenuItem { text: "Run them, in order"; enabled: nb.pickedCells().some(c => c.type === "code" && c.viewPath === "" && !c.running); onTriggered: nb.runPicked() }
+        SlimMenuItem { text: "Copy their commands"; onTriggered: nb.copyPicked("code") }
+        SlimMenuItem { text: "Copy their output"; onTriggered: nb.copyPicked("output") }
+        SlimMenuItem { text: "Copy commands and output"; onTriggered: nb.copyPicked("both") }
+        SlimMenuItem { text: "Hide their output"; onTriggered: nb.setPickedOutputHidden(true) }
+        SlimMenuItem { text: "Show their output"; onTriggered: nb.setPickedOutputHidden(false) }
+        SlimMenuItem { text: "Move up\tAlt+Up"; onTriggered: nb.moveTargets(-1) }
+        SlimMenuItem { text: "Move down\tAlt+Down"; onTriggered: nb.moveTargets(1) }
+        SlimMenuItem { text: "Move to the top"; onTriggered: nb.moveCells(nb.targets(), 0) }
+        SlimMenuItem { text: "Move to the end"; onTriggered: nb.moveCells(nb.targets(), cells.count) }
+        SlimMenuItem { text: "Pick all\tCtrl+A"; onTriggered: nb.pickAll() }
+        SlimMenuItem { text: "Unpick all"; onTriggered: nb.clearPicks() }
+        SlimMenuItem { text: "Delete them\tDelete"; onTriggered: nb.deleteCells(nb.targets()) }
     }
     // Where a dragged card lands: a line between cards.
     Rectangle {
@@ -2506,6 +2540,15 @@ FocusScope {
             HoverHandler { id: cellHover }
             TapHandler { acceptedModifiers: Qt.NoModifier; onTapped: { nb.clearPicks(); nb.current = cell.index; if (!(editorLoader.item && editorLoader.item.hasFocus)) list.forceActiveFocus() } }
             TapHandler { acceptedModifiers: Qt.ControlModifier; onTapped: { nb.pickToggle(cell.index); list.forceActiveFocus() } }
+            // (Right-click: the picked cards' menu on one of them; on any other
+            // card, its own ⋯ menu.)
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: (pt) => {
+                    if (cell.picked && nb.pickedCount > 1) pickMenu.popup()
+                    else { nb.clearPicks(); nb.current = cell.index; moreMenu.popup() }
+                }
+            }
             TapHandler { acceptedModifiers: Qt.ShiftModifier; onTapped: { if (nb.pickedCount === 0) nb.pickToggle(nb.current); nb.pickRange(cell.index); list.forceActiveFocus() } }
 
             // ---- header: status, the code, folder, time, view ----
