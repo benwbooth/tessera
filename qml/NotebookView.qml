@@ -132,8 +132,9 @@ FocusScope {
     property string languageVersion: ""
     readonly property var kernel: kernels.find(k => k.name === kernelName) || null
     readonly property bool shellKernel: kernelName === "tessera-shell"
-    // (A language with no Jupyter kernel: each cell runs once, as a program,
-    // in the pane's shell, as the input editor runs it.)
+    // (A language with no kernel at all, Jupyter's or Tessera's own (replk:
+    // data, config and document languages): each cell on its own, as a
+    // program, in the pane's shell, as the input editor runs it.)
     readonly property bool oneShot: kernelName.startsWith("tessera-run:")
     readonly property bool viaShell: shellKernel || oneShot
     readonly property bool kernelUp: viaShell || kernelState === "idle" || kernelState === "busy"
@@ -159,7 +160,7 @@ FocusScope {
                 let run = []
                 try { run = JSON.parse(controller.runnableLanguages()) } catch (e) {}
                 const more = run.filter(r => !ks.some(k => k.name !== "tessera-shell" && sameLang(k.language, r[0])))
-                    .map(r => ({ name: "tessera-run:" + r[0], display: r[1] + " (each cell runs once)", language: r[0], oneShot: true }))
+                    .map(r => ({ name: "tessera-run:" + r[0], display: r[1] + " (each cell on its own)", language: r[0], oneShot: true }))
                     .sort((a, b) => a.display.toLowerCase() < b.display.toLowerCase() ? -1 : 1)
                 kernels = ks.concat(more)
             }
@@ -1184,7 +1185,8 @@ FocusScope {
     }
     // The kernel for a language: one installed, else one Tessera fetches.
     function langSpec(l) {
-        const ks = kernels.filter(k => k.name !== "tessera-shell" && sameLang(k.language, l))
+        // (A run-once entry isn't a kernel: none, and the cell runs once in the shell.)
+        const ks = kernels.filter(k => k.name !== "tessera-shell" && !k.oneShot && sameLang(k.language, l))
         // (A shell: Tessera's own shell kernel first.)
         return ks.find(k => k.name.startsWith("tessera-sh-")) || ks.find(k => !k.name.startsWith("tessera-")) || ks.find(k => k.name === "tessera-" + l) || ks[0] || null
     }
