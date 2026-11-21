@@ -133,7 +133,14 @@ Item {
         if (editorOn && focused) { preferEditor = true; Qt.callLater(compose.focusEditor) }
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
-    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || idleShell || replLang !== "")
+    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || idleShell || replLang !== "" || awaitingPrompt)
+    // (A new shell: the editor's room kept from the start, so the terminal
+    // opens at the size it'll have at the prompt instead of shrinking when
+    // the prompt comes. Not for a command of its own or a reattached shell;
+    // given up if no prompt says so within a few seconds.)
+    property bool awaitingPrompt: term.command === "" && term.attachId === ""
+    Timer { running: pane.awaitingPrompt; interval: 4000; onTriggered: pane.awaitingPrompt = false }
+    Connections { target: term; enabled: pane.awaitingPrompt; function onAtPromptChanged() { pane.awaitingPrompt = false } }
     // (Reattached after a restart, the shell may be at its prompt without
     // having said so since: nothing running in front of it counts as that,
     // until the shell integration says otherwise.)

@@ -559,7 +559,9 @@ ApplicationWindow {
             if (opts.layout.color) t.tabColor = opts.layout.color
             if (t.root.count === 0) { t.destroy(); return null }
         } else {
-            const props = { profileName: prof.name }
+            // (At the tab's size from the start: no frame at a default size
+            // before it's laid out.)
+            const props = { profileName: prof.name, width: stack.width, height: stack.height }
             if (opts.command) props.commandOverride = opts.command
             if (opts.title) t.launchTitle = opts.title
             if (opts.attachId) props.attachId = opts.attachId
@@ -697,9 +699,11 @@ ApplicationWindow {
     // (Test hook: TESSERA_TEST_CLOSETAB=<dir>: three tabs, the middle one
     // current, closed; each frame after it saved to <dir>/f-N.png.)
     property int closeTabFrames: -1
-    Timer { interval: 3000; running: controller.testEnv("CLOSETAB") !== ""; onTriggered: { newTab({}); win.later(1000, () => newTab({})); win.later(2000, () => focusTab(1)) } }
+    Timer { interval: 3000; running: controller.testEnv("CLOSETAB") !== ""; onTriggered: { const v = controller.testEnv("CLOSETAB_VIEW"); newTab({ view: v }); win.later(1000, () => newTab({ view: v })); win.later(2000, () => focusTab(1)) } }
     Timer { interval: 7000; running: controller.testEnv("CLOSETAB") !== ""; onTriggered: { win.closeTabFrames = 0; rootLayout.grabToImage(r => r.saveToFile(controller.testEnv("CLOSETAB") + "/f-before.png")); console.log("closing at " + Date.now()); win.removeTab(win.tabs[1]) } }
-    Connections { target: win; function onFrameSwapped() { if (win.closeTabFrames >= 0 && win.closeTabFrames < 12) { const n = win.closeTabFrames++; rootLayout.grabToImage(r => r.saveToFile(controller.testEnv("CLOSETAB") + "/f-" + n + ".png")) } } }
+    // (TESSERA_TEST_NEWTAB=<dir>: a new tab at 6 s, each frame after it saved.)
+    Timer { interval: 6000; running: controller.testEnv("NEWTAB") !== ""; onTriggered: { win.closeTabFrames = 0; newTab({ view: controller.testEnv("CLOSETAB_VIEW") }) } }
+    Connections { target: win; function onFrameSwapped() { if (win.closeTabFrames >= 0 && win.closeTabFrames < 20) { const n = win.closeTabFrames++; rootLayout.grabToImage(r => r.saveToFile((controller.testEnv("CLOSETAB") || controller.testEnv("NEWTAB")) + "/f-" + n + ".png")) } } }
     // (Test hook: TESSERA_TEST_NIXHELP=<program> shows it.)
     Timer { interval: 3000; running: controller.testEnv("NIXHELP") !== ""; onTriggered: win.nixHelp(controller.testEnv("NIXHELP"), "") }
     NixHelp {
