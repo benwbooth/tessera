@@ -1624,12 +1624,34 @@ FocusScope {
         const w = c.split(/\s+/)
         let first = w[0]
         try { const al = JSON.parse(view ? view.aliases : "{}"); if (al[first]) first = al[first].trim().split(/\s+/)[0] } catch (e) {}
-        if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && w.slice(1).filter(a => !a.startsWith("-")).length <= 1) return "files"
-        // (cd, then the folder it went to.)
-        if (["cd", "pushd", "z", "zi"].indexOf(w[0]) >= 0 && w.length <= 2) return "files"
+        // (ls with what the folder view shows as ls would: one folder (or
+        // none), and only these options. Any other (-R, -d, -i, -s, -F, two
+        // folders, ...): ls's own output, as it printed it.)
+        if (["ls", "ll", "la", "l", "dir"].indexOf(first) >= 0 && lsViewable(w.slice(1))) return "files"
+        // (cd, then the folder it went to: any cd, its own options and all.)
+        if (["cd", "pushd", "popd", "z", "zi"].indexOf(w[0]) >= 0) return "files"
         if ((first === "env" || first === "printenv") && w.length === 1) return "env"
         if (c === "export" || c === "export -p" || c === "declare -x" || c === "typeset -x") return "env"
         return ""
+    }
+    function lsViewable(args) {
+        const shortOk = /^-[aAlh1tSXUfr]+$/
+        const longOk = ["--all", "--almost-all", "--human-readable", "--reverse", "--group-directories-first", "--color", "--color=auto", "--color=always", "--color=never"]
+        let paths = 0
+        for (const a of args) {
+            if (a === "--") continue
+            if (a.startsWith("--")) { if (longOk.indexOf(a) < 0 && !/^--sort=(time|size|extension|none|name)$/.test(a)) return false; continue }
+            if (a.startsWith("-") && a !== "-") { if (!shortOk.test(a)) return false; continue }
+            if (++paths > 1) return false
+        }
+        return true
+    }
+    // (Where a cd took the shell: the folder the next card started in, or the
+    // shell's own if it's the last; cd's options, ~user and CDPATH included.)
+    function cwdAfter(cid) {
+        const i = indexOf(cid)
+        for (let j = i + 1; j >= 1 && j < cells.count; ++j) { const c = cells.get(j); if (c.cwd) return localPath(c.cwd) }
+        return shellDir
     }
     // A tessh cell whose code is an ls (or cd) alone, its view not changed by hand.
     function tesshFiles(cid, lang, source) {
@@ -3596,7 +3618,7 @@ FocusScope {
         FileBrowser {
             readonly property var src: parent
             readonly property var words: (src.command || "").trim().split(/\s+/)
-            readonly property bool isCd: ["cd", "pushd", "z", "zi"].indexOf(words[0]) >= 0
+            readonly property bool isCd: ["cd", "pushd", "popd", "z", "zi"].indexOf(words[0]) >= 0
             readonly property var args: words.slice(1)
             controller: nb.controller
             themeData: nb.themeData
@@ -3605,12 +3627,26 @@ FocusScope {
             rowHeight: nb.outputRow > 0 ? nb.outputRow : 18
             flagAll: !isCd && args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all")
             flagLong: !isCd && (args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test(words[0]))
+            // (ls's order flags; the last one given wins, as in ls.)
+            readonly property string shortFlags: isCd ? "" : args.filter(a => /^-[a-zA-Z]+$/.test(a)).map(a => a.slice(1)).join("")
+            flagSort: {
+                if (isCd) return ""
+                let s = ""
+                for (const a of args) {
+                    const m = /^--sort=(\w+)$/.exec(a)
+                    if (m) s = ({ time: "date", size: "size", extension: "type", none: "none", name: "" })[m[1]] || s
+                    else if (/^-[a-zA-Z]+$/.test(a)) for (const c of a.slice(1)) s = ({ t: "date", S: "size", X: "type", U: "none", f: "none" })[c] || s
+                }
+                return s
+            }
+            flagReverse: !isCd && (/r/.test(shortFlags) || args.indexOf("--reverse") >= 0)
+            flagFoldersFirst: !isCd && args.indexOf("--group-directories-first") >= 0
             startDir: {
                 const base = nb.localPath(src.cwd) || nb.shellDir
                 const home = nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
-                const a = args.find(x => !x.startsWith("-"))
-                // (cd: where it went. With no folder, home; "cd -" and z: wherever the shell is now.)
-                if (isCd && (!a || a === "-" || words[0] === "z" || words[0] === "zi")) return nb.onHost(a || words[0] !== "cd" ? nb.shellDir : home)
+                const a = args.find(x => !x.startsWith("-") || x === "-")
+                // (cd: where it went, as the shell has it.)
+                if (isCd) return nb.onHost(nb.cwdAfter(src.cid) || home)
                 if (!a) return nb.onHost(base)
                 const p = a.replace(/^['"]|['"]$/g, "").replace(/^~(?=\/|$)/, home)
                 return nb.onHost(p.startsWith("/") ? p : base + "/" + p)

@@ -17,6 +17,11 @@ Item {
     property string startDir: ""
     property bool flagAll: false        // ls -a
     property bool flagLong: false       // ls -l
+    // ls's order: "date" (-t), "size" (-S), "type" (-X), "none" (-U), or "" (by
+    // name); flagReverse: -r. Given, they're the card's, over the last choice.
+    property string flagSort: ""
+    property bool flagReverse: false
+    property bool flagFoldersFirst: false   // ls --group-directories-first
     property string fontFamily: "monospace"
     property real pointSize: 10
     property real rowHeight: 18
@@ -34,11 +39,17 @@ Item {
     property var kept: null             // the notebook's copy of this card's choices
     signal keptChanged2(var choices)    // (to the notebook, to keep)
     property var mine: ({})
-    Component.onCompleted: { mine = kept ? Object.assign({}, kept) : Object.assign({}, saved, { view: undefined }); list() }
+    Component.onCompleted: {
+        mine = kept ? Object.assign({}, kept) : Object.assign({}, saved, { view: undefined })
+        // (ls -t, -S, -r ...: the command's order, not the last one picked.)
+        if (!kept && (flagSort !== "" || flagReverse || flagFoldersFirst)) mine = Object.assign({}, mine, { sort: undefined, desc: undefined, folders_first: undefined })
+        list()
+    }
     readonly property string view: mine.view ? mine.view : flagLong ? "details" : (saved.view || "list")
-    readonly property string sortBy: mine.sort || "name"
-    readonly property bool desc: !!mine.desc
-    readonly property bool foldersFirst: !!mine.folders_first
+    readonly property string sortBy: mine.sort || flagSort || "name"
+    // (As ls has it: by time and by size the newest and largest first, -r the other way.)
+    readonly property bool desc: mine.sort ? !!mine.desc : (flagSort === "date" || flagSort === "size") !== flagReverse
+    readonly property bool foldersFirst: mine.folders_first !== undefined ? !!mine.folders_first : flagFoldersFirst
     readonly property bool showHidden: flagAll || !!mine.hidden
     function save(k, v) {
         const m = Object.assign({}, mine)
@@ -94,6 +105,7 @@ Item {
             size: (x, y) => (x.dir ? x.items : x.size) - (y.dir ? y.items : y.size) || name(x).localeCompare(name(y)),
             date: (x, y) => x.mtime - y.mtime || name(x).localeCompare(name(y)),
             type: (x, y) => ext(x).localeCompare(ext(y)) || name(x).localeCompare(name(y)),
+            none: (x, y) => 0,
         }[sortBy] || ((x, y) => 0)
         a.sort((x, y) => {
             if (foldersFirst && x.dir !== y.dir) return x.dir ? -1 : 1
