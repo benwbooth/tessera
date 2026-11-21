@@ -2192,7 +2192,19 @@ FocusScope {
     Timer { interval: nb.controller ? parseInt(nb.controller.testEnv("NB_FG") || "0") : 0; running: interval > 0
             onTriggered: { for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).job > 0 && cells.get(i).jobTty) { console.log("nb fg test: card " + i); nb.foregroundJob(i); break } } }
     Timer { interval: nb.controller ? parseInt((nb.controller.testEnv("NB_CELL2") || "0").split(":")[0]) : 0; running: interval > 0
-            onTriggered: nb.submit(nb.controller.testEnv("NB_CELL2").replace(/^[0-9]+:/, "")) }
+            onTriggered: { nb.testFrames = 0; nb.submit(nb.controller.testEnv("NB_CELL2").replace(/^[0-9]+:/, "")) } }
+    // (TESSERA_TEST_NB_FRAMES=<dir>: the 40 frames after NB_CELL2 is sent, grabbed there.)
+    property int testFrames: -1
+    Connections {
+        target: nb.testFrames >= 0 && nb.controller && nb.controller.testEnv("NB_FRAMES") !== "" ? nb.Window.window : null
+        function onFrameSwapped() {
+            if (nb.testFrames < 0 || nb.testFrames >= 40) return
+            const n = nb.testFrames++
+            const last = list.itemAtIndex(cells.count - 1)
+            console.log("nbframe " + n + " t=" + Date.now() % 100000 + " cy=" + Math.round(list.contentY) + " ch=" + Math.round(list.contentHeight) + " oy=" + Math.round(list.originY) + " h=" + Math.round(list.height) + " last=" + (last ? Math.round(last.height) + "@" + Math.round(last.y) : "-") + " count=" + cells.count)
+            if (n % 2 === 0) nb.grabToImage(r => r.saveToFile(nb.controller.testEnv("NB_FRAMES") + "/f" + (n < 10 ? "0" : "") + n + ".png"))
+        }
+    }
     // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s, as
     // its Expand button does, focus taken first as a click takes it.)
     Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("EXPAND_LAST") !== ""; onTriggered: if (cells.count > 0) { list.forceActiveFocus(); nb.toggleExpand(cells.count - 1) } }
@@ -2677,6 +2689,12 @@ FocusScope {
             required property string outputs
             required property int count
             required property bool running
+            // (Running for a moment: before that a quick run's card stays as
+            // it'll end up, not flashing Signal and bg on and off.)
+            property bool slowRun: false
+            onRunningChanged: { slowRun = false; if (running) slowTimer.restart(); else slowTimer.stop() }
+            Timer { id: slowTimer; interval: 400; onTriggered: cell.slowRun = cell.running }
+            Component.onCompleted: if (running) slowTimer.restart()
             required property bool failed
             required property double started
             required property double ended
@@ -2984,7 +3002,7 @@ FocusScope {
                 Chip { visible: cell.job > 0 && cell.running; base: cell.color; label: "\u25a0 Stop"; tip: "Stop it (TERM, then KILL after 3 s)"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.stopJob(cell.index) }
                 // (Running in the pane: to the background; a background one with its terminal: back.)
-                Chip { visible: cell.running && (cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) || nb.fgJob === cell.cid) && nb.canBg(cells.get(cell.index)); base: cell.color; label: "\u2198 bg"
+                Chip { visible: cell.running && cell.slowRun && (cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) || nb.fgJob === cell.cid) && nb.canBg(cells.get(cell.index)); base: cell.color; label: "\u2198 bg"
                        tip: "Move to the background (Ctrl+Alt+Z): it goes on as a job, the notebook carries on"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.moveToBg(cell.index) }
                 Chip { visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; base: cell.color; label: "\u2196 Foreground"
@@ -2998,7 +3016,7 @@ FocusScope {
                 Chip { visible: cell.code && cell.viewPath === "" && (cell.fromTerm || cell.ended > 0 || cell.running || cell.execs !== "[]")
                        base: cell.color; label: "\u24d8"; tip: "Details: the command line as run, folder, user and environment"
                        Layout.minimumWidth: implicitWidth; onClicked: nb.showExec(cell.index) }
-                Chip { id: sigChip; visible: cell.running; base: cell.color; label: "\u26a1 Signal"; Layout.minimumWidth: implicitWidth
+                Chip { id: sigChip; visible: cell.running && cell.slowRun; base: cell.color; label: "\u26a1 Signal"; Layout.minimumWidth: implicitWidth
                        tip: "Send it a signal: interrupt, terminate, kill, hang up, suspend, continue, ..."
                        onClicked: { sigMenu.row = cell.index; sigMenu.popup(sigChip, 0, sigChip.height + 2) } }
                 Chip { visible: cell.hasOutput; base: cell.color; label: "Copy"; tip: "Copy the output"; Layout.minimumWidth: implicitWidth
@@ -3006,8 +3024,8 @@ FocusScope {
                                     // (A file card's text: read now, then copied.)
                                     if (c && c.tid <= 0 && c.viewPath !== "") nb.fileText(c.viewPath, t => nb.copyText(t))
                                     else nb.copyText(nb.outputText(cell.index)) } }
-                Chip { visible: cell.code && !cell.running && cell.source.trim() !== ""; base: cell.color; label: "↻"; tip: "Run it again"; Layout.minimumWidth: implicitWidth
-                       onClicked: { nb.current = cell.index; nb.run(cell.index) } }
+                Chip { visible: cell.code && (!cell.running || !cell.slowRun) && cell.source.trim() !== ""; base: cell.color; label: "↻"; tip: "Run it again"; Layout.minimumWidth: implicitWidth
+                       onClicked: if (!cell.running) { nb.current = cell.index; nb.run(cell.index) } }
                 Chip {
                     // (A terminal app running in it counts as output.)
                     visible: cell.hasOutput || cell.expanded || (nb.liveWanted && cell.index === nb.liveIndex)
@@ -4436,6 +4454,9 @@ FocusScope {
                     text: jf.src.running ? "" : "(no output)"
                     color: Theme.textDim
                     font.pixelSize: 11
+                    // (A line of output's room, so the first line doesn't grow the card.)
+                    height: Math.max(implicitHeight, nb.outputRow + 8)
+                    verticalAlignment: Text.AlignVCenter
                 }
             }
         }
