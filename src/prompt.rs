@@ -144,7 +144,7 @@ pub fn starship(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: u32) 
 
 /// Starship with a given config file (None: the user's own).
 pub fn starship_with(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: u32, config: Option<&std::path::Path>) -> String {
-    let run = |right: bool| -> String {
+    let run_with = |right: bool, width: u32| -> String {
         let mut cmd = std::process::Command::new("starship");
         cmd.arg("prompt");
         if right {
@@ -164,6 +164,8 @@ pub fn starship_with(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: 
         cmd.stderr(std::process::Stdio::null());
         cmd.output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
     };
+    let run = |right: bool| run_with(right, width);
+    let run_at = |w: u32| run_with(false, w);
     let left = run(false);
     let mut lines: Vec<&str> = left.split('\n').collect();
     while lines.first().is_some_and(|l| strip(l).trim().is_empty()) {
@@ -176,12 +178,86 @@ pub fn starship_with(cwd: &str, status: i32, duration_ms: u64, width: u32, pid: 
     if lines.len() > 1 && strip(lines.last().unwrap()).trim().chars().count() <= 2 {
         lines.pop();
     }
+    // ($fill: the run that pads a line to the width. Found by asking again
+    // a little wider, when a line reaches the width, and seeing where it
+    // grew; marked "fill" so the window stretches it to the room it has
+    // instead of a count of characters for one width.)
+    let mut out_lines: Vec<Vec<serde_json::Value>> = lines.iter().map(|l| runs(l)).collect();
+    let plain = |l: &str| -> Vec<char> { strip(l).chars().filter(|c| *c != '\u{1}' && *c != '\u{2}').collect() };
+    if lines.iter().any(|l| plain(l).len() + 1 >= width as usize) {
+        const MORE: u32 = 8;
+        let wider = run_at(width + MORE);
+        let mut wl: Vec<&str> = wider.split('\n').collect();
+        while wl.first().is_some_and(|l| strip(l).trim().is_empty()) {
+            wl.remove(0);
+        }
+        for (i, l) in lines.iter().enumerate() {
+            let (a, b) = (plain(l), wl.get(i).map(|w| plain(w)).unwrap_or_default());
+            if b.len() != a.len() + MORE as usize {
+                continue;
+            }
+            let p = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+            let c = b[p];
+            let mut start = p;
+            while start > 0 && a[start - 1] == c {
+                start -= 1;
+            }
+            if p > start {
+                mark_fill(&mut out_lines[i], start, p - start);
+            }
+        }
+    }
     let right_text = run(true);
     json!({
-        "lines": lines.iter().map(|l| runs(l)).collect::<Vec<_>>(),
+        "lines": out_lines,
         "right": runs(right_text.trim_end_matches('\n')),
     })
     .to_string()
+}
+
+/// Split `runs` so the `len` characters from `start` are a run of their own,
+/// marked "fill".
+fn mark_fill(runs: &mut Vec<serde_json::Value>, start: usize, len: usize) {
+    let mut out = Vec::new();
+    let mut at = 0;
+    for r in runs.drain(..) {
+        let t: Vec<char> = r["t"].as_str().unwrap_or("").chars().collect();
+        let (a, b) = (at, at + t.len());
+        at = b;
+        let (fs, fe) = (start.max(a), (start + len).min(b));
+        if fs >= fe {
+            out.push(r);
+            continue;
+        }
+        let piece = |x: usize, y: usize, fill: bool| {
+            let mut v = r.clone();
+            v["t"] = json!(t[x - a..y - a].iter().collect::<String>());
+            if fill {
+                v["fill"] = json!(true);
+            }
+            v
+        };
+        if fs > a {
+            out.push(piece(a, fs, false));
+        }
+        out.push(piece(fs, fe, true));
+        if fe < b {
+            out.push(piece(fe, b, false));
+        }
+    }
+    // (One fill run, though the fill spanned several: it's the one stretched.)
+    let mut merged: Vec<serde_json::Value> = Vec::new();
+    for r in out {
+        if r["fill"].as_bool() == Some(true) {
+            if let Some(last) = merged.last_mut().filter(|l| l["fill"].as_bool() == Some(true)) {
+                let t = format!("{}{}", last["t"].as_str().unwrap_or(""), r["t"].as_str().unwrap_or(""));
+                last["t"] = json!(t);
+                continue;
+            }
+        }
+        merged.push(r);
+    }
+    *runs = merged;
 }
 
 fn strip(s: &str) -> String {

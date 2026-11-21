@@ -74,6 +74,7 @@ fn main() {
         QmlFile::from("qml/SlimCombo.qml"),
         QmlFile::from("qml/ThemeBar.qml"),
         QmlFile::from("qml/NixHelp.qml"),
+        QmlFile::from("qml/CapShape.qml"),
         QmlFile::from("qml/SlimMenu.qml"),
         QmlFile::from("qml/SlimMenuItem.qml"),
         QmlFile::from("qml/StarshipLine.qml"),

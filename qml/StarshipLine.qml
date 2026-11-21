@@ -39,38 +39,11 @@ Column {
             font.bold: run.r.b
             renderType: Text.NativeRendering
         }
-        Canvas {
+        CapShape {
             visible: run.cap !== ""
             anchors.fill: parent
-            property color ink: run.ink
-            property string cap: run.cap
-            onInkChanged: requestPaint()
-            onCapChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onPaint: {
-                const c = getContext("2d")
-                c.reset()
-                c.fillStyle = ink
-                const w = width, h = height
-                c.beginPath()
-                switch (cap) {
-                case "\ue0b6": // left half circle
-                    c.moveTo(w, 0); c.arc(w, h / 2, h / 2, -Math.PI / 2, Math.PI / 2, true); c.lineTo(w, h); break
-                case "\ue0b4": // right half circle
-                    c.moveTo(0, 0); c.arc(0, h / 2, h / 2, -Math.PI / 2, Math.PI / 2, false); c.lineTo(0, h); break
-                case "\ue0b0": case "\ue0b8": // right-pointing triangle
-                    c.moveTo(0, 0); c.lineTo(w, h / 2); c.lineTo(0, h); break
-                case "\ue0b2": case "\ue0ba": // left-pointing triangle
-                    c.moveTo(w, 0); c.lineTo(0, h / 2); c.lineTo(w, h); break
-                case "\ue0bc": // upper-left triangle
-                    c.moveTo(0, 0); c.lineTo(w, 0); c.lineTo(0, h); break
-                case "\ue0be": // upper-right triangle
-                    c.moveTo(0, 0); c.lineTo(w, 0); c.lineTo(w, h); break
-                }
-                c.closePath()
-                c.fill()
-            }
+            cap: run.cap
+            ink: run.ink
         }
     }
     Repeater {

@@ -219,7 +219,7 @@ ApplicationWindow {
                 // own titles differ, fish's shortens the path.)
                 : (win.settings.tab_titles_per_tab && titleView && titleView.title && !(lastPane && lastPane.editorOn) ? titleView.title
                    : launchTitle !== "" ? launchTitle
-                   : win.folderName(titleView && titleView.pwd ? titleView.pwd : (lastPane ? lastPane.procCwd : ""))
+                   : win.folderName(titleView && titleView.pwd ? titleView.pwd : (lastPane ? (lastPane.procCwd || lastPane.cwd) : ""))
                      || (lastPane && lastPane.shellName) || prof.name)
             PaneSplit {
                 id: rootSplit
@@ -687,6 +687,9 @@ ApplicationWindow {
         sheet.ask({ title: title, message: label, input: true, value: initial, okText: "OK", onAccept: done })
     }
     Sheet { id: sheet }
+
+    // The prompt bars' shared memory (PromptBar.cache()).
+    property var promptCache: ({})
 
     // ---- Nix missing: what it is and how to install it -------------------------
     // (what: the program that needed it; host: where, "" for here.)

@@ -47,11 +47,28 @@ Item {
     function refreshStarship() {
         if (!controller) return
         const host = sshHost
-        Async.call(controller, k => controller.hasStarshipOn(k, host), r => { if (bar && bar.sshHost === host) bar.starshipThere = r === "true" })
+        // (What the window last heard for this host, at once: a new tab's
+        // bar starts as it'll stay, not with the built-in widgets first.)
+        const c = bar.cache()
+        if (c && c["star:" + host] !== undefined) bar.starshipThere = c["star:" + host]
+        Async.call(controller, k => controller.hasStarshipOn(k, host), r => {
+            if (!bar || bar.sshHost !== host) return
+            bar.starshipThere = r === "true"
+            const c2 = bar.cache()
+            if (c2) c2["star:" + host] = bar.starshipThere
+        })
+    }
+    // (The window's, shared by its prompt bars: whether a host has starship,
+    // and the last prompt drawn for a host and folder.)
+    function cache() { const w = bar.Window.window; return w && w.promptCache !== undefined ? w.promptCache : null }
+    function cachedPrompt() {
+        const c = cache(), j = c ? c["prompt:" + sshHost + ":" + cwd] : undefined
+        if (j === undefined || starLines.length > 0) return
+        try { const r = JSON.parse(j); starLines = r.lines; starRight = r.right } catch (e) {}
     }
     onSshHostChanged: { refreshHome(); refreshStarship() }
     onControllerChanged: { refreshHome(); refreshStarship() }
-    Component.onCompleted: { refreshHome(); refreshStarship() }
+    Component.onCompleted: { refreshHome(); refreshStarship(); cachedPrompt() }
     readonly property bool useStarship: controller !== null && (engine === "starship" || (engine === "auto" && starshipThere))
     signal runRequested(string command)
     signal fixRequested()
@@ -167,6 +184,7 @@ Item {
         const st = bar.view ? bar.view.lastStatus : 0, du = bar.view ? bar.view.lastDuration : 0
         if (layout.indexOf("starship") >= 0 || layout.indexOf("starship_right") >= 0) {
             lastCols = fillCols()
+            cachedPrompt()
             controller.requestStarship(key, bar.cwd, st, du, lastCols, bar.shellPid, bar.sshHost)
         }
         const mods = layout.filter(w => w.startsWith("star:")).map(w => w.substring(5))
@@ -176,13 +194,17 @@ Item {
         controller.requestPromptInfo(key + "#" + (++infoSeq), bar.cwd, bar.shellPid, bar.sshHost)
     }
     property int infoSeq: 0
-    onLayoutChanged: refresh()
+    // (Once the rows are rebuilt for it: the room for Starship's fill is
+    // measured from them.)
+    onLayoutChanged: Qt.callLater(refresh)
     Connections {
         target: bar.controller
         function onStarshipReady(k, json) {
             if (k !== bar.key) return
             if (bar.dragFrom >= 0) { bar.heldStar = json; return }
             try { const r = JSON.parse(json); bar.starLines = r.lines; bar.starRight = r.right } catch (e) {}
+            const c = bar.cache()
+            if (c) c["prompt:" + bar.sshHost + ":" + bar.cwd] = json
         }
         function onPromptInfoReady(k, json) {
             if (k !== bar.key + "#" + bar.infoSeq) return
@@ -347,7 +369,8 @@ Item {
             let cur = [], w = 0
             for (let i = 0; i < line.length; i++) {
                 const r = line[i]
-                const rw = runWidth(r)
+                // (Starship's $fill stretches to what's left: it never wraps a line.)
+                const rw = r.fill ? 0 : runWidth(r)
                 if (w + rw <= room || isCap(r.t)) { cur.push(r); w += rw; continue }
                 // (Blank, as Starship's $fill padding: cut to what fits, never a
                 // line of its own.)
@@ -515,7 +538,12 @@ Item {
         property bool hot: false
         readonly property string cap: r.t.length === 1 && "\ue0b0\ue0b2\ue0b4\ue0b6\ue0bc\ue0be\ue0b8\ue0ba".indexOf(r.t) >= 0 ? r.t : ""
         readonly property color ink: bar.color(r.fg, Theme.fg)
-        width: cap !== "" ? Math.ceil(height / 2) : Math.ceil(rt.implicitWidth)
+        // (Starship's $fill: stretched to the room the line has, its
+        // character repeated and cut there.)
+        property real fillWidth: -1
+        readonly property bool stretch: !!r.fill && fillWidth >= 0
+        clip: stretch
+        width: cap !== "" ? Math.ceil(height / 2) : stretch ? Math.floor(fillWidth) : Math.ceil(rt.implicitWidth)
         height: Math.ceil(sfm.height) + 2
         color: "transparent"
         // (Its background reaches a little under its neighbours: edge to edge
@@ -534,7 +562,7 @@ Item {
             x: 0.001
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: 0.001
-            text: bar.glyphs(run.r.t)
+            text: bar.glyphs(run.stretch ? run.r.t.repeat(Math.max(1, Math.ceil(run.fillWidth / Math.max(1, sfm.averageCharacterWidth * run.r.t.length)) + 1)) : run.r.t)
             textFormat: Text.RichText
             color: run.ink
             font.family: bar.fontFamily
@@ -544,44 +572,15 @@ Item {
             renderType: Text.NativeRendering
             PathHits { anchors.fill: parent; t: run.cap === "" ? (run.r.full !== undefined ? run.r.full : run.r.t) : ""; off: run.r.off || 0; len: run.r.full !== undefined ? run.r.t.length : -1; font: rt.font; ink: rt.color }
         }
-        Canvas {
+        CapShape {
             visible: run.cap !== ""
             // (A pixel more on its flat side, under the next run: no seam.)
-            readonly property bool flatRight: ["\ue0b6", "\ue0b2", "\ue0ba", "\ue0be"].indexOf(cap) >= 0
             x: flatRight ? 0 : -1
             width: parent.width + 1
             height: parent.height
-            property color ink: run.ink
-            property string cap: run.cap
-            onInkChanged: requestPaint()
-            onCapChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onPaint: {
-                const c = getContext("2d")
-                c.reset()
-                c.fillStyle = ink
-                const w = width - 1, h = height
-                if (!flatRight) c.translate(1, 0)
-                c.fillRect(flatRight ? w - 0.5 : -1, 0, 1.5, h)
-                c.beginPath()
-                switch (cap) {
-                case "\ue0b6": // left half circle
-                    c.moveTo(w, 0); c.arc(w, h / 2, h / 2, -Math.PI / 2, Math.PI / 2, true); c.lineTo(w, h); break
-                case "\ue0b4": // right half circle
-                    c.moveTo(0, 0); c.arc(0, h / 2, h / 2, -Math.PI / 2, Math.PI / 2, false); c.lineTo(0, h); break
-                case "\ue0b0": case "\ue0b8": // right-pointing triangle
-                    c.moveTo(0, 0); c.lineTo(w, h / 2); c.lineTo(0, h); break
-                case "\ue0b2": case "\ue0ba": // left-pointing triangle
-                    c.moveTo(w, 0); c.lineTo(0, h / 2); c.lineTo(w, h); break
-                case "\ue0bc": // upper-left triangle
-                    c.moveTo(0, 0); c.lineTo(w, 0); c.lineTo(0, h); break
-                case "\ue0be": // upper-right triangle
-                    c.moveTo(0, 0); c.lineTo(w, 0); c.lineTo(w, h); break
-                }
-                c.closePath()
-                c.fill()
-            }
+            cap: run.cap
+            ink: run.ink
+            seam: true
         }
     }
 
@@ -813,8 +812,11 @@ Item {
             Repeater {
                 model: lc.wd ? bar.wrapLines(lc.wd.lines, lc.parent ? lc.parent.room : 0) : []
                 delegate: Row {
+                    id: lineRow
                     required property var modelData
-                    Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData; hot: lc.parent ? lc.parent.hot : false } }
+                    // (Its runs but the fill: the fill takes the rest of the room.)
+                    readonly property real fixedW: { let s = 0; for (let k = 0; k < children.length; k++) { const c = children[k]; if (c.r !== undefined && !c.r.fill) s += c.width } return s }
+                    Repeater { model: modelData; delegate: Run { required property var modelData; r: modelData; hot: lc.parent ? lc.parent.hot : false; fillWidth: (lc.parent ? lc.parent.room : 0) - lineRow.fixedW - 2 } }
                 }
             }
         }
