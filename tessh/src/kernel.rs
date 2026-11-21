@@ -375,7 +375,10 @@ fn execute(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
     if store {
         COUNT.fetch_add(1, Ordering::SeqCst);
     }
-    let ok = json!({"status": "ok", "execution_count": count, "user_expressions": {}, "payload": []});
+    // (The exit status of the last program it ran, for the card's ✓ or ✘:
+    // a program failing isn't an error to tessh, but it is to the card.)
+    let exit = if RAN_PROGRAM.load(Ordering::SeqCst) { runtime::STATUS.load(Ordering::SeqCst) } else { 0 };
+    let ok = json!({"status": "ok", "execution_count": count, "user_expressions": {}, "payload": [], "tessera_exit": exit});
     let (ename, evalue, tb) = match r {
         Ok(()) => return ok,
         Err(TesshError::Py(e)) => {

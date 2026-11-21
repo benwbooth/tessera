@@ -307,7 +307,8 @@ FocusScope {
                 cells.setProperty(i, "running", false)
                 if (e.count !== null && e.count !== undefined) cells.setProperty(i, "count", e.count)
                 cells.setProperty(i, "ended", Date.now())
-                cells.setProperty(i, "failed", e.status !== "ok")
+                cells.setProperty(i, "failed", e.status !== "ok" || (e.exit || 0) !== 0)
+                if (e.exit) cells.setProperty(i, "status", e.exit)
                 if (e.cwd) cells.setProperty(i, "cwd", e.cwd)
                 // (A shell's kernel: its folder and exports go back to the
                 // pane's shell, so the next shell carries on from there.)
@@ -2753,7 +2754,7 @@ FocusScope {
                 Text { topPadding: 0.001;
                     visible: cell.started > 1
                     text: (cell.ended > 0 ? nb.seconds(cell.ended - cell.started) + "  ·  " : "") + Qt.formatTime(new Date(cell.started), "hh:mm")
-                          + (cell.ended > 0 && cell.fromTerm && cell.status !== 0 ? "  ·  exit " + cell.status : "")
+                          + (cell.ended > 0 && (cell.fromTerm || cell.failed) && cell.status > 0 ? "  ·  exit " + cell.status : "")
                     color: Theme.textDim
                     font.pixelSize: 10
                 }

@@ -1092,7 +1092,9 @@ impl Kernel {
                     }
                     "execute_reply" => {
                         let status = c["status"].as_str().unwrap_or("ok");
-                        sink(json!({"type": "done", "cell": what, "status": status, "count": c["execution_count"]}));
+                        // (tessh: the last program's exit status, for the card.)
+                        sink(json!({"type": "done", "cell": what, "status": status, "count": c["execution_count"],
+                                    "exit": c["tessera_exit"].as_i64().unwrap_or(0)}));
                     }
                     "complete_reply" => {
                         sink(json!({"type": "complete", "request": what, "matches": c["matches"],
