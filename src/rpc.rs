@@ -152,7 +152,7 @@ pub fn kernels_running() -> bool {
 }
 
 fn kernel_running(key: &str) -> bool {
-    crate::shellk::has(key) || crate::jupyter::has(key)
+    crate::shellk::has(key) || crate::replk::has(key) || crate::jupyter::has(key)
 }
 
 /// Every running kernel (Jupyter's and the shell kernels), as the
@@ -160,6 +160,7 @@ fn kernel_running(key: &str) -> bool {
 fn running() -> Value {
     let mut all: Vec<Value> = serde_json::from_str(&crate::jupyter::running()).unwrap_or_default();
     all.extend(crate::shellk::running());
+    all.extend(crate::replk::running());
     Value::Array(all)
 }
 
@@ -168,6 +169,7 @@ pub fn stop_all_kernels() {
     let keys: Vec<String> = running().as_array().into_iter().flatten().filter_map(|k| k["key"].as_str().map(String::from)).collect();
     for k in keys {
         crate::shellk::stop(&k);
+        crate::replk::stop(&k);
         crate::jupyter::stop(&k);
         forget_key(&k);
     }
@@ -179,6 +181,7 @@ fn stop_tree(key: &str) {
     let keys: Vec<String> = running().as_array().into_iter().flatten().filter_map(|k| k["key"].as_str().map(String::from)).filter(|k| k == key || k.starts_with(&prefix)).collect();
     for k in keys.iter().chain(std::iter::once(&key.to_string())) {
         crate::shellk::stop(k);
+        crate::replk::stop(k);
         crate::jupyter::stop(k);
         forget_key(k);
     }
@@ -225,6 +228,7 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
         "kernel.specs" => {
             let mut all: Vec<Value> = serde_json::from_str(&crate::jupyter::specs_json()).unwrap_or_default();
             all.extend(crate::shellk::specs());
+            all.extend(crate::replk::specs());
             Value::Array(all)
         }
         "kernel.running" => running(),
@@ -239,12 +243,16 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             }
             let spec = s("spec");
             let shell = crate::shellk::is_spec(&spec);
-            if !has_nix() && if shell { crate::shellk::needs_nix(&spec) } else { crate::jupyter::needs_nix(&spec) } {
+            let repl = crate::replk::is_spec(&spec);
+            let nix = if shell { crate::shellk::needs_nix(&spec) } else if repl { crate::replk::needs_nix(&spec) } else { crate::jupyter::needs_nix(&spec) };
+            if !has_nix() && nix {
                 sink(&key)(json!({"type": "status", "state": "dead", "message": NO_NIX, "no_nix": true}));
                 return Ok(json!({"running": false, "events": events}));
             }
             if shell {
                 crate::shellk::start(&key, &spec, &s("cwd"), pid(), sink(&key));
+            } else if repl {
+                crate::replk::start(&key, &spec, &s("cwd"), pid(), sink(&key));
             } else {
                 crate::jupyter::start(&key, &spec, &s("cwd"), pid(), sink(&key));
             }
@@ -277,13 +285,15 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             let key = s("key");
             if crate::shellk::has(&key) {
                 json!(crate::shellk::sync(&key, pid(), &s("cwd")))
+            } else if crate::replk::has(&key) {
+                json!(true)
             } else {
                 json!(crate::jupyter::sync(&key, pid(), &s("cwd")))
             }
         }
         "kernel.export" => {
             let key = s("key");
-            if !crate::shellk::has(&key) {
+            if !crate::shellk::has(&key) && !crate::replk::has(&key) {
                 crate::jupyter::export_to_shell(&key, pid());
             }
             Value::Null
@@ -292,6 +302,8 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
             let key = s("key");
             if crate::shellk::has(&key) {
                 json!(crate::shellk::execute(&key, &s("cell"), &s("code")))
+            } else if crate::replk::has(&key) {
+                json!(crate::replk::execute(&key, &s("cell"), &s("code")))
             } else {
                 json!(crate::jupyter::execute(&key, &s("cell"), &s("code")))
             }
@@ -299,12 +311,14 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
         "kernel.complete" => json!(crate::jupyter::complete(&s("key"), &s("request"), &s("code"), n("pos") as usize)),
         "kernel.interrupt" => {
             crate::shellk::interrupt(&s("key"));
+            crate::replk::interrupt(&s("key"));
             crate::jupyter::interrupt(&s("key"));
             Value::Null
         }
         "kernel.stop" => {
             let key = s("key");
             crate::shellk::stop(&key);
+            crate::replk::stop(&key);
             crate::jupyter::stop(&key);
             forget_key(&key);
             Value::Null

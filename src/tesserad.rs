@@ -44,6 +44,7 @@ mod remote;
 mod rpc;
 mod settings;
 mod shell_integration;
+mod replk;
 mod shellk;
 mod snapshot;
 mod snippets;
