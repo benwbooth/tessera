@@ -72,6 +72,7 @@ fn main() {
         QmlFile::from("qml/BlockSelect.qml"),
         QmlFile::from("qml/Chip.qml"),
         QmlFile::from("qml/SlimCombo.qml"),
+        QmlFile::from("qml/ThemeBar.qml"),
         QmlFile::from("qml/SlimMenu.qml"),
         QmlFile::from("qml/SlimMenuItem.qml"),
         QmlFile::from("qml/StarshipLine.qml"),

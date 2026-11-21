@@ -3764,134 +3764,148 @@ FocusScope {
         focus: true
         background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
         onOpened: envFilter.text = ""
-        contentItem: ColumnLayout {
-            spacing: 6
-            RowLayout {
-                Layout.fillWidth: true
-                Text { text: "Details"; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                Chip { base: Theme.panel; label: "Close"; onClicked: execPop.close() }
-            }
-            // (A tessh cell that ran several programs: one at a time.)
-            Flow {
-                Layout.fillWidth: true
-                visible: execPop.records.length > 1
-                spacing: 4
-                Repeater {
-                    model: execPop.records
-                    delegate: Chip {
-                        required property var modelData
-                        required property int index
-                        base: index === execPop.sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : Theme.panel
-                        label: (index + 1) + ". " + (modelData.cell ? "the cell" : (modelData.argv && modelData.argv[0] && modelData.argv[0][0]) || (modelData.command || "").split(" ")[0])
-                        tip: modelData.command || ""
-                        onClicked: execPop.sel = index
-                    }
-                }
-            }
-            Text {
-                visible: execPop.note !== ""
-                Layout.fillWidth: true
-                text: execPop.note
-                wrapMode: Text.Wrap
-                color: Theme.textDim
-                font.pixelSize: 12
-                font.italic: true
-            }
-            GridLayout {
-                Layout.fillWidth: true
-                columns: 3
-                columnSpacing: 8
-                rowSpacing: 4
-                Text { text: execPop.rec.cell ? "Code (no programs)" : "Command line"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
-                // (Laid out and colored as treetop's process details: a line a
-                // word when it's long; Copy takes it as one line.)
-                TextEdit {
-                    objectName: "execLine"
-                    text: nb.controller && !execPop.rec.cell ? nb.controller.prettyCommand(execPop.ran, execPop.rec.argv ? JSON.stringify(execPop.rec.argv) : "", Theme.dark, String(Theme.text))
-                                                            : execPop.ran.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
-                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.RichText
-                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
-                    topPadding: 3.001; Layout.fillWidth: true
-                }
-                Chip { base: Theme.panel; label: "Copy"; Layout.alignment: Qt.AlignTop; onClicked: nb.copyText(execPop.ran) }
-                Text { text: "Typed"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001; visible: typed.visible }
-                TextEdit {
-                    id: typed; visible: !execPop.rec.argv && !!execPop.rec.line && execPop.rec.line !== execPop.rec.command; text: execPop.rec.command || ""
-                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
-                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
-                    topPadding: 3.001; Layout.fillWidth: true
-                }
-                Item { visible: typed.visible; width: 1; height: 1 }
-                Text { text: "Folder"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
-                TextEdit {
-                    text: execPop.rec.cwd || "—"
-                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
-                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
-                    topPadding: 3.001; Layout.fillWidth: true
-                }
-                Chip { base: Theme.panel; label: "Copy"; Layout.alignment: Qt.AlignTop; onClicked: nb.copyText(execPop.rec.cwd || "") }
-                Text { text: "User"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
-                TextEdit {
-                    text: execPop.rec.user || "—"
-                    readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
-                    color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
-                    topPadding: 3.001; Layout.fillWidth: true
-                }
-                Item { width: 1; height: 1 }
-            }
-            RowLayout {
-                Layout.fillWidth: true
+        // (Taller than the room: it scrolls, with a bar that stays while there's more.)
+        contentItem: Flickable {
+            id: execFlick
+            clip: true
+            implicitHeight: execCol.implicitHeight
+            contentWidth: width
+            contentHeight: execCol.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: false   // (the wheel and the bar scroll; a drag selects text)
+            ScrollBar.vertical: ThemeBar { id: execBar; policy: execFlick.contentHeight > execFlick.height + 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+            MomentumWheel { flick: execFlick }
+            ColumnLayout {
+                id: execCol
+                width: execFlick.width - (execBar.policy === ScrollBar.AlwaysOn ? 14 : 0)
                 spacing: 6
-                Text { text: "Environment" + (execPop.rec.env ? " (" + execPop.rec.env.length + ")" : ": not reported"); color: Theme.textDim; font.pixelSize: 12 }
-                TextField {
-                    id: envFilter
-                    visible: !!execPop.rec.env
-                    Layout.preferredWidth: 240
-                    placeholderText: "Filter"
-                    color: Theme.text
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: "Details"; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                    Chip { base: Theme.panel; label: "Close"; onClicked: execPop.close() }
+                }
+                // (A tessh cell that ran several programs: one at a time.)
+                Flow {
+                    Layout.fillWidth: true
+                    visible: execPop.records.length > 1
+                    spacing: 4
+                    Repeater {
+                        model: execPop.records
+                        delegate: Chip {
+                            required property var modelData
+                            required property int index
+                            base: index === execPop.sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : Theme.panel
+                            label: (index + 1) + ". " + (modelData.cell ? "the cell" : (modelData.argv && modelData.argv[0] && modelData.argv[0][0]) || (modelData.command || "").split(" ")[0])
+                            tip: modelData.command || ""
+                            onClicked: execPop.sel = index
+                        }
+                    }
+                }
+                Text {
+                    visible: execPop.note !== ""
+                    Layout.fillWidth: true
+                    text: execPop.note
+                    wrapMode: Text.Wrap
+                    color: Theme.textDim
                     font.pixelSize: 12
-                    background: Rectangle { radius: 5; color: Theme.bg; border.color: envFilter.activeFocus ? Theme.accent : Theme.divider }
-                    Keys.onEscapePressed: execPop.close()
+                    font.italic: true
                 }
-                Item { Layout.fillWidth: true }
-                Chip { base: Theme.panel; label: "Copy all"; visible: !!execPop.rec.env; onClicked: nb.copyText(execPop.envs.map(x => x.k + "=" + x.v).join("\n") + "\n") }
-            }
-            ListView {
-                id: envList
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(contentHeight, Math.max(120, nb.height - 340))
-                visible: !!execPop.rec.env
-                clip: true
-                model: execPop.envs
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
-                MomentumWheel { flick: envList }
-                delegate: Row {
-                    required property var modelData
-                    width: envList.width - 12
-                    spacing: 8
-                    Text {
-                        topPadding: 2.001
-                        width: Math.min(240, envList.width * 0.3)
-                        text: modelData.k
-                        elide: Text.ElideRight
-                        color: nb.ansi(4, "#61afef")
-                        font.family: nb.fontFamily
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                    }
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 3
+                    columnSpacing: 8
+                    rowSpacing: 4
+                    Text { text: execPop.rec.cell ? "Code (no programs)" : "Command line"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                    // (Laid out and colored as treetop's process details: a line a
+                    // word when it's long; Copy takes it as one line.)
                     TextEdit {
-                        topPadding: 2.001
-                        width: parent.width - Math.min(240, envList.width * 0.3) - 8
-                        text: modelData.v
-                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
-                        textFormat: TextEdit.PlainText
-                        color: Theme.text; selectionColor: Theme.accent
-                        font.family: nb.fontFamily
+                        objectName: "execLine"
+                        text: nb.controller && !execPop.rec.cell ? nb.controller.prettyCommand(execPop.ran, execPop.rec.argv ? JSON.stringify(execPop.rec.argv) : "", Theme.dark, String(Theme.text))
+                                                                : execPop.ran.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")
+                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.RichText
+                        color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                        topPadding: 3.001; Layout.fillWidth: true
+                    }
+                    Chip { base: Theme.panel; label: "Copy"; Layout.alignment: Qt.AlignTop; onClicked: nb.copyText(execPop.ran) }
+                    Text { text: "Typed"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001; visible: typed.visible }
+                    TextEdit {
+                        id: typed; visible: !execPop.rec.argv && !!execPop.rec.line && execPop.rec.line !== execPop.rec.command; text: execPop.rec.command || ""
+                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                        color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                        topPadding: 3.001; Layout.fillWidth: true
+                    }
+                    Item { visible: typed.visible; width: 1; height: 1 }
+                    Text { text: "Folder"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                    TextEdit {
+                        text: execPop.rec.cwd || "—"
+                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                        color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                        topPadding: 3.001; Layout.fillWidth: true
+                    }
+                    Chip { base: Theme.panel; label: "Copy"; Layout.alignment: Qt.AlignTop; onClicked: nb.copyText(execPop.rec.cwd || "") }
+                    Text { text: "User"; color: Theme.textDim; font.pixelSize: 12; Layout.alignment: Qt.AlignTop; topPadding: 3.001 }
+                    TextEdit {
+                        text: execPop.rec.user || "—"
+                        readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere; textFormat: TextEdit.PlainText
+                        color: Theme.text; selectionColor: Theme.accent; font.family: nb.fontFamily; font.pixelSize: 12
+                        topPadding: 3.001; Layout.fillWidth: true
+                    }
+                    Item { width: 1; height: 1 }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    Text { text: "Environment" + (execPop.rec.env ? " (" + execPop.rec.env.length + ")" : ": not reported"); color: Theme.textDim; font.pixelSize: 12 }
+                    TextField {
+                        id: envFilter
+                        visible: !!execPop.rec.env
+                        Layout.preferredWidth: 240
+                        placeholderText: "Filter"
+                        color: Theme.text
                         font.pixelSize: 12
+                        background: Rectangle { radius: 5; color: Theme.bg; border.color: envFilter.activeFocus ? Theme.accent : Theme.divider }
+                        Keys.onEscapePressed: execPop.close()
+                    }
+                    Item { Layout.fillWidth: true }
+                    Chip { base: Theme.panel; label: "Copy all"; visible: !!execPop.rec.env; onClicked: nb.copyText(execPop.envs.map(x => x.k + "=" + x.v).join("\n") + "\n") }
+                }
+                ListView {
+                    id: envList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(contentHeight, Math.max(120, nb.height - 340))
+                    visible: !!execPop.rec.env
+                    clip: true
+                    model: execPop.envs
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ThemeBar { policy: envList.contentHeight > envList.height + 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+                    MomentumWheel { flick: envList }
+                    delegate: Row {
+                        required property var modelData
+                        width: envList.width - 12
+                        spacing: 8
+                        Text {
+                            topPadding: 2.001
+                            width: Math.min(240, envList.width * 0.3)
+                            text: modelData.k
+                            elide: Text.ElideRight
+                            color: nb.ansi(4, "#61afef")
+                            font.family: nb.fontFamily
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
+                        TextEdit {
+                            topPadding: 2.001
+                            width: parent.width - Math.min(240, envList.width * 0.3) - 8
+                            text: modelData.v
+                            readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
+                            textFormat: TextEdit.PlainText
+                            color: Theme.text; selectionColor: Theme.accent
+                            font.family: nb.fontFamily
+                            font.pixelSize: 12
+                        }
                     }
                 }
-            }
+        }
         }
     }
 
