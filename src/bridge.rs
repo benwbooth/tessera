@@ -1236,6 +1236,13 @@ impl ffi::Controller {
             if !method.starts_with("job.") {
                 return serde_json::json!({"error": "not a job request"}).to_string();
             }
+            // (A signal to what runs in a local pane: sent from here. tesserad
+            // holds off upgrading while a notebook kernel runs, so an older
+            // one may not know the request yet.)
+            if method == "job.signal_front" && host.is_empty() {
+                let pid = params["pid"].as_u64().unwrap_or(0) as u32;
+                return serde_json::json!(crate::procinfo::signal_foreground(pid, params["sig"].as_str().unwrap_or(""))).to_string();
+            }
             match crate::client::rpc(&host, &method, params) {
                 Ok(v) => v.to_string(),
                 Err(e) => serde_json::json!({"error": e}).to_string(),

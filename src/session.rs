@@ -882,7 +882,25 @@ impl Session {
         self.scan_aliases(data);
         let transformed = self.transform_images(data);
         self.capture_output(&transformed);
-        self.term.vt_write(&transformed);
+        // A command that ended without putting the terminal back (vim
+        // killed): when it ends, the main screen again, and the modes only a
+        // terminal app wants turned off, as the shell's prompt can't. (Else
+        // the screen stays the app's, and a notebook takes it for one still
+        // running.)
+        const END: &[u8] = b"\x1b]133;D";
+        match transformed.windows(END.len()).position(|w| w == END) {
+            Some(p) => {
+                self.term.vt_write(&transformed[..p]);
+                if matches!(self.term.active_screen(), Ok(Screen::Alternate)) {
+                    self.term.vt_write(b"\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25h");
+                }
+                if self.term.mode(Mode::FOCUS_EVENT).unwrap_or(false) {
+                    self.term.vt_write(b"\x1b[?1004l");
+                }
+                self.term.vt_write(&transformed[p..]);
+            }
+            None => self.term.vt_write(&transformed),
+        }
     }
 
     pub fn take_events(&mut self) -> String {

@@ -893,9 +893,20 @@ FocusScope {
     }
     function signalCell(i, sig) {
         const c = cells.get(i), way = signalWay(i)
-        if (way === "job") controller.jobCall("", sshHost, "job.signal", JSON.stringify({ id: c.job, sig: sig }))
+        // (A tesserad from before signals: asked whether to update it, then sent again.)
+        const old = (r) => {
+            let e = ""
+            try { e = (JSON.parse(r) || {}).error || "" } catch (x) {}
+            if (!/no request/.test(e)) return false
+            const cid = c.cid
+            askUpdate("sending signals to cards", "sends " + sig, () => { const t = indexOf(cid); if (t >= 0) signalCell(t, sig) })
+            return true
+        }
+        if (way === "job")
+            Async.call(controller, k => controller.jobCall(k, sshHost, "job.signal", JSON.stringify({ id: c.job, sig: sig })), r => old(r))
         else if (way === "term")
             Async.call(controller, k => controller.jobCall(k, sshHost, "job.signal_front", JSON.stringify({ pid: shellPid, sig: sig })), r => {
+                if (old(r)) return
                 // (Nothing in front of the shell to signal: Ctrl+C to the terminal.)
                 if (r !== "true" && sig === "INT" && view) view.sendText("\x03")
             })
