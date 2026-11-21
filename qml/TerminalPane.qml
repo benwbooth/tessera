@@ -138,6 +138,9 @@ Item {
     // having said so since: nothing running in front of it counts as that,
     // until the shell integration says otherwise.)
     property bool idleShell: false
+    // TEMPORARY: why the input editor is off (a notebook tab with no input box in Ben's window).
+    Connections { target: pane; function onEditorOnChanged() { console.warn("editor " + (pane.editorOn ? "on" : "off") + ": tab view=" + pane.viewMode + " inputEditor=" + pane.inputEditor + " exited=" + term.exited + " fullScreen=" + term.fullScreen + " atPrompt=" + term.atPrompt + " idleShell=" + pane.idleShell + " replLang=" + pane.replLang + " session=" + term.sessionId) } }
+    Timer { interval: 8000; running: true; onTriggered: if (!pane.editorOn) console.warn("editor off after start: tab view=" + pane.viewMode + " inputEditor=" + pane.inputEditor + " exited=" + term.exited + " fullScreen=" + term.fullScreen + " atPrompt=" + term.atPrompt + " idleShell=" + pane.idleShell + " runningLong=" + pane.runningLong + " session=" + term.sessionId) }
     // Switching the pane's shell (the editor's language list): to one it was
     // started from, the ones above it are left (exit), what they changed
     // handed down; to another, it's started in the current one. (Which shell

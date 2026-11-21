@@ -2621,6 +2621,9 @@ FocusScope {
                 }
                 Chip { id: moreChip; base: cell.color; label: "⋯"; tip: "More"; Layout.minimumWidth: implicitWidth
                        onClicked: moreMenu.popup(moreChip, 0, moreChip.height + 2) }
+                // (Delete in reach, not in the menu: Z in the notebook brings it back.)
+                Chip { base: cell.color; label: "\u2715"; tip: "Delete this card (Z brings it back)"; Layout.minimumWidth: implicitWidth
+                       onClicked: nb.deleteCell(cell.index) }
                 // (Test hook: TESSERA_TEST_EXPAND_CELL fills the window with the first cell.)
                 Timer { interval: 2500; running: cell.index === 0 && nb.controller !== null && nb.controller.testEnv("EXPAND_CELL") !== ""; onTriggered: nb.expandedId = cell.cid }
                 // (Test hook: TESSERA_TEST_OPEN_MORE_MENU opens the first card's ⋯ menu.)
@@ -2695,7 +2698,6 @@ FocusScope {
                 SlimMenuItem { text: "Move down"; enabled: cell.index < cells.count - 1; onTriggered: nb.moveCell(cell.index, 1) }
                 SlimMenuItem { text: "Add code below"; onTriggered: nb.insertCell(cell.index + 1, "code") }
                 SlimMenuItem { text: "Add Markdown below"; onTriggered: nb.insertCell(cell.index + 1, "markdown") }
-                SlimMenuItem { text: "Delete"; onTriggered: nb.deleteCell(cell.index) }
             }
 
             // ---- the code (or Markdown) being written ----
