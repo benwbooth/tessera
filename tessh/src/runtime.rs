@@ -366,9 +366,6 @@ def tree(x, color=True, width=None):
     """x as a notebook card folds it (see _tree)."""
     return pretty(x, color=color, width=width, _tree_of=_tree)
 
-_card_out = None    # (the kernel's stdout: a card's)
-_card_show = None   # (the kernel's display: what shows a value in the card)
-
 def print(*args, sep=" ", end="\n", file=None, flush=False):
     """print: values separated by spaces and a newline after them, as
     Python's print; lists, dicts, sets, tuples and records are laid out by
@@ -376,9 +373,6 @@ def print(*args, sep=" ", end="\n", file=None, flush=False):
     notebook).  print $config"""
     import builtins, sys
     out = file if file is not None else sys.stdout
-    if _card_show is not None and file is None and out is _card_out and len(args) == 1 and _kind(args[0]) and end == "\n":
-        _card_show(args[0])
-        return
     if file is None or file is sys.stdout:
         color = _wants_color(out)
         args = [pretty(a, color=color) if _kind(a) else a for a in args]
@@ -727,13 +721,9 @@ pub fn pretty_text(py: Python<'_>, v: &Bound<'_, PyAny>, color: Option<bool>) ->
     prelude(py)?.getattr("pretty")?.call((v,), Some(&kw))?.extract()
 }
 
-/// In the kernel: values go to notebook cards, which show color, and a
-/// lone printed value goes through show (to fold there).
-pub fn set_notebook(py: Python<'_>, show: &Bound<'_, PyAny>) -> PyResult<()> {
-    let p = prelude(py)?;
-    p.setattr("_notebook", true)?;
-    p.setattr("_card_out", py.import("sys")?.getattr("stdout")?)?;
-    p.setattr("_card_show", show)
+/// In the kernel: values go to notebook cards, which show color.
+pub fn set_notebook(py: Python<'_>) -> PyResult<()> {
+    prelude(py)?.setattr("_notebook", true)
 }
 
 /// A value as a notebook card folds it (JSON), if it's one that folds.

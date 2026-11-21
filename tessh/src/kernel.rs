@@ -604,7 +604,7 @@ pub fn run(conn_file: &str) -> i32 {
             publish("tessera_exec", v)
         });
         runtime::set_display(wrap_pyfunction!(display_hook, py)?.into_any().unbind());
-        runtime::set_notebook(py, d.as_any())?;
+        runtime::set_notebook(py)?;
         let sys = py.import("sys")?;
         for s in ["stdout", "stderr"] {
             let kw = PyDict::new(py);
