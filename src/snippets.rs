@@ -92,7 +92,12 @@ fn runners(lang: &str) -> &'static [Runner] {
         "d" => &[r!("ldc2", "ldc2 -run {f}", File("d"), "ldc"), r!("rdmd", "rdmd {f}", File("d"), "dmd")],
         "v" => &[r!("v", "v -e", Inline, "vlang")],
         "fsharp" => &[r!("dotnet", "dotnet fsi {f}", File("fsx"), "dotnet-sdk")],
-        "c-sharp" => &[r!("dotnet-script", "dotnet-script {f}", File("csx"), "dotnet-script")],
+        // (dotnet-script if it's there; else a console project of its own, which
+        // .NET 8 runs: nixpkgs has no dotnet-script.)
+        "c-sharp" => &[
+            r!("dotnet-script", "dotnet-script {f}", File("csx"), ""),
+            r!("dotnet", "cd {d} && export DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 && dotnet new console -o app >/dev/null && cp {f} app/Program.cs && cd app && dotnet run", File("cs"), "dotnet-sdk"),
+        ],
         "prolog" => &[r!("swipl", "swipl {f}", File("pl"), "swi-prolog")],
         "fortran" => &[r!("gfortran", "gfortran -o {b} {f} && {b}", File("f90"), "gfortran")],
         "elvish" => &[r!("elvish", "elvish -c", Inline, "elvish")],

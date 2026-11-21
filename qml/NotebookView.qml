@@ -1986,6 +1986,68 @@ FocusScope {
         if (Object.keys(t).length) md.tessera = t
         return JSON.stringify(sorted({ cells: out, metadata: md, nbformat: 4, nbformat_minor: 5 }), null, 1) + "\n"
     }
+    // ---- Jupytext: the notebook as a script (percent format) or Markdown ----
+    // (Each language's file extension and line comment, as Jupytext has them.)
+    readonly property var jupytextLangs: ({
+        python: ["py", "#"], tessh: ["tsh", "#"], bash: ["sh", "#"], zsh: ["zsh", "#"], fish: ["fish", "#"], sh: ["sh", "#"],
+        powershell: ["ps1", "#"], xonsh: ["xsh", "#"], nu: ["nu", "#"], r: ["R", "#"], ruby: ["rb", "#"], perl: ["pl", "#"],
+        julia: ["jl", "#"], tcl: ["tcl", "#"], elixir: ["exs", "#"], crystal: ["cr", "#"], nim: ["nim", "#"], nix: ["nix", "#"],
+        javascript: ["js", "//"], typescript: ["ts", "//"], rust: ["rs", "//"], go: ["go", "//"], c: ["c", "//"], cpp: ["cpp", "//"],
+        java: ["java", "//"], kotlin: ["kt", "//"], scala: ["scala", "//"], swift: ["swift", "//"], dart: ["dart", "//"],
+        zig: ["zig", "//"], v: ["v", "//"], d: ["d", "//"], "c-sharp": ["cs", "//"], fsharp: ["fsx", "//"], groovy: ["groovy", "//"],
+        php: ["php", "//"], odin: ["odin", "//"], hare: ["ha", "//"], gleam: ["gleam", "//"], koka: ["kk", "//"], inko: ["inko", "#"],
+        lua: ["lua", "--"], luau: ["luau", "--"], haskell: ["hs", "--"], sql: ["sql", "--"], lean: ["lean", "--"], ada: ["adb", "--"],
+        clojure: ["clj", ";;"], racket: ["rkt", ";;"], scheme: ["scm", ";;"], "common-lisp": ["lisp", ";;"], fennel: ["fnl", ";;"],
+        janet: ["janet", "#"], elisp: ["el", ";;"], octave: ["m", "%"], matlab: ["m", "%"], prolog: ["pl", "%"], erlang: ["erl", "%"],
+        ocaml: ["ml", "//"], sml: ["sml", "//"], fortran: ["f90", "!"], pascal: ["pas", "//"], koto: ["koto", "#"], amber: ["ab", "//"]
+    })
+    readonly property var jupytextLang: jupytextLangs[shellKernel ? (shellName || "bash") : codeLang] || ["txt", "#"]
+    // (fmt: "percent" or "md". No outputs, as Jupytext keeps none.)
+    function jupytext(fmt) {
+        const lang = shellKernel ? (shellName || "bash") : codeLang
+        const cm = jupytextLang[1]
+        const ks = shellKernel ? { name: "bash", display_name: "Bash", language: "bash" }
+                 : kernel ? { name: kernel.name, display_name: kernel.display, language: kernel.language } : null
+        const head = ["jupyter:", "  jupytext:", "    text_representation:", "      extension: ." + (fmt === "md" ? "md" : jupytextLang[0]),
+                      "      format_name: " + (fmt === "md" ? "markdown" : "percent")]
+        if (ks) head.push("  kernelspec:", "    display_name: " + JSON.stringify(ks.display_name), "    language: " + ks.language, "    name: " + ks.name)
+        const out = []
+        if (fmt === "md") out.push("---", ...head, "---", "")
+        else out.push(cm + " ---", ...head.map(l => cm + " " + l), cm + " ---", "")
+        for (let i = 0; i < cells.count; ++i) {
+            const c = cells.get(i)
+            if (c.viewPath !== "") continue     // (a file's card: the file is its own)
+            const src = c.source.replace(/\n+$/, "")
+            // (Another language than the notebook's, or a shell command run in
+            // the terminal: its cell magic, as IPython and Jupytext write it.)
+            const other = c.lang !== "" && !sameLang(c.lang, lang) ? c.lang : (c.tid > 0 && !shellKernel ? (shellName || "bash") : "")
+            if (fmt === "md") {
+                if (c.type === "markdown") out.push(src, "")
+                else out.push("```" + (other || lang), src, "```", "")
+            } else if (c.type === "markdown") {
+                out.push(cm + " %% [markdown]", ...src.split("\n").map(l => l === "" ? cm : cm + " " + l), "")
+            } else {
+                out.push(cm + " %%", ...(other ? ["%%" + other] : []), src, "")
+            }
+        }
+        return out.join("\n").replace(/\n+$/, "") + "\n"
+    }
+    function exportTo(p) {
+        const fmt = /\.md$/i.test(p) ? "md" : "percent"
+        Async.call(controller, k => controller.writeTextFile(k, p, jupytext(fmt)), err => { saveError = err; if (controller.testEnv("JUPYTEXT") !== "") console.log("jupytext test: " + p + " -> " + (err || "written")) })
+    }
+    FileDialog {
+        id: exportDialog
+        title: "Export as Jupytext"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: nb.jupytextLang[0]
+        nameFilters: ["Jupytext script, percent format (*." + nb.jupytextLang[0] + ")", "Jupytext Markdown (*.md)"]
+        currentFolder: nb.folder !== "" ? "file://" + nb.folder : ""
+        onAccepted: nb.exportTo(decodeURIComponent(String(selectedFile).replace(/^file:\/\//, "")))
+    }
+    // (Test hook: TESSERA_TEST_JUPYTEXT=<path> exports there at 16 s.)
+    Timer { interval: 16000; running: nb.controller !== null && nb.controller.testEnv("JUPYTEXT") !== ""
+            onTriggered: { for (const p of nb.controller.testEnv("JUPYTEXT").split(",")) nb.exportTo(p) } }
     property string written: ""         // the path just saved to (not read back)
     function save() {
         if (path === "") { saveDialog.open(); return }
@@ -2307,6 +2369,11 @@ FocusScope {
                 label: nb.path === "" ? (nb.narrow ? "Save…" : "Save as .ipynb…") : nb.dirty ? "Save" : "Saved"
                 tip: (nb.path === "" ? "Save as a Jupyter notebook (a file to run again or share)" : "Save the notebook") + " (Ctrl+S in the notebook)"
                 onClicked: nb.save()
+            }
+            Tool {
+                label: nb.narrow ? "Export…" : "Export Jupytext…"
+                tip: "Export as Jupytext: a ." + nb.jupytextLang[0] + " script with # %% cells, or Markdown (.md) with code blocks. The cells only, without outputs"
+                onClicked: exportDialog.open()
             }
         }
     }
@@ -3201,17 +3268,16 @@ FocusScope {
                 Chip { base: Theme.bg; label: "+ Markdown"; tip: "Add a Markdown cell at the end"; onClicked: nb.insertCell(cells.count, "markdown") }
             }
         }
-        Column {
-            anchors.centerIn: parent
-            width: parent.width - 60
-            spacing: 12
+        // (A new notebook: where its first cell goes, at the bottom, by the
+        // input editor, as the cards fill up from there.)
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 10
+            spacing: 8
             visible: cells.count === 0
-            Row {
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 8
-                Chip { base: Theme.bg; label: "+ Code"; onClicked: nb.insertCell(0, "code") }
-                Chip { base: Theme.bg; label: "+ Markdown"; onClicked: nb.insertCell(0, "markdown") }
-            }
+            Chip { base: Theme.bg; label: "+ Code"; tip: "Add a code cell"; onClicked: nb.insertCell(0, "code") }
+            Chip { base: Theme.bg; label: "+ Markdown"; tip: "Add a Markdown cell"; onClicked: nb.insertCell(0, "markdown") }
         }
     }
     TextEdit { id: clip; visible: false }

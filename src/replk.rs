@@ -104,7 +104,7 @@ const LANGS: &[Lang] = &[
         display: "F# (dotnet fsi)",
         prog: "dotnet",
         pkg: "dotnet-sdk",
-        args: &["fsi", "--nologo", "--readline-"],
+        args: &["fsi", "--nologo", "--quiet", "--readline-"],
         how: How::Raw { init: "", mark: "\n;;\nprintf \"\\u001b]7777;tessera-done;0\\u0007\";;\n" },
     },
     Lang {
@@ -126,7 +126,7 @@ const LANGS: &[Lang] = &[
     Lang { lang: "crystal", display: "Crystal", prog: "crystal", pkg: "crystal", args: &[], how: How::Replay { entry: None, stub: "", hoist: None } },
     Lang { lang: "d", display: "D", prog: "ldc2", pkg: "ldc", args: &[], how: How::Replay { entry: Some(r"\bmain\s*\("), stub: "void main() {}", hoist: None } },
     Lang { lang: "v", display: "V", prog: "v", pkg: "vlang", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "fn main() {}", hoist: Some(r"^\s*(module|import)\s") } },
-    Lang { lang: "c-sharp", display: "C#", prog: "dotnet-script", pkg: "dotnet-script", args: &[], how: How::Replay { entry: None, stub: "", hoist: Some(r"^\s*using\s+[\w.]+\s*;") } },
+    Lang { lang: "c-sharp", display: "C#", prog: "dotnet", pkg: "dotnet-sdk", args: &[], how: How::Replay { entry: None, stub: "", hoist: Some(r"^\s*using\s+[\w.]+\s*;") } },
     Lang { lang: "fortran", display: "Fortran", prog: "gfortran", pkg: "gfortran", args: &[], how: How::Replay { entry: Some(r"(?im)^\s*program\b"), stub: "program main\nend program main", hoist: None } },
     Lang { lang: "hare", display: "Hare", prog: "hare", pkg: "hare", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "export fn main() void = void;", hoist: Some(r"^\s*use\s") } },
     Lang { lang: "koka", display: "Koka", prog: "koka", pkg: "koka", args: &[], how: How::Replay { entry: Some(r"\bfun\s+main\s*\("), stub: "fun main() ()", hoist: Some(r"^\s*import\s") } },
@@ -610,7 +610,7 @@ fn strip_nix_noise(err: &[u8]) -> Vec<u8> {
             continue;
         }
         in_list = false;
-        if t.starts_with("copying path '/nix/store/") || t.starts_with("building '/nix/store/") || t.starts_with("fetching ") {
+        if t.starts_with("copying path '/nix/store/") || t.starts_with("building '/nix/store/") || t.starts_with("fetching ") || t.starts_with("error (ignored): SQLite database") {
             continue;
         }
         out.push_str(line);
