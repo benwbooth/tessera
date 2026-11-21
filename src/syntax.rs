@@ -850,6 +850,10 @@ mod tests {
         ] {
             assert!(h.contains(want), "{want}\n in\n{h}");
         }
+        // (A string inside an interpolation doesn't end the outer one.)
+        let h = super::highlight_html("tessh", r#"print "n: ${len "a b"} done""#);
+        let want = r#"<span class="t-embedded">${</span><span class="t-function">len</span> <span class="t-string">"a b"</span><span class="t-embedded">}</span><span class="t-string"> done"</span>"#;
+        assert!(h.contains(want), "{want}\n in\n{h}");
     }
 
     #[test]

@@ -11,6 +11,9 @@ module.exports = grammar({
 
   word: $ => $.bareword,
 
+  // ("…" strings: src/scanner.c, so interpolations can hold strings.)
+  externals: $ => [$._dq_string],
+
   rules: {
     source_file: $ => seq(optional($._line_or_comment), repeat(seq($._newline, optional($._line_or_comment)))),
 
@@ -61,12 +64,12 @@ module.exports = grammar({
 
     status: _ => '$?',
 
-    string: _ => token(choice(
-      seq(optional(/[bBrR]{1,2}/), '"""', repeat(choice(/[^"\\]/, /\\(.|\n)/, /"[^"]/, /""[^"]/)), '"""'),
+    string: $ => choice($._dq_string, token(choice(
+      seq(/[bBrR]{1,2}/, '"""', repeat(choice(/[^"\\]/, /\\(.|\n)/, /"[^"]/, /""[^"]/)), '"""'),
       seq(optional(/[bBrR]{1,2}/), "'''", repeat(choice(/[^']/, /'[^']/, /''[^']/)), "'''"),
-      seq(optional(/[bBrR]{1,2}/), '"', repeat(choice(/[^"\\]/, /\\(.|\n)/)), '"'),
+      seq(/[bBrR]{1,2}/, '"', repeat(choice(/[^"\\]/, /\\(.|\n)/)), '"'),
       seq(optional(/[bBrR]{1,2}/), "'", /[^']*/, "'"),
-    )),
+    ))),
 
     number: _ => token(seq(
       optional(/[-+]/),
