@@ -476,10 +476,21 @@ fn print_lays_out_values() {
     });
 }
 
+#[test]
+fn env_prints_its_variables() {
+    let (ns, out) = run("print $env\ne = (dict (sorted ($env.items)))");
+    Python::attach(|py| {
+        let e = ns.bind(py).get_item("e").unwrap().unwrap();
+        let want = crate::runtime::pretty_text(py, &e, Some(false)).unwrap();
+        assert!(out.starts_with('{') && !out.contains("variables>"), "{out}");
+        assert_eq!(out.trim_end(), want.trim_end(), "$env prints as the dict of its variables (sorted)");
+    });
+}
+
 /// What print shows is tessh that reads back as an equal value.
 #[test]
 fn printed_values_read_back() {
-    let defs = "from dataclasses import dataclass\nfrom collections import namedtuple\n@dataclass\nclass Pt\n  x: int\n  y: object\nNT = (namedtuple 'NT' 'a b')\n";
+    let defs = "from dataclasses import dataclass\nfrom collections import namedtuple Counter OrderedDict defaultdict deque\nfrom pathlib import Path\n@dataclass\nclass Pt\n  x: int\n  y: object\nNT = (namedtuple 'NT' 'a b')\n";
     let vals = r#"vals = [
   [1 -2 3.5 1e300 None True False (float 'inf') (float '-inf') (complex 1 -2)]
   ['a b' "x\ny" "\$z" "it's" "q\"q" "tab\t" "\x01" '' "é ☃" 'True' '1']
@@ -497,6 +508,14 @@ fn printed_values_read_back() {
   (Pt 1 (Pt 2 {1 2}))
   (NT 1 [2 3])
   [[$i (str $i) {k: $i}] for i in (range 40)]
+  (Counter 'aab')
+  (OrderedDict {b: 1 a: 2})
+  (defaultdict $list {a: [1]})
+  (deque [1 2] 5)
+  (range 3)
+  (range 0 9 3)
+  (Path '/tmp/x y')
+  (dict ($env.items))
 ]
 "#;
     let (ns, _) = run(&format!("{defs}{vals}"));
@@ -519,5 +538,5 @@ fn printed_values_read_back() {
             }
         }
     });
-    assert!(checked >= 48);
+    assert!(checked >= 72);
 }
