@@ -88,7 +88,8 @@ fn runners(lang: &str) -> &'static [Runner] {
         "zig" => &[r!("zig", "zig run {f}", File("zig"), "zig")],
         "nim" => &[r!("nim", "nim --hints:off --eval:{c}", Inline, "nim"), r!("nim", "nim r --hints:off {f}", File("nim"), "nim")],
         "crystal" => &[r!("crystal", "crystal eval", Inline, "crystal")],
-        "d" => &[r!("rdmd", "rdmd {f}", File("d"), "dmd")],
+        // (ldc first: nixpkgs has it prebuilt; its dmd builds from source.)
+        "d" => &[r!("ldc2", "ldc2 -run {f}", File("d"), "ldc"), r!("rdmd", "rdmd {f}", File("d"), "dmd")],
         "v" => &[r!("v", "v -e", Inline, "vlang")],
         "fsharp" => &[r!("dotnet", "dotnet fsi {f}", File("fsx"), "dotnet-sdk")],
         "c-sharp" => &[r!("dotnet-script", "dotnet-script {f}", File("csx"), "dotnet-script")],

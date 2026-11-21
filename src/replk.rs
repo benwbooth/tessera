@@ -122,7 +122,7 @@ const LANGS: &[Lang] = &[
     Lang { lang: "zig", display: "Zig", prog: "zig", pkg: "zig", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "pub fn main() void {}" } },
     Lang { lang: "nim", display: "Nim", prog: "nim", pkg: "nim", args: &[], how: How::Replay { entry: None, stub: "" } },
     Lang { lang: "crystal", display: "Crystal", prog: "crystal", pkg: "crystal", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "d", display: "D", prog: "rdmd", pkg: "dmd", args: &[], how: How::Replay { entry: Some(r"\bmain\s*\("), stub: "void main() {}" } },
+    Lang { lang: "d", display: "D", prog: "ldc2", pkg: "ldc", args: &[], how: How::Replay { entry: Some(r"\bmain\s*\("), stub: "void main() {}" } },
     Lang { lang: "v", display: "V", prog: "v", pkg: "vlang", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "fn main() {}" } },
     Lang { lang: "c-sharp", display: "C#", prog: "dotnet-script", pkg: "dotnet-script", args: &[], how: How::Replay { entry: None, stub: "" } },
     Lang { lang: "fortran", display: "Fortran", prog: "gfortran", pkg: "gfortran", args: &[], how: How::Replay { entry: Some(r"(?im)^\s*program\b"), stub: "program main\nend program main" } },
