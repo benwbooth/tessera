@@ -65,6 +65,7 @@ fn main() {
         QmlFile::from("qml/MomentumWheel.qml"),
         QmlFile::from("qml/ComposeBox.qml"),
         QmlFile::from("qml/GuidePage.qml"),
+        QmlFile::from("qml/ValueTree.qml"),
         QmlFile::from("qml/PromptBar.qml"),
         QmlFile::from("qml/AssistantPanel.qml"),
         QmlFile::from("qml/RichViewer.qml"),

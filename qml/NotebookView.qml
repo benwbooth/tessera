@@ -4422,6 +4422,7 @@ FocusScope {
                         sourceComponent: {
                             const o = modelData
                             if (o.output_type === "stream" || o.output_type === "error") return textOut
+                            if ((o.data || {})["application/vnd.tessh.tree+json"] !== undefined) return treeOut
                             const m = nb.bestMime(o.data || {})
                             if (m === "image/png" || m === "image/jpeg" || m === "image/gif") return imageOut
                             if (m === "text/html" || m === "image/svg+xml") return htmlOut
@@ -4487,6 +4488,31 @@ FocusScope {
                         return nb.colored(t)
                     }
                 }
+            }
+        }
+    }
+    Component {
+        id: treeOut
+        // A tessh value: lists, dicts and records that fold (▸/▾).
+        Flickable {
+            id: trf
+            readonly property var o: parent ? parent.out : ({})
+            interactive: false
+            implicitHeight: vtree.implicitHeight + 8
+            height: implicitHeight
+            contentWidth: Math.max(width, vtree.implicitWidth + 8)
+            contentHeight: vtree.implicitHeight + 8
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.horizontal: ScrollBar {}
+            ValueTree {
+                id: vtree
+                x: 0
+                y: 4
+                colored: nb.colored
+                fontFamily: nb.fontFamily
+                pointSize: nb.outputPointSize
+                node: (trf.o.data || {})["application/vnd.tessh.tree+json"] || ({})
             }
         }
     }

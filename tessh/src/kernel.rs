@@ -181,6 +181,10 @@ fn mimebundle(py: Python<'_>, obj: &Bound<'_, PyAny>) -> (Map<String, Value>, Ma
     if let Ok(r) = runtime::pretty_text(py, obj, Some(true)).or_else(|_| obj.repr().map(|r| r.to_string())) {
         data.insert("text/plain".into(), Value::String(r));
     }
+    // (Lists, dicts and records also as a tree the card folds.)
+    if let Some(t) = runtime::tree_json(py, obj).and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        data.insert("application/vnd.tessh.tree+json".into(), t);
+    }
     if let Ok(f) = obj.getattr("_repr_mimebundle_") {
         if let Ok(b) = f.call0() {
             let (d, m) = if let Ok((d, m)) = b.extract::<(Bound<PyDict>, Bound<PyDict>)>() { (Some(d), Some(m)) } else { (b.cast_into::<PyDict>().ok(), None) };
@@ -590,7 +594,7 @@ pub fn run(conn_file: &str) -> i32 {
         runner::init(py)?;
         let ns = runner::new_namespace(py, "__main__", vec![])?;
         let d = wrap_pyfunction!(display, py)?;
-        ns.set_item("display", d)?;
+        ns.set_item("display", &d)?;
         let b = py.import("builtins")?;
         b.setattr("input", wrap_pyfunction!(kernel_input, py)?)?;
         let _ = runtime::TTY_HOOK.set(kernel_tty);
@@ -600,7 +604,7 @@ pub fn run(conn_file: &str) -> i32 {
             publish("tessera_exec", v)
         });
         runtime::set_display(wrap_pyfunction!(display_hook, py)?.into_any().unbind());
-        runtime::set_notebook(py)?;
+        runtime::set_notebook(py, d.as_any())?;
         let sys = py.import("sys")?;
         for s in ["stdout", "stderr"] {
             let kw = PyDict::new(py);

@@ -176,7 +176,7 @@ def _bytes_lit(x):
             out.append(f"\\x{b:02x}")
     return 'b"' + "".join(out) + '"'
 
-def pretty(x, color=None, width=None, indent=0):
+def pretty(x, color=None, width=None, indent=0, _tree_of=None):
     """x as tessh code that reads back as an equal value: [1 2], {a: 1},
     {1 2}, (1, 2), 'text', (Point x=1 y=2) for a record (a dataclass or
     namedtuple).  What has no such form (a function, a file) is shown as
@@ -321,7 +321,53 @@ def pretty(x, color=None, width=None, indent=0):
             lines.append(pad + head + field_value(k, v, body) + comma)
         seen.discard(id(x))
         return o + "\n" + "\n".join(lines) + "\n" + " " * at + e
+    if _tree_of is not None:
+        return _tree_of(x, parts, flat, key, field_value, lay, width)
     return lay(x, indent, indent)
+
+def _tree(x, parts, flat, key, field_value, lay, width):
+    """x for a notebook card to fold: {"s": text} for a plain value, or
+    {"o": open, "c": close, "f": the whole on a line (or a count), "e":
+    open at first, "items": [{"k": key, "v": node, "w": wrapped}], "t": tuple}.
+    Texts are colored (ANSI)."""
+    seen = set()
+    def node(v, col, at):
+        p = parts(v)
+        if p is None or id(v) in seen:
+            return {"s": flat(v)}
+        o, items, e, kind = p
+        one = flat(v)
+        n = len(items)
+        # (Folded, it's the whole on a line where that fits, else a count.)
+        short = one if col + _shown_len(one) < width else o + "\x1b[90m… " + str(n) + (" item" if n == 1 else " items") + " …\x1b[0m" + e
+        # (Plain values with no keys: as many to a line as fit, as pretty does.)
+        if kind != "record" and items and all(k is None and parts(vv) is None for k, vv in items):
+            comma = "\x1b[90m,\x1b[0m" if kind is True and _wants_color() else ("," if kind is True else "")
+            rows, row = [], ""
+            for _, vv in items:
+                t = flat(vv) + comma
+                if row and at + 2 + _shown_len(row + " " + t) > width:
+                    rows.append(row)
+                    row = ""
+                row = row + " " + t if row else t
+            rows.append(row)
+            return {"o": o, "c": e, "f": short, "e": col + _shown_len(one) >= width, "rows": rows, "t": kind is True}
+        seen.add(id(v))
+        kids = []
+        for k, vv in items:
+            head = key(k) if k else ""
+            wrapped = k is not None and k[0] == "field" and _kind(vv) in ("list", "dict", "set")
+            kids.append({"k": head, "v": node(vv, at + 2 + _shown_len(head), at + 2), "w": wrapped})
+        seen.discard(id(v))
+        return {"o": o, "c": e, "f": short, "e": n > 0 and col + _shown_len(one) >= width, "items": kids, "t": kind is True}
+    return node(x, 0, 0)
+
+def tree(x, color=True, width=None):
+    """x as a notebook card folds it (see _tree)."""
+    return pretty(x, color=color, width=width, _tree_of=_tree)
+
+_card_out = None    # (the kernel's stdout: a card's)
+_card_show = None   # (the kernel's display: what shows a value in the card)
 
 def print(*args, sep=" ", end="\n", file=None, flush=False):
     """print: values separated by spaces and a newline after them, as
@@ -330,6 +376,9 @@ def print(*args, sep=" ", end="\n", file=None, flush=False):
     notebook).  print $config"""
     import builtins, sys
     out = file if file is not None else sys.stdout
+    if _card_show is not None and file is None and out is _card_out and len(args) == 1 and _kind(args[0]) and end == "\n":
+        _card_show(args[0])
+        return
     if file is None or file is sys.stdout:
         color = _wants_color(out)
         args = [pretty(a, color=color) if _kind(a) else a for a in args]
@@ -678,9 +727,23 @@ pub fn pretty_text(py: Python<'_>, v: &Bound<'_, PyAny>, color: Option<bool>) ->
     prelude(py)?.getattr("pretty")?.call((v,), Some(&kw))?.extract()
 }
 
-/// In the kernel: values go to notebook cards, which show color.
-pub fn set_notebook(py: Python<'_>) -> PyResult<()> {
-    prelude(py)?.setattr("_notebook", true)
+/// In the kernel: values go to notebook cards, which show color, and a
+/// lone printed value goes through show (to fold there).
+pub fn set_notebook(py: Python<'_>, show: &Bound<'_, PyAny>) -> PyResult<()> {
+    let p = prelude(py)?;
+    p.setattr("_notebook", true)?;
+    p.setattr("_card_out", py.import("sys")?.getattr("stdout")?)?;
+    p.setattr("_card_show", show)
+}
+
+/// A value as a notebook card folds it (JSON), if it's one that folds.
+pub fn tree_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> Option<String> {
+    let p = prelude(py).ok()?;
+    if !p.getattr("_kind").ok()?.call1((v,)).ok()?.is_truthy().ok()? {
+        return None;
+    }
+    let t = p.getattr("tree").ok()?.call1((v,)).ok()?;
+    py.import("json").ok()?.call_method1("dumps", (t,)).ok()?.extract().ok()
 }
 
 fn is_attached_output(v: &Bound<'_, PyAny>) -> bool {
