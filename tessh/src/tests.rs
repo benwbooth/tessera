@@ -356,6 +356,7 @@ fn guide_examples() {
     };
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut failed = Vec::new();
+    let mut blessed: Vec<(usize, String)> = Vec::new();
     Python::attach(|py| {
         let home = std::env::current_dir().unwrap();
         for (line, code, run, checked, want) in &blocks {
@@ -390,10 +391,36 @@ fn guide_examples() {
             } else if let Some(w) = want {
                 if addr(&out) != *w {
                     failed.push(format!("guide.md:{line}: printed\n{out}--- not\n{w}"));
+                    blessed.push((*line, addr(&out)));
                 }
             }
         }
     });
+    // (TESSH_BLESS_GUIDE=1: what they print becomes their output blocks.)
+    if std::env::var_os("TESSH_BLESS_GUIDE").is_some() && !blessed.is_empty() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/doc/guide.md");
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut ls: Vec<String> = text.lines().map(String::from).collect();
+        for (line, out) in blessed.iter().rev() {
+            // (The output fence after the example that starts at line.)
+            let mut k = *line;
+            while !ls[k].starts_with("```") {
+                k += 1;
+            }
+            k += 1;
+            while ls[k].trim().is_empty() {
+                k += 1;
+            }
+            assert_eq!(ls[k], "```output");
+            let mut e = k + 1;
+            while !ls[e].starts_with("```") {
+                e += 1;
+            }
+            ls.splice(k + 1..e, out.lines().map(String::from));
+        }
+        std::fs::write(path, ls.join("\n") + "\n").unwrap();
+        return;
+    }
     assert!(failed.is_empty(), "{} of {} examples:\n\n{}", failed.len(), blocks.len(), failed.join("\n\n"));
 }
 
@@ -437,14 +464,60 @@ fn cd_takes_bash_options() {
 fn print_lays_out_values() {
     let (_, out) = run("print small [1 2] {a: 1} (1,)\nxs = [1 2]\n$xs.append $xs\nprint $xs\nprint (pretty {k: [(str $i) for i in (range 30)]} width=40 color=False)");
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines[0], "small [1, 2] {'a': 1} (1,)", "short values stay on one line, text as text");
-    assert_eq!(lines[1], "[1, 2, [...]]");
-    assert_eq!(lines[2..5], ["{", "  'k': [", "    '0', '1', '2', '3', '4', '5', '6',"], "long ones break, indented, plain values packed");
-    assert_eq!(lines[lines.len() - 2..], ["  ],", "}"]);
+    assert_eq!(lines[0], "small [1 2] {a: 1} (1,)", "short values stay on one line, text as text");
+    assert_eq!(lines[1], "[1 2 [...]]");
+    assert_eq!(lines[2..5], ["{", "  k: [", "    '0' '1' '2' '3' '4' '5' '6' '7' '8'"], "long ones break, indented, plain values packed");
+    assert_eq!(lines[lines.len() - 2..], ["  ]", "}"]);
     Python::attach(|py| {
         let v = pyo3::types::PyDict::new(py);
         v.set_item("a", vec![1, 2]).unwrap();
         let c = crate::runtime::pretty_text(py, v.as_any(), Some(true)).unwrap();
-        assert!(c.contains("\x1b[36m'a'\x1b[0m") && c.contains("\x1b[33m1\x1b[0m"), "{c:?}");
+        assert!(c.contains("\x1b[36ma\x1b[0m") && c.contains("\x1b[33m1\x1b[0m"), "{c:?}");
     });
+}
+
+/// What print shows is tessh that reads back as an equal value.
+#[test]
+fn printed_values_read_back() {
+    let defs = "from dataclasses import dataclass\nfrom collections import namedtuple\n@dataclass\nclass Pt\n  x: int\n  y: object\nNT = (namedtuple 'NT' 'a b')\n";
+    let vals = r#"vals = [
+  [1 -2 3.5 1e300 None True False (float 'inf') (float '-inf') (complex 1 -2)]
+  ['a b' "x\ny" "\$z" "it's" "q\"q" "tab\t" "\x01" '' "é ☃" 'True' '1']
+  {a: 1 'b c': 2 1: 3 (True): 4 (None): 5 'True': 6 (1, 2): 7 -1.5: 8 b"k": 9 '': 10}
+  (1, 2)
+  (1,)
+  ()
+  {1 2}
+  (set)
+  (frozenset {3 4})
+  (frozenset)
+  b"\x00ab\"$\n"
+  (Pt x=1 y=([1 2]))
+  (Pt 1 {a: [1 {2 3}]})
+  (Pt 1 (Pt 2 {1 2}))
+  (NT 1 [2 3])
+  [[$i (str $i) {k: $i}] for i in (range 40)]
+]
+"#;
+    let (ns, _) = run(&format!("{defs}{vals}"));
+    let mut checked = 0;
+    Python::attach(|py| {
+        let vs = ns.bind(py).get_item("vals").unwrap().unwrap();
+        for v in vs.try_iter().unwrap() {
+            let v = v.unwrap();
+            let want = v.repr().unwrap().to_string();
+            for w in [200, 30, 8] {
+                let kw = pyo3::types::PyDict::new(py);
+                kw.set_item("width", w).unwrap();
+                kw.set_item("color", false).unwrap();
+                let pretty = py.import("__tessh__").unwrap().getattr("pretty").unwrap();
+                let t: String = pretty.call((&v,), Some(&kw)).unwrap().extract().unwrap();
+                let (ns2, _) = run(&format!("{defs}back = {t}\n"));
+                let back = ns2.bind(py).get_item("back").unwrap().unwrap().repr().unwrap().to_string();
+                assert_eq!(back, want, "printed at width {w} as\n{t}");
+                checked += 1;
+            }
+        }
+    });
+    assert!(checked >= 48);
 }

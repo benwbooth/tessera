@@ -106,11 +106,13 @@ def _wants_color(f=None):
 
 def _width():
     import os, shutil
+    if _notebook:
+        return 80   # (a card is narrower than the terminal $COLUMNS speaks for)
     try:
         return int(os.environ["COLUMNS"])
     except (KeyError, ValueError):
         pass
-    return shutil.get_terminal_size((100, 24)).columns if not _notebook else 100
+    return shutil.get_terminal_size((100, 24)).columns
 
 _COLORS = {"str": "32", "num": "33", "key": "36", "const": "35", "punct": "90", "name": "34"}
 
@@ -129,12 +131,52 @@ def _kind(x):
         return "record"
     return None
 
+def _str_lit(x):
+    """A str as tessh reads it back: 'raw' when it can be, else "escaped"."""
+    if "'" not in x and x.isprintable():
+        return "'" + x + "'"
+    out = []
+    for ch in x:
+        if ch in '\\"$':
+            out.append("\\" + ch)
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ch == "\r":
+            out.append("\\r")
+        elif not ch.isprintable():
+            o = ord(ch)
+            out.append(f"\\x{o:02x}" if o < 0x100 else f"\\u{o:04x}" if o < 0x10000 else f"\\U{o:08x}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+def _bytes_lit(x):
+    out = []
+    for b in x:
+        ch = chr(b)
+        if ch in '\\"':
+            out.append("\\" + ch)
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif 32 <= b < 127:
+            out.append(ch)
+        else:
+            out.append(f"\\x{b:02x}")
+    return 'b"' + "".join(out) + '"'
+
 def pretty(x, color=None, width=None, indent=0):
-    """x as text to read: lists, dicts, sets, tuples and records (dataclasses,
-    namedtuples) laid out over indented lines when they don't fit on one,
-    colored by type (strings, numbers, keys, None/True/False) when color is
-    true; None (the default) colors when the output is a terminal or a
-    notebook.  print uses it for these.  pretty {a: [1 2]} -> "{'a': [1, 2]}" """
+    """x as tessh code that reads back as an equal value: [1 2], {a: 1},
+    {1 2}, (1, 2), 'text', (Point x=1 y=2) for a record (a dataclass or
+    namedtuple).  What has no such form (a function, a file) is shown as
+    Python shows it.  Lists, dicts, sets, tuples and records that don't fit
+    in width are laid out over indented lines, colored by type when color is
+    true (None, the default: when the output is a terminal or a notebook).
+    print uses it for these.  pretty {a: [1 2]} -> "{a: [1 2]}" """
+    import math
     if color is None:
         color = _wants_color()
     if width is None:
@@ -142,70 +184,98 @@ def pretty(x, color=None, width=None, indent=0):
     def c(kind, t):
         return f"\x1b[{_COLORS[kind]}m{t}\x1b[0m" if color else t
     def parts(x):
-        """(name, open, [(key or None, value)], close) for a container, else None."""
+        """(open, [(key or None, value)], close, tuple-like) for a container."""
         k = _kind(x)
         if k == "list":
-            return "", "[", [(None, v) for v in x], "]"
+            return c("punct", "["), [(None, v) for v in x], c("punct", "]"), False
         if k == "tuple":
-            return "", "(", [(None, v) for v in x], ",)" if len(x) == 1 else ")"
+            return c("punct", "("), [(None, v) for v in x], c("punct", ")"), True
         if k in ("set", "frozenset"):
-            if not x:
-                return k, "(", [], ")"
             try:
                 items = sorted(x)
             except TypeError:
                 items = list(x)
-            return ("", "{", [(None, v) for v in items], "}") if k == "set" else ("frozenset", "({", [(None, v) for v in items], "})")
+            if not x:
+                return c("punct", "(") + c("name", k), [], c("punct", ")"), False
+            if k == "set":
+                return c("punct", "{"), [(None, v) for v in items], c("punct", "}"), False
+            return c("punct", "(") + c("name", "frozenset") + " " + c("punct", "{"), [(None, v) for v in items], c("punct", "})"), False
         if k == "dict":
-            return "", "{", [(("key", kk), v) for kk, v in x.items()], "}"
+            return c("punct", "{"), [(("key", kk), v) for kk, v in x.items()], c("punct", "}"), False
         if k == "record":
             import dataclasses
             if dataclasses.is_dataclass(x):
                 fs = [(("field", f.name), getattr(x, f.name)) for f in dataclasses.fields(x) if f.repr]
             else:
                 fs = [(("field", n), getattr(x, n)) for n in type(x)._fields]
-            return type(x).__name__, "(", fs, ")"
+            return c("punct", "(") + c("name", type(x).__name__), fs, c("punct", ")"), "record"
         return None
     def scalar(x):
-        if x is None or x is True or x is False or x is Ellipsis:
+        if x is None or x is True or x is False:
             return c("const", repr(x))
-        if type(x) in (int, float, complex):
+        if type(x) is int:
             return c("num", repr(x))
-        if isinstance(x, (str, bytes)):
-            return c("str", repr(x))
+        if type(x) is float:
+            if math.isfinite(x):
+                return c("num", repr(x))
+            return c("punct", "(") + "float " + c("str", "'" + repr(x) + "'") + c("punct", ")")
+        if type(x) is complex:
+            return c("punct", "(") + "complex " + c("num", repr(x.real)) + " " + c("num", repr(x.imag)) + c("punct", ")")
+        if type(x) is str:
+            return c("str", _str_lit(x))
+        if type(x) is bytes:
+            return c("str", _bytes_lit(x))
         return repr(x)
     def key(k):
         kind, v = k
         if kind == "field":
             return c("key", v) + c("punct", "=")
-        return (c("key", repr(v)) if isinstance(v, str) else scalar(v)) + c("punct", ": ")
+        if type(v) is str and v.isidentifier() and v.isascii():
+            return c("key", v) + c("punct", ":") + " "
+        if v is None or v is True or v is False:
+            return c("punct", "(") + c("const", repr(v)) + c("punct", ")") + c("punct", ":") + " "
+        if type(v) is str:
+            return c("key", _str_lit(v)) + c("punct", ":") + " "
+        return flat(v) + c("punct", ":") + " "
+    def field_value(k, v, text):
+        # (A record's field: a [list], {dict} or {set} reads there in parentheses.)
+        if k and k[0] == "field" and _kind(v) in ("list", "dict", "set"):
+            return c("punct", "(") + text + c("punct", ")")
+        return text
     seen = set()
     def flat(x):
         p = parts(x)
         if p is None:
             return scalar(x)
-        n, o, items, e = p
+        o, items, e, kind = p
         if id(x) in seen:
-            return c("punct", o + "..." + e)
+            return o + "..." + e
         seen.add(id(x))
-        inner = c("punct", ", ").join((key(k) if k else "") + flat(v) for k, v in items)
+        texts = [(key(k) if k else "") + field_value(k, v, flat(v)) for k, v in items]
         seen.discard(id(x))
-        return (c("name", n) if n else "") + c("punct", o) + inner + c("punct", e)
+        if kind == "record":
+            return o + "".join(" " + t for t in texts) + e
+        if kind is True:
+            if len(texts) == 1:
+                return o + texts[0] + c("punct", ",") + e
+            return o + c("punct", ", ").join(texts) + e
+        return o + " ".join(texts) + e
     def lay(x, at, col):
         """x with its lines indented by at, starting at column col."""
         one = flat(x)
         p = parts(x)
-        if p is None or col + _shown_len(one) < width or not p[2] or id(x) in seen:
+        if p is None or col + _shown_len(one) < width or not p[1] or id(x) in seen:
             return one
         seen.add(id(x))
-        n, o, items, e = p
+        o, items, e, kind = p
+        comma = c("punct", ",") if kind is True else ""
         pad = " " * (at + 2)
         lines = []
         # (Plain values with no keys: as many to a line as fit.)
-        if all(k is None and parts(v) is None for k, v in items):
+        if kind != "record" and all(k is None and parts(v) is None for k, v in items):
             row = ""
             for _, v in items:
-                t = scalar(v) + c("punct", ",")
+                t = scalar(v) + comma
                 if row and _shown_len(pad + row + " " + t) > width:
                     lines.append(pad + row)
                     row = ""
@@ -214,9 +284,11 @@ def pretty(x, color=None, width=None, indent=0):
             items = []
         for k, v in items:
             head = key(k) if k else ""
-            lines.append(pad + head + lay(v, at + 2, at + 2 + _shown_len(head) + 1) + c("punct", ","))
+            wrapped = k is not None and k[0] == "field" and _kind(v) in ("list", "dict", "set")
+            body = lay(v, at + 2, at + 2 + _shown_len(head) + (1 if wrapped else 0))
+            lines.append(pad + head + field_value(k, v, body) + comma)
         seen.discard(id(x))
-        return (c("name", n) if n else "") + c("punct", o) + "\n" + "\n".join(lines) + "\n" + " " * at + c("punct", e)
+        return o + "\n" + "\n".join(lines) + "\n" + " " * at + e
     return lay(x, indent, indent)
 
 def print(*args, sep=" ", end="\n", file=None, flush=False):

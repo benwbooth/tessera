@@ -146,8 +146,8 @@ print $xs.__len__ ("a,b".split ",")
 ```
 
 ```output
-10 [20, 30] 40 v
-<method-wrapper '__len__' of list object at ADDR> ['a', 'b']
+10 [20 30] 40 v
+<method-wrapper '__len__' of list object at ADDR> ['a' 'b']
 ```
 
 Call a method by giving it its arguments, or by putting it alone on a line or
@@ -291,7 +291,7 @@ print $total $nums
 ```
 
 ```output
-3 [1, 2, 3, 4]
+3 [1 2 3 4]
 ```
 
 Commas separate only when a space, a bracket or the end follows. Inside words
@@ -302,7 +302,7 @@ print [1, 2] cut-f1,3
 ```
 
 ```output
-[1, 2] cut-f1,3
+[1 2] cut-f1,3
 ```
 
 Indent with spaces; tabs are an error. `elif`, `else`, `except` and `finally`
@@ -383,7 +383,7 @@ print (3 `max` 9) ([1] `list.__add__` [2])
 ```
 
 ```output
-9 [1, 2]
+9 [1 2]
 ```
 
 `defop` defines a symbolic operator: its precedence (1 loosest to 13
@@ -401,7 +401,7 @@ print ([1] <> [2] <> [3]) (2 ^^ 3 ^^ 2)
 ```
 
 ```output
-[1, 2, 3] 512
+[1 2 3] 512
 ```
 
 # Commands
@@ -436,7 +436,7 @@ print $out.lines
 
 ```output
 got captured
-['a', 'b', 'c']
+['a' 'b' 'c']
 ```
 
 What a command returns is an `Output`: a `str` with `.code` (the exit
@@ -455,7 +455,7 @@ print $both.lines
 ```output
 out 3 False False
 True 0
-['out', 'err']
+['out' 'err']
 ```
 
 A list inserts one argument per item. Quoted strings aren't split.
@@ -521,7 +521,7 @@ print ((echo ~/x) == "$HOME/x")
 a.py b.py
 c.txt
 *.none
-['a.py', 'b.py']
+['a.py' 'b.py']
 True
 ```
 
@@ -556,8 +556,8 @@ echo '{"a": [1, 2]}' | json.loads | print
 
 ```output
 HELLO
-['1', '2', '3']
-{'a': [1, 2]}
+['1' '2' '3']
+{a: [1 2]}
 ```
 
 The first stage can be a value: a string is written as it is and any other
@@ -587,8 +587,8 @@ print ($a | $b)
 ```
 
 ```output
-{1, 2, 3} 7
-{'x': 1, 'y': 2}
+{1 2 3} 7
+{x: 1 y: 2}
 ```
 
 ## And, or, then
@@ -743,7 +743,7 @@ print $x $a $b $c $d $head $rest
 ```
 
 ```output
-12 1 2 3 4 1 [2, 3, 4]
+12 1 2 3 4 1 [2 3 4]
 ```
 
 Attributes and items are targets too, and `del` removes.
@@ -760,7 +760,7 @@ print $d $o.name
 ```
 
 ```output
-{'j': 2} thing
+{j: 2} thing
 ```
 
 The augmented forms are `+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`.
@@ -810,7 +810,7 @@ print ($pick 1)
 ```
 
 ```output
-5 [10, 20]
+5 [10 20]
 yes
 ```
 
@@ -828,7 +828,7 @@ print (fib 50) (list (count_up 3))
 ```
 
 ```output
-12586269025 [0, 1, 2]
+12586269025 [0 1 2]
 ```
 
 `global` and `nonlocal` work as in Python.
@@ -981,15 +981,17 @@ print $xs[2:5] $xs[::3] $xs[-2:] $xs[:2]
 ```
 
 ```output
-[1, 2, 3] [2, 3] {'a': 1, 'b': [2, 3]} {'key': 1} {1, 2} () (1, 2) {}
-[2, 3, 4] [0, 3, 6, 9] [8, 9] [0, 1]
+[1 2 3] [2 3] {a: 1 b: [2 3]} {key: 1} {1 2} () (1, 2) {}
+[2 3 4] [0 3 6 9] [8 9] [0 1]
 ```
 
-`print` lays out a list, dict, set, tuple or record (a dataclass or
-namedtuple) that doesn't fit on a line over indented lines, and colors it
-by type on a terminal or in a notebook (not when piped, or with `NO_COLOR`).
-A cell's or the REPL's value is shown the same way. `pretty x` gives the
-text, with `width=` and `color=` to choose.
+`print` shows a list, dict, set, tuple or record (a dataclass or
+namedtuple, as `(Point x=1 y=2)`) as tessh: paste what it prints back in and
+you get an equal value. One that doesn't fit on a line is laid out over
+indented lines, and it's colored by type on a terminal or in a notebook (not
+when piped, or with `NO_COLOR`). A cell's or the REPL's value is shown the
+same way. What has no such form, like a function or a file, shows as Python
+shows it. `pretty x` gives the text, with `width=` and `color=` to choose.
 
 ## Comprehensions
 <!-- help: comprehensions comprehension generator genexpr -->
@@ -1006,11 +1008,11 @@ print [[$i $j] for i in [1 2] for j in [a b]]
 ```
 
 ```output
-[4, 6, 8]
-{1: 1, 2: 4, 3: 9, 4: 16}
-{0, 1}
+[4 6 8]
+{1: 1 2: 4 3: 9 4: 16}
+{0 1}
 10
-[[1, 'a'], [1, 'b'], [2, 'a'], [2, 'b']]
+[[1 'a'] [1 'b'] [2 'a'] [2 'b']]
 ```
 
 As everywhere, a name is bare where it's made (`for x`) and has `$` where
@@ -1063,7 +1065,7 @@ print $Registry.names
 ```
 
 ```output
-Point(x=1, y=2) Point(x=0, y=5)
+(Point x=1 y=2) (Point x=0 y=5)
 ['Plugin']
 ```
 
@@ -1281,7 +1283,7 @@ print (nothing)
 ```
 
 ```output
-[1, 2, 3]
+[1 2 3]
 None
 ```
 
@@ -1318,7 +1320,7 @@ print $words
 
 ```output
 2024 2024-03-09
-['a', 'b', 'c']
+['a' 'b' 'c']
 ```
 
 Alone in parentheses, `(.name)` is a function that calls the method on its
@@ -1332,8 +1334,8 @@ print (list (map (.-real) [1 2]))
 ```
 
 ```output
-HI ['Ann', 'Bob']
-[1, 2]
+HI ['Ann' 'Bob']
+[1 2]
 ```
 
 A `.name` stage in a pipe calls the method on what came in.
@@ -1343,7 +1345,7 @@ echo " a,b,c " | .strip | .split "," | print
 ```
 
 ```output
-['a', 'b', 'c']
+['a' 'b' 'c']
 ```
 
 ## Threading
@@ -1361,8 +1363,8 @@ print (->> [3 1 2] sorted (map $inc) list)
 ```
 
 ```output
-['hello', 'there']
-[2, 3, 4]
+['hello' 'there']
+[2 3 4]
 ```
 
 Steps can go on indented lines.
@@ -1387,7 +1389,7 @@ print (-> "a-b" (.split "-") (->> (map $str.upper)) list)
 ```
 
 ```output
-['A', 'B']
+['A' 'B']
 ```
 
 `some->` and `some->>` stop at the first `None`: the value is `None` and
@@ -1430,7 +1432,7 @@ print $xs
 ```
 
 ```output
-[1, 2, 3, 4]
+[1 2 3 4]
 ```
 
 ## Keywords
@@ -1449,7 +1451,7 @@ print (list (map :name $people)) (:name (max $people key=:age))
 
 ```output
 Ann None Oslo
-['Bo', 'Ann'] Bo
+['Bo' 'Ann'] Bo
 ```
 
 ```tessh
@@ -1483,7 +1485,7 @@ print $year $month
 
 ```output
 Ann 31
-none {'age': 31, 'town': 'Oslo'}
+none {age: 31 town: 'Oslo'}
 2024 5
 ```
 
@@ -1504,7 +1506,7 @@ print ($count a b c)
 ```
 
 ```output
-[10, 20, 30]
+[10 20 30]
 5
 3
 ```
@@ -1525,7 +1527,7 @@ print done
 
 ```output
 1 3 6
-['a', 'd']
+['a' 'd']
 done
 ```
 
@@ -1548,12 +1550,12 @@ print (flatten [1 [2 [3 4]]]) (mapcat (fn ([$% $%])) [1 2]) (keep (fn (if $% > 1
 ```
 
 ```output
-1 2 3 [2, 3] [1, 2]
-[10, 11, 12] [3, 4] [1, 2]
-{'a': 2, 'b': 1, 'c': 1} [1, 2, 3]
-{1: ['a', 'c'], 2: ['bb', 'dd']} [[1, 2], [3, 4]] [[1, 2], [3]]
-[[1, 2], [-1], [3]] ['a', ',', 'b', ',', 'c'] [1, 'a', 2, 'b']
-[1, 2, 3, 4] [1, 1, 2, 2] [2, 3]
+1 2 3 [2 3] [1 2]
+[10 11 12] [3 4] [1 2]
+{a: 2 b: 1 c: 1} [1 2 3]
+{1: ['a' 'c'] 2: ['bb' 'dd']} [[1 2] [3 4]] [[1 2] [3]]
+[[1 2] [-1] [3]] ['a' ',' 'b' ',' 'c'] [1 'a' 2 'b']
+[1 2 3 4] [1 1 2 2] [2 3]
 ```
 
 `comp`, `juxt`, `complement`, `partial`, `constantly`, `identity`, `inc`,
@@ -1567,10 +1569,10 @@ print (repeatedly (constantly x) 3)
 ```
 
 ```output
-2 [1, 3] True
+2 [1 3] True
 1024 7 x 2 0
 20 True
-['x', 'x', 'x']
+['x' 'x' 'x']
 ```
 
 `get_in`, `assoc_in` and `update_in` reach into nested data by a path.
@@ -1587,9 +1589,9 @@ print $d
 
 ```output
 20 none
-{'a': {'b': [10, 20], 'c': 5}} {'a': {'b': 2}}
-{'x': 1, 'y': 2} {'y': 2} {'a': 5, 'b': 2}
-{'a': {'b': [10, 20]}}
+{a: {b: [10 20] c: 5}} {a: {b: 2}}
+{x: 1 y: 2} {y: 2} {a: 5 b: 2}
+{a: {b: [10 20]}}
 ```
 
 # From Hy
@@ -1710,8 +1712,8 @@ print (py "{k: v for k, v in zip('ab', xs)}")
 ```
 
 ```output
-[3, 2, 1]
-{'a': 3, 'b': 1}
+[3 2 1]
+{a: 3 b: 1}
 ```
 
 ```tessh
@@ -1724,7 +1726,7 @@ print (words "one, two; three")
 ```
 
 ```output
-['one', 'two', 'three']
+['one' 'two' 'three']
 ```
 
 # Macros
@@ -1837,7 +1839,7 @@ show_args a $b (1 + 2)
 ```
 
 ```output
-['a', '$b', '(1 + 2)']
+['a' '$b' '(1 + 2)']
 ```
 
 `macroexpand` shows what a form becomes, and `gensym "hint"` makes a fresh
