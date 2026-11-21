@@ -43,8 +43,10 @@ enum How {
     /// Earlier cells and this one run as one program (snippets::command);
     /// `entry`: a cell with the program's entry point (a main), which runs
     /// but isn't kept for the next runs (two mains wouldn't build); a run
-    /// with none gets `stub`, an empty one, where the language needs it.
-    Replay { entry: Option<&'static str>, stub: &'static str },
+    /// with none gets `stub`, an empty one, where the language needs it;
+    /// lines matching `hoist` (imports, where the language wants them first)
+    /// go to the top, once each.
+    Replay { entry: Option<&'static str>, stub: &'static str, hoist: Option<&'static str> },
 }
 
 struct Lang {
@@ -117,26 +119,26 @@ const LANGS: &[Lang] = &[
         },
     },
     // ---- replayed: compiled (or run-once) languages ----
-    Lang { lang: "dart", display: "Dart", prog: "dart", pkg: "dart", args: &[], how: How::Replay { entry: Some(r"\bmain\s*\("), stub: "void main() {}" } },
-    Lang { lang: "swift", display: "Swift", prog: "swift", pkg: "swift", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "zig", display: "Zig", prog: "zig", pkg: "zig", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "pub fn main() void {}" } },
-    Lang { lang: "nim", display: "Nim", prog: "nim", pkg: "nim", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "crystal", display: "Crystal", prog: "crystal", pkg: "crystal", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "d", display: "D", prog: "ldc2", pkg: "ldc", args: &[], how: How::Replay { entry: Some(r"\bmain\s*\("), stub: "void main() {}" } },
-    Lang { lang: "v", display: "V", prog: "v", pkg: "vlang", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "fn main() {}" } },
-    Lang { lang: "c-sharp", display: "C#", prog: "dotnet-script", pkg: "dotnet-script", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "fortran", display: "Fortran", prog: "gfortran", pkg: "gfortran", args: &[], how: How::Replay { entry: Some(r"(?im)^\s*program\b"), stub: "program main\nend program main" } },
-    Lang { lang: "hare", display: "Hare", prog: "hare", pkg: "hare", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "export fn main() void = void;" } },
-    Lang { lang: "koka", display: "Koka", prog: "koka", pkg: "koka", args: &[], how: How::Replay { entry: Some(r"\bfun\s+main\s*\("), stub: "fun main() ()" } },
-    Lang { lang: "lean", display: "Lean", prog: "lean", pkg: "lean4", args: &[], how: How::Replay { entry: Some(r"\bdef\s+main\b"), stub: "" } },
-    Lang { lang: "luau", display: "Luau", prog: "luau", pkg: "luau", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "odin", display: "Odin", prog: "odin", pkg: "odin", args: &[], how: How::Replay { entry: Some(r"\bmain\s*::"), stub: "main :: proc() {}" } },
-    Lang { lang: "pascal", display: "Pascal", prog: "fpc", pkg: "fpc", args: &[], how: How::Replay { entry: Some(r"(?im)^\s*end\s*\.\s*$"), stub: "begin\nend." } },
-    Lang { lang: "gleam", display: "Gleam", prog: "gleam", pkg: "gleam", args: &[], how: How::Replay { entry: Some(r"\bpub\s+fn\s+main\s*\("), stub: "pub fn main() { Nil }" } },
-    Lang { lang: "koto", display: "Koto", prog: "koto", pkg: "koto", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "inko", display: "Inko", prog: "inko", pkg: "inko", args: &[], how: How::Replay { entry: Some(r"\bclass\s+async\s+Main\b|\btype\s+async\s+Main\b"), stub: "type async Main {\n  fn async main {}\n}" } },
-    Lang { lang: "forth", display: "Forth (gforth)", prog: "gforth", pkg: "gforth", args: &[], how: How::Replay { entry: None, stub: "" } },
-    Lang { lang: "amber", display: "Amber", prog: "amber", pkg: "amber-lang", args: &[], how: How::Replay { entry: None, stub: "" } },
+    Lang { lang: "dart", display: "Dart", prog: "dart", pkg: "dart", args: &[], how: How::Replay { entry: Some(r"\bmain\s*\("), stub: "void main() {}", hoist: Some(r"^\s*import\s") } },
+    Lang { lang: "swift", display: "Swift", prog: "swift", pkg: "swift", args: &[], how: How::Replay { entry: None, stub: "", hoist: Some(r"^\s*import\s") } },
+    Lang { lang: "zig", display: "Zig", prog: "zig", pkg: "zig", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "pub fn main() void {}", hoist: None } },
+    Lang { lang: "nim", display: "Nim", prog: "nim", pkg: "nim", args: &[], how: How::Replay { entry: None, stub: "", hoist: None } },
+    Lang { lang: "crystal", display: "Crystal", prog: "crystal", pkg: "crystal", args: &[], how: How::Replay { entry: None, stub: "", hoist: None } },
+    Lang { lang: "d", display: "D", prog: "ldc2", pkg: "ldc", args: &[], how: How::Replay { entry: Some(r"\bmain\s*\("), stub: "void main() {}", hoist: None } },
+    Lang { lang: "v", display: "V", prog: "v", pkg: "vlang", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "fn main() {}", hoist: Some(r"^\s*(module|import)\s") } },
+    Lang { lang: "c-sharp", display: "C#", prog: "dotnet-script", pkg: "dotnet-script", args: &[], how: How::Replay { entry: None, stub: "", hoist: Some(r"^\s*using\s+[\w.]+\s*;") } },
+    Lang { lang: "fortran", display: "Fortran", prog: "gfortran", pkg: "gfortran", args: &[], how: How::Replay { entry: Some(r"(?im)^\s*program\b"), stub: "program main\nend program main", hoist: None } },
+    Lang { lang: "hare", display: "Hare", prog: "hare", pkg: "hare", args: &[], how: How::Replay { entry: Some(r"\bfn\s+main\s*\("), stub: "export fn main() void = void;", hoist: Some(r"^\s*use\s") } },
+    Lang { lang: "koka", display: "Koka", prog: "koka", pkg: "koka", args: &[], how: How::Replay { entry: Some(r"\bfun\s+main\s*\("), stub: "fun main() ()", hoist: Some(r"^\s*import\s") } },
+    Lang { lang: "lean", display: "Lean", prog: "lean", pkg: "lean4", args: &[], how: How::Replay { entry: Some(r"\bdef\s+main\b"), stub: "", hoist: Some(r"^\s*import\s") } },
+    Lang { lang: "luau", display: "Luau", prog: "luau", pkg: "luau", args: &[], how: How::Replay { entry: None, stub: "", hoist: None } },
+    Lang { lang: "odin", display: "Odin", prog: "odin", pkg: "odin", args: &[], how: How::Replay { entry: Some(r"\bmain\s*::"), stub: "main :: proc() {}", hoist: Some(r"^\s*(package|import)\s") } },
+    Lang { lang: "pascal", display: "Pascal", prog: "fpc", pkg: "fpc", args: &[], how: How::Replay { entry: Some(r"(?im)^\s*end\s*\.\s*$"), stub: "begin\nend.", hoist: Some(r"^\s*(program|uses)\s") } },
+    Lang { lang: "gleam", display: "Gleam", prog: "gleam", pkg: "gleam", args: &[], how: How::Replay { entry: Some(r"\bpub\s+fn\s+main\s*\("), stub: "pub fn main() { Nil }", hoist: Some(r"^\s*import\s") } },
+    Lang { lang: "koto", display: "Koto", prog: "koto", pkg: "koto", args: &[], how: How::Replay { entry: None, stub: "", hoist: None } },
+    Lang { lang: "inko", display: "Inko", prog: "inko", pkg: "inko", args: &[], how: How::Replay { entry: Some(r"\bclass\s+async\s+Main\b|\btype\s+async\s+Main\b"), stub: "type async Main {\n  fn async main {}\n}", hoist: Some(r"^\s*import\s") } },
+    Lang { lang: "forth", display: "Forth (gforth)", prog: "gforth", pkg: "gforth", args: &[], how: How::Replay { entry: None, stub: "", hoist: None } },
+    Lang { lang: "amber", display: "Amber", prog: "amber", pkg: "amber-lang", args: &[], how: How::Replay { entry: None, stub: "", hoist: None } },
 ];
 
 fn lang_of(spec: &str) -> Option<&'static Lang> {
@@ -159,8 +161,9 @@ pub fn specs() -> Vec<Value> {
         .iter()
         .filter(|l| crate::snippets::runnable(l.lang) || on_path(l.prog).is_some())
         .map(|l| {
-            let how = if matches!(l.how, How::Replay { .. }) { "earlier cells run again" } else { "kept running" };
-            json!({"name": format!("tessera-repl-{}", l.lang), "display": format!("{} ({how})", l.display), "language": l.lang})
+            // (Kept running is what a kernel does: only a replayed one says how it differs.)
+            let display = if matches!(l.how, How::Replay { .. }) { format!("{} (earlier cells run again)", l.display) } else { l.display.to_string() };
+            json!({"name": format!("tessera-repl-{}", l.lang), "display": display, "language": l.lang})
         })
         .collect()
 }
@@ -419,9 +422,9 @@ impl Kernel {
         let k = self.clone();
         std::thread::spawn(move || {
             let (kept, before) = k.kept.lock().unwrap().clone();
-            let (entry_re, stub) = match k.lang.how {
-                How::Replay { entry, stub } => (entry, stub),
-                _ => (None, ""),
+            let (entry_re, stub, hoist) = match k.lang.how {
+                How::Replay { entry, stub, hoist } => (entry, stub, hoist),
+                _ => (None, "", None),
             };
             let has_entry = |c: &str| entry_re.is_some_and(|re| regex::Regex::new(re).is_ok_and(|r| r.is_match(c)));
             let mut all = kept.clone();
@@ -429,7 +432,27 @@ impl Kernel {
             if !stub.is_empty() && !all.iter().any(|c| has_entry(c)) {
                 all.push(stub.to_string());
             }
-            let program = all.join("\n\n");
+            let program = match hoist.and_then(|h| regex::Regex::new(h).ok()) {
+                Some(re) => {
+                    let mut top: Vec<&str> = Vec::new();
+                    let mut rest: Vec<String> = Vec::new();
+                    for c in &all {
+                        let mut body = Vec::new();
+                        for l in c.lines() {
+                            if re.is_match(l) {
+                                if !top.contains(&l) {
+                                    top.push(l);
+                                }
+                            } else {
+                                body.push(l);
+                            }
+                        }
+                        rest.push(body.join("\n"));
+                    }
+                    format!("{}\n\n{}", top.join("\n"), rest.join("\n\n"))
+                }
+                None => all.join("\n\n"),
+            };
             let cmd_line = crate::snippets::command(k.lang.lang, &program, &k.cwd, "bash");
             let (status, out, err) = if cmd_line.is_empty() {
                 (127, Vec::new(), format!("Tessera can't run {} here (no {}, and no Nix to fetch it).\n", k.lang.display, k.lang.prog).into_bytes())
@@ -923,6 +946,18 @@ mod tests {
             ("crystal", &["x = 41\nputs \"first\"", "puts x + 1"], "42"),
             ("fortran", &["module m\n  integer :: x = 41\nend module m", "program p\n  use m\n  print *, x + 1\nend program p"], "42"),
             ("pascal", &["var x: integer;", "begin\n  x := 41;\n  writeln(x + 1);\nend."], "42"),
+            ("fsharp", &["let x = 41", "printfn \"%d\" (x + 1)"], "42"),
+            ("c-sharp", &["var x = 41;", "using System.Linq;\nConsole.WriteLine(new[] { x }.Select(v => v + 1).First());"], "42"),
+            ("v", &["const x = 41", "fn main() { println(x + 1) }"], "42"),
+            ("hare", &["def X: int = 41;", "use fmt;\nexport fn main() void = { fmt::println(X + 1)!; };"], "42"),
+            ("koka", &["val x = 41", "fun main() println(x + 1)"], "42"),
+            ("lean", &["def x : Nat := 41", "#eval x + 1"], "42"),
+            ("luau", &["x = 41", "print(x + 1)"], "42"),
+            ("odin", &["package main\nx :: 41", "import \"core:fmt\"\nmain :: proc() { fmt.println(x + 1) }"], "42"),
+            ("gleam", &["const x = 41", "import gleam/io\nimport gleam/int\npub fn main() { io.println(int.to_string(x + 1)) }"], "42"),
+            ("koto", &["x = 41", "print x + 1"], "42"),
+            ("inko", &["let X = 41", "import std.stdio (Stdout)\ntype async Main {\n  fn async main {\n    Stdout.new.print((X + 1).to_string)\n  }\n}"], "42"),
+            ("amber", &["let x = 41", "echo(x + 1)"], "42"),
             ("d", &["int x = 41;", "import std.stdio;\nvoid main() { writeln(x + 1); }"], "42"),
         ];
         for (lang, codes, want) in cases {
