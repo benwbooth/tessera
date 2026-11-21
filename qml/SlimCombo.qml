@@ -13,6 +13,19 @@ T.ComboBox {
     font.pixelSize: 12
 
     readonly property color tint: Theme.mix(Theme.panel, Theme.accent, 0.3)
+    // (The field's text cut off at its edge: its whole text in a tooltip.)
+    readonly property bool clipped: contentItem.contentWidth > contentItem.width + 0.5
+    ToolTip.visible: hovered && clipped && !popup.visible
+    ToolTip.delay: 500
+    ToolTip.text: displayText
+
+    // (The list as wide as its longest entry, within the window.)
+    TextMetrics { id: rowMetrics; font.pixelSize: 12; font.weight: Font.DemiBold }
+    function widest() {
+        let w = 0
+        for (let i = 0; i < control.count; ++i) { rowMetrics.text = control.textAt(i); w = Math.max(w, rowMetrics.advanceWidth) }
+        return Math.ceil(w) + 8 + 8 + 8 + 14   // (row padding, popup padding, scroll bar)
+    }
 
     background: Rectangle {
         radius: 6
@@ -59,7 +72,11 @@ T.ComboBox {
         rightPadding: 8
         highlighted: control.highlightedIndex === index
         hoverEnabled: true
+        ToolTip.visible: row.hovered && rowText.truncated
+        ToolTip.delay: 400
+        ToolTip.text: rowText.text
         contentItem: Text {
+            id: rowText
             text: typeof row.modelData === "object" && row.modelData !== null && control.textRole ? row.modelData[control.textRole] : String(row.modelData)
             color: Theme.text
             font.pixelSize: 12
@@ -80,8 +97,13 @@ T.ComboBox {
         // (On whole pixels, plus the nudge: the combo can sit at a fraction
         // of one in a layout, and native text smears there at 130%.)
         onAboutToShow: {
+            const win = control.Window.window
+            const room = win ? win.width - 8 : 100000
+            width = Math.min(Math.max(control.width, 160, control.widest()), room)
             const p = control.mapToItem(null, 0, control.height + 2)
-            x = Math.round(p.x) - p.x + 0.001
+            // (Wider than the room to its right: moved left to fit.)
+            const shift = win ? Math.min(0, win.width - 4 - (p.x + width)) : 0
+            x = Math.round(p.x + shift) - p.x + 0.001
             y = control.height + 2 + Math.round(p.y) - p.y + 0.001
         }
         width: Math.max(control.width, 160)

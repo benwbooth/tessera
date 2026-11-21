@@ -2070,6 +2070,8 @@ FocusScope {
     Shortcut { sequence: "Ctrl+Alt+B"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "code") }
     Shortcut { sequence: "Ctrl+Alt+M"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "markdown") }
     Shortcut { sequence: "Ctrl+Alt+P"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.listKernels(); kernelBox.popup.open() } }
+    // (Test hook: TESSERA_TEST_KERNEL_LIST opens the kernels list at 12 s.)
+    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("KERNEL_LIST") !== ""; onTriggered: nb.listKernels(() => { kernelBox.popup.open(); console.log("kernel list test: " + kernelBox.count + " rows, field " + kernelBox.width + ", list " + kernelBox.popup.width + ", widest " + kernelBox.widest()) }) }
     // (Expand or Restore: the expanded card, else the chosen one, else a
     // running terminal app's, else the last.)
     Shortcut { sequence: "Ctrl+Alt+F"; enabled: nb.keysHere && cells.count > 0; context: Qt.WindowShortcut
@@ -2293,7 +2295,7 @@ FocusScope {
                 onPressedChanged: if (pressed) nb.listKernels()
                 ToolTip.visible: hovered && !popup.visible
                 ToolTip.delay: 500
-                ToolTip.text: "What runs the code cells: this pane's shell, or a Jupyter kernel (Ctrl+Alt+P)"
+                ToolTip.text: (clipped ? displayText + "\n" : "") + "What runs the code cells: this pane's shell, or a Jupyter kernel (Ctrl+Alt+P)"
             }
             Tool {
                 visible: nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")
@@ -3204,15 +3206,6 @@ FocusScope {
             width: parent.width - 60
             spacing: 12
             visible: cells.count === 0
-            Text { topPadding: 0.001;
-                width: parent.width
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.Wrap
-                text: "Notebook: each command you run becomes a cell, its output shown for what it is (a table, JSON, HTML, a picture, ...). "
-                    + "Write cells here too, run by this pane's shell or a Jupyter kernel, and save it all as a .ipynb."
-                color: Theme.textDim
-                font.pixelSize: 13
-            }
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 8
