@@ -305,6 +305,10 @@ pub mod ffi {
         /// "duplicate", "copy"/"move" (arg: to folder). "" or the error.
         #[qinvokable]
         fn file_action(self: &Controller, reply: &QString, op: &QString, path: &QString, arg: &QString);
+        /// The desktop's apps for a file's kind: {"mime", "apps": [{id, name,
+        /// icon, default}]} (none for another host's file).
+        #[qinvokable]
+        fn file_apps(self: &Controller, reply: &QString, path: &QString);
         /// Open a window holding this tab (JSON layout with session ids): a
         /// tab torn off by dragging it out of the tab bar.
         #[qinvokable]
@@ -877,6 +881,11 @@ impl ffi::Controller {
     fn file_action(&self, reply: &ffi::QString, op: &ffi::QString, path: &ffi::QString, arg: &ffi::QString) {
         let (op, path, arg) = (op.to_string(), path.to_string(), arg.to_string());
         self.answer_on(reply, Some("files"), move || file_action_now(op, &path, arg))
+    }
+
+    fn file_apps(&self, reply: &ffi::QString, path: &ffi::QString) {
+        let path = path.to_string();
+        self.answer_on(reply, Some("files"), move || if host_path(&path).0.is_empty() { crate::files::apps_for(&path) } else { "{\"apps\": []}".into() })
     }
 
     fn home_dir(&self) -> ffi::QString {

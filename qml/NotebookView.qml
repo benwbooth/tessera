@@ -1627,7 +1627,8 @@ FocusScope {
         // (ls with what the folder view shows as ls would: one folder (or
         // none), and only these options. Any other (-R, -d, -i, -s, -F, two
         // folders, ...): ls's own output, as it printed it.)
-        if (["ls", "ll", "la", "l", "dir"].indexOf(first) >= 0 && lsViewable(w.slice(1))) return "files"
+        // (ls an alias of lsd, eza or exa counts too: what it lists is the same.)
+        if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && lsViewable(w.slice(1))) return "files"
         // (cd, then the folder it went to: any cd, its own options and all.)
         if (["cd", "pushd", "popd", "z", "zi"].indexOf(w[0]) >= 0) return "files"
         if ((first === "env" || first === "printenv") && w.length === 1) return "env"

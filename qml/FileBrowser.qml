@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import Tessera
+import Tessera.Native
 
 // A folder, browsable, in a notebook card (an `ls` or `cd` card). On the
 // surface it reads as ls output: names with icons in columns going down
@@ -512,35 +513,125 @@ Item {
 
     // ---- right click: an entry's actions ----------------------------------
     TextEdit { id: clip; visible: false }
+    function later(ms, f) { const t = Qt.createQmlObject("import QtQuick; Timer {}", fb); t.interval = ms; t.triggered.connect(() => { f(); t.destroy() }); t.start() }
     function copyText(t) { clip.text = t; clip.selectAll(); clip.copy() }
-    property var held: null             // {op: "copy"|"move", path}: for Paste
+    component Sep: MenuSeparator {
+        topPadding: 3; bottomPadding: 3
+        contentItem: Rectangle { implicitWidth: 120; implicitHeight: 1; color: Theme.divider }
+    }
+    property var held: null             // {op: "copy"|"move", path}: for Paste (another host's, or copied here)
+    // ---- the desktop's clipboard: files to and from file managers ------------
+    FileClip {
+        id: fileClip
+        // (Something else copied since: that's what Paste takes now.)
+        onChanged: { if (fb.putting) fb.putting = false; else fb.held = null }
+    }
+    property bool putting: false
+    function local(path) { return !/^ssh:\/\//.test(path) }
+    function copyFile(path, cut) {
+        held = { op: cut ? "move" : "copy", path: path }
+        if (local(path)) { putting = true; fileClip.put([path], cut) }
+    }
+    readonly property bool canPaste: held !== null || fileClip.hasFiles
+    // (Into `dest`: what was copied or cut here, else the clipboard's files.)
+    function pasteInto(dest) {
+        if (held) {
+            const h = held
+            act(h.op, h.path, dest, ok => { if (ok && h.op === "move" && held === h) { held = null; if (local(h.path)) fileClip.clear() } })
+            return
+        }
+        const paths = fileClip.files(), op = fileClip.cut ? "move" : "copy"
+        const next = (i) => { if (i < paths.length) act(op, paths[i], dest, ok => { if (ok) next(i + 1) }); else if (op === "move") fileClip.clear() }
+        next(0)
+    }
+    // (Its app list, read as the menu opens: [{id, name, icon, default}].)
+    property var apps: []
+    property string appsMime: ""
+    function loadApps(path) {
+        apps = []; appsMime = ""
+        Async.call(controller, k => controller.fileApps(k, path), r => { try { const j = JSON.parse(r); apps = j.apps || []; appsMime = j.mime || "" } catch (x) {} })
+    }
+    readonly property bool isArchive: !!(menuEntry && !menuEntry.dir && /\.(tar(\.(gz|xz|bz2|zst))?|tgz|zip|7z|rar)$/i.test(menuEntry.name))
+    // (Disk use: gdu or ncdu if there's one, in a card of its own; else du's totals, largest last.)
+    function diskUsage(path) {
+        const q = shq(path)
+        commandRequested("if command -v gdu >/dev/null; then gdu " + q + "; elif command -v ncdu >/dev/null; then ncdu " + q + "; else du -sh -- " + q + "/* " + q + "/.[!.]* 2>/dev/null | sort -h; fi")
+    }
     SlimMenu {
         id: itemMenu
         readonly property var e: fb.menuEntry || ({ dir: false, exec: false, path: "", name: "" })
-        SlimMenuItem { text: "View"; visible: !itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.viewRequested(itemMenu.e.path) }
-        SlimMenuItem { text: itemMenu.e.dir ? "Open" : "Open with its app"; onTriggered: fb.openEntry(itemMenu.e) }
-        SlimMenuItem { text: "Open with the desktop"; visible: itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.act("open", itemMenu.e.path) }
+        onAboutToShow: fb.loadApps(e.path)
+        SlimMenuItem { text: "Open"; font.bold: true; onTriggered: fb.openEntry(itemMenu.e) }
+        SlimMenu {
+            title: "Open with ▸"
+            enabled: fb.apps.length > 0
+            topPadding: 4.001
+            Repeater {
+                model: fb.apps
+                delegate: SlimMenuItem {
+                    required property var modelData
+                    text: modelData.name + (modelData.default ? "  (default)" : "")
+                    onTriggered: fb.act("open_with", itemMenu.e.path, modelData.id)
+                }
+            }
+        }
+        SlimMenu {
+            title: "Always open " + (itemMenu.e.dir ? "folders" : fb.ext(itemMenu.e) !== "" ? "." + fb.ext(itemMenu.e) + " files" : fb.appsMime !== "" ? fb.appsMime + " files" : "these") + " with ▸"
+            enabled: fb.apps.length > 0
+            topPadding: 4.001
+            Repeater {
+                model: fb.apps
+                delegate: SlimMenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    checkable: true
+                    checked: !!modelData.default
+                    onTriggered: fb.act("set_default", itemMenu.e.path, modelData.id, ok => { if (ok) fb.loadApps(itemMenu.e.path) })
+                }
+            }
+        }
+        SlimMenuItem { text: "View in a card"; visible: !itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.fileCardRequested(itemMenu.e.path) }
+        SlimMenuItem { text: "View in Tessera's viewer"; visible: !itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.viewRequested(itemMenu.e.path) }
+        SlimMenuItem { text: itemMenu.e.dir ? "Open in the file manager" : "Show in the file manager"; onTriggered: fb.act(itemMenu.e.dir ? "open" : "reveal", itemMenu.e.path) }
         SlimMenuItem { text: itemMenu.e.dir ? "Go here in the shell (cd)" : "Run it"; visible: !!(itemMenu.e.dir || itemMenu.e.exec); height: visible ? implicitHeight : 0
             onTriggered: fb.commandRequested(itemMenu.e.dir ? "cd " + fb.shq(itemMenu.e.path) : fb.shq(itemMenu.e.path)) }
-        SlimMenuItem { text: "Insert the path in the editor"; onTriggered: fb.insertRequested(fb.shq(itemMenu.e.path) + " ") }
+        Sep {}
+        SlimMenuItem { text: "Cut"; onTriggered: fb.copyFile(itemMenu.e.path, true) }
+        SlimMenuItem { text: "Copy"; onTriggered: fb.copyFile(itemMenu.e.path, false) }
+        SlimMenuItem { text: "Paste into it"; visible: itemMenu.e.dir; height: visible ? implicitHeight : 0; enabled: fb.canPaste; onTriggered: fb.pasteInto(itemMenu.e.path) }
         SlimMenuItem { text: "Copy the path"; onTriggered: fb.copyText(itemMenu.e.path) }
         SlimMenuItem { text: "Copy the name"; onTriggered: fb.copyText(itemMenu.e.name) }
-        SlimMenuItem { text: "Copy"; onTriggered: fb.held = { op: "copy", path: itemMenu.e.path } }
-        SlimMenuItem { text: "Cut"; onTriggered: fb.held = { op: "move", path: itemMenu.e.path } }
-        SlimMenuItem { text: "Paste into it"; visible: itemMenu.e.dir && fb.held !== null; height: visible ? implicitHeight : 0
-            onTriggered: { const h = fb.held; fb.act(h.op, h.path, itemMenu.e.path, ok => { if (ok && h.op === "move" && fb.held === h) fb.held = null }) } }
+        SlimMenuItem { text: "Insert the path in the editor"; onTriggered: fb.insertRequested(fb.shq(itemMenu.e.path) + " ") }
+        Sep {}
         SlimMenuItem { text: "Rename…"; onTriggered: fb.ask("rename", itemMenu.e) }
         SlimMenuItem { text: "Duplicate"; onTriggered: fb.act("duplicate", itemMenu.e.path) }
+        SlimMenuItem { text: itemMenu.e.exec ? "Not a program (chmod -x)" : "Make it a program (chmod +x)"; visible: !itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.act("chmod_x", itemMenu.e.path) }
+        SlimMenu {
+            title: "Compress ▸"
+            topPadding: 4.001
+            SlimMenuItem { text: "To " + itemMenu.e.name + ".tar.gz"; onTriggered: fb.act("compress", itemMenu.e.path, "tar.gz") }
+            SlimMenuItem { text: "To " + itemMenu.e.name + ".zip"; onTriggered: fb.act("compress", itemMenu.e.path, "zip") }
+        }
+        SlimMenuItem { text: "Extract here"; visible: fb.isArchive; height: visible ? implicitHeight : 0; onTriggered: fb.act("extract", itemMenu.e.path) }
+        SlimMenuItem { text: "Disk usage…"; visible: itemMenu.e.dir; height: visible ? implicitHeight : 0; onTriggered: fb.diskUsage(itemMenu.e.path) }
+        Sep {}
         SlimMenuItem { text: "Move to the trash"; onTriggered: fb.act("trash", itemMenu.e.path) }
-        SlimMenuItem { text: "Show in the file manager"; onTriggered: fb.act("reveal", itemMenu.e.path) }
+        SlimMenuItem { text: "Delete for good…"; onTriggered: fb.confirmDelete(itemMenu.e) }
+        Sep {}
         SlimMenuItem { text: "Properties"; onTriggered: { fb.propsFor = itemMenu.e; props.open() } }
     }
     // ---- right click on nothing: the folder's actions ---------------------
     SlimMenu {
         id: folderMenu
+        SlimMenuItem { text: "Open in the file manager"; onTriggered: fb.act("open", fb.dir) }
+        SlimMenuItem { text: "Go here in the shell (cd)"; onTriggered: fb.commandRequested("cd " + fb.shq(fb.dir)) }
+        Sep {}
         SlimMenuItem { text: "New folder…"; onTriggered: fb.ask("mkdir", null) }
         SlimMenuItem { text: "New file…"; onTriggered: fb.ask("touch", null) }
-        SlimMenuItem { text: "Paste"; enabled: fb.held !== null; onTriggered: { const h = fb.held; fb.act(h.op, h.path, fb.dir, ok => { if (ok && h.op === "move" && fb.held === h) fb.held = null }) } }
+        SlimMenuItem { text: "Paste"; enabled: fb.canPaste; onTriggered: fb.pasteInto(fb.dir) }
+        SlimMenuItem { text: "Copy the folder's path"; onTriggered: fb.copyText(fb.dir) }
+        SlimMenuItem { text: "Disk usage…"; onTriggered: fb.diskUsage(fb.dir) }
+        Sep {}
         SlimMenuItem { text: "List (as ls)"; checkable: true; checked: fb.view === "list"; onTriggered: fb.setView("list") }
         SlimMenuItem { text: "Details (as ls -l)"; checkable: true; checked: fb.view === "details"; onTriggered: fb.setView("details") }
         SlimMenuItem { text: "Tiles"; checkable: true; checked: fb.view === "tiles"; onTriggered: fb.setView("tiles") }
@@ -548,9 +639,30 @@ Item {
         SlimMenuItem { text: "Folders first"; checkable: true; checked: fb.foldersFirst; onTriggered: fb.save("folders_first", !fb.foldersFirst) }
         SlimMenuItem { text: "Show hidden files"; checkable: true; checked: fb.showHidden; onTriggered: fb.save("hidden", !fb.mine.hidden) }
         SlimMenuItem { text: "Refresh"; onTriggered: fb.refresh++ }
-        SlimMenuItem { text: "Go here in the shell (cd)"; onTriggered: fb.commandRequested("cd " + fb.shq(fb.dir)) }
-        SlimMenuItem { text: "Open in the file manager"; onTriggered: fb.act("open", fb.dir) }
-        SlimMenuItem { text: "Copy the folder's path"; onTriggered: fb.copyText(fb.dir) }
+    }
+    // ---- delete for good: asked first ---------------------------------------
+    property var deleting: null
+    function confirmDelete(e) { deleting = e; delPop.open() }
+    Popup {
+        id: delPop
+        anchors.centerIn: parent
+        width: 340
+        padding: 12
+        topPadding: 12.001   // (off the half pixel: 130% scale smears native text there)
+        modal: true
+        background: Rectangle { radius: 8; color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.04); border.color: Theme.divider }
+        contentItem: Column {
+            spacing: 8
+            Text { width: parent.width; wrapMode: Text.Wrap; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold
+                   text: fb.deleting ? "Delete " + fb.deleting.name + (fb.deleting.dir ? " and everything in it" : "") + " for good?" : "" }
+            Text { width: parent.width; wrapMode: Text.Wrap; color: Theme.textDim; font.pixelSize: 12; text: "It doesn't go to the trash: it can't be brought back." }
+            Row {
+                anchors.right: parent.right
+                spacing: 6
+                Chip { base: Theme.panel; label: "Cancel"; onClicked: delPop.close() }
+                Chip { base: Theme.mix(Theme.panel, fb.ansi(1, "#e06c75"), 0.35); label: "Delete for good"; onClicked: { const e = fb.deleting; delPop.close(); if (e) fb.act("delete", e.path) } }
+            }
+        }
     }
 
     // ---- a name to ask for (rename, new folder, new file) ------------------
@@ -630,6 +742,18 @@ Item {
             else if (t.startsWith("view:") && e) fb.viewRequested(e.path)
             else if (t === "folder") folderMenu.popup(fb, 40, 30)
             else if (t === "tiles" || t === "details" || t === "list") fb.setView(t)
+            // (apps:<name> logs its apps; act:<op>:<name>[:<arg>] does op on it;
+            // paste:<name> copies it to the desktop's clipboard, then pastes into <name>.d.)
+            else if (t.startsWith("apps:") && e) { fb.loadApps(e.path); fb.later(1500, () => console.log("fb test apps: " + fb.appsMime + " " + JSON.stringify(fb.apps.map(a => a.name + (a.default ? "*" : ""))))) }
+            else if (t.startsWith("act:")) {
+                const [, op, nm, a2] = t.split(":")
+                const x = fb.entries.find(y => y.name === nm)
+                if (x) fb.act(op, x.path, a2 || "", ok => console.log("fb test act " + op + " " + nm + ": " + (ok ? "ok" : fb.error)))
+            }
+            else if (t.startsWith("paste:") && e) {
+                fb.copyFile(e.path, false)
+                fb.later(800, () => { fb.held = null; console.log("fb test clip: " + JSON.stringify(fileClip.files()) + " cut " + fileClip.cut); fb.pasteInto(fb.dir + "/" + arg + ".d") })
+            }
         }
     }
 }

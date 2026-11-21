@@ -97,6 +97,7 @@ fn main() {
     .qt_module("WebEngineQuick")
     .cpp_file("include/terminal_item.h")
     .cpp_file("include/syntax_highlighter.h")
+    .cpp_file("include/file_clip.h")
     .cpp_file("cpp/terminal_item.cpp")
     .files(["src/bridge.rs"])
     .build();

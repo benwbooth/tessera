@@ -344,6 +344,166 @@ fn spawn(prog: &str, args: &[&str]) -> Result<(), String> {
         .map_err(|e| format!("Couldn't run {prog}: {e}"))
 }
 
+/// Run it in `dir`, waiting: "" or what it said went wrong.
+fn run_in(cmd: &mut std::process::Command, dir: &Path) -> Result<(), String> {
+    let o = cmd.current_dir(dir).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
+    if o.status.success() {
+        Ok(())
+    } else {
+        let e = String::from_utf8_lossy(&o.stderr).trim().to_string();
+        Err(if e.is_empty() { "It failed.".into() } else { e })
+    }
+}
+
+// ---- the desktop's apps for a file (freedesktop: xdg-mime, mimeinfo.cache,
+// mimeapps.list, .desktop files) ----
+
+/// Its MIME type, as the desktop has it ("inode/directory" for a folder).
+fn mime_of(path: &str) -> String {
+    if Path::new(path).is_dir() {
+        return "inode/directory".into();
+    }
+    std::process::Command::new("xdg-mime")
+        .args(["query", "filetype", path])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// The folders .desktop files are in: the user's first.
+fn app_dirs() -> Vec<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut out = vec![std::env::var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|_| Path::new(&home).join(".local/share")).join("applications")];
+    let data = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    out.extend(data.split(':').filter(|d| !d.is_empty()).map(|d| Path::new(d).join("applications")));
+    out
+}
+
+fn desktop_file(id: &str) -> Option<PathBuf> {
+    app_dirs().into_iter().map(|d| d.join(id)).find(|f| f.is_file())
+}
+
+/// A .desktop file's [Desktop Entry] keys.
+fn desktop_entry(file: &Path) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let mut inside = false;
+    for l in std::fs::read_to_string(file).unwrap_or_default().lines() {
+        let l = l.trim();
+        if l.starts_with('[') {
+            inside = l == "[Desktop Entry]";
+            continue;
+        }
+        if let (true, Some((k, v))) = (inside, l.split_once('=')) {
+            out.entry(k.trim().to_string()).or_insert_with(|| v.trim().to_string());
+        }
+    }
+    out
+}
+
+/// The apps that open `path`'s kind of file: [{id, name, icon, default}],
+/// the default first, then by name. ("[]" for another host's file.)
+pub fn apps_for(path: &str) -> String {
+    let mime = mime_of(path);
+    if mime.is_empty() {
+        return "[]".into();
+    }
+    // (Text of any kind: the plain-text apps too.)
+    let mut mimes = vec![mime.clone()];
+    if mime.starts_with("text/") && mime != "text/plain" {
+        mimes.push("text/plain".into());
+    }
+    let mut ids: Vec<String> = Vec::new();
+    let mut add = |id: &str| {
+        let id = id.trim();
+        if !id.is_empty() && !ids.iter().any(|x| x == id) {
+            ids.push(id.to_string());
+        }
+    };
+    let home = std::env::var("HOME").unwrap_or_default();
+    let config = std::env::var("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|_| Path::new(&home).join(".config"));
+    // (The user's own choices, mimeapps.list's Default and Added, then every app that says it takes it.)
+    let lists: Vec<PathBuf> = std::iter::once(config.join("mimeapps.list")).chain(app_dirs().into_iter().map(|d| d.join("mimeapps.list"))).collect();
+    for f in &lists {
+        let text = std::fs::read_to_string(f).unwrap_or_default();
+        let mut section = String::new();
+        for l in text.lines() {
+            let l = l.trim();
+            if l.starts_with('[') {
+                section = l.to_string();
+                continue;
+            }
+            if section == "[Default Applications]" || section == "[Added Associations]" {
+                if let Some((k, v)) = l.split_once('=') {
+                    if mimes.iter().any(|m| m == k.trim()) {
+                        v.split(';').for_each(&mut add);
+                    }
+                }
+            }
+        }
+    }
+    for d in app_dirs() {
+        let text = std::fs::read_to_string(d.join("mimeinfo.cache")).unwrap_or_default();
+        for l in text.lines() {
+            if let Some((k, v)) = l.split_once('=') {
+                if mimes.iter().any(|m| m == k.trim()) {
+                    v.split(';').for_each(&mut add);
+                }
+            }
+        }
+    }
+    let default = std::process::Command::new("xdg-mime")
+        .args(["query", "default", &mime])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let mut out: Vec<serde_json::Value> = ids
+        .iter()
+        .filter_map(|id| {
+            let e = desktop_entry(&desktop_file(id)?);
+            if e.get("Hidden").is_some_and(|v| v == "true") || !e.contains_key("Exec") {
+                return None;
+            }
+            Some(json!({"id": id, "name": e.get("Name").cloned().unwrap_or_else(|| id.trim_end_matches(".desktop").to_string()),
+                        "icon": e.get("Icon").cloned().unwrap_or_default(), "default": *id == default}))
+        })
+        .collect();
+    out.sort_by(|a, b| b["default"].as_bool().cmp(&a["default"].as_bool()).then_with(|| a["name"].as_str().unwrap_or("").to_lowercase().cmp(&b["name"].as_str().unwrap_or("").to_lowercase())));
+    json!({"mime": mime, "apps": out}).to_string()
+}
+
+/// Start the app `id` on `path`: its Exec line with the file put in.
+fn open_with(id: &str, path: &str) -> Result<(), String> {
+    let file = desktop_file(id).ok_or_else(|| format!("No app {id}."))?;
+    let e = desktop_entry(&file);
+    let exec = e.get("Exec").ok_or("It has no Exec line.")?;
+    let words = shell_words::split(exec).map_err(|e| e.to_string())?;
+    let url = format!("file://{}", path.split('/').map(|s| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>()).collect::<Vec<_>>().join("/"));
+    let mut argv: Vec<String> = Vec::new();
+    let mut put = false;
+    for w in words {
+        match w.as_str() {
+            "%f" | "%F" => { argv.push(path.to_string()); put = true }
+            "%u" | "%U" => { argv.push(url.clone()); put = true }
+            "%i" => { if let Some(i) = e.get("Icon") { argv.push("--icon".into()); argv.push(i.clone()) } }
+            "%c" => argv.push(e.get("Name").cloned().unwrap_or_default()),
+            "%k" => argv.push(file.to_string_lossy().to_string()),
+            _ => argv.push(w.replace("%%", "\u{1}").replace("%f", path).replace("%u", &url).split('%').next().unwrap_or("").replace('\u{1}', "%")),
+        }
+    }
+    if !put {
+        argv.push(path.to_string());
+    }
+    // (A terminal app: in a terminal of its own.)
+    if e.get("Terminal").is_some_and(|v| v == "true") {
+        let me = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "tessera".into());
+        argv = vec![me, "--new-window".into(), "--run".into(), shell_words::join(&argv)];
+    }
+    let refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
+    spawn(refs[0], &refs[1..])
+}
+
 fn on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }
@@ -400,6 +560,98 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
         "touch" => {
             let to = p.join(if arg.is_empty() { "New File.txt" } else { arg });
             if to.exists() { Err(format!("{} is already there.", to.display())) } else { std::fs::write(&to, b"").map_err(|e| e.to_string()) }
+        }
+        // (With an app picked from apps_for: its .desktop file's Exec line.)
+        "open_with" => open_with(arg, path),
+        // (That app, from now on, for every file of this one's type.)
+        "set_default" => {
+            let mime = mime_of(path);
+            if mime.is_empty() {
+                Err("Couldn't tell what kind of file it is.".into())
+            } else {
+                std::process::Command::new("xdg-mime").args(["default", arg, &mime]).status().map_err(|e| e.to_string()).and_then(|s| if s.success() { Ok(()) } else { Err("xdg-mime couldn't set it.".into()) })
+            }
+        }
+        // (For good, not the trash: the menu asks first.)
+        "delete" => if p.is_dir() && !p.is_symlink() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }.map_err(|e| e.to_string()),
+        // (Made a program, or not: x for whoever can read it.)
+        "chmod_x" => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::metadata(p).map_err(|e| e.to_string()).and_then(|m| {
+                    let mode = m.permissions().mode();
+                    let new = if mode & 0o111 != 0 { mode & !0o111 } else { mode | ((mode & 0o444) >> 2) };
+                    std::fs::set_permissions(p, std::fs::Permissions::from_mode(new)).map_err(|e| e.to_string())
+                })
+            }
+            #[cfg(not(unix))]
+            Err("Not on this system.".into())
+        }
+        // (A .tar.gz or .zip beside it; an archive unpacked into a folder beside it.)
+        "compress" => {
+            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let zip = arg == "zip";
+            let out = unused_name(parent, &format!("{name}.{}", if zip { "zip" } else { "tar.gz" }));
+            let out_s = out.to_string_lossy().to_string();
+            let mut cmd = if zip {
+                let mut c = std::process::Command::new(if on_path("zip") { "zip" } else { "nix" });
+                if !on_path("zip") {
+                    c.args(["run", "nixpkgs#zip", "--"]);
+                }
+                c.args(["-qr", &out_s, &name]);
+                c
+            } else {
+                let mut c = std::process::Command::new("tar");
+                c.args(["-czf", &out_s, "--", &name]);
+                c
+            };
+            run_in(&mut cmd, parent)
+        }
+        "extract" => {
+            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let stem = [".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz", ".tar", ".zip", ".7z", ".rar"]
+                .iter()
+                .find_map(|e| name.strip_suffix(e))
+                .unwrap_or(&name)
+                .to_string();
+            let to = unused_name(parent, &stem);
+            std::fs::create_dir_all(&to).map_err(|e| e.to_string()).and_then(|_| {
+                let to_s = to.to_string_lossy().to_string();
+                let lower = name.to_lowercase();
+                let mut cmd = if lower.ends_with(".zip") {
+                    let mut c = std::process::Command::new(if on_path("unzip") { "unzip" } else { "nix" });
+                    if !on_path("unzip") {
+                        c.args(["run", "nixpkgs#unzip", "--"]);
+                    }
+                    c.args(["-q", path, "-d", &to_s]);
+                    c
+                } else if lower.ends_with(".7z") || lower.ends_with(".rar") {
+                    let mut c = std::process::Command::new(if on_path("7z") { "7z" } else { "nix" });
+                    if !on_path("7z") {
+                        c.args(["run", "nixpkgs#p7zip", "--"]);
+                    }
+                    c.args(["x", "-y", &format!("-o{to_s}"), path]);
+                    c
+                } else {
+                    let mut c = std::process::Command::new("tar");
+                    c.args(["-xf", path, "-C", &to_s]);
+                    c
+                };
+                run_in(&mut cmd, parent)?;
+                // (One thing inside, a folder of its own most often: it goes
+                // beside the archive itself, not a folder deeper.)
+                let inside: Vec<PathBuf> = std::fs::read_dir(&to).map(|r| r.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+                if let [one] = inside.as_slice() {
+                    let name = one.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    let dest = unused_name(parent, &name);
+                    let dest = if dest == to { parent.join(format!("{name}.extracted")) } else { dest };
+                    if std::fs::rename(one, &dest).is_ok() {
+                        let _ = std::fs::remove_dir(&to);
+                    }
+                }
+                Ok(())
+            })
         }
         "duplicate" => {
             let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
