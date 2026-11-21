@@ -684,7 +684,9 @@ False
 ```
 
 `cd` changes folder (`cd` alone goes home, `cd -` goes back), and `pushd`,
-`popd` and `dirs` keep a stack.
+`popd` and `dirs` keep a stack. They take bash's options: `cd -P` goes by the
+real folders (`-L`, keeping symlinks in the path, is the default), `$CDPATH`
+is searched, and `pushd`/`popd`/`dirs` take `+N`/`-N`, `-n`, `-v` and the rest.
 
 ```tessh
 mkdir -p sub/deeper

@@ -406,3 +406,29 @@ fn help_topics() {
     assert!(crate::help::lookup("").unwrap().contains("`help macros`"));
     assert!(crate::help::lookup("zzqx").is_none());
 }
+
+#[test]
+fn cd_takes_bash_options() {
+    let here = std::env::current_dir().unwrap();
+    let d = std::env::temp_dir().join(format!("tessh-cd-{}", std::process::id()));
+    std::fs::create_dir_all(d.join("real/sub")).unwrap();
+    std::fs::create_dir_all(d.join("cp/proj")).unwrap();
+    let _ = std::os::unix::fs::symlink(d.join("real"), d.join("link"));
+    let d = d.to_string_lossy().to_string();
+    let (ns, out) = run(&format!(
+        "cd -P {d}/link\na = $env.PWD\ncd -- {d}/link/sub\nb = $env.PWD\ncd ..\nc = $env.PWD\ncd -\n$env.CDPATH = '{d}/cp'\ncd proj\npushd /\npushd +1\npopd +1\ndirs -l -p"
+    ));
+    std::env::set_current_dir(&here).unwrap();
+    std::env::remove_var("CDPATH");
+    let _ = std::fs::remove_dir_all(&d);
+    assert_eq!(get::<String>(&ns, "a"), format!("{d}/real"), "-P resolves the symlink");
+    assert_eq!(get::<String>(&ns, "b"), format!("{d}/link/sub"), "-L keeps it");
+    assert_eq!(get::<String>(&ns, "c"), format!("{d}/link"), ".. goes back by name");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], format!("{d}/link/sub"), "cd - says where it went");
+    assert_eq!(lines[1], format!("{d}/cp/proj"), "a $CDPATH folder is said");
+    assert_eq!(lines[2], format!("/ {d}/cp/proj"));
+    assert_eq!(lines[3], format!("{d}/cp/proj /"), "+1 turns the stack");
+    assert_eq!(lines[4], format!("{d}/cp/proj"), "popd +1 drops one");
+    assert_eq!(&lines[5..], [format!("{d}/cp/proj").as_str()], "dirs -l -p");
+}

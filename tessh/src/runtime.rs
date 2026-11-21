@@ -1255,12 +1255,105 @@ pub fn setenv(py: Python<'_>, k: &str, v: Option<&str>) -> PyResult<()> {
 }
 
 fn chdir(py: Python<'_>, d: &str) -> PyResult<()> {
-    let old = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    std::env::set_current_dir(d).map_err(|e| PyOSError::new_err(format!("cd: {d}: {e}")))?;
+    go(py, d, false).map(|_| ())
+}
+
+/// The folder as the shell names it: $PWD while it's still where we are
+/// (it keeps the symlinks you went through), else the real path.
+fn logical_pwd() -> String {
+    use std::os::unix::fs::MetadataExt;
+    let real = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    match std::env::var("PWD") {
+        Ok(p) if p.starts_with('/') => {
+            let same = |a: &str, b: &str| match (std::fs::metadata(a), std::fs::metadata(b)) {
+                (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+                _ => false,
+            };
+            if same(&p, ".") { p } else { real }
+        }
+        _ => real,
+    }
+}
+
+/// `a/./b/../c` as `a/c`, by the names alone (as cd -L reads them).
+fn tidy_path(p: &str) -> String {
+    let mut parts: Vec<&str> = vec![];
+    for x in p.split('/') {
+        match x {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            x => parts.push(x),
+        }
+    }
+    format!("/{}", parts.join("/"))
+}
+
+/// Go to d: by the path as written (-L, the default, as bash does) or the
+/// real one (-P, symlinks resolved). Sets $OLDPWD and $PWD; the new $PWD.
+fn go(py: Python<'_>, d: &str, physical: bool) -> PyResult<String> {
+    let old = logical_pwd();
+    let fail = |e: std::io::Error| {
+        let msg = e.to_string();
+        let msg = msg.split(" (os error").next().unwrap_or(&msg).to_string();
+        PyOSError::new_err(format!("cd: {d}: {msg}"))
+    };
+    let new = if physical {
+        std::env::set_current_dir(d).map_err(fail)?;
+        std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+    } else {
+        let want = tidy_path(&if d.starts_with('/') { d.to_string() } else { format!("{old}/{d}") });
+        // (Where the names don't lead anywhere, the path as the system reads it.)
+        match std::env::set_current_dir(&want) {
+            Ok(()) => want,
+            Err(_) => {
+                std::env::set_current_dir(d).map_err(fail)?;
+                std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+            }
+        }
+    };
     *OLDPWD.lock().unwrap() = Some(old.clone());
     setenv(py, "OLDPWD", Some(&old))?;
-    let new = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    setenv(py, "PWD", Some(&new))
+    setenv(py, "PWD", Some(&new))?;
+    Ok(new)
+}
+
+/// cd's target: d, or where $CDPATH finds it (and whether to say so).
+fn cdpath(d: &str) -> (String, bool) {
+    let rel = !(d.starts_with('/') || d == "." || d == ".." || d.starts_with("./") || d.starts_with("../"));
+    if let (true, Ok(cp)) = (rel, std::env::var("CDPATH")) {
+        for base in cp.split(':') {
+            let cand = if base.is_empty() { format!("./{d}") } else { format!("{}/{d}", base.trim_end_matches('/')) };
+            if std::path::Path::new(&cand).is_dir() {
+                return (cand, !base.is_empty() && base != ".");
+            }
+        }
+    }
+    (d.to_string(), false)
+}
+
+/// The folder stack, as dirs shows it: the current folder, then the stack
+/// from its top.
+fn dir_list() -> Vec<String> {
+    let mut v = vec![logical_pwd()];
+    v.extend(DIRSTACK.lock().unwrap().iter().rev().cloned());
+    v
+}
+
+fn set_dir_list(v: &[String]) {
+    *DIRSTACK.lock().unwrap() = v.iter().skip(1).rev().cloned().collect();
+}
+
+/// +N (from the left, the current folder 0) or -N (from the right) as an index.
+fn stack_index(cmd: &str, a: &str, len: usize) -> PyResult<Option<usize>> {
+    let (sign, n) = a.split_at(1);
+    if !(sign == "+" || sign == "-") || n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(None);
+    }
+    let n: usize = n.parse().unwrap_or(usize::MAX);
+    let i = if sign == "+" { Some(n).filter(|n| *n < len) } else { len.checked_sub(n + 1) };
+    i.map(Some).ok_or_else(|| PyIndexError::new_err(format!("{cmd}: {a}: directory stack index out of range")))
 }
 
 fn b64d(s: &str) -> PyResult<Vec<u8>> {
@@ -1329,10 +1422,10 @@ impl Builtin {
     #[getter]
     fn _tessh_usage(&self) -> &'static str {
         match self.name {
-            "cd" => "cd [dir]\n\nGo to dir (home without one; - is the last folder). The folder is this shell's, and every program it runs starts there.",
-            "pushd" => "pushd dir\n\nGo to dir, keeping the folder you were in on the stack (dirs lists it, popd goes back).",
-            "popd" => "popd\n\nBack to the folder on top of the stack (pushd put it there).",
-            "dirs" => "dirs\n\nThe folder stack, the current folder first.",
+            "cd" => "cd [-L|-P [-e]] [--] [dir]\n\nGo to dir: home without one, the last folder for - (and says where), ~ and ~user for homes, and $CDPATH's folders for a name that isn't there. -L (the default) keeps the path as written, symlinks and all; -P goes by the real folders. The folder is this shell's, and every program it runs starts there.",
+            "pushd" => "pushd [-n] [dir | +N | -N]\n\nGo to dir, keeping the folder you were in on the stack (dirs lists it, popd goes back). Alone, swap the top two; +N/-N turn the stack so its Nth folder (from the left or right of dirs) is on top. -n changes the stack only.",
+            "popd" => "popd [-n] [+N | -N]\n\nBack to the folder on top of the stack (pushd put it there). +N/-N drop the Nth folder (from the left or right of dirs) instead; -n changes the stack only.",
+            "dirs" => "dirs [-clpv] [+N | -N]\n\nThe folder stack, the current folder first. -c clears it, -l spells out ~, -p puts one folder a line, -v numbers them, +N/-N shows just that one.",
             "export" => "export NAME=value …\n\nSet environment variables for this shell and every program it runs. export NAME alone exports the tessh variable $NAME's value.",
             "unset" => "unset NAME …\n\nRemove environment variables.",
             "exit" => "exit [status]\n\nEnd tessh (a script, or the REPL) with status, 0 without one.",
@@ -1375,37 +1468,115 @@ impl Builtin {
                 crate::deps::ensure(py, &words, None)?;
                 Ok(none)
             }
+            // cd [-L|-P [-e]] [--] [dir|-]: bash's.
             "cd" => {
-                if words.len() > 1 {
+                let usage = "cd: usage: cd [-L|[-P [-e]]] [-@] [dir]";
+                let mut physical = false;
+                let mut rest = &words[..];
+                while let Some(a) = rest.first() {
+                    if a == "--" {
+                        rest = &rest[1..];
+                        break;
+                    }
+                    if !a.starts_with('-') || a == "-" {
+                        break;
+                    }
+                    for c in a[1..].chars() {
+                        match c {
+                            'L' => physical = false,
+                            'P' => physical = true,
+                            'e' => {}
+                            '@' => return Err(PyValueError::new_err(format!("cd: -@: extended attributes aren't on this system\n{usage}"))),
+                            c => return Err(PyValueError::new_err(format!("cd: -{c}: invalid option\n{usage}"))),
+                        }
+                    }
+                    rest = &rest[1..];
+                }
+                if rest.len() > 1 {
                     return Err(PyTypeError::new_err("cd: too many arguments"));
                 }
-                let mut d = words.first().cloned().unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into()));
-                if d == "-" {
-                    d = OLDPWD.lock().unwrap().clone().or_else(|| std::env::var("OLDPWD").ok()).unwrap_or_else(|| ".".into());
-                    py_print(py, &d)?;
-                }
-                chdir(py, &expanduser(&d))?;
-                Ok(none)
-            }
-            "pushd" => {
-                let here = std::env::current_dir()?.to_string_lossy().to_string();
-                let d = match words.first() {
-                    Some(d) => expanduser(d),
-                    None => DIRSTACK.lock().unwrap().pop().unwrap_or_else(|| std::env::var("HOME").unwrap_or_default()),
+                let (d, say) = match rest.first().map(String::as_str) {
+                    None => (std::env::var("HOME").map_err(|_| PyOSError::new_err("cd: HOME not set"))?, false),
+                    Some("-") => {
+                        let d = OLDPWD.lock().unwrap().clone().or_else(|| std::env::var("OLDPWD").ok());
+                        (d.ok_or_else(|| PyOSError::new_err("cd: OLDPWD not set"))?, true)
+                    }
+                    Some("") => return Ok(none),
+                    Some(d) => cdpath(&expanduser(d)),
                 };
-                chdir(py, &d)?;
-                DIRSTACK.lock().unwrap().push(here);
-                print_dirs(py)?;
+                let new = go(py, &expanduser(&d), physical)?;
+                if say {
+                    py_print(py, &new)?;
+                }
                 Ok(none)
             }
-            "popd" => {
-                let d = DIRSTACK.lock().unwrap().pop().ok_or_else(|| PyIndexError::new_err("popd: the folder stack is empty"))?;
-                chdir(py, &d)?;
-                print_dirs(py)?;
+            // pushd [-n] [dir|+N|-N], popd [-n] [+N|-N], dirs [-clpv] [+N|-N]: bash's.
+            "pushd" | "popd" => {
+                let cmd = self.name;
+                let mut stay = false;
+                let mut arg: Option<&String> = None;
+                for a in &words {
+                    if a == "-n" {
+                        stay = true;
+                    } else if a == "--" {
+                    } else if arg.is_none() {
+                        arg = Some(a);
+                    } else {
+                        return Err(PyTypeError::new_err(format!("{cmd}: too many arguments")));
+                    }
+                }
+                let mut v = dir_list();
+                let len = v.len();
+                let at = match arg {
+                    Some(a) => stack_index(cmd, a, len)?,
+                    None => None,
+                };
+                if cmd == "popd" {
+                    if len < 2 {
+                        return Err(PyIndexError::new_err("popd: directory stack empty"));
+                    }
+                    if let (Some(a), None) = (arg, at) {
+                        return Err(PyValueError::new_err(format!("popd: {a}: invalid argument\npopd: usage: popd [-n] [+N | -N]")));
+                    }
+                    let i = at.unwrap_or(0);
+                    if i == 0 && !stay {
+                        go(py, &v[1], false)?;
+                        v.remove(0);
+                        v[0] = logical_pwd();
+                    } else {
+                        v.remove(if i == 0 { 1 } else { i });
+                    }
+                } else {
+                    match (arg, at) {
+                        (None, _) => {
+                            if len < 2 {
+                                return Err(PyIndexError::new_err("pushd: no other directory"));
+                            }
+                            v.swap(0, 1);
+                        }
+                        (Some(_), Some(i)) => {
+                            if stay {
+                                v[1..].rotate_left(i.saturating_sub(1));
+                            } else {
+                                v.rotate_left(i);
+                            }
+                        }
+                        (Some(d), None) => {
+                            let (d, _) = cdpath(&expanduser(d));
+                            v.insert(if stay { 1 } else { 0 }, d);
+                        }
+                    }
+                    if !stay && v[0] != logical_pwd() {
+                        let new = go(py, &v[0], false)?;
+                        v[0] = new;
+                    }
+                }
+                set_dir_list(&v);
+                print_dirs(py, &[])?;
                 Ok(none)
             }
             "dirs" => {
-                print_dirs(py)?;
+                print_dirs(py, &words)?;
                 Ok(none)
             }
             "export" => {
@@ -1480,11 +1651,44 @@ impl Builtin {
     }
 }
 
-fn print_dirs(py: Python<'_>) -> PyResult<()> {
-    let here = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let mut v = vec![here];
-    v.extend(DIRSTACK.lock().unwrap().iter().rev().cloned());
-    py_print(py, &v.join(" "))
+fn print_dirs(py: Python<'_>, opts: &[String]) -> PyResult<()> {
+    let (mut long, mut lines, mut numbered) = (false, false, false);
+    let mut only: Option<String> = None;
+    let v = dir_list();
+    for a in opts {
+        if let Some(i) = stack_index("dirs", a, v.len())? {
+            only = Some(v[i].clone());
+            continue;
+        }
+        if !a.starts_with('-') || a.len() < 2 {
+            return Err(PyValueError::new_err(format!("dirs: {a}: invalid argument\ndirs: usage: dirs [-clpv] [+N] [-N]")));
+        }
+        for c in a[1..].chars() {
+            match c {
+                'c' => {
+                    DIRSTACK.lock().unwrap().clear();
+                    return Ok(());
+                }
+                'l' => long = true,
+                'p' => lines = true,
+                'v' => {
+                    lines = true;
+                    numbered = true
+                }
+                c => return Err(PyValueError::new_err(format!("dirs: -{c}: invalid option\ndirs: usage: dirs [-clpv] [+N] [-N]"))),
+            }
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let show = |d: &str| match d.strip_prefix(home.as_str()) {
+        Some(t) if !long && !home.is_empty() && (t.is_empty() || t.starts_with('/')) => format!("~{t}"),
+        _ => d.to_string(),
+    };
+    if let Some(d) = only {
+        return py_print(py, &show(&d));
+    }
+    let shown: Vec<String> = v.iter().enumerate().map(|(i, d)| if numbered { format!("{i:2}  {}", show(d)) } else { show(d) }).collect();
+    py_print(py, &shown.join(if lines { "\n" } else { " " }))
 }
 
 /// A builtin's output, through Python's print: redirections and the
