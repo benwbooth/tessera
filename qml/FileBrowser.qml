@@ -191,6 +191,8 @@ Item {
     // (`then` gets whether it worked, once the answer comes.)
     function act(op, path, arg, then) {
         Async.call(controller, k => controller.fileAction(k, op, path, arg || ""), r => {
+            // (A tool from Nix, with no Nix: what Nix is and how to get it.)
+            if (r.startsWith("needs-nix:")) { error = ""; Window.window.nixHelp(r.substring(10), hostPrefix.replace(/^ssh:\/\//, "")); if (then) then(false); return }
             error = r
             if (r === "") refresh++
             if (then) then(r === "")
@@ -557,8 +559,20 @@ Item {
     function diskUsage(path) {
         const q = shq(path)
         // (Another host's folder: its gdu, else Nix's there, decided by its shell.)
-        if (hostPrefix !== "") { commandRequested("if command -v gdu >/dev/null; then gdu " + shq(bareOf(path)) + "; else nix run nixpkgs#gdu -- " + shq(bareOf(path)) + "; fi"); return }
-        Async.call(controller, k => controller.findProgram(k, "gdu"), found => commandRequested(found !== "" ? "gdu " + q : "nix run nixpkgs#gdu -- " + q))
+        if (hostPrefix !== "") {
+            const b = shq(bareOf(path))
+            commandRequested("if command -v gdu >/dev/null; then gdu " + b + "; elif command -v nix >/dev/null; then nix run nixpkgs#gdu -- " + b
+                             + "; else printf '%s\\n' " + shq(Window.window.noNixText("gdu")) + "; fi")
+            return
+        }
+        // (Neither: what Nix is and how to install it.)
+        Async.call(controller, k => controller.findProgram(k, "gdu"), found => {
+            if (found !== "") { commandRequested("gdu " + q); return }
+            Async.call(controller, k => controller.findProgram(k, "nix"), nix => {
+                if (nix !== "") commandRequested("nix run nixpkgs#gdu -- " + q)
+                else Window.window.nixHelp("gdu", "")
+            })
+        })
     }
     function bareOf(p) { return p.replace(/^ssh:\/\/[^/]*/, "") || "/" }
     SlimMenu {

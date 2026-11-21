@@ -282,6 +282,7 @@ FocusScope {
         if (e.type === "status") {
             kernelState = e.state
             if (e.message !== undefined) kernelMessage = e.message
+            if (e.no_nix) Window.window.nixHelp(kernelName, sshHost)
             if (e.state === "idle" && queue.length > 0) { const q = queue; queue = []; for (const c of q) execute(c) }
             if (e.state === "dead") stopRunning()
         } else if (e.type === "info") {
@@ -1245,6 +1246,7 @@ FocusScope {
         if (e.type === "status") {
             const patch = { state: e.state }
             if (e.message !== undefined) patch.message = e.message
+            if (e.no_nix) Window.window.nixHelp(l, sshHost)
             setLang(l, patch)
             const q = (langKernels[l] && langKernels[l].queue) || []
             if (e.state === "idle" && q.length > 0) { setLang(l, { queue: [] }); for (const c of q) execLang(c, l) }
@@ -2443,6 +2445,8 @@ FocusScope {
             anchors.right: parent.right
             anchors.rightMargin: 10
             anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
+            Chip { base: banner.color; label: "Install Nix…"; visible: nb.kernelMessage.indexOf("needs Nix") >= 0; onClicked: Window.window.nixHelp(nb.kernelName, nb.sshHost) }
             Chip { base: banner.color; label: "Restart"; onClicked: nb.restartKernel() }
         }
     }

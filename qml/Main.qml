@@ -674,6 +674,21 @@ ApplicationWindow {
     }
     Sheet { id: sheet }
 
+    // ---- Nix missing: what it is and how to install it -------------------------
+    // (what: the program that needed it; host: where, "" for here.)
+    function nixHelp(what, host) { if (!nixHelpBox.opened) nixHelpBox.show(what, host) }
+    // (The same as text, for a terminal: an ssh host's shell, an editor's.)
+    function noNixText(what) {
+        return (what ? what + " needs Nix" : "This needs Nix") + ", which isn't installed here. Nix fetches the programs Tessera uses that you don't have yet, "
+             + "kept apart from the system's own packages. To install it, run:\n\n  " + nixHelpBox.installCmd + "\n\nthen open a new tab. More: https://nixos.org/download/"
+    }
+    // (Test hook: TESSERA_TEST_NIXHELP=<program> shows it.)
+    Timer { interval: 3000; running: controller.testEnv("NIXHELP") !== ""; onTriggered: win.nixHelp(controller.testEnv("NIXHELP"), "") }
+    NixHelp {
+        id: nixHelpBox
+        onInstallRequested: (cmd, host) => newTab({ command: cmd + "; exec \"${SHELL:-sh}\" -l", host: host, view: "terminal", title: "Installing Nix" })
+    }
+
     // ---- screenshots and recordings ------------------------------------------
     // A screenshot (of the pane, or the window) goes to ~/Pictures/Screenshots
     // and the clipboard; a recording (asciicast) of a pane's output to
@@ -704,7 +719,7 @@ ApplicationWindow {
             const path = view.stopRecording()
             if (path === "") return
             notice("Recording saved: " + path.replace(controller.homeDir(), "~"), [
-                { label: "Make a GIF", run: () => { Async.call(controller, k => controller.fileAction(k, "gif", path, ""), null); notice("Making the GIF (agg)… it opens when it's done.", []) } },
+                { label: "Make a GIF", run: () => { Async.call(controller, k => controller.fileAction(k, "gif", path, ""), e => { if (e.startsWith("needs-nix:")) nixHelp("agg", "") }); notice("Making the GIF (agg)… it opens when it's done.", []) } },
                 { label: "Show in folder", run: () => Async.call(controller, k => controller.fileAction(k, "reveal", path, ""), null) }])
         } else {
             const dir = controller.homeDir() + "/Videos/Tessera"

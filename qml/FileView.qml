@@ -307,7 +307,10 @@ Item {
         enabled: fv.inTerm && fv.termHost !== "" && !fv.termHostUp
         function onHostConnected(h, err) {
             if (h !== fv.termHost) return
-            if (err !== "") fv.termHostError = err
+            // (No tesserad there: installed only once the user says so, from
+            // a terminal tab to that host, which asks.)
+            if (err.startsWith("tesserad-missing:")) fv.termHostError = h + " doesn't have tesserad yet. Open a terminal tab to " + h + ": it asks whether to install it there."
+            else if (err !== "") fv.termHostError = err
             else fv.termHostUp = true
         }
     }
@@ -327,7 +330,7 @@ Item {
         return "if command -v " + bin + " >/dev/null 2>&1; then exec " + bin + " " + a + '"$1"; '
              + "elif command -v nix >/dev/null 2>&1; then echo '" + bin + " isn'\\''t installed: running it from nixpkgs (nix run nixpkgs#" + pkg + ")...'; "
              + "exec nix run nixpkgs#" + pkg + " -- " + a + '"$1"; '
-             + "else echo '" + bin + " isn'\\''t installed, and there'\\''s no nix to run it with.'; printf 'Press Enter to close. '; read _; fi"
+             + "else printf '%s\\n\\n' " + shq(Window.window.noNixText(bin)) + "; printf 'Press Enter to close. '; read _; fi"
     }
     function openInTerminal(ed) {
         if (ed !== undefined && ed !== termEditor && controller) controller.setSetting("terminal_editor", JSON.stringify(ed))

@@ -508,6 +508,21 @@ fn on_path(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }
 
+/// `prog`, or nixpkgs' `attr` through `nix run` when it isn't installed;
+/// neither: "needs-nix:<prog>", for the window to say what Nix is and how to
+/// install it.
+fn tool(prog: &str, attr: &str) -> Result<std::process::Command, String> {
+    if on_path(prog) {
+        Ok(std::process::Command::new(prog))
+    } else if on_path("nix") {
+        let mut c = std::process::Command::new("nix");
+        c.args(["run", &format!("nixpkgs#{attr}"), "--"]);
+        Ok(c)
+    } else {
+        Err(format!("needs-nix:{prog}"))
+    }
+}
+
 /// Do `op` on `path`: "" when done, else what went wrong.
 pub fn action(op: &str, path: &str, arg: &str) -> String {
     let p = Path::new(path);
@@ -520,7 +535,11 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
             let gif = p.with_extension("gif").to_string_lossy().into_owned();
             let agg = if on_path("agg") { "agg".to_string() } else { "nix run nixpkgs#agg --".to_string() };
             let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
-            spawn("sh", &["-c", &format!("{agg} {} {} && xdg-open {}", q(path), q(&gif), q(&gif))])
+            if !on_path("agg") && !on_path("nix") {
+                Err("needs-nix:agg".into())
+            } else {
+                spawn("sh", &["-c", &format!("{agg} {} {} && xdg-open {}", q(path), q(&gif), q(&gif))])
+            }
         }
         // (The file manager, with the item selected: FileManager1 over D-Bus.)
         "reveal" | "reveal_uri" => {
@@ -594,19 +613,17 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
             let zip = arg == "zip";
             let out = unused_name(parent, &format!("{name}.{}", if zip { "zip" } else { "tar.gz" }));
             let out_s = out.to_string_lossy().to_string();
-            let mut cmd = if zip {
-                let mut c = std::process::Command::new(if on_path("zip") { "zip" } else { "nix" });
-                if !on_path("zip") {
-                    c.args(["run", "nixpkgs#zip", "--"]);
-                }
-                c.args(["-qr", &out_s, &name]);
-                c
+            let cmd = if zip {
+                tool("zip", "zip").map(|mut c| {
+                    c.args(["-qr", &out_s, &name]);
+                    c
+                })
             } else {
                 let mut c = std::process::Command::new("tar");
                 c.args(["-czf", &out_s, "--", &name]);
-                c
+                Ok(c)
             };
-            run_in(&mut cmd, parent)
+            cmd.and_then(|mut cmd| run_in(&mut cmd, parent))
         }
         "extract" => {
             let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -616,28 +633,25 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
                 .unwrap_or(&name)
                 .to_string();
             let to = unused_name(parent, &stem);
-            std::fs::create_dir_all(&to).map_err(|e| e.to_string()).and_then(|_| {
-                let to_s = to.to_string_lossy().to_string();
-                let lower = name.to_lowercase();
-                let mut cmd = if lower.ends_with(".zip") {
-                    let mut c = std::process::Command::new(if on_path("unzip") { "unzip" } else { "nix" });
-                    if !on_path("unzip") {
-                        c.args(["run", "nixpkgs#unzip", "--"]);
-                    }
+            let lower = name.to_lowercase();
+            let to_s = to.to_string_lossy().to_string();
+            // (The tool first: with no tool and no Nix, no empty folder left behind.)
+            let cmd = if lower.ends_with(".zip") {
+                tool("unzip", "unzip").map(|mut c| {
                     c.args(["-q", path, "-d", &to_s]);
                     c
-                } else if lower.ends_with(".7z") || lower.ends_with(".rar") {
-                    let mut c = std::process::Command::new(if on_path("7z") { "7z" } else { "nix" });
-                    if !on_path("7z") {
-                        c.args(["run", "nixpkgs#p7zip", "--"]);
-                    }
+                })
+            } else if lower.ends_with(".7z") || lower.ends_with(".rar") {
+                tool("7z", "p7zip").map(|mut c| {
                     c.args(["x", "-y", &format!("-o{to_s}"), path]);
                     c
-                } else {
-                    let mut c = std::process::Command::new("tar");
-                    c.args(["-xf", path, "-C", &to_s]);
-                    c
-                };
+                })
+            } else {
+                let mut c = std::process::Command::new("tar");
+                c.args(["-xf", path, "-C", &to_s]);
+                Ok(c)
+            };
+            cmd.and_then(|cmd| std::fs::create_dir_all(&to).map_err(|e| e.to_string()).map(|_| cmd)).and_then(|mut cmd| {
                 run_in(&mut cmd, parent)?;
                 // (One thing inside, a folder of its own most often: it goes
                 // beside the archive itself, not a folder deeper.)

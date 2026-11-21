@@ -205,7 +205,7 @@ pub fn handle(mut stream: UnixStream, payload: &[u8]) -> std::io::Result<()> {
 
 /// What `nix` is for when it's missing on this host: the message the window
 /// shows, with the installer to run.
-pub const NO_NIX: &str = "This needs Nix, which isn't installed on this host. Install it with the Determinate Systems installer:\n\ncurl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install";
+pub const NO_NIX: &str = "This needs Nix, which isn't installed on this host. Nix fetches the programs Tessera uses that you don't have yet (kernels, tools), kept apart from the system's own packages. To install it (Linux, macOS, or WSL 2 on Windows), run:\n\ncurl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install\n\nthen restart the kernel. More: https://nixos.org/download/";
 
 pub fn has_nix() -> bool {
     crate::jupyter::nix_program().is_some()
