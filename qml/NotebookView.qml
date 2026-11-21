@@ -2728,6 +2728,9 @@ FocusScope {
             TapHandler {
                 acceptedButtons: Qt.RightButton
                 onTapped: (pt) => {
+                    // (On the header only: the output's own right-click is its
+                    // own: a folder's files, the terminal, a viewer.)
+                    if (!cell.plainMd && pt.position.y > header.y + header.height) return
                     if (cell.picked && nb.pickedCount > 1) pickMenu.popup()
                     else { nb.clearPicks(); nb.current = cell.index; moreMenu.popup() }
                 }
@@ -2821,17 +2824,22 @@ FocusScope {
                     font.pixelSize: 10
                 }
                 Text { topPadding: 0.001;
+                    id: srcText
                     Layout.fillWidth: true
                     // (A file card: its whole path, wrapped if need be, never cut short.)
                     // (Another host's: its name as typed, not URL-encoded.)
+                    // (A command or code: its first line, cut short at the edge;
+                    // the whole of it in the tooltip, and in ⓘ Details.)
+                    readonly property string whole: cell.source.replace(/^\s*\n|\s+$/g, "")
+                    readonly property bool more: whole.indexOf("\n") >= 0
                     text: cell.viewPath !== "" ? cell.viewPath.replace(/^ssh:\/\/([^\/]*)/, (m, h) => { try { return "ssh://" + decodeURIComponent(h) } catch (e) { return m } })
-                        : cell.editing ? (cell.code ? "" : "Markdown") : cell.source.trim() !== "" ? cell.source.replace(/^\s*\n|\s+$/g, "") : "(empty)"
-                    // (A command wraps too, so a path in it shows whole; code of
-                    // several lines shows as its lines, indented as written,
-                    // the rest in the cell past forty.)
-                    maximumLineCount: cell.source.trim().indexOf("\n") >= 0 ? 40 : 6
-                    wrapMode: cell.viewPath !== "" ? Text.WrapAnywhere : Text.WrapAtWordBoundaryOrAnywhere
+                        : cell.editing ? (cell.code ? "" : "Markdown") : whole !== "" ? whole.split("\n")[0] + (more ? "  \u2026" : "") : "(empty)"
+                    maximumLineCount: cell.viewPath !== "" ? 6 : 1
+                    wrapMode: cell.viewPath !== "" ? Text.WrapAnywhere : Text.NoWrap
                     elide: cell.viewPath !== "" ? Text.ElideNone : Text.ElideRight
+                    ToolTip.visible: srcHover.hovered && cell.viewPath === "" && !cell.editing && (truncated || more)
+                    ToolTip.delay: 500
+                    ToolTip.text: whole
                     color: cell.editing ? Theme.textDim : Theme.text
                     font.family: nb.fontFamily
                     font.pointSize: 9

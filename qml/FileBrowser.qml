@@ -552,10 +552,11 @@ Item {
         Async.call(controller, k => controller.fileApps(k, path), r => { try { const j = JSON.parse(r); apps = j.apps || []; appsMime = j.mime || "" } catch (x) {} })
     }
     readonly property bool isArchive: !!(menuEntry && !menuEntry.dir && /\.(tar(\.(gz|xz|bz2|zst))?|tgz|zip|7z|rar)$/i.test(menuEntry.name))
-    // (Disk use: gdu or ncdu if there's one, in a card of its own; else du's totals, largest last.)
+    // (Disk use, to look through and clean up: gdu (or ncdu), a TUI, in the
+    // card's live terminal; neither installed: gdu from Nix.)
     function diskUsage(path) {
         const q = shq(path)
-        commandRequested("if command -v gdu >/dev/null; then gdu " + q + "; elif command -v ncdu >/dev/null; then ncdu " + q + "; else du -sh -- " + q + "/* " + q + "/.[!.]* 2>/dev/null | sort -h; fi")
+        commandRequested("if command -v gdu >/dev/null; then gdu " + q + "; elif command -v ncdu >/dev/null; then ncdu " + q + "; else nix run nixpkgs#gdu -- " + q + "; fi")
     }
     SlimMenu {
         id: itemMenu
