@@ -2155,6 +2155,8 @@ FocusScope {
     Shortcut { sequence: "Ctrl+Alt+B"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "code") }
     Shortcut { sequence: "Ctrl+Alt+M"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: nb.insertCell(nb.current + 1, "markdown") }
     Shortcut { sequence: "Ctrl+Alt+P"; enabled: nb.keysHere; context: Qt.WindowShortcut; onActivated: { nb.listKernels(); kernelBox.popup.open() } }
+    // (Test hook: TESSERA_TEST_SAVE_MENU opens the Save menu at 12 s.)
+    Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("SAVE_MENU") !== ""; onTriggered: saveMenu.popup(saveTool, 0, saveTool.height + 2) }
     // (Test hook: TESSERA_TEST_KERNEL_LIST opens the kernels list at 12 s.)
     Timer { interval: 12000; running: nb.controller !== null && nb.controller.testEnv("KERNEL_LIST") !== ""; onTriggered: nb.listKernels(() => { kernelBox.popup.open(); console.log("kernel list test: " + kernelBox.count + " rows, field " + kernelBox.width + ", list " + kernelBox.popup.width + ", widest " + kernelBox.widest()) }) }
     // (Expand or Restore: the expanded card, else the chosen one, else a
@@ -2388,15 +2390,18 @@ FocusScope {
                 tip: "The tessh guide, in a tab: every feature, with examples (F1)"
                 onClicked: nb.openGuide()
             }
+            // (Saving, one menu: the notebook as a .ipynb, or as Jupytext.)
             Tool {
-                label: nb.path === "" ? (nb.narrow ? "Save…" : "Save as .ipynb…") : nb.dirty ? "Save" : "Saved"
-                tip: (nb.path === "" ? "Save as a Jupyter notebook (a file to run again or share)" : "Save the notebook") + " (Ctrl+S in the notebook)"
-                onClicked: nb.save()
+                id: saveTool
+                label: (nb.path === "" ? "Save" : nb.dirty ? "Save" : "Saved") + " \u25be"
+                tip: "Save the notebook: as a Jupyter notebook (.ipynb), or export it as Jupytext (Ctrl+S saves)"
+                onClicked: saveMenu.popup(saveTool, 0, saveTool.height + 2)
             }
-            Tool {
-                label: nb.narrow ? "Export…" : "Export Jupytext…"
-                tip: "Export as Jupytext: a ." + nb.jupytextLang[0] + " script with # %% cells, or Markdown (.md) with code blocks. The cells only, without outputs"
-                onClicked: exportDialog.open()
+            SlimMenu {
+                id: saveMenu
+                SlimMenuItem { text: nb.path === "" ? "Save as Jupyter notebook (.ipynb)…\tCtrl+S" : "Save " + nb.fileName + "\tCtrl+S"; onTriggered: nb.save() }
+                SlimMenuItem { text: "Save as Jupyter notebook (.ipynb)…"; visible: nb.path !== ""; height: visible ? implicitHeight : 0; onTriggered: saveDialog.open() }
+                SlimMenuItem { text: "Export as Jupytext (." + nb.jupytextLang[0] + " script or .md)…"; onTriggered: exportDialog.open() }
             }
         }
     }
