@@ -261,7 +261,9 @@ inline void tessera_show_windows()
         if (auto* wl = w->nativeInterface<QNativeInterface::Private::QWaylandWindow>())
             wl->setSessionRestoreId(w->objectName());
 #endif
-        w->setVisible(true);
+        // (Maximized when it was closed so: asked for in its first show.)
+        if (w->property("startMaximized").toBool()) w->showMaximized();
+        else w->setVisible(true);
     }
 }
 

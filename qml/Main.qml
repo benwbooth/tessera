@@ -11,8 +11,22 @@ ApplicationWindow {
     id: win
     // Shown again by the desktop (include/bootstrap.h): browser views redraw.
     signal reexposed()
-    width: 1100
-    height: 700
+    // (The size it was closed at, asked for before it's first shown: a
+    // desktop that doesn't restore windows itself still gets it; one that
+    // places windows itself, a tiling one, may not follow it.)
+    readonly property var savedSize: {
+        // (Not a New Window: that's the profile's columns × rows.)
+        if (!controller.restoreAllowed()) return null
+        let l = null
+        try { l = JSON.parse(controller.lastLayout()) } catch (e) {}
+        if (!l || !(l.width > 200) || !(l.height > 100)) return null
+        const availW = Screen.desktopAvailableWidth > 0 ? Screen.desktopAvailableWidth : 1e9
+        const availH = Screen.desktopAvailableHeight > 0 ? Screen.desktopAvailableHeight : 1e9
+        return { w: Math.min(l.width, availW), h: Math.min(l.height, availH), max: !!l.maximized }
+    }
+    width: savedSize ? savedSize.w : 1100
+    height: savedSize ? savedSize.h : 700
+    property bool startMaximized: !!(savedSize && savedSize.max)
     // Shown from C++ once named, so the desktop can put it back where it was.
     visible: false
     objectName: "tessera-main"
@@ -682,6 +696,12 @@ ApplicationWindow {
         return (what ? what + " needs Nix" : "This needs Nix") + ", which isn't installed here. Nix fetches the programs Tessera uses that you don't have yet, "
              + "kept apart from the system's own packages. To install it, run:\n\n  " + nixHelpBox.installCmd + "\n\nthen open a new tab. More: https://nixos.org/download/"
     }
+    // (Test hook: TESSERA_TEST_CLOSETAB=<dir>: three tabs, the middle one
+    // current, closed; each frame after it saved to <dir>/f-N.png.)
+    property int closeTabFrames: -1
+    Timer { interval: 3000; running: controller.testEnv("CLOSETAB") !== ""; onTriggered: { newTab({}); win.later(1000, () => newTab({})); win.later(2000, () => focusTab(1)) } }
+    Timer { interval: 7000; running: controller.testEnv("CLOSETAB") !== ""; onTriggered: { win.closeTabFrames = 0; rootLayout.grabToImage(r => r.saveToFile(controller.testEnv("CLOSETAB") + "/f-before.png")); console.log("closing at " + Date.now()); win.removeTab(win.tabs[1]) } }
+    Connections { target: win; function onFrameSwapped() { if (win.closeTabFrames >= 0 && win.closeTabFrames < 12) { const n = win.closeTabFrames++; rootLayout.grabToImage(r => r.saveToFile(controller.testEnv("CLOSETAB") + "/f-" + n + ".png")) } } }
     // (Test hook: TESSERA_TEST_NIXHELP=<program> shows it.)
     Timer { interval: 3000; running: controller.testEnv("NIXHELP") !== ""; onTriggered: win.nixHelp(controller.testEnv("NIXHELP"), "") }
     NixHelp {
@@ -2544,7 +2564,8 @@ ApplicationWindow {
     function startupRest(restored) {
         if (!restored) {
             newTab({})
-            sizeTimer.start()
+            if (!savedSize) sizeTimer.start()
+            else if (startMaximized && win.visibility !== Window.Maximized) win.showMaximized()
         }
         startupDone = true
         layoutSaver.restart()
