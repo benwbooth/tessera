@@ -733,13 +733,15 @@ ApplicationWindow {
     // (Test hook: TESSERA_TEST_HOVER=x,y[,ms] moves the pointer there after 6 s (or ms).)
     Timer { interval: Number(controller.testEnv("HOVER").split(",")[2] || 6000); running: controller.testEnv("HOVER") !== ""; onTriggered: { const p = controller.testEnv("HOVER").split(",").map(Number); controller.testMouse(3, p[0] - 1, p[1], 0, 0); controller.testMouse(3, p[0], p[1], 0, 0) } }
     // A note at the bottom of the window for a few seconds, with buttons.
-    function notice(text, actions, ms) { noticeBox.text = text; noticeBox.actions = actions; noticeBox.shown = true; noticeTimer.interval = ms || 7000; noticeTimer.restart() }
+    // (ms < 0: it stays until a button or × closes it.)
+    function notice(text, actions, ms) { noticeBox.text = text; noticeBox.actions = actions; noticeBox.shown = true; noticeBox.sticky = (ms || 0) < 0; noticeTimer.interval = ms > 0 ? ms : 7000; if (noticeBox.sticky) noticeTimer.stop(); else noticeTimer.restart() }
     Timer { id: noticeTimer; interval: 7000; onTriggered: noticeBox.shown = false }
     Rectangle {
         id: noticeBox
         property string text: ""
         property var actions: []
         property bool shown: false
+        property bool sticky: false
         parent: win.contentItem
         z: 1000
         visible: shown
@@ -751,7 +753,7 @@ ApplicationWindow {
         radius: 6
         color: Theme.panel
         border.color: Theme.divider
-        HoverHandler { onHoveredChanged: if (hovered) noticeTimer.stop(); else noticeTimer.restart() }
+        HoverHandler { onHoveredChanged: if (hovered) noticeTimer.stop(); else if (!noticeBox.sticky) noticeTimer.restart() }
         Row {
             id: noticeRow
             anchors.centerIn: parent
@@ -1717,13 +1719,14 @@ ApplicationWindow {
     // A newer tesserad is waiting: the running one swaps it in (shells kept)
     // only once no notebook kernel or background job runs in it, so a window
     // with a notebook open can stay on the old one for good. Said once per
-    // start, with the way to update now.
+    // start, with the way to update now; it stays until answered (a devloop
+    // window restarts often, and a note that went away by itself was missed).
     Timer {
         id: waitingTimer
         interval: 2500
         onTriggered: win.notice("A newer tesserad is waiting for the notebook kernels to stop", [
             { label: "Update now\u2026", run: win.askUpdateWaiting },
-            { label: "Later", run: () => {} }], 30000)
+            { label: "Later", run: () => {} }], -1)
         // (Test hook: TESSERA_TEST_UPDATE_ACCEPT takes Update now and says yes.)
         onRunningChanged: if (!running && controller.testEnv("UPDATE_ACCEPT") !== "") { win.askUpdateWaiting(); Qt.callLater(sheet.accept) }
     }

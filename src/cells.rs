@@ -451,7 +451,7 @@ pub fn to_html(raw: &[u8], cols: u16) -> String {
         return String::new();
     };
     // (A newline at the start keeps the first line clear of a prompt's leftovers.)
-    t.vt_write(raw);
+    t.vt_write(&strip_prompt_sp(raw));
     let opts = FormatterOptions::new().with_format(Format::Html).with_trim(true).with_unwrap(true).with_style(true);
     let Ok(mut f) = Formatter::new(&t, opts) else { return String::new() };
     let html = f.format_alloc(None).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
@@ -722,6 +722,16 @@ pub fn decode_b64_text(b64: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.decode(clean).map(|r| String::from_utf8_lossy(&r).trim().to_string()).unwrap_or_default()
 }
 
+/// A command's output without zsh's partial-line mark (PROMPT_SP: its
+/// PROMPT_EOL_MARK, "%" or "#" in reverse video, padded to the line's end,
+/// then "\r \r"), which it prints after output that didn't end in a newline
+/// (Perl's `print 1`), on the same line as it.
+pub fn strip_prompt_sp(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    static RE: std::sync::OnceLock<regex::bytes::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::bytes::Regex::new(r"(?-u)(?:\x1b\[[0-9;]*m)*[%#](?:\x1b\[[0-9;]*m)* +\r +\r").unwrap());
+    re.replace_all(raw, &b""[..])
+}
+
 /// Without zsh's partial-line marker ("%" and padding) before its prompt.
 pub fn strip_zsh_marker(mut text: String) -> String {
     while let Some(last) = text.trim_end_matches('\n').rsplit('\n').next().map(str::to_string) {
@@ -864,7 +874,7 @@ impl Recorder {
     /// screen), done, status).
     pub fn cell_text(&self, id: u64) -> Option<(String, bool, bool, i64)> {
         let c = self.cells.get(id)?;
-        let text = strip_frame(&strip_zsh_marker(crate::images::plain_text(&c.raw)));
+        let text = strip_frame(&strip_zsh_marker(crate::images::plain_text(&strip_prompt_sp(&c.raw))));
         Some((text, c.screen, c.done, c.status))
     }
 
@@ -976,7 +986,7 @@ impl Recorder {
                             let img = crate::images::un_onlcr(&raw);
                             (crate::images::output_is_image(&raw) && crate::images::is_image(&img)).then_some(img)
                         };
-                        let text = strip_frame(&strip_zsh_marker(crate::images::plain_text(&raw)));
+                        let text = strip_frame(&strip_zsh_marker(crate::images::plain_text(&strip_prompt_sp(&raw))));
                         let named = self.cells.list.iter().rev().find(|c| !c.done).map(|c| crate::images::kind_from_command(&c.command)).unwrap_or("");
                         let kind = if named.is_empty() { crate::images::detect_text(&text) } else { named };
                         if let Some(id) = self.cells.finish(status, kind) {
