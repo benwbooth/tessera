@@ -121,7 +121,6 @@ Rectangle {
     signal keysPicked(string keys)     // the corner switch: "emacs", "vi", "vscode"
     signal openRich()                  // show the last output's rich view
     property string viewMode: "terminal"
-    signal viewModePicked(string mode) // "terminal" or "notebook"
     // Background jobs on this pane's host (the notebook keeps count): the
     // badge shows how many run; a click shows or hides their list.
     property int jobsRunning: 0
@@ -1113,13 +1112,6 @@ Rectangle {
             label: "? Guide"
             tip: "The tessh guide, in a tab: every feature, with examples"
             onClicked: Window.window.openGuide()
-        }
-        Chip {
-            id: modeChip
-            base: box.color
-            label: box.viewMode === "notebook" ? "\u25a4 Notebook" : "\u25ad Terminal"
-            tip: "Click (or Ctrl+Shift+J) to switch between terminal and notebook (each command a cell)"
-            onClicked: box.viewModePicked(box.viewMode === "notebook" ? "terminal" : "notebook")
         }
         Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {

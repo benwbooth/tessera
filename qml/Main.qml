@@ -376,7 +376,7 @@ ApplicationWindow {
         if (maximizedPane) toggleMaximize()
         const prof = profileFor(profileName !== undefined ? profileName : p.profileName)
         // (A split of another host's pane opens there too.)
-        const props = { profileName: prof.name, cwd: cwdFor(prof, p.view), sshHost: p.sshHost }
+        const props = { profileName: prof.name, cwd: cwdFor(prof, p.view), sshHost: p.sshHost, viewMode: p.viewMode }
         const h = p.host
         if (h.count === 1) h.orientation = orientation
         let np
@@ -1194,8 +1194,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+Shift+]"; onActivated: cyclePane(1) }
     Shortcut { sequence: "Ctrl+Shift+["; onActivated: cyclePane(-1) }
     Shortcut { sequence: "Ctrl+Shift+Return"; autoRepeat: false; onActivated: toggleMaximize() }
-    // Terminal <-> notebook for the active pane.
-    Shortcut { sequence: "Ctrl+Shift+J"; autoRepeat: false; onActivated: if (activePane) activePane.viewMode = activePane.viewMode === "notebook" ? "terminal" : "notebook" }
+    // (A tab is a terminal or a notebook from the start, for good.)
+    Shortcut { sequence: "Ctrl+Shift+J"; autoRepeat: false; onActivated: newTab({ view: "notebook" }) }
     Shortcut { sequence: "F11"; autoRepeat: false; onActivated: toggleFullScreen() }
     Shortcut { sequence: "Ctrl+Shift+/"; onActivated: if (activeView) activeView.findCursor() }
     Shortcut { sequences: ["Ctrl+=", "Ctrl++"]; onActivated: zoomBy(1) }
@@ -1236,6 +1236,7 @@ ApplicationWindow {
             title: "Shell"
             icon.name: "utilities-terminal"
             P.MenuItem { icon.name: "tab-new"; text: "New Tab\tCtrl+Shift+T"; onTriggered: newTab({}) }
+            P.MenuItem { icon.name: "view-list-details"; text: "New Notebook Tab\tCtrl+Shift+J"; onTriggered: newTab({ view: "notebook" }) }
             P.MenuItem { icon.name: "document-new"; text: "New Jupyter Notebook"; onTriggered: newNotebook() }
             P.MenuItem { icon.name: "document-open"; text: "Open Jupyter Notebook\u2026\tCtrl+O"; onTriggered: notebookDialog.open() }
             P.MenuItem { icon.name: "tab-new"; text: "New Tab with Current Profile"; onTriggered: newTab({ profile: activeProfile.name }) }
@@ -1482,8 +1483,8 @@ ApplicationWindow {
         id: launchMenu
         onAboutToShow: { win.launchData = JSON.parse(controller.launchers()); win.launchOpen = true }
         onAboutToHide: win.launchOpen = false
-        // (Either view, whichever the current tab is in.)
-        P.MenuItem { icon.name: "view-list-details"; text: "New Notebook Tab"; onTriggered: newTab({ view: "notebook" }) }
+        // (Either view; a tab stays the one it was opened as.)
+        P.MenuItem { icon.name: "view-list-details"; text: "New Notebook Tab\tCtrl+Shift+J"; onTriggered: newTab({ view: "notebook" }) }
         P.MenuItem { icon.name: "utilities-terminal"; text: "New Terminal Tab"; onTriggered: newTab({ view: "terminal" }) }
         P.MenuSeparator {}
         Instantiator {

@@ -34,7 +34,7 @@ FocusScope {
     property string markdownStyle: "rich"  // Markdown by default: "rich" or "text"
     signal markdownStylePicked(string style)
     signal pathPicked(string path)      // saved as a file
-    signal terminalRequested()          // "show me the terminal"
+    property bool jobsOnly: false       // a terminal tab's: only its jobs list shows
     signal commandRequested(string command)   // run in the pane's shell, as if typed
     signal insertRequested(string text)       // into the pane's editor
     signal viewRequested(string path)         // a file, shown over the pane
@@ -2144,7 +2144,6 @@ FocusScope {
                 tip: (nb.path === "" ? "Save as a Jupyter notebook (a file to run again or share)" : "Save the notebook") + " (Ctrl+S in the notebook)"
                 onClicked: nb.save()
             }
-            Tool { visible: nb.view !== null; label: ">_"; tip: "Show the terminal (Ctrl+Shift+J)"; onClicked: nb.terminalRequested() }
         }
     }
     // Starting, failing: said under the strip.
@@ -2236,7 +2235,7 @@ FocusScope {
                 Chip { base: jobsHead.color; label: "Clear finished"; visible: nb.hostJobs.some(j => !j.running)
                        tip: "Take the finished jobs off the list (their cards go back to the notebook)"
                        onClicked: { for (const j of nb.hostJobs) if (!j.running) nb.controller.jobCall("", nb.sshHost, "job.forget", JSON.stringify({ id: j.id })); Qt.callLater(nb.refreshJobs) } }
-                Chip { base: jobsHead.color; label: "\u2190 Notebook"; tip: "Back to the notebook (Ctrl+Alt+J)"; onClicked: nb.setJobsView(false) }
+                Chip { base: jobsHead.color; label: nb.jobsOnly ? "\u2190 Terminal" : "\u2190 Notebook"; tip: (nb.jobsOnly ? "Back to the terminal" : "Back to the notebook") + " (Ctrl+Alt+J)"; onClicked: nb.setJobsView(false) }
             }
             Text {
                 visible: nb.hostJobs.length === 0

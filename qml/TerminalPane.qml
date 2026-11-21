@@ -331,8 +331,7 @@ Item {
             const shellLang = (l) => ["tessh", "fish", "nu", "powershell", "elvish", "xonsh"].indexOf(l) >= 0
             const asLang = () => {
                 if (inTerm && shellLang(L) && controller) { snippet(L, plain); return }
-                if (pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
-                    pane.viewMode = "notebook"
+                if (!inTerm && pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
                     notebook.submitLang(t, L)
                     return
                 }
@@ -340,7 +339,7 @@ Item {
                 plain()
             }
             if (S !== "" && controller) {
-                if (!inTerm && notebook.hasKernelFor(S)) { pane.viewMode = "notebook"; notebook.submitLang(t, S); return }
+                if (!inTerm && notebook.hasKernelFor(S)) { notebook.submitLang(t, S); return }
                 snippet(S, asLang)
                 return
             }
@@ -351,22 +350,11 @@ Item {
         onKeysPicked: (k) => pane.editorKeysPicked(k)
         onOpenRich: pane.openRich()
         viewMode: pane.viewMode
-        onViewModePicked: (m) => pane.viewMode = m
         jobsRunning: notebook.jobsActive
         jobsAll: notebook.hostJobs.length
-        // (The jobs are the notebook's, out of sight: shown there; shown
-        // again, back to where it was, the terminal too.)
-        onJobsToggled: {
-            if (notebook.jobsView && pane.viewMode === "notebook") {
-                notebook.setJobsView(false)
-                if (pane.jobsFromTerminal) pane.viewMode = "terminal"
-                pane.jobsFromTerminal = false
-            } else {
-                pane.jobsFromTerminal = pane.viewMode !== "notebook"
-                pane.viewMode = "notebook"
-                notebook.setJobsView(true)
-            }
-        }
+        // (The jobs list is the notebook's: in a terminal tab it shows over
+        // the terminal while it's open, and the tab stays a terminal.)
+        onJobsToggled: notebook.setJobsView(!notebook.jobsView)
         onEditingChanged: if (editing) pane.preferEditor = true
     }
 
@@ -594,7 +582,6 @@ Item {
             }
         }
     }
-    property bool jobsFromTerminal: false   // the jobs were shown from the terminal
     NotebookView {
         id: notebook
         z: 15
@@ -604,7 +591,8 @@ Item {
         anchors.fill: termHome
         // (It stays for a program that runs on: a full-screen one runs in its
         // card (termSlot), and keys go to the program while it runs.)
-        shown: pane.viewMode === "notebook"
+        shown: pane.viewMode === "notebook" || jobsView
+        jobsOnly: pane.viewMode !== "notebook"
         // (A full-screen program with no card of its own, started before the
         // notebook showed: it has the pane, as in the terminal.)
         visible: shown && !(term.fullScreen && notebook.liveIndex < 0)
@@ -622,7 +610,6 @@ Item {
         defaultKernel: pane.notebookKernel
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         onPathPicked: (p) => pane.docPath = p
-        onTerminalRequested: { pane.viewMode = "terminal"; term.forceActiveFocus() }
         onCommandRequested: (c) => compose.runCommand(c)
         onInsertRequested: (t) => { compose.focusEditor(); compose.insert(t) }
         onViewRequested: (p) => pane.viewFile(p)
