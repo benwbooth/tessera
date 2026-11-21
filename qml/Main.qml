@@ -733,7 +733,7 @@ ApplicationWindow {
     // (Test hook: TESSERA_TEST_HOVER=x,y[,ms] moves the pointer there after 6 s (or ms).)
     Timer { interval: Number(controller.testEnv("HOVER").split(",")[2] || 6000); running: controller.testEnv("HOVER") !== ""; onTriggered: { const p = controller.testEnv("HOVER").split(",").map(Number); controller.testMouse(3, p[0] - 1, p[1], 0, 0); controller.testMouse(3, p[0], p[1], 0, 0) } }
     // A note at the bottom of the window for a few seconds, with buttons.
-    function notice(text, actions) { noticeBox.text = text; noticeBox.actions = actions; noticeBox.shown = true; noticeTimer.restart() }
+    function notice(text, actions, ms) { noticeBox.text = text; noticeBox.actions = actions; noticeBox.shown = true; noticeTimer.interval = ms || 7000; noticeTimer.restart() }
     Timer { id: noticeTimer; interval: 7000; onTriggered: noticeBox.shown = false }
     Rectangle {
         id: noticeBox
@@ -1714,6 +1714,35 @@ ApplicationWindow {
             onAccept: win.restartDaemon
         })
     }
+    // A newer tesserad is waiting: the running one swaps it in (shells kept)
+    // only once no notebook kernel or background job runs in it, so a window
+    // with a notebook open can stay on the old one for good. Said once per
+    // start, with the way to update now.
+    Timer {
+        id: waitingTimer
+        interval: 2500
+        onTriggered: win.notice("A newer tesserad is waiting for the notebook kernels to stop", [
+            { label: "Update now\u2026", run: win.askUpdateWaiting },
+            { label: "Later", run: () => {} }], 30000)
+        // (Test hook: TESSERA_TEST_UPDATE_ACCEPT takes Update now and says yes.)
+        onRunningChanged: if (!running && controller.testEnv("UPDATE_ACCEPT") !== "") { win.askUpdateWaiting(); Qt.callLater(sheet.accept) }
+    }
+    function askUpdateWaiting() {
+        sheet.ask({
+            title: "Update tesserad now?",
+            message: "Tessera's background process (tesserad) is an older build. It updates itself to this one in place, keeping your shells "
+                   + "and what runs in them, but only once no notebook kernel or background job runs in it.\n\n"
+                   + "Updating now stops them: notebooks' kernels start again after, without their variables, and background jobs end.",
+            okText: "Stop and Update",
+            destructive: true,
+            onAccept: () => Async.call(controller, k => controller.updateDaemon(k, ""), json => {
+                let r = {}
+                try { r = JSON.parse(json) } catch (x) {}
+                controller.jupyterEvent("tesserad", JSON.stringify({ type: "daemon.updated", ok: !!r.ok, error: r.error || "" }))
+                win.notice(r.ok ? "tesserad is up to date" : "tesserad didn't update: " + (r.error || "no answer"), [])
+            })
+        })
+    }
     // tesserad, the shells' background process, started again (this build's):
     // new shells in every tab's place, each under its saved screen, then the
     // old tabs go. Programs running in them, and notebook kernels, end.
@@ -2513,6 +2542,7 @@ ApplicationWindow {
         // (Test hook: TESSERA_TEST_HOST=<ssh host> opens a tab there.)
         if (controller.testEnv("HOST") !== "") newTab({ host: controller.testEnv("HOST"), title: controller.testEnv("HOST") })
         if (controller.daemonState() === "outdated") daemonTimer.start()
+        else if (controller.daemonState() === "waiting") waitingTimer.start()
         controller.aiAutodetect()
         if (controller.screenshotPath() !== "") shotTimer.start()
     }

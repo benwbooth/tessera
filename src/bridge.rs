@@ -652,7 +652,7 @@ pub mod ffi {
         #[qinvokable]
         fn history_search(self: &Controller, reply: &QString, query: &QString);
         /// How the running daemon compared with this build at startup:
-        /// "none", "current", "upgraded", "outdated", "newer".
+        /// "none", "current", "upgraded", "waiting", "outdated", "newer".
         #[qinvokable]
         fn daemon_state(self: &Controller) -> QString;
         /// End an outdated daemon (and its shells). False if it couldn't be.

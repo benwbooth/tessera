@@ -452,7 +452,8 @@ pub fn session_job(id: &str) -> std::io::Result<String> {
 }
 
 /// Bring the running daemon up to this build. "none" (no daemon yet),
-/// "current", "upgraded" (swapped in place; every shell kept), "outdated"
+/// "current", "upgraded" (swapped in place; every shell kept), "waiting"
+/// (it will swap in once no notebook kernel or job runs), "outdated"
 /// (a build from before in-place upgrades: it has to be restarted), or
 /// "newer" (the daemon is a newer build than this window: leave it).
 pub fn sync_daemon() -> &'static str {
@@ -488,9 +489,11 @@ pub fn sync_daemon() -> &'static str {
         let (_, p) = read_frame(&mut s)?;
         Ok(serde_json::from_slice::<String>(&p).unwrap_or_default())
     })();
-    // (Deferred: kernels are running; it swaps itself in when they're done.)
+    // (Deferred: kernels are running; it swaps itself in when they're done.
+    // "waiting": the window says so, and offers to update now.)
     match sent.as_deref() {
-        Ok("deferred") | Err(_) => return "current",
+        Ok("deferred") => return "waiting",
+        Err(_) => return "current",
         _ => {}
     }
     // The new build answers on the same socket once it has taken over.
