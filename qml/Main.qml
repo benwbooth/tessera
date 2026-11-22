@@ -103,12 +103,11 @@ ApplicationWindow {
     // the active pane's terminal from its input editor, else to the editor
     // (when it's up: at a prompt).
     // A tap of Ctrl on its own (include/bootstrap.h): right Ctrl runs the
-    // editor's command in the background (Ctrl+Enter's); left Ctrl, or right
-    // with nothing to run, switches between the editor and the terminal.
+    // editor's command in the background (Ctrl+Enter's), and with nothing to
+    // run does nothing; left Ctrl switches between the editor and the terminal.
     function ctrlTapped(right) {
         const p = activePane
-        console.warn("TEMPORARY ctrl tap: right=" + right + " editorOn=" + (p ? p.editorOn : "-") + " editing=" + (p ? p.compose.editing : "-") + " text=" + (p ? JSON.stringify(p.compose.text.substring(0, 20)) : "-"))
-        if (right && p && p.editorOn && p.compose.editing && p.compose.text.trim() !== "") { p.compose.submitBackground(); return }
+        if (right) { if (p && p.editorOn && p.compose.editing && p.compose.text.trim() !== "") p.compose.submitBackground(); return }
         toggleEditor()
     }
     function toggleEditor() {
