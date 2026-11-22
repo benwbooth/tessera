@@ -1748,6 +1748,8 @@ FocusScope {
             if (a === "--") continue
             if (a.startsWith("--")) { if (longOk.indexOf(a) < 0 && !/^--sort=(time|size|extension|none|name)$/.test(a)) return false; continue }
             if (a.startsWith("-") && a !== "-") { if (!shortOk.test(a)) return false; continue }
+            // (A pattern (ls *, ls *.txt): the names it matched, as ls shows them.)
+            if (/[*?\[]/.test(a)) return false
             if (++paths > 1) return false
         }
         return true
