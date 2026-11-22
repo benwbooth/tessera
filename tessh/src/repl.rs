@@ -352,7 +352,9 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
         // (A name that needs quoting comes quoted, so it works as inserted:
         // '7th Heaven'/ — unless it's inside a quote already.)
         let insert = if (kind == "dir" || kind == "file") && !before[..start].ends_with(['\'', '"']) { quote_path(&n) } else { n.clone() };
-        items.push(serde_json::json!({"insert": insert, "label": n, "kind": kind, "detail": detail, "doc": doc}));
+        // (Shown as it'll go in, quotes and all.)
+        let label = if kind == "dir" || kind == "file" { insert.clone() } else { n.clone() };
+        items.push(serde_json::json!({"insert": insert, "label": label, "kind": kind, "detail": detail, "doc": doc}));
     }
     serde_json::json!({"start": u16_of(start), "end": u16_of(pos), "items": items})
 }

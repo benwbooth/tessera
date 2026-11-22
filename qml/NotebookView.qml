@@ -1723,17 +1723,37 @@ FocusScope {
                                       ["html", "HTML"], ["markdown", "Markdown (rich)"], ["mdtext", "Markdown (text)"], ["svg", "SVG"], ["diff", "Diff"], ["image", "Image"],
                                       ["files", "Files"], ["env", "Variables"]]
     // ls (lsd, eza, ...) and env: Tessera's own views, to click and edit.
+    // A command's words as the shell reads them: quotes and backslashes
+    // taken off ('7th Heaven'/ is one word). (A pattern outside quotes is
+    // marked: ls *.txt.)
+    function shellWords(c) {
+        const out = []
+        let w = "", has = false, glob = false, q = ""
+        for (let i = 0; i < c.length; ++i) {
+            const ch = c[i]
+            if (q === "'") { if (ch === "'") q = ""; else w += ch; continue }
+            if (q === '"') { if (ch === '"') q = ""; else if (ch === "\\" && i + 1 < c.length) w += c[++i]; else w += ch; continue }
+            if (ch === "'" || ch === '"') { q = ch; has = true; continue }
+            if (ch === "\\" && i + 1 < c.length) { w += c[++i]; has = true; continue }
+            if (/\s/.test(ch)) { if (has) out.push({ text: w, glob: glob }); w = ""; has = false; glob = false; continue }
+            if ("*?[".indexOf(ch) >= 0) glob = true
+            w += ch; has = true
+        }
+        if (has) out.push({ text: w, glob: glob })
+        return out
+    }
     function builtinKind(command) {
         const c = (command || "").trim()
         if (c === "" || /[|;&<>`$(]/.test(c)) return ""
-        const w = c.split(/\s+/)
+        const sw = shellWords(c)
+        const w = sw.map(x => x.text)
         let first = w[0]
         try { const al = JSON.parse(view ? view.aliases : "{}"); if (al[first]) first = al[first].trim().split(/\s+/)[0] } catch (e) {}
         // (ls with what the folder view shows as ls would: one folder (or
         // none), and only these options. Any other (-R, -d, -i, -s, -F, two
         // folders, ...): ls's own output, as it printed it.)
         // (ls an alias of lsd, eza or exa counts too: what it lists is the same.)
-        if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && lsViewable(w.slice(1))) return "files"
+        if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && lsViewable(sw.slice(1))) return "files"
         // (cd, then the folder it went to: any cd, its own options and all.)
         if (["cd", "pushd", "popd", "z", "zi"].indexOf(w[0]) >= 0) return "files"
         if ((first === "env" || first === "printenv") && w.length === 1) return "env"
@@ -1744,12 +1764,13 @@ FocusScope {
         const shortOk = /^-[aAlh1tSXUfr]+$/
         const longOk = ["--all", "--almost-all", "--human-readable", "--reverse", "--group-directories-first", "--color", "--color=auto", "--color=always", "--color=never"]
         let paths = 0
-        for (const a of args) {
+        for (const x of args) {
+            const a = x.text
             if (a === "--") continue
             if (a.startsWith("--")) { if (longOk.indexOf(a) < 0 && !/^--sort=(time|size|extension|none|name)$/.test(a)) return false; continue }
             if (a.startsWith("-") && a !== "-") { if (!shortOk.test(a)) return false; continue }
             // (A pattern (ls *, ls *.txt): the names it matched, as ls shows them.)
-            if (/[*?\[]/.test(a)) return false
+            if (x.glob) return false
             if (++paths > 1) return false
         }
         return true
@@ -3793,7 +3814,7 @@ FocusScope {
         id: filesView
         FileBrowser {
             readonly property var src: parent
-            readonly property var words: (src.command || "").trim().split(/\s+/)
+            readonly property var words: nb.shellWords((src.command || "").trim()).map(x => x.text)
             readonly property bool isCd: ["cd", "pushd", "popd", "z", "zi"].indexOf(words[0]) >= 0
             readonly property var args: words.slice(1)
             controller: nb.controller
