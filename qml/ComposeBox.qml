@@ -1606,6 +1606,22 @@ Rectangle {
         }
     }
 
+    // (History open: a click anywhere outside it closes it, and still
+    // does what it was for there.)
+    MouseArea {
+        parent: box.Window.window ? box.Window.window.contentItem : box
+        anchors.fill: parent
+        z: 10000
+        enabled: compPopup.visible && compPopup.hist
+        visible: enabled
+        acceptedButtons: Qt.AllButtons
+        onPressed: (m) => {
+            m.accepted = false
+            const p = mapToItem(compPopup, m.x, m.y)
+            if (p.x >= 0 && p.y >= 0 && p.x < compPopup.width && p.y < compPopup.height) return
+            box.closeComp()
+        }
+    }
     // The dropdown, above the editor at the word being completed.
     Rectangle {
         id: compPopup
