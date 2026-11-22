@@ -93,8 +93,8 @@ The sources are in `src/guides.rs` (`GUIDES`). To check them all:
 | nim | [Nim Tutorial](https://nim-lang.org/docs/tut1.html) | [MIT](https://github.com/nim-lang/Nim/blob/devel/copying.txt) |
 | crystal | [Crystal Tutorials: Language Introduction](https://raw.githubusercontent.com/crystal-lang/crystal-book/master/docs/tutorials/basics/10_hello_world.md) | [Apache-2.0](https://github.com/crystal-lang/crystal-book/blob/master/LICENSE) |
 | v | [V Documentation](https://raw.githubusercontent.com/vlang/v/master/doc/docs.md) | [MIT](https://github.com/vlang/v/blob/master/LICENSE) |
-| fsharp, f# | [Tour of F#](https://raw.githubusercontent.com/dotnet/docs/main/docs/fsharp/tour.md) | [CC BY 4.0](https://github.com/dotnet/docs/blob/main/LICENSE) |
-| c-sharp, csharp, c#, cs | [A tour of the C# language](https://raw.githubusercontent.com/dotnet/docs/main/docs/csharp/tour-of-csharp/overview.md) | [CC BY 4.0](https://github.com/dotnet/docs/blob/main/LICENSE) |
+| fsharp, f# | [F#: a tour and the language reference](https://raw.githubusercontent.com/dotnet/docs/main/docs/fsharp/tour.md) | [CC BY 4.0](https://github.com/dotnet/docs/blob/main/LICENSE) |
+| c-sharp, csharp, c#, cs | [C#: a tour and the fundamentals](https://raw.githubusercontent.com/dotnet/docs/main/docs/csharp/tour-of-csharp/overview.md) | [CC BY 4.0](https://github.com/dotnet/docs/blob/main/LICENSE) |
 | kotlin | [Kotlin Tour](https://raw.githubusercontent.com/JetBrains/kotlin-web-site/master/docs/topics/tour/kotlin-tour-hello-world.md) | [Apache-2.0](https://github.com/JetBrains/kotlin-web-site/blob/master/LICENSE) |
 | scala | [Scala 3 Book](https://docs.scala-lang.org/scala3/book/introduction.html) | [CC BY-SA 4.0](https://github.com/scala/docs.scala-lang/blob/main/LICENSE.md) |
 | clojure | [Learn Clojure (clojure.org)](https://clojure.org/guides/learn/clojure) | [CC BY-SA 3.0](https://clojure.org/community/license) |
@@ -129,7 +129,7 @@ The sources are in `src/guides.rs` (`GUIDES`). To check them all:
 | d | [The D Language Tour: D's Basics](https://raw.githubusercontent.com/dlang-tour/english/master/basics/imports-and-modules.md) | [Boost-1.0 (D Language Tour)](https://github.com/dlang-tour/core/blob/master/LICENSE.txt) |
 | sml | [SML Help (Standard ML)](https://smlhelp.github.io/book/docs/start/install/) | [© the SML Help authors; read from the site, not redistributed](https://github.com/smlhelp/book) |
 | prql | [The PRQL Language Book](https://prql-lang.org/book/print.html) | [Apache-2.0](https://github.com/PRQL/prql/blob/main/LICENSE) |
-| scss, sass | [Sass Basics](https://sass-lang.com/guide/) | [MIT](https://github.com/sass/sass-site/blob/main/LICENSE) |
+| scss, sass | [Sass: basics and documentation](https://sass-lang.com/guide/) | [MIT](https://github.com/sass/sass-site/blob/main/LICENSE) |
 | make | [GNU make Manual](https://www.gnu.org/software/make/manual/make.html) | [GNU FDL 1.3](https://www.gnu.org/licenses/fdl-1.3.html) |
 | cmake | [CMake Tutorial](https://cmake.org/cmake/help/latest/guide/tutorial/index.html) | [BSD-3-Clause](https://cmake.org/licensing/) |
 | typst | [Typst Tutorial](https://typst.app/docs/tutorial/) | [Apache-2.0](https://github.com/typst/typst/blob/main/LICENSE) |
