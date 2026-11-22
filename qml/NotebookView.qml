@@ -532,7 +532,7 @@ FocusScope {
     property bool pinning: false
     function follow() { sticking = true; Qt.callLater(pin) }
     function pin() {
-        if (!sticking) return
+        if (!sticking || unseenCid !== "") return   // (a card on its way: when it shows)
         pinning = true
         list.positionViewAtEnd()
         pinning = false
@@ -1306,10 +1306,19 @@ FocusScope {
     // it's done and drawn — a folder card's listing in — so it comes up as
     // it'll stay, not empty, then filling, then done. A slow one shows after
     // 250 ms, running.
+    // (Meanwhile the list doesn't make room for it: the cards above stay put
+    // as its size settles, and move once, as it shows.)
     property string unseenCid: ""
-    Timer { id: unseenCap; interval: 250; onTriggered: nb.unseenCid = "" }
-    function hideUntilReady(cid) { unseenCid = cid; unseenCap.restart() }
-    function reveal(cid) { if (unseenCid === cid) Qt.callLater(() => { if (nb.unseenCid === cid) nb.unseenCid = "" }) }
+    property real unseenRoom: 0         // (its height and the gap before it)
+    Timer { id: unseenCap; interval: 250; onTriggered: nb.showUnseen() }
+    function hideUntilReady(cid) { unseenCid = cid; unseenRoom = 0; unseenCap.restart() }
+    function showUnseen() {
+        if (unseenCid === "") return
+        unseenCid = ""; unseenRoom = 0; unseenCap.stop()
+        if (sticking) pin()
+        if (liveIndex >= 0) followLive()
+    }
+    function reveal(cid) { if (unseenCid === cid) Qt.callLater(() => { if (nb.unseenCid === cid) nb.showUnseen() }) }
     function submit(code) {
         expandedId = ""         // (a new card shows: nothing hides it)
         const c = newCell("code", code)
@@ -1592,7 +1601,7 @@ FocusScope {
     }
     function isMarkdownFile(p) { return /\.(md|markdown|mdx)$/i.test(p || "") }
     function isPictureFile(p) { return !/^ssh:/.test(p || "") && /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p || "") }
-    function followLive() { if (liveIndex >= 0) { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
+    function followLive() { if (liveIndex >= 0 && unseenCid === "") { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
     property int termRev: 0             // the terminal's cells came back: read outputs again
     Timer { interval: 400; repeat: true; running: nb.visible && nb.ownRunOrAny; onTriggered: nb.tick++ }
     property bool ownRunOrAny: false
@@ -2205,13 +2214,24 @@ FocusScope {
             onTriggered: { nb.testFrames = 0; nb.submit(nb.controller.testEnv("NB_CELL2").replace(/^[0-9]+:/, "")) } }
     // (TESSERA_TEST_NB_FRAMES=<dir>: the 40 frames after NB_CELL2 is sent, grabbed there.)
     property int testFrames: -1
+    // (For the frame log: each card in view, its kind and what its body shows.)
+    function visibleCardsState() {
+        let out = []
+        for (let i = 0; i < cells.count; ++i) {
+            const it = list.itemAtIndex(i)
+            if (!it || it.y + it.height < list.contentY || it.y > list.contentY + list.height) continue
+            const b = it.bodyItem
+            out.push(i + ":" + it.kind + ":" + (b ? (b.raw !== undefined ? "raw" + b.raw.length + (b.listed ? "L" : "") + ":" + b.dir : "item") : "none") + ":op" + it.opacity + ":" + Math.round(it.height))
+        }
+        return out.join(" ")
+    }
     Connections {
         target: nb.testFrames >= 0 && nb.controller && nb.controller.testEnv("NB_FRAMES") !== "" ? nb.Window.window : null
         function onFrameSwapped() {
             if (nb.testFrames < 0 || nb.testFrames >= 40) return
             const n = nb.testFrames++
             const last = list.itemAtIndex(cells.count - 1)
-            console.log("nbframe " + n + " t=" + Date.now() % 100000 + " nbh=" + Math.round(nb.height) + " nby=" + Math.round(nb.mapToItem(null, 0, 0).y) + " cy=" + Math.round(list.contentY) + " ch=" + Math.round(list.contentHeight) + " oy=" + Math.round(list.originY) + " h=" + Math.round(list.height) + " last=" + (last ? Math.round(last.height) + "@" + Math.round(last.y) + " kind=" + last.kind + " outs=" + last.outs.length + " run=" + last.running + " has=" + last.hasOutput + " tid=" + last.tid + " live=" + nb.liveWanted : "-") + " unseen=" + (nb.unseenCid !== "") + " count=" + cells.count)
+            console.log("nbframe " + n + " t=" + Date.now() % 100000 + " nbh=" + Math.round(nb.height) + " nby=" + Math.round(nb.mapToItem(null, 0, 0).y) + " cy=" + Math.round(list.contentY) + " ch=" + Math.round(list.contentHeight) + " oy=" + Math.round(list.originY) + " h=" + Math.round(list.height) + " last=" + (last ? Math.round(last.height) + "@" + Math.round(last.y) + " kind=" + last.kind + " outs=" + last.outs.length + " run=" + last.running + " has=" + last.hasOutput + " tid=" + last.tid + " live=" + nb.liveWanted : "-") + " unseen=" + (nb.unseenCid !== "") + " count=" + cells.count + " cards=" + nb.visibleCardsState())
             if (n % 2 === 0 && nb.controller.testEnv("NB_FRAMES") !== "") nb.grabToImage(r => r.saveToFile(nb.controller.testEnv("NB_FRAMES") + "/f" + (n < 10 ? "0" : "") + n + ".png"))
         }
     }
@@ -2632,7 +2652,7 @@ FocusScope {
         anchors.rightMargin: 10
         // (A pane's notebook fills up from the bottom, by the input editor,
         // like a terminal; a document starts at the top.)
-        topMargin: nb.expandedId !== "" ? 4 : nb.path === "" ? Math.max(10, height - contentHeight - bottomMargin) : 10
+        topMargin: nb.expandedId !== "" ? 4 : nb.path === "" ? Math.max(10, height - (contentHeight - nb.unseenRoom) - bottomMargin) : 10
         bottomMargin: nb.expandedId !== "" ? 4 : 10
         spacing: 12
         model: cells
@@ -2705,6 +2725,12 @@ FocusScope {
             onRunningChanged: { slowRun = false; if (running) slowTimer.restart(); else { slowTimer.stop(); checkReady() } }
             // (Sent just now: unseen until it's done and drawn; see hideUntilReady.)
             opacity: nb.unseenCid === cid ? 0 : 1
+            onHeightChanged: if (nb.unseenCid === cid) nb.unseenRoom = height + list.spacing
+            Component.onCompleted: {
+                if (running) slowTimer.restart()
+                if (nb.unseenCid === cid) nb.unseenRoom = height + list.spacing
+            }
+            readonly property var bodyItem: loader.item
             function checkReady() {
                 if (nb.unseenCid !== cid || running) return
                 if (kind === "files" && !(loader.item && loader.item.listed)) return
@@ -2712,7 +2738,6 @@ FocusScope {
             }
             Connections { target: loader.item; ignoreUnknownSignals: true; function onListedChanged() { cell.checkReady() } }
             Timer { id: slowTimer; interval: 400; onTriggered: cell.slowRun = cell.running }
-            Component.onCompleted: if (running) slowTimer.restart()
             required property bool failed
             required property double started
             required property double ended
