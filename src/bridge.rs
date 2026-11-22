@@ -355,6 +355,10 @@ pub mod ffi {
         /// The shell command that runs code in a language ("" if it can't).
         #[qinvokable]
         fn snippet_command(self: &Controller, reply: &QString, lang: &QString, code: &QString, cwd: &QString, shell: &QString, host: &QString);
+        /// Fetch every language guide now, for reading offline; progress in
+        /// help_status ("…guides…").
+        #[qinvokable]
+        fn download_guides(self: Pin<&mut Controller>);
         /// Download Helix's grammars (~250 languages) for the editor;
         /// progress in help_status. (Used after the next start.)
         #[qinvokable]
@@ -645,6 +649,9 @@ pub mod ffi {
         /// file URL, or "error: ...". (A file: loadHtml shows at most 2 MB.)
         #[qinvokable]
         fn guide_page(self: &Controller, reply: &QString, lang: &QString, refresh: bool, head: &QString);
+        /// Every kept guide searched, in the background: an HTML page of the hits.
+        #[qinvokable]
+        fn guides_search(self: &Controller, reply: &QString, query: &QString);
         /// A language's guides when it has more than one: JSON [[key, title]].
         #[qinvokable]
         fn guide_choices(self: &Controller, lang: &QString) -> QString;
@@ -1432,6 +1439,11 @@ impl ffi::Controller {
         self.answer_on(reply, None, move || crate::guides::page_file(&lang, refresh, &head).unwrap_or_else(|e| format!("error: {e}")))
     }
 
+    fn guides_search(&self, reply: &ffi::QString, query: &ffi::QString) {
+        let query = query.to_string();
+        self.answer_on(reply, None, move || crate::guides::search_html(&query))
+    }
+
     fn guide_choices(&self, lang: &ffi::QString) -> ffi::QString {
         qs(&crate::guides::choices_json(&lang.to_string()))
     }
@@ -1766,6 +1778,26 @@ impl ffi::Controller {
 
     fn syntax_languages(&self) -> ffi::QString {
         qs(&crate::syntax::languages_json())
+    }
+
+    fn download_guides(mut self: Pin<&mut Self>) {
+        self.as_mut().set_help_status(qs("Downloading the language guides\u{2026}"));
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let q2 = qt.clone();
+            let (got, failed) = crate::guides::download_all(move |done, total, bad| {
+                let msg = format!("Downloading the language guides\u{2026} {done} of {total}{}", if bad > 0 { format!(" ({bad} couldn't be fetched)") } else { String::new() });
+                let _ = q2.queue(move |mut c| c.as_mut().set_help_status(qs(&msg)));
+            });
+            let _ = qt.queue(move |mut c| {
+                let msg = if failed.is_empty() {
+                    format!("All language guides are kept for reading offline ({got} fetched now).")
+                } else {
+                    format!("Language guides kept for reading offline; {} couldn't be fetched: {}.", failed.len(), failed.join(", "))
+                };
+                c.as_mut().set_help_status(qs(&msg));
+            });
+        });
     }
 
     fn download_grammars(mut self: Pin<&mut Self>) {

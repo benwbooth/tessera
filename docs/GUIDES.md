@@ -36,6 +36,16 @@ grammar crashes on any string). The verdicts are kept in
 tree-sitter can't read is left out and the rest kept (Helix's Solidity
 rules had one).
 
+Preferences › General › Language guides › **Download All** fetches every
+guide now, for reading offline (about 100 MB; the ones already kept are
+skipped). A guide kept over a month, or taken from the archive over a day
+ago, is shown at once and fetched again in the background for next time.
+Files no guide uses any more are removed.
+
+**All Guides** beside the find box (or Ctrl+Enter in it) looks for the
+words in every kept guide: the hits under each guide's title, with the
+heading they're under; one opens that guide at the words.
+
 Why fetched and not bundled: together the documents are tens of megabytes,
 and their licenses differ (GNU FDL, CC BY-SA, and some that allow reading
 but not redistribution). Fetched on the reader's own machine, nothing is

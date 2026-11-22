@@ -265,6 +265,7 @@ ApplicationWindow {
                     guideId: tabItem.page.startsWith("guide:") ? (tabItem.page.slice(6).split("/")[1] || "") : ""
                     fallbackTitle: win.guides[lang] || (lang + " guide")
                     onChose: (id, title) => { tabItem.page = "guide:" + lang + "/" + id; tabItem.customTitle = title }
+                    onOpenOther: (target, query) => win.openGuide(target, query)
                     ansi: win.themeFor(tabItem.prof).ansi || []
                     fontFamily: tabItem.prof.font_family || "monospace"
                 }
@@ -1890,6 +1891,8 @@ ApplicationWindow {
             if (!t || !t.pageItem) return
             if (controller.testEnv("GUIDE_WHEEL") !== "") t.pageItem.testWheel()
             // (TESSERA_TEST_GUIDE_SWITCH=GUIDE: its chip clicked, as a person would.)
+            // (TESSERA_TEST_GUIDE_SEARCH=1: TESSERA_TEST_GUIDE's words looked for in every guide.)
+            else if (controller.testEnv("GUIDE_SEARCH") !== "") { t.pageItem.find(controller.testEnv("GUIDE")); t.pageItem.searchAll() }
             else if (controller.testEnv("GUIDE_SWITCH") !== "") t.pageItem.chose(controller.testEnv("GUIDE_SWITCH"), controller.testEnv("GUIDE_SWITCH"))
             else t.pageItem.find(controller.testEnv("GUIDE"))
         }

@@ -796,6 +796,17 @@ Window {
                                 Item { Layout.fillWidth: true }
                             }
                             Row2 {
+                                label: "Language guides"
+                                hint: prefs.controller.helpStatus.indexOf("guides") >= 0 ? prefs.controller.helpStatus
+                                      : "The Guide chip opens each language's own documentation, fetched from its site the first time and kept (refreshed after a month). Download All fetches them all now, for reading offline (about 100 MB)."
+                                PlainButton {
+                                    text: "Download All"
+                                    enabled2: !prefs.controller.helpStatus.startsWith("Downloading")
+                                    onClicked: prefs.controller.downloadGuides()
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Row2 {
                                 label: "Command help"
                                 hint: prefs.controller.helpStatus !== "" ? prefs.controller.helpStatus
                                       : "Completions show help from man and info pages, tldr-pages (examples, fetched once) and fish-shell's completions (subcommands and options for thousands of commands)."

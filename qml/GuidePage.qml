@@ -19,6 +19,17 @@ Rectangle {
     readonly property string key: guideId !== "" ? guideId : lang
     readonly property var choices: backend && lang !== "tessh" ? JSON.parse(backend.guideChoices(lang) || "[]") : []
     signal chose(string id, string title)
+    // (A hit in another guide, from All Guides: that guide, at the words.)
+    signal openOther(string target, string query)
+    property bool showingSearch: false
+    function searchAll() {
+        const q = findField.text.trim()
+        if (q === "" || !backend) return
+        showingSearch = true
+        Async.call(backend, k => backend.guidesSearch(k, q), html => {
+            web.loadHtml(shell("<nav><div class='title'>Search</div><a class='part' href='tessera-guide:back'>\u2190 Back to " + page.title.replace(/</g, "&lt;") + "</a></nav>" + html), "about:blank")
+        })
+    }
     property string fallbackTitle: lang === "tessh" ? "tessh guide" : lang + " guide"
     readonly property string title: {
         const c = choices.find(x => x[0] === key) || (guideId === "" && choices.length ? choices[0] : null)
@@ -60,6 +71,7 @@ Rectangle {
             + ".t-variable{color:" + col(1, "#e06c75") + "}.t-punctuation{color:" + c(Theme.textDim) + "}"
             + ".t-embedded{color:" + col(13, "#c678dd") + ";font-weight:bold}.t-escape{color:" + col(6, "#56b6c2") + "}"
             + ".t-type,.t-constructor,.t-tag,.t-label,.t-namespace,.t-module{color:" + col(3, "#e5c07b") + "}"
+            + "main li{margin:.5em 0}.hit{color:" + c(Theme.textDim) + ";font-size:13px}.note{color:" + c(Theme.textDim) + "}"
             + "img{max-width:100%}blockquote{margin:.6em 0;padding:.2em 1em;border-left:3px solid " + c(Theme.divider) + ";color:" + c(Theme.textDim) + "}"
             + "main>blockquote:first-child{border-left-color:" + c(Theme.accent) + ";font-size:12.5px}"
             + ".msg{margin:40px auto;max-width:520px;color:" + c(Theme.textDim) + ";font-size:15px;text-align:center}"
@@ -85,7 +97,7 @@ Rectangle {
         return "<style id='tessera-theme'>" + page.css() + "</style>"
             // (Links in the guide go to their heading; others open in the browser.)
             + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(!a)return;const h=a.getAttribute('href');e.preventDefault();"
-            + "if(h.startsWith('#')){const t=document.getElementById(decodeURIComponent(h.slice(1)));if(t)t.scrollIntoView({block:'start'})}else if(/^(https?|mailto):/.test(h))window.open(h)})</script>"
+            + "if(h.startsWith('#')){const t=document.getElementById(decodeURIComponent(h.slice(1)));if(t)t.scrollIntoView({block:'start'})}else if(/^(https?|mailto|tessera-guide):/.test(h))window.open(h)})</script>"
             + "<script>" + momentum + "</script>"
     }
     // Momentum scrolling in the page, as MomentumWheel does it in QML: a
@@ -186,6 +198,12 @@ Rectangle {
                     tip: "Fetch the guide again from its site (it's kept, so it isn't fetched every time)"
                     onClicked: page.load(true)
                 }
+                Chip {
+                    base: Theme.panel
+                    label: "All Guides"
+                    tip: "Look for the words in every kept guide, not just this one (Ctrl+Enter in the find box)"
+                    onClicked: page.searchAll()
+                }
                 TextField {
                     id: findField
                     Layout.preferredWidth: 240
@@ -194,7 +212,10 @@ Rectangle {
                     font.pixelSize: 12
                     background: Rectangle { radius: 6; color: Theme.field; border.color: findField.activeFocus ? Theme.accent : Theme.divider }
                     onTextChanged: web.findText(text)
-                    Keys.onReturnPressed: (e) => web.findText(text, (e.modifiers & Qt.ShiftModifier) ? WebEngineView.FindBackward : 0)
+                    Keys.onReturnPressed: (e) => {
+                        if (e.modifiers & Qt.ControlModifier) page.searchAll()
+                        else web.findText(text, (e.modifiers & Qt.ShiftModifier) ? WebEngineView.FindBackward : 0)
+                    }
                     Keys.onEscapePressed: { text = ""; web.forceActiveFocus() }
                 }
             }
@@ -209,7 +230,20 @@ Rectangle {
             settings.localContentCanAccessFileUrls: false
             // (The page is a file; its pictures are on the web.)
             settings.localContentCanAccessRemoteUrls: true
-            onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+            onNewWindowRequested: (req) => {
+                const u = req.requestedUrl.toString()
+                if (u === "tessera-guide:back") { page.showingSearch = false; page.asked = false; page.load() }
+                else if (u.startsWith("tessera-guide:")) {
+                    const rest = u.slice(14), i = rest.indexOf("?q=")
+                    const target = i < 0 ? rest : rest.slice(0, i), q = i < 0 ? "" : decodeURIComponent(rest.slice(i + 3))
+                    // (This guide: back to it, at the words; another: its tab.)
+                    const [l, id] = target.split("/")
+                    const shown = page.guideId !== "" ? page.guideId : (page.choices.length ? page.choices[0][0] : page.lang)
+                    if (l === page.lang && (id || shown) === shown) {
+                        page.showingSearch = false; page.asked = false; page.load(); page.find(q)
+                    } else page.openOther(target, q)
+                } else Qt.openUrlExternally(req.requestedUrl)
+            }
             // (The page's own test lines, to the log.)
             onJavaScriptConsoleMessage: (level, message) => { if (message.startsWith("tessera-")) console.log(message) }
             // (Nothing navigates the page away: links open in the browser.)

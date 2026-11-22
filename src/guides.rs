@@ -1033,7 +1033,7 @@ const RENDER_VERSION: &str = "<!-- tessera-guide-render 4 -->";
 /// fetched and converted again.
 const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 5 -->";
 
-fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
+fn page_html_of(g: &'static Guide, refresh: bool) -> Result<String, String> {
     let path = cache_path(g);
     let body_path = path.with_extension("body.html");
     if !refresh {
@@ -1050,6 +1050,17 @@ fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
         }
     }
     let kept = std::fs::read_to_string(&path).ok();
+    tidy_once();
+    // (Kept a long while, or taken from the archive while the site was
+    // down: shown now, and fetched again in the background for next time.)
+    if !refresh {
+        if let (Some(md), Ok(age)) = (&kept, std::fs::metadata(&path).and_then(|m| m.modified()).map(|t| t.elapsed().unwrap_or_default())) {
+            let stale = age > std::time::Duration::from_secs(30 * 86400) || (md.contains("Internet Archive's copy") && age > std::time::Duration::from_secs(86400));
+            if stale && md.starts_with(CONVERT_VERSION) {
+                refresh_in_background(g);
+            }
+        }
+    }
     let md = match kept {
         Some(md) if !refresh && md.starts_with(CONVERT_VERSION) => md,
         _ => {
@@ -1096,6 +1107,156 @@ fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
         let _ = std::fs::rename(&tmp, &body_path);
     }
     Ok(body)
+}
+
+/// A guide fetched again without anyone waiting (one at a time per guide);
+/// kept only when it came through whole.
+fn refresh_in_background(g: &'static Guide) {
+    static BUSY: std::sync::Mutex<Vec<&str>> = std::sync::Mutex::new(Vec::new());
+    {
+        let mut b = BUSY.lock().unwrap();
+        if b.contains(&g.key()) {
+            return;
+        }
+        b.push(g.key());
+    }
+    std::thread::spawn(move || {
+        if let Ok(md) = fetch_markdown(g) {
+            if !md.contains("couldn't be fetched") {
+                let path = cache_path(g);
+                let tmp = path.with_extension("md.part");
+                if std::fs::write(&tmp, format!("{CONVERT_VERSION}\n{md}")).is_ok() {
+                    let _ = std::fs::rename(&tmp, &path);
+                }
+            }
+        }
+        BUSY.lock().unwrap().retain(|k| *k != g.key());
+    });
+}
+
+/// Kept files no guide uses any more (a guide renamed or split, as C++'s
+/// was), removed: once a run.
+fn tidy_once() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let mut names: std::collections::HashSet<&str> = GUIDES.iter().map(|g| g.key()).collect();
+        names.extend(GUIDES.iter().flat_map(|g| g.langs.iter().copied()));
+        names.insert("tessh");
+        let Ok(rd) = std::fs::read_dir(cache_dir()) else { return };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let stem = name.split('.').next().unwrap_or("");
+            let ours = [".md", ".body.html", ".page.html", ".md.part", ".body.part"].iter().any(|x| name.ends_with(x));
+            if ours && !names.contains(stem) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+        // (A guide kept under a language's name that now has its own: C++'s
+        // cppreference was cpp.md before LearnCpp came.)
+        for g in GUIDES.iter().filter(|g| !g.id.is_empty()) {
+            for l in g.langs {
+                for x in [".md", ".body.html"] {
+                    let _ = std::fs::remove_file(cache_dir().join(format!("{l}{x}")));
+                }
+            }
+        }
+    });
+}
+
+/// Every guide fetched and drawn now, for reading offline: those already
+/// kept (at this conversion) skipped. `progress(done, total, failed)`.
+/// Returns (fetched, failed names).
+pub fn download_all(progress: impl Fn(usize, usize, usize) + Sync) -> (usize, Vec<String>) {
+    let todo: Vec<&'static Guide> = GUIDES
+        .iter()
+        .filter(|g| !std::fs::read_to_string(cache_path(g)).map(|t| t.starts_with(CONVERT_VERSION)).unwrap_or(false))
+        .collect();
+    let total = todo.len();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let failed: std::sync::Mutex<Vec<String>> = Default::default();
+    progress(0, total, 0);
+    std::thread::scope(|sc| {
+        for _ in 0..4 {
+            sc.spawn(|| loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let Some(g) = todo.get(i) else { break };
+                if std::panic::catch_unwind(|| page_html(g.key(), false)).map(|r| r.is_err()).unwrap_or(true) {
+                    failed.lock().unwrap().push(g.title.to_string());
+                }
+                let d = done.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                progress(d, total, failed.lock().unwrap().len());
+            });
+        }
+    });
+    let failed = failed.into_inner().unwrap();
+    (total - failed.len(), failed)
+}
+
+/// Every kept guide searched for `query` (any case): an HTML page of the
+/// hits, a guide's under its title, each with the heading it's under and
+/// the line, linked as `tessera-guide:LANG[/GUIDE]?q=QUERY`. Guides not
+/// fetched yet aren't searched (said at the end).
+pub fn search_html(query: &str) -> String {
+    let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return "<div class='msg'>Type what to look for, then All Guides.</div>".into();
+    }
+    let enc = |t: &str| t.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    let mut out = format!("<main><h1>\u{201c}{}\u{201d} in every guide</h1>", esc(query.trim()));
+    let (mut total, mut missing) = (0, 0);
+    let mut seen = std::collections::HashSet::new();
+    for g in GUIDES {
+        if !seen.insert(g.key()) {
+            continue;
+        }
+        let Ok(md) = std::fs::read_to_string(cache_path(g)) else {
+            missing += 1;
+            continue;
+        };
+        let target = if g.id.is_empty() { g.langs[0].to_string() } else { format!("{}/{}", g.langs[0], g.id) };
+        let mut heading = String::new();
+        let mut fenced = false;
+        let mut hits = vec![];
+        for line in md.lines() {
+            let t = line.trim_start();
+            if t.starts_with("```") {
+                fenced = !fenced;
+                continue;
+            }
+            if !fenced && t.starts_with('#') {
+                heading = regex::Regex::new(r"<[^>]*>").unwrap().replace_all(t.trim_start_matches('#'), "").trim().to_string();
+            }
+            if line.to_lowercase().contains(&q) && hits.len() < 6 {
+                let plain = regex::Regex::new(r"<[^>]*>|\]\([^)]*\)|[*`\[]").unwrap().replace_all(line, "").trim().trim_start_matches(['#', '>', ' ']).to_string();
+                let shown: String = plain.chars().take(220).collect();
+                hits.push((heading.clone(), shown));
+            }
+        }
+        if hits.is_empty() {
+            continue;
+        }
+        total += hits.len();
+        out.push_str(&format!("<h2>{}</h2><ul>", esc(g.title)));
+        for (h, line) in hits {
+            out.push_str(&format!(
+                "<li><a href=\"tessera-guide:{target}?q={}\">{}</a><br><span class='hit'>{}</span></li>",
+                enc(query.trim()),
+                if h.is_empty() { esc(g.title) } else { esc(&h) },
+                esc(&line)
+            ));
+        }
+        out.push_str("</ul>");
+    }
+    if total == 0 {
+        out.push_str("<p>Not found in any kept guide.</p>");
+    }
+    if missing > 0 {
+        out.push_str(&format!("<p class='note'>{missing} guides aren't kept yet and weren't searched: Preferences \u{203a} General \u{203a} Language guides \u{203a} Download All fetches them.</p>"));
+    }
+    out.push_str("</main>");
+    out
 }
 
 /// A guide's page written out whole (`head`: its style and script), for
@@ -1974,6 +2135,27 @@ mod tests {
             }
         }
         eprintln!("failed: {bad:?}");
+    }
+}
+
+#[cfg(test)]
+mod download {
+    /// download_all into $XDG_STATE_HOME, and the tidying of stale files
+    /// (`cargo test guides::download -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn all() {
+        let dir = super::cache_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cpp.md"), "old").unwrap();
+        std::fs::write(dir.join("gone-language.md"), "old").unwrap();
+        let t = std::time::Instant::now();
+        let (got, failed) = super::download_all(|d, n, bad| if d % 20 == 0 || d == n { eprintln!("{d} of {n} ({bad} failed)") });
+        eprintln!("fetched {got}, failed {failed:?}, in {:.0}s", t.elapsed().as_secs_f32());
+        assert!(!dir.join("cpp.md").exists() && !dir.join("gone-language.md").exists(), "stale files tidied");
+        let (again, _) = super::download_all(|_, _, _| {});
+        eprintln!("second run fetched {again}");
+        assert_eq!(again, 0, "nothing fetched twice");
     }
 }
 
