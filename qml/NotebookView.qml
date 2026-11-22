@@ -1631,10 +1631,21 @@ FocusScope {
     onLiveWantedChanged: {
         const was = liveIndex >= 0 && liveIndex < cells.count ? cells.get(liveIndex).cid : ""
         findLive()
-        if (liveWanted) Qt.callLater(followLive)
+        if (liveWanted) { autoExpanded = ""; Qt.callLater(followLive); autoExpand() }
         else if (was !== "" && expandedId === was) toggleExpand(indexOf(was))
     }
-    Timer { interval: 150; repeat: true; running: nb.liveWanted; onTriggered: { nb.findLive(); nb.placeLive() } }
+    // (A full-screen program (vim, htop, ...) fills the notebook as it starts,
+    // once per run; Restore puts it back in its card, and it goes back there
+    // itself when the program ends.)
+    property string autoExpanded: ""
+    function autoExpand() {
+        if (!liveWanted || liveIndex < 0 || liveIndex >= cells.count) return
+        const cid = cells.get(liveIndex).cid
+        if (autoExpanded === cid) return
+        autoExpanded = cid
+        if (expandedId !== cid) toggleExpand(liveIndex)
+    }
+    Timer { interval: 150; repeat: true; running: nb.liveWanted; onTriggered: { nb.findLive(); nb.autoExpand(); nb.placeLive() } }
     function placeLive() {
         if (!liveBox || !liveBox.visible) { liveHost.visible = false; return }
         const p = liveBox.mapToItem(liveClip, 0, 0)

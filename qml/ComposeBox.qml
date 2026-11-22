@@ -181,6 +181,8 @@ Rectangle {
     // running) or "bg" (in the background at once, alongside it: as a
     // shell's &, for any language). Ctrl+Enter or a tap of right Ctrl.
     property string submitMode: ""
+    // A command's running with the keys (the editor's shown, waiting).
+    property bool waiting: false
     // Commands waiting for the one running to finish (the pane's), and a
     // signal to drop them.
     property int queued: 0
@@ -1280,7 +1282,8 @@ Rectangle {
         visible: edit.text === "" && !(box.keys === "vi" && box.viNormal)
         width: flick.width
         elide: Text.ElideRight
-        text: box.aiNL && box.chatReady ? "Type a command, or # and a request for the AI — hover for keys"
+        text: box.waiting ? "Running \u2014 click or tap left Ctrl to queue the next command"
+            : box.aiNL && box.chatReady ? "Type a command, or # and a request for the AI — hover for keys"
                                          : "Type a command — hover for keys"
         HoverHandler { id: hintHover }
         ToolTip.visible: hintHover.hovered

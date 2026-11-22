@@ -134,6 +134,10 @@ Item {
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
     readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (promptHeld || editorCalled)
+    // (Shown while a command runs too, the keys the program's: the pane
+    // doesn't come and go, and a click or a tap of left Ctrl there types
+    // the next command, queued. Only a full-screen program takes it away.)
+    readonly property bool editorShown: inputEditor && !term.exited && !term.fullScreen
     // (At the prompt, or was a moment ago: a quick command (ls) leaves the
     // editor up rather than taking it away and back, which resizes
     // everything above it twice. One that's still going after 250 ms hides
@@ -282,7 +286,7 @@ Item {
         anchors.right: parent.right
         // (Whether the editor should show, not whether it's on screen: a tab in
         // the background has it hidden, and the terminal mustn't resize then.)
-        anchors.bottom: pane.editorOn ? compose.top : parent.bottom
+        anchors.bottom: pane.editorShown ? compose.top : parent.bottom
     }
     TerminalView {
         id: term
@@ -316,7 +320,9 @@ Item {
         // (Over the notebook and the views on the terminal: its dropdowns,
         // history and completions, open upward over them.)
         z: 22
-        visible: pane.editorOn
+        visible: pane.editorShown
+        // (A command running with the keys: the editor waits, dimmed.)
+        waiting: !pane.editorOn
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -421,7 +427,7 @@ Item {
         // (The jobs list is the notebook's: in a terminal tab it shows over
         // the terminal while it's open, and the tab stays a terminal.)
         onJobsToggled: notebook.setJobsView(!notebook.jobsView)
-        onEditingChanged: if (editing) pane.preferEditor = true
+        onEditingChanged: if (editing) { pane.preferEditor = true; if (!pane.editorOn) pane.editorCalled = true }
     }
 
     // Badge: large text behind the content, top right (iTerm2's badges).
