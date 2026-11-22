@@ -358,8 +358,10 @@ FocusScope {
     // pane pushed other cards out of the buffer, which were then made
     // again small, and so on without end.)
     property var seenH: ({})
-    // The tessh guide, in a tab of its own (Main's openGuide).
-    function openGuide() { Window.window.openGuide() }
+    // The guide for the cells' language, in a tab of its own (Main's openGuide).
+    readonly property string guideLang: Window.window && Window.window.guideFor
+        ? ((kernelName === "tessh" || kernelName.endsWith("-tessh")) ? "tessh" : Window.window.guideFor(String(runsIn).toLowerCase(), "")) : ""
+    function openGuide() { if (guideLang !== "") Window.window.openGuide(guideLang) }
     // ---- a card's command, colored as the editor colors it -------------------
     readonly property var synColors: ({
         keyword: nb.ansi(5, "#c678dd"), string: nb.ansi(2, "#98c379"), comment: Theme.textDim,
@@ -2269,7 +2271,7 @@ FocusScope {
 
     // (Test hook: TESSERA_TEST_OPEN_GUIDE opens the guide's tab at 8 s.)
     Timer { interval: 8000; running: nb.controller !== null && nb.path === "" && nb.controller.testEnv("OPEN_GUIDE") !== ""; onTriggered: nb.openGuide() }
-    Shortcut { sequence: "F1"; enabled: nb.visible && (nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")); context: Qt.WindowShortcut; onActivated: nb.openGuide() }
+    Shortcut { sequence: "F1"; enabled: nb.visible && nb.guideLang !== ""; context: Qt.WindowShortcut; onActivated: nb.openGuide() }
 
 
     // (Test hooks: TESSERA_TEST_NB_RUN_ALL runs every cell once it's open,
@@ -2511,9 +2513,10 @@ FocusScope {
                 ToolTip.text: (clipped ? displayText + "\n" : "") + "What runs the code cells: this pane's shell, or a Jupyter kernel (Ctrl+Alt+P)"
             }
             Tool {
-                visible: nb.kernelName === "tessh" || nb.kernelName.endsWith("-tessh")
+                visible: nb.guideLang !== ""
                 label: nb.narrow ? "?" : "Guide"
-                tip: "The tessh guide, in a tab: every feature, with examples (F1)"
+                tip: nb.guideLang === "tessh" ? "The tessh guide, in a tab: every feature, with examples (F1)"
+                    : "The " + (Window.window.guides[nb.guideLang] || nb.guideLang) + ", in a tab: the language's own documentation (F1)"
                 onClicked: nb.openGuide()
             }
             // (Saving, one menu: the notebook as a .ipynb, or as Jupytext.)

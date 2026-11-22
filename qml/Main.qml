@@ -215,7 +215,8 @@ ApplicationWindow {
             property bool activity: false
             property bool bell: false
             property var lastView: null
-            // A page instead of panes ("tessh-guide": the tessh guide).
+            // A page instead of panes ("guide:LANG": a language's guide;
+            // "tessh-guide", the tessh guide, from before).
             property string page: ""
             readonly property var pageItem: pageLoader.item
             // The pane the title follows: the last focused, else the first.
@@ -256,9 +257,11 @@ ApplicationWindow {
             Loader {
                 id: pageLoader
                 anchors.fill: parent
-                active: tabItem.page === "tessh-guide"
+                active: tabItem.page === "tessh-guide" || tabItem.page.startsWith("guide:")
                 sourceComponent: GuidePage {
                     backend: controller
+                    lang: tabItem.page.startsWith("guide:") ? tabItem.page.slice(6) : "tessh"
+                    title: win.guides[lang] || (lang + " guide")
                     ansi: win.themeFor(tabItem.prof).ansi || []
                     fontFamily: tabItem.prof.font_family || "monospace"
                 }
@@ -266,10 +269,21 @@ ApplicationWindow {
         }
     }
 
-    // The tessh guide, a tab of its own (the one there is, if it's open).
-    function openGuide() {
-        for (let i = 0; i < tabs.length; ++i) if (tabs[i].page === "tessh-guide") { currentTab = i; return }
-        const t = tabComp.createObject(stack, { profile: profileFor(settings.default_profile).name, page: "tessh-guide", customTitle: "tessh guide" })
+    // The languages with a guide ({lang: title}): tessh's, built in, and
+    // the others' own documentation, fetched the first time (guides.rs).
+    readonly property var guides: JSON.parse(controller.guideList() || "{}")
+    // The guide for an editor language ("" for none); the shell's own for
+    // shell commands (zsh, fish...), when it has one.
+    function guideFor(lang, shell) {
+        if (lang === "bash" && shell && guides[shell]) return shell
+        return guides[lang] ? lang : ""
+    }
+    // A language's guide, a tab of its own (the one there is, if it's open).
+    function openGuide(lang) {
+        lang = lang || "tessh"
+        const page = "guide:" + lang
+        for (let i = 0; i < tabs.length; ++i) if (tabs[i].page === page || (lang === "tessh" && tabs[i].page === "tessh-guide")) { currentTab = i; return }
+        const t = tabComp.createObject(stack, { profile: profileFor(settings.default_profile).name, page: page, customTitle: guides[lang] || (lang + " guide") })
         tabs.splice(tabs.length, 0, t)
         tabs = tabs.slice()
         currentTab = tabs.length - 1
@@ -1952,13 +1966,14 @@ ApplicationWindow {
             onAccept: win.restartDaemon
         })
     }
-    // (Test hook: TESSERA_TEST_GUIDE="text" opens the tessh guide at 3 s and finds the text in it.)
+    // (Test hook: TESSERA_TEST_GUIDE="text" opens the tessh guide (or
+    // TESSERA_TEST_GUIDE_LANG's) at 3 s and finds the text in it.)
     Timer {
         interval: 3000; running: controller.testEnv("GUIDE") !== ""
-        onTriggered: { win.openGuide(); guideFind.start() }
+        onTriggered: { win.openGuide(controller.testEnv("GUIDE_LANG")); guideFind.start() }
     }
     Timer {
-        id: guideFind; interval: 2500
+        id: guideFind; interval: controller.testEnv("GUIDE_LANG") !== "" ? 20000 : 2500
         onTriggered: { const t = win.tabs[win.currentTab]; if (t && t.pageItem) t.pageItem.find(controller.testEnv("GUIDE")) }
     }
     // (Test hook: TESSERA_TEST_RESTART_DAEMON restarts tesserad at 6 s.)

@@ -4,14 +4,17 @@ import QtQuick.Layouts
 import QtWebEngine
 import Tessera
 
-// The tessh guide (tessh/doc/guide.md, built in) as a page, a tab of its
-// own: contents on the left, find above, examples highlighted with their
-// output under them.
+// A language's guide as a page, a tab of its own: contents on the left,
+// find above, code highlighted. tessh's is built in (tessh/doc/guide.md);
+// the others are the languages' own documentation, fetched the first time
+// and kept (guides.rs).
 Rectangle {
     id: page
     property var backend: null    // the Controller
     property var ansi: []
     property string fontFamily: "monospace"
+    property string lang: "tessh"
+    property string title: lang === "tessh" ? "tessh guide" : lang + " guide"
     color: Theme.bg
     function find(text) { findField.text = text; findField.forceActiveFocus() }
     function focusFind() { findField.forceActiveFocus() }
@@ -41,21 +44,46 @@ Rectangle {
             + ".t-comment{color:" + col(8, "#5c6370") + ";font-style:italic}.t-operator,.t-property{color:" + col(6, "#56b6c2") + "}"
             + ".t-variable{color:" + col(1, "#e06c75") + "}.t-punctuation{color:" + c(Theme.textDim) + "}"
             + ".t-embedded{color:" + col(13, "#c678dd") + ";font-weight:bold}.t-escape{color:" + col(6, "#56b6c2") + "}"
-            + "h1:target,h2:target{color:" + c(Theme.accent) + "}"
+            + ".t-type,.t-constructor,.t-tag,.t-label,.t-namespace,.t-module{color:" + col(3, "#e5c07b") + "}"
+            + "img{max-width:100%}blockquote{margin:.6em 0;padding:.2em 1em;border-left:3px solid " + c(Theme.divider) + ";color:" + c(Theme.textDim) + "}"
+            + "main>blockquote:first-child{border-left-color:" + c(Theme.accent) + ";font-size:12.5px}"
+            + ".msg{margin:40px auto;max-width:520px;color:" + c(Theme.textDim) + ";font-size:15px;text-align:center}"
+            + "h1:target,h2:target,h3:target{color:" + c(Theme.accent) + "}"
     }
-    // (The page is made in the background, then shown.)
+    // (The page is made in the background, then shown; a guide that isn't
+    // kept yet is fetched first, which takes a few seconds.)
     property bool asked: false
-    function load() {
-        if (asked || !backend) return
+    property bool busy: false
+    property string error: ""
+    function head() {
+        return "<style>" + page.css() + "</style>"
+            // (Links in the guide go to their heading; others open in the browser.)
+            + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(!a)return;const h=a.getAttribute('href');e.preventDefault();"
+            + "if(h.startsWith('#')){const t=document.getElementById(decodeURIComponent(h.slice(1)));if(t)t.scrollIntoView({block:'start'})}else if(/^(https?|mailto):/.test(h))window.open(h)})</script>"
+    }
+    function shell(body) { return "<!doctype html><html><head><meta charset='utf-8'>" + head() + "</head><body>" + body + "</body></html>" }
+    function load(refresh) {
+        if (!backend || busy || (asked && !refresh)) return
         asked = true
-        Async.call(backend, k => backend.tesshManualHtml(k), html => {
-            web.loadHtml("<!doctype html><html><head><meta charset='utf-8'><style>" + page.css() + "</style>"
-                + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href^=\"#\"]');if(!a)return;e.preventDefault();const t=document.getElementById(a.getAttribute('href').slice(1));if(t)t.scrollIntoView({block:'start'})})</script>"
-                + "</head><body>" + html + "</body></html>", "about:blank")
+        busy = true
+        error = ""
+        if (lang !== "tessh")
+            web.loadHtml(shell("<div class='msg'>Fetching <b>" + page.title
+                + "</b> from its official site and converting it to Markdown…<br><br>It's kept for next time (and offline).</div>"), "about:blank")
+        // (Written to a file and loaded from it: loadHtml shows at most 2 MB.)
+        Async.call(backend, k => backend.guidePage(k, lang, !!refresh, head()), url => {
+            busy = false
+            if (url.startsWith("error: ")) {
+                error = url.slice(7)
+                web.loadHtml(shell("<div class='msg'>The " + page.title + " couldn't be fetched:<br><br><code>"
+                    + error.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</code><br><br>Check the connection, then Retry.</div>"), "about:blank")
+                return
+            }
+            web.url = url + "?v=" + Date.now()
         })
     }
-    onBackendChanged: load()
-    Component.onCompleted: load()
+    onBackendChanged: Qt.callLater(load)
+    Component.onCompleted: Qt.callLater(load)
 
     ColumnLayout {
         anchors.fill: parent
@@ -69,9 +97,20 @@ Rectangle {
                 anchors.leftMargin: 14
                 anchors.rightMargin: 8
                 spacing: 10
-                Text { topPadding: 0.001; text: "tessh guide"; color: Theme.fg; font.pixelSize: 14; font.bold: true; renderType: Text.NativeRendering }
-                Text { topPadding: 0.001; text: "help TOPIC in tessh shows one part"; color: Theme.textDim; font.pixelSize: 12; renderType: Text.NativeRendering; visible: page.width >= 700 }
+                Text { topPadding: 0.001; text: page.title; color: Theme.fg; font.pixelSize: 14; font.bold: true; renderType: Text.NativeRendering; elide: Text.ElideRight; Layout.maximumWidth: page.width * 0.4 }
+                Text {
+                    topPadding: 0.001
+                    text: page.lang === "tessh" ? "help TOPIC in tessh shows one part" : page.busy ? "Fetching…" : "From the language's own documentation; source and license at the top"
+                    color: Theme.textDim; font.pixelSize: 12; renderType: Text.NativeRendering; visible: page.width >= 900
+                }
                 Item { Layout.fillWidth: true }
+                Chip {
+                    visible: page.lang !== "tessh"
+                    base: Theme.panel
+                    label: page.error !== "" ? "Retry" : "↻ Refresh"
+                    tip: "Fetch the guide again from its site (it's kept, so it isn't fetched every time)"
+                    onClicked: page.load(true)
+                }
                 TextField {
                     id: findField
                     Layout.preferredWidth: 240
@@ -93,7 +132,11 @@ Rectangle {
             backgroundColor: Theme.bg
             settings.pluginsEnabled: false
             settings.localContentCanAccessFileUrls: false
+            // (The page is a file; its pictures are on the web.)
+            settings.localContentCanAccessRemoteUrls: true
             onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+            // (Nothing navigates the page away: links open in the browser.)
+            onNavigationRequested: (req) => { if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation) { req.reject(); Qt.openUrlExternally(req.url) } }
             onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus && findField.text !== "") findText(findField.text) }
         }
     }

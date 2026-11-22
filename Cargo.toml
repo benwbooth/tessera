@@ -59,6 +59,9 @@ tree-sitter-yaml = "0.7.2"
 ureq = { version = "3", features = ["json"] }
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 csv = "1.4.0"
+scraper = "0.29"
+ego-tree = "0.11"
+htmd = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

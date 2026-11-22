@@ -543,84 +543,9 @@ pub fn markdown_html(md: &str) -> String {
 /// (`<nav>`) and the guide (`<main>`), headings with ids, tessh examples
 /// highlighted (`pre.tessh`) and their output (`pre.output`).
 pub fn tessh_manual_html() -> String {
-    use pulldown_cmark::{html, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
     const GUIDE: &str = include_str!("../tessh/doc/guide.md");
     let md: String = GUIDE.lines().filter(|l| !l.starts_with("<!-- help:")).collect::<Vec<_>>().join("\n");
-    let slug = |t: &str| t.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect::<String>();
-    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
-    // (Heading texts first, for ids and the contents.)
-    let mut heads: Vec<(HeadingLevel, String)> = vec![];
-    let mut cur: Option<(HeadingLevel, String)> = None;
-    for ev in Parser::new_ext(&md, opts) {
-        match ev {
-            Event::Start(Tag::Heading { level, .. }) => cur = Some((level, String::new())),
-            Event::Text(t) | Event::Code(t) => {
-                if let Some((_, s)) = &mut cur {
-                    s.push_str(&t);
-                }
-            }
-            Event::End(TagEnd::Heading(_)) => heads.extend(cur.take()),
-            _ => {}
-        }
-    }
-    let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    let mut nav = String::from("<nav><div class='title'>Contents</div>");
-    let mut open = false;
-    for (k, (level, t)) in heads.iter().enumerate() {
-        let id = format!("{}-{k}", slug(t));
-        match level {
-            HeadingLevel::H1 if k == 0 => nav.push_str(&format!("<a class='part' href='#{id}'>Introduction</a>")),
-            HeadingLevel::H1 => {
-                if open {
-                    nav.push_str("</div>");
-                }
-                nav.push_str(&format!("<a class='part' href='#{id}'>{}</a><div class='topics'>", esc(t)));
-                open = true;
-            }
-            _ => nav.push_str(&format!("<a href='#{id}'>{}</a>", esc(t))),
-        }
-    }
-    if open {
-        nav.push_str("</div>");
-    }
-    nav.push_str("</nav>");
-    // The guide, with ids on headings and its code drawn.
-    let mut events: Vec<Event> = vec![];
-    let mut code: Option<(String, String)> = None; // (fence info, text)
-    let mut h = 0;
-    for ev in Parser::new_ext(&md, opts) {
-        match ev {
-            Event::Start(Tag::Heading { level, .. }) => {
-                let id = heads.get(h).map(|(_, t)| format!("{}-{h}", slug(t))).unwrap_or_default();
-                h += 1;
-                events.push(Event::Html(CowStr::from(format!("<{level} id='{id}'>"))));
-            }
-            Event::End(TagEnd::Heading(level)) => events.push(Event::Html(CowStr::from(format!("</{level}>")))),
-            Event::Start(Tag::CodeBlock(kind)) => {
-                let info = match kind {
-                    CodeBlockKind::Fenced(i) => i.to_string(),
-                    CodeBlockKind::Indented => String::new(),
-                };
-                code = Some((info, String::new()));
-            }
-            Event::Text(t) if code.is_some() => code.as_mut().unwrap().1.push_str(&t),
-            Event::End(TagEnd::CodeBlock) => {
-                let (info, text) = code.take().unwrap_or_default();
-                let text = text.trim_end_matches('\n');
-                let lang = info.split_whitespace().next().unwrap_or("");
-                let block = match lang {
-                    "tessh" => format!("<pre class='tessh'><code>{}</code></pre>", crate::syntax::highlight_html("tessh", text)),
-                    "output" => format!("<pre class='output'><code>{}</code></pre>", esc(text)),
-                    _ => format!("<pre><code>{}</code></pre>", esc(text)),
-                };
-                events.push(Event::Html(CowStr::from(block)));
-            }
-            ev => events.push(ev),
-        }
-    }
-    let mut body = String::new();
-    html::push_html(&mut body, events.into_iter());
-    format!("{nav}<main>{body}</main>")
+    crate::manual::manual_html(&md, "")
 }
 
 #[cfg(test)]
@@ -631,7 +556,7 @@ mod tests {
     fn tessh_manual() {
         let m = tessh_manual_html();
         assert!(m.starts_with("<nav>") && m.contains("<main>"), "{}", &m[..200]);
-        assert!(m.contains("href='#threading-") && m.contains("<h2 id='threading-"), "headings have ids");
+        assert!(m.contains("href='#threading'") && m.contains("<h2 id='threading'>"), "headings have ids");
         assert!(m.contains("<pre class='tessh'><code>") && m.contains("<span class=\"t-"), "examples are highlighted");
         assert!(m.contains("<pre class='output'>") && !m.contains("<!-- help:"));
     }

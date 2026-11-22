@@ -640,6 +640,14 @@ pub mod ffi {
         /// The tessh guide as a page, in the background: HTML, a <nav> and a <main>.
         #[qinvokable]
         fn tessh_manual_html(self: &Controller, reply: &QString);
+        /// A language's guide as a page, in the background (fetched and kept
+        /// the first time), written out with `head` (its style): the page's
+        /// file URL, or "error: ...". (A file: loadHtml shows at most 2 MB.)
+        #[qinvokable]
+        fn guide_page(self: &Controller, reply: &QString, lang: &QString, refresh: bool, head: &QString);
+        /// The languages with a guide: JSON {lang: title}.
+        #[qinvokable]
+        fn guide_list(self: &Controller) -> QString;
         #[qinvokable]
         fn ai_has_key(self: &Controller, provider: &QString) -> bool;
         /// A provider's models, in the background: ai_models_ready(provider, json list or "error: ...").
@@ -1411,6 +1419,15 @@ impl ffi::Controller {
 
     fn tessh_manual_html(&self, reply: &ffi::QString) {
         self.answer_on(reply, None, crate::cells::tessh_manual_html)
+    }
+
+    fn guide_page(&self, reply: &ffi::QString, lang: &ffi::QString, refresh: bool, head: &ffi::QString) {
+        let (lang, head) = (lang.to_string(), head.to_string());
+        self.answer_on(reply, None, move || crate::guides::page_file(&lang, refresh, &head).unwrap_or_else(|e| format!("error: {e}")))
+    }
+
+    fn guide_list(&self) -> ffi::QString {
+        qs(&crate::guides::list_json())
     }
 
     fn history_search(&self, reply: &ffi::QString, query: &ffi::QString, lang: &ffi::QString) {

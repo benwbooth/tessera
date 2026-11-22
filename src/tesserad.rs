@@ -34,6 +34,7 @@ mod jupyter;
 mod launchers;
 mod mux;
 mod lsp;
+mod manual;
 mod net;
 mod nixcmds;
 mod procinfo;
