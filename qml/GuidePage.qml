@@ -14,7 +14,16 @@ Rectangle {
     property var ansi: []
     property string fontFamily: "monospace"
     property string lang: "tessh"
-    property string title: lang === "tessh" ? "tessh guide" : lang + " guide"
+    // (A language with more than one guide: the one chosen, "" for its first.)
+    property string guideId: ""
+    readonly property string key: guideId !== "" ? guideId : lang
+    readonly property var choices: backend && lang !== "tessh" ? JSON.parse(backend.guideChoices(lang) || "[]") : []
+    signal chose(string id, string title)
+    property string fallbackTitle: lang === "tessh" ? "tessh guide" : lang + " guide"
+    readonly property string title: {
+        const c = choices.find(x => x[0] === key) || (guideId === "" && choices.length ? choices[0] : null)
+        return c ? c[1] : fallbackTitle
+    }
     color: Theme.bg
     function find(text) { findField.text = text; findField.forceActiveFocus() }
     function focusFind() { findField.forceActiveFocus() }
@@ -66,7 +75,7 @@ Rectangle {
     Timer {
         interval: 300; repeat: true; running: page.busy && page.lang !== "tessh"
         onTriggered: {
-            const p = page.backend ? page.backend.guideProgress(page.lang) : ""
+            const p = page.backend ? page.backend.guideProgress(page.key) : ""
             if (p === page.progress) return
             page.progress = p
             web.runJavaScript("(()=>{const e=document.getElementById('prog');if(e)e.textContent=" + JSON.stringify(p) + "})()")
@@ -105,18 +114,23 @@ Rectangle {
         + "const w=ev.wheelDeltaY||0;if(ev.deltaMode===0&&w!==0&&w%120===0)notches(e,s,w/120);else pixels(e,s,ev.deltaMode===1?ev.deltaY*40:ev.deltaY)},{passive:false});"
         + "addEventListener('keydown',()=>S.forEach(stop));addEventListener('mousedown',()=>S.forEach(s=>{stop(s)}))})();"
     function shell(body) { return "<!doctype html><html><head><meta charset='utf-8'>" + head() + "</head><body>" + body + "</body></html>" }
+    // (Another guide chosen while one is fetched: that one when it's done.)
+    property string loadingKey: ""
+    onKeyChanged: if (asked) { asked = false; error = ""; if (!busy) load() }
     function load(refresh) {
         if (!backend || busy || (asked && !refresh)) return
         asked = true
+        loadingKey = key
         busy = true
         error = ""
         if (lang !== "tessh")
             web.loadHtml(shell("<div class='msg'>Fetching <b>" + page.title
                 + "</b> from its official site and converting it to Markdown…<br><br><span id='prog'></span><br><br>It's kept for next time (and offline).</div>"), "about:blank")
         // (Written to a file and loaded from it: loadHtml shows at most 2 MB.)
-        Async.call(backend, k => backend.guidePage(k, lang, !!refresh, head()), url => {
+        Async.call(backend, k => backend.guidePage(k, page.key, !!refresh, head()), url => {
             busy = false
             progress = ""
+            if (loadingKey !== key) { asked = false; load(); return }
             if (url.startsWith("error: ")) {
                 error = url.slice(7)
                 web.loadHtml(shell("<div class='msg'>The " + page.title + " couldn't be fetched:<br><br><code>"
@@ -148,6 +162,19 @@ Rectangle {
                     color: Theme.textDim; font.pixelSize: 12; renderType: Text.NativeRendering; visible: page.width >= 900
                 }
                 Item { Layout.fillWidth: true }
+                // (More than one guide for the language: which one.)
+                Repeater {
+                    model: page.choices.length > 1 ? page.choices : []
+                    Chip {
+                        required property var modelData
+                        required property int index
+                        readonly property bool current: modelData[0] === page.key || (page.guideId === "" && index === 0)
+                        base: current ? Theme.mix(Theme.panel, Theme.accent, 0.35) : Theme.panel
+                        label: modelData[1]
+                        tip: current ? "The guide shown" : "Show " + modelData[1] + " instead (kept apart: each is fetched once)"
+                        onClicked: if (!current) page.chose(modelData[0], modelData[1])
+                    }
+                }
                 Chip {
                     visible: page.lang !== "tessh"
                     base: Theme.panel

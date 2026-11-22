@@ -31,20 +31,46 @@ pub struct Guide {
     /// Every part `select` matches, in order, not just the first (chapters
     /// of a one-page manual).
     pub all: bool,
+    /// Its own name, for a language with more than one guide (its kept
+    /// files' name; "" for the language's).
+    pub id: &'static str,
+    /// The index's chapter titles (CSS selector): each chapter a part, its
+    /// pages under it; and the chapter where the index stops being read.
+    pub chapters: &'static str,
+    pub until: &'static str,
+    /// Elements to write as others: (CSS selector, "h3" or "p>strong"...).
+    pub renames: &'static [(&'static str, &'static str)],
 }
 
 const fn g(langs: &'static [&'static str], title: &'static str, license: &'static str, license_url: &'static str, pages: &'static [&'static str], select: &'static str, code: &'static str) -> Guide {
-    Guide { langs, title, license, license_url, pages, index: None, select, drop: "", code, code_sel: "", all: false }
+    Guide { langs, title, license, license_url, pages, index: None, select, drop: "", code, code_sel: "", all: false, id: "", chapters: "", until: "", renames: &[] }
 }
 
 const fn gi(langs: &'static [&'static str], title: &'static str, license: &'static str, license_url: &'static str, index: (&'static str, &'static str), select: &'static str, code: &'static str) -> Guide {
-    Guide { langs, title, license, license_url, pages: &[], index: Some(index), select, drop: "", code, code_sel: "", all: false }
+    Guide { langs, title, license, license_url, pages: &[], index: Some(index), select, drop: "", code, code_sel: "", all: false, id: "", chapters: "", until: "", renames: &[] }
 }
 
 impl Guide {
     const fn pages(mut self, p: &'static [&'static str]) -> Self {
         self.pages = p;
         self
+    }
+    const fn renames(mut self, r: &'static [(&'static str, &'static str)]) -> Self {
+        self.renames = r;
+        self
+    }
+    const fn id(mut self, id: &'static str) -> Self {
+        self.id = id;
+        self
+    }
+    const fn chapters(mut self, titles: &'static str, until: &'static str) -> Self {
+        self.chapters = titles;
+        self.until = until;
+        self
+    }
+    /// The name its kept files and progress go by.
+    pub fn key(&self) -> &'static str {
+        if self.id.is_empty() { self.langs[0] } else { self.id }
     }
     const fn all(mut self) -> Self {
         self.all = true;
@@ -111,6 +137,11 @@ pub static GUIDES: &[Guide] = &[
     ], "article", "typescript"),
     g(&["c"], "GNU C Language Intro and Reference Manual", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html",
         &["https://www.gnu.org/software/c-intro-and-ref/manual/c-intro-and-ref.html"], "body", "c").drop(GNU_DROP),
+    gi(&["cpp", "c++", "cxx"], "LearnCpp.com", "© LearnCpp.com; read from the site, not redistributed", "https://www.learncpp.com/about/",
+        ("https://www.learncpp.com/", ".lessontable-row-title a"), "div.entry-content, article", "cpp")
+        .id("learncpp").chapters(".lessontable-header-title", "C++ Updates")
+        .renames(&[("p.cpp-section", "h2"), ("p.cpp-note-title", "p>strong"), ("div.cpp-note", "blockquote")])
+        .drop(".prevnext, .wpd-wrapper, #comments, .comments-area, .cpp-ad, .header-image, .sharedaddy, ins, .adsbygoogle"),
     g(&["cpp", "c++", "cxx"], "C++ language (cppreference.com)", "CC BY-SA 3.0", "https://en.cppreference.com/w/Cppreference:Copyright/CC-BY-SA", &[
         "https://en.cppreference.com/w/cpp/language/basic_concepts",
         "https://en.cppreference.com/w/cpp/language/types",
@@ -123,7 +154,7 @@ pub static GUIDES: &[Guide] = &[
         "https://en.cppreference.com/w/cpp/language/classes",
         "https://en.cppreference.com/w/cpp/language/templates",
         "https://en.cppreference.com/w/cpp/language/exceptions",
-    ], "#mw-content-text", "cpp").drop(".t-navbar, .editsection, #toc, .printfooter"),
+    ], "#mw-content-text", "cpp").drop(".t-navbar, .editsection, #toc, .printfooter").id("cppreference"),
     gi(&["java"], "Learn Java: Language Basics (dev.java)", "© Oracle; read from dev.java, not redistributed", "https://www.oracle.com/legal/copyright.html",
         ("https://dev.java/learn/language/constructs/basics/", "main a[href^='/learn/language/constructs/basics/']"), "main", "java").code_sel("readonly-code-editor")
         .pages(&["https://dev.java/learn/language/constructs/basics/"]),
@@ -518,21 +549,30 @@ pub static GUIDES: &[Guide] = &[
         &["https://commonmark.org/help/"], "body", "markdown").drop(".navbar, nav, header, footer"),
 ];
 
-/// The guide for a language (its name in the editor), if there is one.
-pub fn find(lang: &str) -> Option<&'static Guide> {
-    GUIDES.iter().find(|g| g.langs.contains(&lang))
+/// A guide by its own name, else the (first) guide for a language (its
+/// name in the editor).
+pub fn find(key: &str) -> Option<&'static Guide> {
+    GUIDES.iter().find(|g| !g.id.is_empty() && g.id == key).or_else(|| GUIDES.iter().find(|g| g.langs.contains(&key)))
 }
 
-/// Guides there are (JSON {lang: title}), tessh's own included.
+/// Guides there are (JSON {lang: title of its first guide}), tessh's own included.
 pub fn list_json() -> String {
     let mut m = serde_json::Map::new();
     m.insert("tessh".into(), "tessh guide".into());
     for g in GUIDES {
         for l in g.langs {
-            m.insert(l.to_string(), g.title.into());
+            m.entry(l.to_string()).or_insert_with(|| g.title.into());
         }
     }
     serde_json::Value::Object(m).to_string()
+}
+
+/// A language's guides, when it has more than one (JSON [[key, title]]).
+pub fn choices_json(lang: &str) -> String {
+    // (The language the name stands for: "c++" is C++, so is "learncpp".)
+    let lang = find(lang).map(|g| g.langs[0]).unwrap_or(lang);
+    let list: Vec<[&str; 2]> = GUIDES.iter().filter(|g| g.langs.contains(&lang)).map(|g| [g.key(), g.title]).collect();
+    serde_json::to_string(&list).unwrap_or_default()
 }
 
 fn cache_dir() -> PathBuf {
@@ -540,7 +580,7 @@ fn cache_dir() -> PathBuf {
 }
 
 fn cache_path(g: &Guide) -> PathBuf {
-    cache_dir().join(format!("{}.md", g.langs[0]))
+    cache_dir().join(format!("{}.md", g.key()))
 }
 
 /// A guide as a page (a <nav> and a <main>, the tessh guide's way), fetched
@@ -552,14 +592,14 @@ pub fn page_html(lang: &str, refresh: bool) -> Result<String, String> {
     }
     let g = find(lang).ok_or_else(|| format!("No guide for {lang}."))?;
     let r = page_html_of(g, refresh);
-    set_progress(g.langs[0], "");
+    set_progress(g.key(), "");
     r
 }
 
 /// What a guide being fetched is doing now ("" when nothing): for the page
 /// to show while it waits.
 pub fn progress(lang: &str) -> String {
-    let key = find(lang).map(|g| g.langs[0]).unwrap_or(lang);
+    let key = find(lang).map(|g| g.key()).unwrap_or(lang);
     progress_map().lock().unwrap().get(key).cloned().unwrap_or_default()
 }
 
@@ -582,7 +622,7 @@ fn set_progress(key: &str, what: &str) {
 const RENDER_VERSION: &str = "<!-- tessera-guide-render 3 -->";
 /// Marks the kept Markdown: a guide converted by an older Tessera is
 /// fetched and converted again.
-const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 2 -->";
+const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 3 -->";
 
 fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
     let path = cache_path(g);
@@ -633,11 +673,11 @@ fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
     let mut grammars_ok = true;
     for l in &langs {
         if !crate::syntax::is_builtin(l) && crate::grammars::is_known(l) {
-            set_progress(g.langs[0], &format!("Getting the {l} grammar…"));
+            set_progress(g.key(), &format!("Getting the {l} grammar…"));
             grammars_ok &= crate::grammars::ensure(l).is_ok();
         }
     }
-    set_progress(g.langs[0], "Drawing the page…");
+    set_progress(g.key(), "Drawing the page…");
     let body = crate::manual::manual_html(&md, g.code);
     let tmp = body_path.with_extension("part");
     // (Kept only for this conversion: an older one is redrawn after it's fetched again.)
@@ -654,7 +694,7 @@ fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
 pub fn page_file(lang: &str, refresh: bool, head: &str) -> Result<String, String> {
     // (A panic in the background would leave the page waiting for ever: an error instead.)
     let body = std::panic::catch_unwind(|| page_html(lang, refresh)).unwrap_or_else(|p| {
-        set_progress(find(lang).map(|g| g.langs[0]).unwrap_or(lang), "");
+        set_progress(find(lang).map(|g| g.key()).unwrap_or(lang), "");
         Err(format!("Tessera failed while making the page: {}", p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()))
     })?;
     let dir = cache_dir();
@@ -664,6 +704,26 @@ pub fn page_file(lang: &str, refresh: bool, head: &str) -> Result<String, String
     std::fs::write(&path, format!("<!doctype html><html><head><meta charset='utf-8'>{head}</head><body>{body}</body></html>")).map_err(|e| e.to_string())?;
     let p = path.to_string_lossy().replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F");
     Ok(if p.starts_with('/') { format!("file://{p}") } else { format!("file:///{}", p.replace('\\', "/")) })
+}
+
+/// Markdown with its headings a level down (not lines in code blocks).
+fn demote(md: &str) -> String {
+    let mut fence: Option<&str> = None;
+    let mut out = String::with_capacity(md.len() + 256);
+    for line in md.split_inclusive('\n') {
+        let t = line.trim_start();
+        let mark = if t.starts_with("```") { Some("```") } else if t.starts_with("~~~") { Some("~~~") } else { None };
+        match (fence, mark) {
+            (None, Some(m)) => fence = Some(m),
+            (Some(f), Some(m)) if f == m => fence = None,
+            _ => {}
+        }
+        if fence.is_none() && mark.is_none() && line.starts_with('#') && line.trim_start_matches('#').starts_with(' ') && line.find(' ').unwrap_or(0) < 6 {
+            out.push('#');
+        }
+        out.push_str(line);
+    }
+    out
 }
 
 /// Today's date (UTC), for the note at the top of a guide.
@@ -876,15 +936,32 @@ fn strip_fragment(u: &str) -> &str {
 /// where it's from and its license at the top.
 pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
     let mut urls: Vec<String> = g.pages.iter().map(|s| s.to_string()).collect();
+    // (The pages that start a chapter, and its title.)
+    let mut chapter_at: std::collections::HashMap<usize, String> = Default::default();
     if let Some((index, links)) = g.index {
         let (html, _) = get_or_archived(index)?;
         let doc = scraper::Html::parse_document(&html);
-        let sel = scraper::Selector::parse(links).map_err(|e| format!("{links}: {e}"))?;
+        let both = if g.chapters.is_empty() { links.to_string() } else { format!("{links}, {}", g.chapters) };
+        let sel = scraper::Selector::parse(&both).map_err(|e| format!("{both}: {e}"))?;
+        let title_sel = scraper::Selector::parse(if g.chapters.is_empty() { ":not(*)" } else { g.chapters }).map_err(|e| format!("{}: {e}", g.chapters))?;
         let host = |u: &str| u.split('/').nth(2).unwrap_or("").to_string();
+        let mut chapter: Option<String> = None;
+        // (Links and chapter titles in the order they come.)
         for a in doc.select(&sel) {
+            if title_sel.matches(&a) {
+                let t = a.text().collect::<String>().trim().to_string();
+                if !g.until.is_empty() && t.starts_with(g.until) {
+                    break;
+                }
+                chapter = Some(t);
+                continue;
+            }
             if let Some(h) = a.value().attr("href") {
                 let u = strip_fragment(&join(index, h)).to_string();
                 if host(&u) == host(index) && u != strip_fragment(index) && !urls.contains(&u) {
+                    if let Some(c) = chapter.take() {
+                        chapter_at.insert(urls.len(), c);
+                    }
                     urls.push(u);
                 }
             }
@@ -906,7 +983,7 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
         g.license_url
     ));
     // (Fetched and converted side by side, eight at a time.)
-    let key = g.langs[0];
+    let key = g.key();
     let n = urls.len();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let done = std::sync::atomic::AtomicUsize::new(0);
@@ -945,7 +1022,15 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
     for (i, part) in parts.into_iter().enumerate() {
         match part.unwrap_or_else(|| Err("not fetched".into())) {
             Ok(md) => {
-                out.push_str(&format!("<a id=\"page-{i}\"></a>\n\n{}\n\n", md.trim()));
+                if g.chapters.is_empty() {
+                    out.push_str(&format!("<a id=\"page-{i}\"></a>\n\n{}\n\n", md.trim()));
+                } else {
+                    // (A chapter's title as a part; its pages' headings a level down.)
+                    if let Some(c) = chapter_at.get(&i) {
+                        out.push_str(&format!("# {c}\n\n"));
+                    }
+                    out.push_str(&format!("<a id=\"page-{i}\"></a>\n\n{}\n\n", demote(md.trim())));
+                }
                 got += 1;
             }
             Err(e) if i == 0 => return Err(e),
@@ -1104,43 +1189,90 @@ fn titled(md: String, doc: &scraper::Html) -> String {
     if md.lines().any(|l| l.starts_with("# ")) {
         md
     } else {
-        let title = scraper::Selector::parse("h1#firstHeading, title").ok().and_then(|s| doc.select(&s).next()).map(|t| t.text().collect::<String>()).unwrap_or_default();
-        let title = title.split(" - ").next().unwrap_or("").split(" | ").next().unwrap_or("").split(" \u{2014} ").next().unwrap_or("").trim().to_string();
+        // (The page's own heading as it is; else its <title>, less the site's name.)
+        let text = |sel: &str| scraper::Selector::parse(sel).ok().and_then(|s| doc.select(&s).next()).map(|t| t.text().collect::<String>().trim().to_string()).filter(|t| !t.is_empty());
+        let title = text("h1#firstHeading, h1.entry-title").unwrap_or_else(|| {
+            let t = text("title").unwrap_or_default();
+            [" | ", " - ", " \u{2013} ", " \u{2014} "].iter().fold(t.clone(), |t, sep| t.rsplit_once(sep).map(|(a, _)| a.to_string()).unwrap_or(t)).trim().to_string()
+        });
         if title.is_empty() { md } else { format!("# {title}\n\n{md}") }
+    }
+}
+
+/// A part of a page written out as HTML again, in one pass: what isn't the
+/// document left out, code drawn some other way made code blocks, and the
+/// guide's renames (a site's own "heading" paragraphs as headings).
+struct Writer {
+    drop: Vec<scraper::Selector>,
+    code: Vec<scraper::Selector>,
+    renames: Vec<(scraper::Selector, &'static str)>,
+}
+
+impl Writer {
+    fn node(&self, n: ego_tree::NodeRef<scraper::Node>, out: &mut String) {
+        let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        match n.value() {
+            scraper::Node::Text(t) => out.push_str(&esc(t)),
+            scraper::Node::Element(e) => {
+                let Some(el) = scraper::ElementRef::wrap(n) else { return };
+                if self.drop.iter().any(|s| s.matches(&el)) {
+                    return;
+                }
+                // (Code drawn as tables of tokens or lines with <br>: its
+                // text, a line per row or break.)
+                if self.code.iter().any(|s| s.matches(&el)) {
+                    let mut text = String::new();
+                    code_text(n, &mut text, el.select(&scraper::Selector::parse("br").unwrap()).next().is_some());
+                    let text = textwrap_dedent(&text.replace('\u{a0}', " ").lines().map(str::trim_end).collect::<Vec<_>>().join("\n"));
+                    out.push_str(&format!("<pre><code>{}</code></pre>", esc(&text)));
+                    return;
+                }
+                // ("h3", "blockquote", or "p>strong": the element as those, its id kept.)
+                let tags: Vec<&str> = match self.renames.iter().find(|(s, _)| s.matches(&el)) {
+                    Some((_, to)) => to.split('>').collect(),
+                    None => vec![e.name()],
+                };
+                for (k, t) in tags.iter().enumerate() {
+                    out.push('<');
+                    out.push_str(t);
+                    if k == 0 {
+                        for (name, value) in e.attrs() {
+                            if tags[0] == e.name() || name == "id" {
+                                out.push_str(&format!(" {name}=\"{}\"", value.replace('&', "&amp;").replace('"', "&quot;")));
+                            }
+                        }
+                    }
+                    out.push('>');
+                }
+                const VOID: &[&str] = &["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"];
+                if tags.len() == 1 && VOID.contains(&tags[0]) {
+                    return;
+                }
+                for c in n.children() {
+                    self.node(c, out);
+                }
+                for t in tags.iter().rev() {
+                    out.push_str(&format!("</{t}>"));
+                }
+            }
+            _ => {}
+        }
     }
 }
 
 /// One part of a page (its document) as Markdown.
 fn part_markdown(part: scraper::ElementRef, g: &Guide) -> Result<String, String> {
-    let mut inner = part.inner_html();
-    // (Leave out what isn't the document: its HTML cut out of the part's.)
+    // (Leave out what isn't the document.)
     let drop = format!("script, style, noscript, button, template, a.headerlink, a.anchor, .headerlink, .anchorjs-link, .copybutton, .sr-only, .visually-hidden{}{}", if g.drop.is_empty() { "" } else { ", " }, g.drop);
-    // (Code drawn as tables of tokens or lines with <br>: its text, a line
-    // per row or break.)
-    if !g.code_sel.is_empty() {
-        if let Ok(sel) = scraper::Selector::parse(g.code_sel) {
-            let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-            for e in part.select(&sel) {
-                let mut text = String::new();
-                code_text(*e, &mut text, e.html().contains("<br"));
-                let text = textwrap_dedent(&text.replace('\u{a0}', " ").lines().map(str::trim_end).collect::<Vec<_>>().join("\n"));
-                inner = inner.replacen(&e.html(), &format!("<pre><code>{}</code></pre>", esc(&text)), 1);
-            }
-        }
-    }
-    let mut cut: Vec<String> = vec![];
-    for s in drop.split(',').map(str::trim) {
-        if let Ok(sel) = scraper::Selector::parse(s) {
-            for e in part.select(&sel) {
-                cut.push(e.html());
-            }
-        }
-    }
-    cut.sort_by_key(|c| std::cmp::Reverse(c.len()));
-    for c in cut {
-        if !c.is_empty() {
-            inner = inner.replacen(&c, "", 1);
-        }
+    let parse = |list: &str| list.split(',').map(str::trim).filter(|s| !s.is_empty()).filter_map(|s| scraper::Selector::parse(s).ok()).collect::<Vec<_>>();
+    let w = Writer {
+        drop: parse(&drop),
+        code: parse(g.code_sel),
+        renames: g.renames.iter().filter_map(|(sel, to)| scraper::Selector::parse(sel).ok().map(|s| (s, *to))).collect(),
+    };
+    let mut inner = String::with_capacity(64 << 10);
+    for c in part.children() {
+        w.node(c, &mut inner);
     }
     let inner = keep_ids(&code_in_pre(&inner));
     let conv = htmd::HtmlToMarkdown::builder().skip_tags(vec!["script", "style", "svg", "head", "form", "input", "select", "iframe"]).build();
@@ -1293,6 +1425,16 @@ fn relink(md: &str, page: &str, pages: &[(String, usize)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cpp_has_two_guides() {
+        let c: Vec<[String; 2]> = serde_json::from_str(&choices_json("cpp")).unwrap();
+        assert_eq!(c.iter().map(|x| x[0].as_str()).collect::<Vec<_>>(), ["learncpp", "cppreference"]);
+        assert_eq!(choices_json("c++"), choices_json("cppreference"));
+        assert_eq!(find("cpp").unwrap().key(), "learncpp");
+        assert_eq!(find("cppreference").unwrap().key(), "cppreference");
+        assert_eq!(serde_json::from_str::<Vec<[String; 2]>>(&choices_json("python")).unwrap().len(), 1);
+    }
 
     #[test]
     fn joins() {

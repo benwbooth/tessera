@@ -260,8 +260,11 @@ ApplicationWindow {
                 active: tabItem.page === "tessh-guide" || tabItem.page.startsWith("guide:")
                 sourceComponent: GuidePage {
                     backend: controller
-                    lang: tabItem.page.startsWith("guide:") ? tabItem.page.slice(6) : "tessh"
-                    title: win.guides[lang] || (lang + " guide")
+                    // ("guide:LANG", or "guide:LANG/GUIDE" for one of a language's guides.)
+                    lang: tabItem.page.startsWith("guide:") ? tabItem.page.slice(6).split("/")[0] : "tessh"
+                    guideId: tabItem.page.startsWith("guide:") ? (tabItem.page.slice(6).split("/")[1] || "") : ""
+                    fallbackTitle: win.guides[lang] || (lang + " guide")
+                    onChose: (id, title) => { tabItem.page = "guide:" + lang + "/" + id; tabItem.customTitle = title }
                     ansi: win.themeFor(tabItem.prof).ansi || []
                     fontFamily: tabItem.prof.font_family || "monospace"
                 }
@@ -281,9 +284,11 @@ ApplicationWindow {
     // A language's guide, a tab of its own (the one there is, if it's open).
     function openGuide(lang) {
         lang = lang || "tessh"
+        // ("LANG/GUIDE": one of the language's guides.)
+        const own = lang.indexOf("/") > 0 ? JSON.parse(controller.guideChoices(lang.split("/")[0]) || "[]").find(c => c[0] === lang.split("/")[1]) : null
         const page = "guide:" + lang
-        for (let i = 0; i < tabs.length; ++i) if (tabs[i].page === page || (lang === "tessh" && tabs[i].page === "tessh-guide")) { currentTab = i; return }
-        const t = tabComp.createObject(stack, { profile: profileFor(settings.default_profile).name, page: page, customTitle: guides[lang] || (lang + " guide") })
+        for (let i = 0; i < tabs.length; ++i) if (tabs[i].page === page || tabs[i].page.startsWith(page + "/") || (lang === "tessh" && tabs[i].page === "tessh-guide")) { currentTab = i; return }
+        const t = tabComp.createObject(stack, { profile: profileFor(settings.default_profile).name, page: page, customTitle: own ? own[1] : guides[lang] || (lang + " guide") })
         tabs.splice(tabs.length, 0, t)
         tabs = tabs.slice()
         currentTab = tabs.length - 1
@@ -1871,6 +1876,8 @@ ApplicationWindow {
             const t = win.tabs[win.currentTab]
             if (!t || !t.pageItem) return
             if (controller.testEnv("GUIDE_WHEEL") !== "") t.pageItem.testWheel()
+            // (TESSERA_TEST_GUIDE_SWITCH=GUIDE: its chip clicked, as a person would.)
+            else if (controller.testEnv("GUIDE_SWITCH") !== "") t.pageItem.chose(controller.testEnv("GUIDE_SWITCH"), controller.testEnv("GUIDE_SWITCH"))
             else t.pageItem.find(controller.testEnv("GUIDE"))
         }
     }

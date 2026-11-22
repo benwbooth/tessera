@@ -18,6 +18,11 @@ day it was saved; **Refresh** later fetches it from its site again. The
 archive turns away bursts, so at most two of its pages are asked for at a
 time.
 
+C++ has two guides, LearnCpp.com (the tutorial, shown first) and
+cppreference (the reference): chips at the top of the page switch between
+them, and the tab keeps the choice (`guide:cpp/cppreference`). Each is kept
+on its own (`learncpp.md`, `cppreference.md`).
+
 Why fetched and not bundled: together the documents are tens of megabytes,
 and their licenses differ (GNU FDL, CC BY-SA, and some that allow reading
 but not redistribution). Fetched on the reader's own machine, nothing is
@@ -39,6 +44,7 @@ The sources are in `src/guides.rs` (`GUIDES`). To check them all:
 | javascript, node, js | [MDN JavaScript Guide](https://raw.githubusercontent.com/mdn/content/main/files/en-us/web/javascript/guide/introduction/index.md) | [CC BY-SA 2.5](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license) |
 | typescript, tsx, ts | [The TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html) | [CC BY 4.0](https://github.com/microsoft/TypeScript-Website/blob/v2/LICENSE) |
 | c | [GNU C Language Intro and Reference Manual](https://www.gnu.org/software/c-intro-and-ref/manual/c-intro-and-ref.html) | [GNU FDL 1.3](https://www.gnu.org/licenses/fdl-1.3.html) |
+| cpp, c++, cxx | [LearnCpp.com](https://www.learncpp.com/) | [© LearnCpp.com; read from the site, not redistributed](https://www.learncpp.com/about/) |
 | cpp, c++, cxx | [C++ language (cppreference.com)](https://en.cppreference.com/w/cpp/language/basic_concepts) | [CC BY-SA 3.0](https://en.cppreference.com/w/Cppreference:Copyright/CC-BY-SA) |
 | java | [Learn Java: Language Basics (dev.java)](https://dev.java/learn/language/constructs/basics/) | [© Oracle; read from dev.java, not redistributed](https://www.oracle.com/legal/copyright.html) |
 | ruby | [Ruby Syntax (docs.ruby-lang.org)](https://docs.ruby-lang.org/en/master/syntax_rdoc.html) | [Ruby License or BSD-2-Clause](https://www.ruby-lang.org/en/about/license.txt) |

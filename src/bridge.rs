@@ -645,6 +645,9 @@ pub mod ffi {
         /// file URL, or "error: ...". (A file: loadHtml shows at most 2 MB.)
         #[qinvokable]
         fn guide_page(self: &Controller, reply: &QString, lang: &QString, refresh: bool, head: &QString);
+        /// A language's guides when it has more than one: JSON [[key, title]].
+        #[qinvokable]
+        fn guide_choices(self: &Controller, lang: &QString) -> QString;
         /// What a guide being fetched is doing now ("" when nothing).
         #[qinvokable]
         fn guide_progress(self: &Controller, lang: &QString) -> QString;
@@ -1427,6 +1430,10 @@ impl ffi::Controller {
     fn guide_page(&self, reply: &ffi::QString, lang: &ffi::QString, refresh: bool, head: &ffi::QString) {
         let (lang, head) = (lang.to_string(), head.to_string());
         self.answer_on(reply, None, move || crate::guides::page_file(&lang, refresh, &head).unwrap_or_else(|e| format!("error: {e}")))
+    }
+
+    fn guide_choices(&self, lang: &ffi::QString) -> ffi::QString {
+        qs(&crate::guides::choices_json(&lang.to_string()))
     }
 
     fn guide_progress(&self, lang: &ffi::QString) -> ffi::QString {
