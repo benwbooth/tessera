@@ -133,7 +133,15 @@ Item {
         if (editorOn && focused) { preferEditor = true; Qt.callLater(compose.focusEditor) }
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
-    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (term.atPrompt || idleShell || replLang !== "" || awaitingPrompt)
+    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && promptHeld
+    // (At the prompt, or was a moment ago: a quick command (ls) leaves the
+    // editor up rather than taking it away and back, which resizes
+    // everything above it twice. One that's still going after 250 ms hides
+    // it; a full-screen program does at once.)
+    readonly property bool promptish: term.atPrompt || idleShell || replLang !== "" || awaitingPrompt
+    property bool promptHeld: promptish
+    onPromptishChanged: { if (promptish) { promptDrop.stop(); promptHeld = true } else promptDrop.restart() }
+    Timer { id: promptDrop; interval: 250; onTriggered: pane.promptHeld = pane.promptish }
     // (A new shell: the editor's room kept from the start, so the terminal
     // opens at the size it'll have at the prompt instead of shrinking when
     // the prompt comes. Not for a command of its own or a reattached shell;

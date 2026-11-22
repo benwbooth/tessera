@@ -2201,7 +2201,7 @@ FocusScope {
             if (nb.testFrames < 0 || nb.testFrames >= 40) return
             const n = nb.testFrames++
             const last = list.itemAtIndex(cells.count - 1)
-            console.log("nbframe " + n + " t=" + Date.now() % 100000 + " cy=" + Math.round(list.contentY) + " ch=" + Math.round(list.contentHeight) + " oy=" + Math.round(list.originY) + " h=" + Math.round(list.height) + " last=" + (last ? Math.round(last.height) + "@" + Math.round(last.y) : "-") + " count=" + cells.count)
+            console.log("nbframe " + n + " t=" + Date.now() % 100000 + " cy=" + Math.round(list.contentY) + " ch=" + Math.round(list.contentHeight) + " oy=" + Math.round(list.originY) + " h=" + Math.round(list.height) + " last=" + (last ? Math.round(last.height) + "@" + Math.round(last.y) + " kind=" + last.kind + " outs=" + last.outs.length + " run=" + last.running + " has=" + last.hasOutput + " tid=" + last.tid + " live=" + nb.liveWanted : "-") + " count=" + cells.count)
             if (n % 2 === 0) nb.grabToImage(r => r.saveToFile(nb.controller.testEnv("NB_FRAMES") + "/f" + (n < 10 ? "0" : "") + n + ".png"))
         }
     }
