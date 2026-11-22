@@ -1267,6 +1267,7 @@ FocusScope {
     // language at the end, run in its kernel.
     function submitLang(code, l) {
         const c = newCell("code", code)
+        hideUntilReady(c.cid)
         c.lang = sameLang(l, runsIn) ? "" : l
         cells.append(c)
         current = cells.count - 1
@@ -1301,9 +1302,18 @@ FocusScope {
     }
     // Code from the pane's editor, for a kernel that isn't the shell: a new
     // cell at the end, run.
+    // A card just sent stays unseen (its room kept, so nothing moves) until
+    // it's done and drawn — a folder card's listing in — so it comes up as
+    // it'll stay, not empty, then filling, then done. A slow one shows after
+    // 250 ms, running.
+    property string unseenCid: ""
+    Timer { id: unseenCap; interval: 250; onTriggered: nb.unseenCid = "" }
+    function hideUntilReady(cid) { unseenCid = cid; unseenCap.restart() }
+    function reveal(cid) { if (unseenCid === cid) Qt.callLater(() => { if (nb.unseenCid === cid) nb.unseenCid = "" }) }
     function submit(code) {
         expandedId = ""         // (a new card shows: nothing hides it)
         const c = newCell("code", code)
+        hideUntilReady(c.cid)
         cells.append(c)
         current = cells.count - 1
         run(cells.count - 1)
@@ -2201,8 +2211,8 @@ FocusScope {
             if (nb.testFrames < 0 || nb.testFrames >= 40) return
             const n = nb.testFrames++
             const last = list.itemAtIndex(cells.count - 1)
-            console.log("nbframe " + n + " t=" + Date.now() % 100000 + " cy=" + Math.round(list.contentY) + " ch=" + Math.round(list.contentHeight) + " oy=" + Math.round(list.originY) + " h=" + Math.round(list.height) + " last=" + (last ? Math.round(last.height) + "@" + Math.round(last.y) + " kind=" + last.kind + " outs=" + last.outs.length + " run=" + last.running + " has=" + last.hasOutput + " tid=" + last.tid + " live=" + nb.liveWanted : "-") + " count=" + cells.count)
-            if (n % 2 === 0) nb.grabToImage(r => r.saveToFile(nb.controller.testEnv("NB_FRAMES") + "/f" + (n < 10 ? "0" : "") + n + ".png"))
+            console.log("nbframe " + n + " t=" + Date.now() % 100000 + " nbh=" + Math.round(nb.height) + " nby=" + Math.round(nb.mapToItem(null, 0, 0).y) + " cy=" + Math.round(list.contentY) + " ch=" + Math.round(list.contentHeight) + " oy=" + Math.round(list.originY) + " h=" + Math.round(list.height) + " last=" + (last ? Math.round(last.height) + "@" + Math.round(last.y) + " kind=" + last.kind + " outs=" + last.outs.length + " run=" + last.running + " has=" + last.hasOutput + " tid=" + last.tid + " live=" + nb.liveWanted : "-") + " unseen=" + (nb.unseenCid !== "") + " count=" + cells.count)
+            if (n % 2 === 0 && nb.controller.testEnv("NB_FRAMES") !== "") nb.grabToImage(r => r.saveToFile(nb.controller.testEnv("NB_FRAMES") + "/f" + (n < 10 ? "0" : "") + n + ".png"))
         }
     }
     // (Test hook: TESSERA_TEST_EXPAND_LAST expands the last card at 16 s, as
@@ -2692,7 +2702,15 @@ FocusScope {
             // (Running for a moment: before that a quick run's card stays as
             // it'll end up, not flashing Signal and bg on and off.)
             property bool slowRun: false
-            onRunningChanged: { slowRun = false; if (running) slowTimer.restart(); else slowTimer.stop() }
+            onRunningChanged: { slowRun = false; if (running) slowTimer.restart(); else { slowTimer.stop(); checkReady() } }
+            // (Sent just now: unseen until it's done and drawn; see hideUntilReady.)
+            opacity: nb.unseenCid === cid ? 0 : 1
+            function checkReady() {
+                if (nb.unseenCid !== cid || running) return
+                if (kind === "files" && !(loader.item && loader.item.listed)) return
+                nb.reveal(cid)
+            }
+            Connections { target: loader.item; ignoreUnknownSignals: true; function onListedChanged() { cell.checkReady() } }
             Timer { id: slowTimer; interval: 400; onTriggered: cell.slowRun = cell.running }
             Component.onCompleted: if (running) slowTimer.restart()
             required property bool failed
