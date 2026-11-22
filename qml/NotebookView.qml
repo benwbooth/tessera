@@ -2864,7 +2864,11 @@ FocusScope {
             height: !wanted ? 0 : (plainMd ? mdBody.height + 8 : header.height + (editing ? editorBox.height + 8 : 0)
                      + (hasOutput ? (hideOutput ? 22 : body.height + (body.live ? 14 : 12)) : 4) + (ask ? askBox.height + 6 : 0))
             radius: 8
-            color: picked ? Theme.mix(Theme.bg, Theme.accent, 0.12) : plainMd ? "transparent" : Theme.mix(Theme.bg, Theme.fg, 0.035)
+            // (A background job's card: a faint tint of the theme's blue, told
+            // apart from the rest at a glance.)
+            color: picked ? Theme.mix(Theme.bg, Theme.accent, 0.12) : plainMd ? "transparent"
+                 : cell.job > 0 ? Theme.mix(Theme.mix(Theme.bg, Theme.fg, 0.035), nb.ansi(4, "#61afef"), 0.06)
+                 : Theme.mix(Theme.bg, Theme.fg, 0.035)
             readonly property bool dragged: nb.dragCid !== "" && (nb.dragCid === cid || (picked && nb.isPicked(nb.dragCid)))
             z: dragged ? 3 : 0
             scale: dragged ? 1.01 : 1

@@ -177,6 +177,26 @@ Rectangle {
     function insert(t) { edit.insert(edit.cursorPosition, t) }
     function setText(t) { edit.text = t; edit.cursorPosition = t.length }
 
+    // The editor's keys, for the hint's tooltip: a table, keys on the left.
+    function keysHelp() {
+        const groups = [
+            ["Running", [["Enter", "Run the command \u2014 while one runs, it waits its turn"],
+                         ["Right Ctrl", "Run it in the background, alongside (tap; or Ctrl+Enter)"],
+                         ["Left Ctrl", "Switch between this editor and the terminal (tap)"]]],
+            ["Editing", [["Right Shift", "New line (tap; or Shift+Enter)"],
+                         ["Left Shift", "Take the grey suggestion (tap)"],
+                         ["Tab", "Complete; in the indentation, indent"],
+                         ["Shift+Tab", "Outdent"]]],
+            ["Finding", [["Ctrl+R", "Search history"],
+                         ["Ctrl+Alt+J", "Background jobs"]]]]
+        if (box.aiNL && box.chatReady) groups.push(["AI", [["# \u2026", "Say what you want: the AI writes the command, for you to check"]]])
+        let h = "<table cellspacing='0' cellpadding='2'>"
+        for (const g of groups) {
+            h += "<tr><td colspan='2' style='padding-top:4px'><span style='color:" + Theme.textDim + "'>" + g[0] + "</span></td></tr>"
+            for (const r of g[1]) h += "<tr><td style='padding-right:14px'><b>" + r[0] + "</b></td><td>" + r[1] + "</td></tr>"
+        }
+        return h + "</table>"
+    }
     // How the last submit wants it run: "" (now, or queued behind what's
     // running) or "bg" (in the background at once, alongside it: as a
     // shell's &, for any language). Ctrl+Enter or a tap of right Ctrl.
@@ -1293,13 +1313,23 @@ Rectangle {
             : box.aiNL && box.chatReady ? "Type a command, or # and a request for the AI — hover for keys"
                                          : "Type a command — hover for keys"
         HoverHandler { id: hintHover }
-        ToolTip.visible: hintHover.hovered
-        ToolTip.delay: 300
-        ToolTip.text: "Enter runs the command\n"
-                      + "Tap right Shift (or Shift+Enter) for a new line\n"
-                      + "Tap left Shift to take the grey suggestion (from history or the AI)\n"
-                      + "Tab completes (in the indentation: indents; Shift+Tab outdents); Ctrl+R searches history\nTap Ctrl to switch between this editor and the terminal"
-                      + (box.aiNL && box.chatReady ? "\n# then what you want, in words: the AI writes the command for you to check and run" : "")
+        // (Its own tooltip: the default one draws text, not a table.)
+        ToolTip {
+            visible: hintHover.hovered
+            delay: 300
+            topPadding: 8.001
+            bottomPadding: 8
+            leftPadding: 10
+            rightPadding: 10
+            contentItem: Text {
+                text: box.keysHelp()
+                textFormat: Text.RichText
+                color: Theme.text
+                font.pixelSize: 12
+                renderType: Text.NativeRendering
+            }
+            background: Rectangle { radius: 6; color: Theme.panel; border.color: Theme.divider }
+        }
         color: Theme.textDim
         opacity: 0.55
         font: edit.font
@@ -1446,7 +1476,7 @@ Rectangle {
             base: box.color
             readonly property string guide: Window.window && Window.window.guideFor ? Window.window.guideFor(box.lang, box.runShell || box.shellName) : ""
             visible: guide !== ""
-            label: "? Guide"
+            label: "Guide"
             tip: guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
                 : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept"
             onClicked: Window.window.openGuide(guide)
