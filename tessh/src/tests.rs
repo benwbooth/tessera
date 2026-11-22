@@ -556,3 +556,14 @@ fn path_words_are_paths() {
     let home = std::env::var("HOME").unwrap();
     assert_eq!(out, format!("[/tmp ./a] ./run.sh\n./run.sh {home}\n"), "printed as written; commands get text");
 }
+
+#[test]
+fn a_lone_folder_goes_there() {
+    let here = std::env::current_dir().unwrap();
+    let (_, out) = run("import os\n/tmp\nprint (os.getcwd)\n..\nprint (os.getcwd)");
+    std::env::set_current_dir(&here).unwrap();
+    let tmp = std::fs::canonicalize("/tmp").unwrap();
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines[0] == "/tmp" || std::path::Path::new(lines[0]) == tmp, "{out}");
+    assert_eq!(lines[1], "/", "{out}");
+}

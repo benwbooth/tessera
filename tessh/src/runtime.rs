@@ -953,6 +953,17 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
     let words = argv(py, &args)?;
     let red = redirs_of(&redirs)?;
     let head_s = word(&head)?;
+    // (A line that's only a folder — ~, /tmp, ../src — goes there, as fish
+    // does and zsh with autocd: a folder isn't a program.)
+    if !force && mode != "stage" && mode != "bg" && words.is_empty() && red.is_empty() {
+        let pathish = head_s.contains('/') || head_s.starts_with('~') || head_s == "." || head_s == "..";
+        let d = expanduser(&head_s);
+        if pathish && std::path::Path::new(&d).is_dir() {
+            go(py, &d, false)?;
+            STATUS.store(0, Ordering::SeqCst);
+            return Ok(py.None());
+        }
+    }
     if !force {
         if let Some(f) = resolve_callable(py, &ns, &head_s)? {
             let kw = PyDict::new(py);
