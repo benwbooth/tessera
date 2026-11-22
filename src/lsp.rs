@@ -189,6 +189,8 @@ fn start(lang: &str, root: &str) -> Option<Arc<Server>> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        // Node-based servers (pyright, typescript, bash) stop at 1.5 GB of heap.
+        .env("NODE_OPTIONS", "--max-old-space-size=1536")
         .spawn()
         .ok()?;
     let stdin = child.stdin.take()?;
@@ -294,7 +296,36 @@ pub enum Ask {
     Complete(usize),
 }
 
+/// The folder a server is pointed at. Servers index everything under their
+/// root, so the terminal's folder is only used when it's inside a project
+/// (nearest folder with a project marker); a folder of projects like ~/src
+/// or ~ itself gets an empty folder instead (pyright grew to 3 GB each on
+/// one). The typed command is an in-memory document either way.
+fn project_root(root: &str) -> String {
+    const MARKERS: &[&str] = &[
+        ".git", "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "package.json",
+        "tsconfig.json", "Cargo.toml", "go.mod", "Gemfile", "pom.xml", "build.gradle",
+        "CMakeLists.txt", "compile_commands.json", "meson.build", "Makefile",
+    ];
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut dir = Some(std::path::Path::new(root));
+    while let Some(d) = dir {
+        let s = d.to_string_lossy();
+        if s == "/" || s == home.trim_end_matches('/') {
+            break;
+        }
+        if MARKERS.iter().any(|m| d.join(m).exists()) {
+            return s.into_owned();
+        }
+        dir = d.parent();
+    }
+    let empty = std::env::temp_dir().join(format!("tessera-lsp-{}", unsafe { libc::getuid() }));
+    let _ = std::fs::create_dir_all(&empty);
+    empty.display().to_string()
+}
+
 pub fn ask(lang: &str, root: &str, editor: &str, text: &str, what: Ask) -> Option<String> {
+    let root = &project_root(root);
     let server = start(lang, root)?;
     let uri = doc_uri(lang, root, editor);
     match what {
