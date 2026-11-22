@@ -65,6 +65,9 @@ module.exports = grammar({
     status: _ => '$?',
 
     string: $ => choice($._dq_string, token(choice(
+      // (re'…', re"…": a regex, raw, with Perl's flags after it: re'abc'i.)
+      seq('re', "'", /[^']*/, "'", /[imsxa]*/),
+      seq('re', '"', repeat(choice(/[^"\\]/, /\\(.|\n)/)), '"', /[imsxa]*/),
       seq(/[bBrR]{1,2}/, '"""', repeat(choice(/[^"\\]/, /\\(.|\n)/, /"[^"]/, /""[^"]/)), '"""'),
       seq(optional(/[bBrR]{1,2}/), "'''", repeat(choice(/[^']/, /'[^']/, /''[^']/)), "'''"),
       seq(/[bBrR]{1,2}/, '"', repeat(choice(/[^"\\]/, /\\(.|\n)/)), '"'),
