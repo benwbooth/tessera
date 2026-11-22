@@ -53,6 +53,8 @@ mod syntax;
 mod tables;
 
 fn main() {
+    // (As a child trying a grammar: that, and nothing else.)
+    grammars::check_from_args();
     #[cfg(windows)]
     if std::env::var_os("HOME").is_none() {
         if let Some(p) = std::env::var_os("USERPROFILE") {

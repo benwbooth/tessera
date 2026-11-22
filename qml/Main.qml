@@ -282,18 +282,23 @@ ApplicationWindow {
         return guides[lang] ? lang : ""
     }
     // A language's guide, a tab of its own (the one there is, if it's open).
-    function openGuide(lang) {
+    // `query`: find it in the guide once it's there (Shift+F1, the chip).
+    function openGuide(lang, query) {
         lang = lang || "tessh"
         // ("LANG/GUIDE": one of the language's guides.)
         const own = lang.indexOf("/") > 0 ? JSON.parse(controller.guideChoices(lang.split("/")[0]) || "[]").find(c => c[0] === lang.split("/")[1]) : null
         const page = "guide:" + lang
-        for (let i = 0; i < tabs.length; ++i) if (tabs[i].page === page || tabs[i].page.startsWith(page + "/") || (lang === "tessh" && tabs[i].page === "tessh-guide")) { currentTab = i; return }
+        for (let i = 0; i < tabs.length; ++i) if (tabs[i].page === page || tabs[i].page.startsWith(page + "/") || (lang === "tessh" && tabs[i].page === "tessh-guide")) {
+            currentTab = i
+            if (query && tabs[i].pageItem) tabs[i].pageItem.find(query)
+            return
+        }
         const t = tabComp.createObject(stack, { profile: profileFor(settings.default_profile).name, page: page, customTitle: own ? own[1] : guides[lang] || (lang + " guide") })
         tabs.splice(tabs.length, 0, t)
         tabs = tabs.slice()
         currentTab = tabs.length - 1
         treeRev++
-        Qt.callLater(() => { if (t.pageItem) t.pageItem.focusFind() })
+        Qt.callLater(() => { if (t.pageItem) { if (query) t.pageItem.find(query); else t.pageItem.focusFind() } })
     }
 
     // ---- pane tree -----------------------------------------------------

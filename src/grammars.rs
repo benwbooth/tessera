@@ -243,6 +243,15 @@ fn unpack(archive: &Path, members: &[String]) -> Result<(), String> {
 /// they inherit) from Helix's archive, fetching that first if need be.
 /// Ok(true) when something was added.
 pub fn ensure(name: &str) -> Result<bool, String> {
+    let r = ensure_files(name);
+    // (Tried now, so it's ready, or known to be left alone, when this returns.)
+    if grammar_file(name).is_some() {
+        checked(name, true);
+    }
+    r
+}
+
+fn ensure_files(name: &str) -> Result<bool, String> {
     if grammar_file(name).is_some() && queries_here(query_name(name), 0) {
         return Ok(false);
     }
@@ -316,6 +325,147 @@ pub fn highlights(name: &str) -> String {
 
 /// Load a grammar (kept loaded for the rest of the run).
 pub fn load(name: &str) -> Option<Language> {
+    // (A grammar is compiled code: one that crashes would take Tessera with
+    // it, as Helix's HCL does on any string. Each is tried in a child first.)
+    // (Never waits: an untried grammar is tried in the background and its
+    // code is plain until then; ensure() waits for it.)
+    if !checked(name, false) {
+        return None;
+    }
+    load_unchecked(name)
+}
+
+/// The flag a child is started with to try a grammar (`--tessera-check-grammar NAME`).
+pub const CHECK_ARG: &str = "--tessera-check-grammar";
+
+/// Call first in main: as that child, try the grammar and exit (0 when it
+/// parsed and highlighted the samples).
+pub fn check_from_args() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some(CHECK_ARG) {
+        std::process::exit(if try_grammar(args.get(2).map(String::as_str).unwrap_or("")) { 0 } else { 3 });
+    }
+}
+
+/// Text with the things scanners trip on: strings of every kind, comments,
+/// numbers, heredocs, tags, interpolation.
+const SAMPLE: &str = "a = \"x\" 'y' `z` # c\n// c\n/* c */ -- c ; c\nfn f(x) { return [1, 2.5e3, 0x1F, -7] }\nb = <<EOT\nhi ${x}\nEOT\n<a b=\"c\">d</a>\n$x ${y} @z %w \\n\n\t  end\n";
+
+fn try_grammar(name: &str) -> bool {
+    let Some(lang) = load_unchecked(name) else { return false };
+    let mut p = tree_sitter::Parser::new();
+    if p.set_language(&lang).is_err() {
+        return false;
+    }
+    for text in [SAMPLE, "", "\"", "x", &SAMPLE[..SAMPLE.len() / 2]] {
+        let Some(tree) = p.parse(text, None) else { continue };
+        if let Ok(q) = tree_sitter::Query::new(&lang, &highlights(name)) {
+            use streaming_iterator::StreamingIterator;
+            let mut c = tree_sitter::QueryCursor::new();
+            let mut caps = c.captures(&q, tree.root_node(), text.as_bytes());
+            while caps.next().is_some() {}
+        }
+    }
+    true
+}
+
+/// Whether the grammar came through its trial (tried once per grammar
+/// file, in a child, 10 s at most; kept in checked.tsv). Not tried yet:
+/// `wait` tries it now; otherwise it's tried in the background (false meanwhile).
+fn checked(name: &str, wait: bool) -> bool {
+    static MEMO: OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> = OnceLock::new();
+    static TRYING: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let memo = MEMO.get_or_init(Default::default);
+    if let Some(&ok) = memo.lock().unwrap().get(name) {
+        return ok;
+    }
+    if !wait {
+        // (Already decided on disk: that, no child.)
+        if let Some(ok) = kept_verdict(name) {
+            memo.lock().unwrap().insert(name.to_string(), ok);
+            return ok;
+        }
+        if TRYING.get_or_init(Default::default).lock().unwrap().insert(name.to_string()) {
+            let n = name.to_string();
+            std::thread::spawn(move || {
+                checked(&n, true);
+            });
+        }
+        return false;
+    }
+    let Some(file) = grammar_file(name) else { return false };
+    let key = verdict_key(name, &file);
+    let list = own_dir().join("checked.tsv");
+    let kept = std::fs::read_to_string(&list).unwrap_or_default();
+    let ok = match kept.lines().rev().find(|l| l.starts_with(&key)) {
+        Some(l) => l.ends_with("\tok"),
+        None => {
+            let ok = trial(name);
+            let _ = std::fs::create_dir_all(own_dir());
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&list) {
+                let _ = writeln!(f, "{key}{}", if ok { "ok" } else { "crashed" });
+            }
+            if !ok {
+                eprintln!("tessera: the {name} grammar crashed or hung when tried; its code is shown plain");
+            }
+            ok
+        }
+    };
+    memo.lock().unwrap().insert(name.to_string(), ok);
+    ok
+}
+
+/// What checked.tsv says of the grammar as it is now, if anything.
+fn kept_verdict(name: &str) -> Option<bool> {
+    let file = grammar_file(name)?;
+    let key = verdict_key(name, &file);
+    let kept = std::fs::read_to_string(own_dir().join("checked.tsv")).ok()?;
+    kept.lines().rev().find(|l| l.starts_with(&key)).map(|l| l.ends_with("\tok"))
+}
+
+fn verdict_key(name: &str, file: &Path) -> String {
+    let stamp = std::fs::metadata(file).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+    format!("{name}\t{}\t{stamp}\t", file.display())
+}
+
+/// The grammar tried in a child process: this program again with
+/// CHECK_ARG (in tests, the test that does the same).
+fn trial(name: &str) -> bool {
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let mut cmd = std::process::Command::new(exe);
+    if cfg!(test) {
+        cmd.args(["--ignored", "--exact", "grammars::trial_child::child", "--test-threads=1"]).env("TESSERA_TRY_GRAMMAR", name);
+    } else {
+        cmd.args([CHECK_ARG, name]);
+    }
+    let Ok(mut child) = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() else { return false };
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod trial_child {
+    /// The child side of a grammar's trial in tests (TESSERA_TRY_GRAMMAR).
+    #[test]
+    #[ignore]
+    fn child() {
+        let name = std::env::var("TESSERA_TRY_GRAMMAR").unwrap_or_default();
+        assert!(super::try_grammar(&name));
+    }
+}
+
+fn load_unchecked(name: &str) -> Option<Language> {
     let file = grammar_file(name)?;
     let lib = unsafe { libloading::Library::new(&file) }.ok()?;
     let lib: &'static libloading::Library = Box::leak(Box::new(lib));

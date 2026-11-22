@@ -770,6 +770,18 @@ Rectangle {
     // command line context, item, and kind.)
     property var fetchedDoc: ({})
     // (A command with examples of its own: its man page goes under them.)
+    // The word to look up in the guide: the selection (one line), else the
+    // word the cursor is in or just after.
+    function guideWord() {
+        const sel = edit.selectedText.trim()
+        if (sel !== "" && sel.length <= 60 && sel.indexOf("\n") < 0 && sel.indexOf("\u2029") < 0) return sel
+        const t = edit.text, p = edit.cursorPosition
+        let a = p, b = p
+        while (a > 0 && /[\w$@]/.test(t[a - 1])) a--
+        while (b < t.length && /\w/.test(t[b])) b++
+        const w = t.slice(a, b)
+        return /\w/.test(w) ? w : ""
+    }
     function docFetchable(i) { return !!i && (i.kind === "command" && box.lang !== "tessh" ? true : (i.doc || "") === "") && ["command", "option", "opt", "subcommand"].indexOf(i.kind) >= 0 && i.detail !== "keyword" && i.detail !== "help topic" }
     function docKind(i) { return i.kind === "command" && (i.doc || "") !== "" ? "man" : i.kind }
     function docLine() { return edit.text.slice(0, comp.start) }
@@ -1217,6 +1229,7 @@ Rectangle {
                     done = box.acceptGhost()
                 if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
                 if (!done && e.key === Qt.Key_Escape && box.aiBusy !== "") { box.controller.aiCancel(box.aiKey + "-cmd"); box.aiBusy = ""; done = true }
+                if (!done && e.key === Qt.Key_F1 && (e.modifiers & Qt.ShiftModifier) && guideChip.guide !== "") { Window.window.openGuide(guideChip.guide, box.guideWord()); done = true }
                 if (!done && e.key === Qt.Key_F1) { box.hoverAtPosition(cursorPosition); done = true }
                 if (!done) done = box.compKey(e)
                 if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
@@ -1474,12 +1487,14 @@ Rectangle {
         }
         Chip {
             base: box.color
+            id: guideChip
             readonly property string guide: Window.window && Window.window.guideFor ? Window.window.guideFor(box.lang, box.runShell || box.shellName) : ""
             visible: guide !== ""
             label: "Guide"
-            tip: guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
-                : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept"
-            onClicked: Window.window.openGuide(guide)
+            tip: (guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
+                : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept")
+                + ". Opens at the selected word, or the word at the cursor (Shift+F1)"
+            onClicked: Window.window.openGuide(guide, box.guideWord())
         }
         Chip {
             visible: box.jobsAll > 0

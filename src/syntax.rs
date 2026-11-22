@@ -64,10 +64,73 @@ fn make(name: &str) -> Option<Lang> {
         // Anything else: Helix's grammar for it, if there is one.
         other => (crate::grammars::load(other)?, crate::grammars::highlights(other)),
     };
-    // A query a grammar's version can't read leaves it unhighlighted (but
-    // still checked).
-    let query = Query::new(&language, &query).or_else(|_| Query::new(&language, "")).ok()?;
+    // (A rule this tree-sitter can't read is left out and the rest kept;
+    // with none readable, unhighlighted but still checked.)
+    let query = salvaged_query(&language, &query).or_else(|| Query::new(&language, "").ok())?;
     Some(Lang { language, query })
+}
+
+/// A highlights query, less the rules this tree-sitter can't read (Helix's
+/// are written for its own version: Solidity's used a form this one
+/// rejects, and the whole file failed). Each error's rule — the top-level
+/// form it's in — is taken out and the query tried again.
+fn salvaged_query(language: &Language, src: &str) -> Option<Query> {
+    let mut src = src.to_string();
+    for _ in 0..40 {
+        match Query::new(language, &src) {
+            Ok(q) => return Some(q),
+            Err(e) => {
+                let (start, end) = top_level_form(&src, e.offset)?;
+                src.replace_range(start..end, "");
+            }
+        }
+    }
+    None
+}
+
+/// The byte range of the top-level form (a rule) that `at` is in: from its
+/// opening bracket at depth 0 through its captures and predicates' end.
+fn top_level_form(src: &str, at: usize) -> Option<(usize, usize)> {
+    let b = src.as_bytes();
+    let (mut depth, mut start, mut i, mut in_str) = (0i32, None::<usize>, 0usize, false);
+    let mut forms: Vec<(usize, usize)> = vec![];
+    while i < b.len() {
+        let c = b[i];
+        if in_str {
+            if c == b'\\' {
+                i += 1;
+            } else if c == b'"' {
+                in_str = false;
+            }
+        } else if c == b';' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if c == b'"' {
+            in_str = true;
+        } else if c == b'(' || c == b'[' {
+            if depth == 0 && start.is_none() {
+                start = Some(i);
+            }
+            depth += 1;
+        } else if c == b')' || c == b']' {
+            depth -= 1;
+            if depth == 0 {
+                // (A rule runs on through its captures and quantifiers to the next form.)
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'(' && b[j] != b'[' && b[j] != b';' && b[j] != b'\n' {
+                    j += 1;
+                }
+                if let Some(s) = start.take() {
+                    forms.push((s, j));
+                }
+            }
+        }
+        i += 1;
+    }
+    // (Predicates on their own lines belong to the rule before them: the
+    // form at `at`, else the last one starting before it.)
+    forms.iter().copied().find(|&(s, e)| s <= at && at < e.max(s + 1)).or_else(|| forms.iter().copied().filter(|&(s, _)| s <= at).last()).or(forms.first().copied())
 }
 
 fn lang(name: &str) -> Option<&'static Lang> {
@@ -1077,6 +1140,19 @@ mod shell_check_tests {
 }
 
 #[cfg(test)]
+mod salvage {
+    /// A highlights query with a rule this tree-sitter can't read keeps the rest.
+    #[test]
+    fn bad_rule_left_out() {
+        let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
+        let src = format!("{}\n((no_such_node) @keyword)\n(identifier) @variable\n", tree_sitter_rust::HIGHLIGHTS_QUERY);
+        assert!(tree_sitter::Query::new(&lang, &src).is_err());
+        let q = super::salvaged_query(&lang, &src).expect("salvaged");
+        assert!(q.pattern_count() > 10);
+    }
+}
+
+#[cfg(test)]
 mod no_hang {
     /// Helix's Perl grammar never finished parsing this (no newline at the
     /// end); parsed as if it had one, it's quick. (Skipped without Helix's Perl.)
@@ -1100,5 +1176,22 @@ mod no_hang {
         let h = super::highlight_html("perl", code);
         assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
         assert!(h.contains("0xff") && h.ends_with("5.33.5)</span>") || h.ends_with("5.33.5)"), "{h}");
+    }
+}
+
+
+#[cfg(test)]
+mod grammar_probe {
+    /// $PROBE_LANG's highlighting of $PROBE_TEXT, with its grammar's
+    /// trial (`cargo test grammar_probe -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn probe() {
+        let (lang, text) = (std::env::var("PROBE_LANG").unwrap(), std::env::var("PROBE_TEXT").unwrap_or_else(|_| "a = 1\n".into()));
+        eprintln!("ensure: {:?}", crate::grammars::ensure(&lang));
+        eprintln!("load: {}", crate::grammars::load(&lang).is_some());
+        let q = crate::grammars::load(&lang).map(|l| tree_sitter::Query::new(&l, &crate::grammars::highlights(&lang)).map(|_| ()).map_err(|e| e.to_string()));
+        eprintln!("query: {q:?}");
+        eprintln!("{lang}: {}", super::highlight_html(&lang, &text));
     }
 }

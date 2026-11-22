@@ -46,6 +46,8 @@ mod snippets;
 use cxx_qt_lib::{QQmlApplicationEngine, QString, QUrl};
 
 fn main() {
+    // (As a child trying a grammar: that, and nothing else.)
+    grammars::check_from_args();
     // Windows has no HOME: settings and state live under the user profile
     // (~/.config/tessera and so on), as on the other systems.
     #[cfg(windows)]

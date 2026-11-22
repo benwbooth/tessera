@@ -82,7 +82,7 @@ Rectangle {
         }
     }
     function head() {
-        return "<style>" + page.css() + "</style>"
+        return "<style id='tessera-theme'>" + page.css() + "</style>"
             // (Links in the guide go to their heading; others open in the browser.)
             + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(!a)return;const h=a.getAttribute('href');e.preventDefault();"
             + "if(h.startsWith('#')){const t=document.getElementById(decodeURIComponent(h.slice(1)));if(t)t.scrollIntoView({block:'start'})}else if(/^(https?|mailto):/.test(h))window.open(h)})</script>"
@@ -113,6 +113,10 @@ Rectangle {
         + "if(!s.anim&&!s.raf&&!s.last)s.pos=e.scrollTop;"
         + "const w=ev.wheelDeltaY||0;if(ev.deltaMode===0&&w!==0&&w%120===0)notches(e,s,w/120);else pixels(e,s,ev.deltaMode===1?ev.deltaY*40:ev.deltaY)},{passive:false});"
         + "addEventListener('keydown',()=>S.forEach(stop));addEventListener('mousedown',()=>S.forEach(s=>{stop(s)}))})();"
+    // (The theme changed, or the profile's colours or font: the open page
+    // takes the new style at once, nothing loaded again.)
+    readonly property string liveCss: css()
+    onLiveCssChanged: web.runJavaScript("(()=>{const s=document.getElementById('tessera-theme');if(s)s.textContent=" + JSON.stringify(liveCss) + "})()")
     function shell(body) { return "<!doctype html><html><head><meta charset='utf-8'>" + head() + "</head><body>" + body + "</body></html>" }
     // (Another guide chosen while one is fetched: that one when it's done.)
     property string loadingKey: ""
