@@ -208,10 +208,14 @@ pub fn highlight_html(lang_name: &str, text: &str) -> String {
     if p.set_language(&l.language).is_err() {
         return esc(text);
     }
-    let Some(tree) = p.parse(text, None) else { return esc(text) };
+    // (A time limit too: a guide draws hundreds of blocks. Past it, the
+    // block is plain.)
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+    let Some(tree) = parse(&mut p, text, Some(deadline)) else { return esc(text) };
     // (The innermost capture wins: kinds by byte, later captures over earlier.)
     let mut kind: Vec<Option<&str>> = vec![None; text.len()];
-    for (s, e, k) in capture_spans(lang_name, l, tree.root_node(), text) {
+    let Some(spans) = capture_spans_within(lang_name, l, tree.root_node(), text, Some(deadline)) else { return esc(text) };
+    for (s, e, k) in spans {
         for b in s..e {
             kind[b] = Some(k);
         }
@@ -257,12 +261,13 @@ pub fn analyze(lang_name: &str, text: &str) -> String {
     let Some(tree) = PARSER.with(|p| {
         let mut p = p.borrow_mut();
         p.set_language(&l.language).ok()?;
-        p.parse(text, None)
+        parse(&mut p, text, Some(std::time::Instant::now() + std::time::Duration::from_secs(2)))
     }) else {
         return json!({"spans": [], "errors": []}).to_string();
     };
     // Byte offset -> UTF-16 offset.
-    let mut u16_at = vec![0u32; text.len() + 1];
+    // (One past the end too: the parse's newline.)
+    let mut u16_at = vec![0u32; text.len() + 2];
     let mut n = 0u32;
     for (i, c) in text.char_indices() {
         for b in 0..c.len_utf8() {
@@ -271,6 +276,7 @@ pub fn analyze(lang_name: &str, text: &str) -> String {
         n += c.len_utf16() as u32;
     }
     u16_at[text.len()] = n;
+    u16_at[text.len() + 1] = n;
     let range = |node: Node| {
         let (s, e) = (u16_at[node.start_byte()], u16_at[node.end_byte()]);
         (s, e.saturating_sub(s))
@@ -308,13 +314,33 @@ pub fn analyze(lang_name: &str, text: &str) -> String {
     json!({"spans": spans, "errors": errors}).to_string()
 }
 
+/// `text` parsed as if it ended with a newline (offsets unchanged; the
+/// tree may reach one byte past the end): Helix's Perl grammar never
+/// finished on a block of number literals that didn't end with one. Gives
+/// up (None) once `deadline` passes.
+fn parse(p: &mut Parser, text: &str, deadline: Option<std::time::Instant>) -> Option<tree_sitter::Tree> {
+    let bytes = text.as_bytes();
+    let pad: &[u8] = if text.ends_with('\n') { b"" } else { b"\n" };
+    let mut read = |i: usize, _: tree_sitter::Point| -> &[u8] {
+        if i < bytes.len() {
+            &bytes[i..]
+        } else if i == bytes.len() {
+            pad
+        } else {
+            b""
+        }
+    };
+    let mut over = |_: &tree_sitter::ParseState| if deadline.is_some_and(|d| std::time::Instant::now() > d) { std::ops::ControlFlow::Break(()) } else { std::ops::ControlFlow::Continue(()) };
+    p.parse_with_options(&mut read, None, Some(tree_sitter::ParseOptions::new().progress_callback(&mut over)))
+}
+
 /// A language's highlight spans as byte ranges: (start, end, kind). None
 /// when there's no grammar for it here.
 fn byte_spans(lang_name: &str, text: &str) -> Option<Vec<(usize, usize, &'static str)>> {
     let l = lang(lang_name)?;
     let mut p = Parser::new();
     p.set_language(&l.language).ok()?;
-    let tree = p.parse(text, None)?;
+    let tree = parse(&mut p, text, Some(std::time::Instant::now() + std::time::Duration::from_secs(2)))?;
     // (Kinds as 'static: the highlighter's known names.)
     Some(capture_spans(lang_name, l, tree.root_node(), text)
         .into_iter()
@@ -326,10 +352,24 @@ fn byte_spans(lang_name: &str, text: &str) -> Option<Vec<(usize, usize, &'static
 /// over earlier; tessh's "…" strings split so what they interpolate reads
 /// as code.
 fn capture_spans(lang_name: &str, l: &'static Lang, root: Node, text: &str) -> Vec<(usize, usize, &'static str)> {
+    capture_spans_within(lang_name, l, root, text, None).unwrap_or_default()
+}
+
+/// The captures, or None when `deadline` passed first.
+fn capture_spans_within(lang_name: &str, l: &'static Lang, root: Node, text: &str, deadline: Option<std::time::Instant>) -> Option<Vec<(usize, usize, &'static str)>> {
     let names = l.query.capture_names();
     let mut out = Vec::new();
     let mut cursor = QueryCursor::new();
-    let mut caps = cursor.captures(&l.query, root, text.as_bytes());
+    let mut late = false;
+    let mut check = |_: &tree_sitter::QueryCursorState| {
+        if deadline.is_some_and(|d| std::time::Instant::now() > d) {
+            late = true;
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    };
+    let mut caps = cursor.captures_with_options(&l.query, root, text.as_bytes(), tree_sitter::QueryCursorOptions::new().progress_callback(&mut check));
     while let Some((m, i)) = caps.next() {
         let c = m.captures()[*i];
         let (s, e) = (c.node.start_byte(), c.node.end_byte().min(text.len()));
@@ -337,10 +377,14 @@ fn capture_spans(lang_name: &str, l: &'static Lang, root: Node, text: &str) -> V
             out.push((s, e, kind_of(names[c.index as usize])));
         }
     }
+    drop(caps);
+    if late {
+        return None;
+    }
     if lang_name == "tessh" {
         out = out.into_iter().flat_map(|(s, e, k)| if k == "string" { tessh_string(text, s, e) } else { vec![(s, e, k)] }).collect();
     }
-    out
+    Some(out)
 }
 
 /// tessh code inside a string (text[s..e]), highlighted on its own.
@@ -905,7 +949,7 @@ pub fn has_errors(lang_name: &str, text: &str) -> bool {
     if p.set_language(&l.language).is_err() {
         return false;
     }
-    p.parse(text, None).is_some_and(|t| t.root_node().has_error())
+    parse(&mut p, text, Some(std::time::Instant::now() + std::time::Duration::from_secs(2))).is_some_and(|t| t.root_node().has_error())
 }
 
 /// The shell's own syntax check: `zsh -n` (bash, fish) reads the line
@@ -1019,5 +1063,22 @@ mod shell_check_tests {
         assert_eq!(super::shell_check("bash", "echo hi && ls -la"), "[]");
         assert_ne!(super::shell_check("bash", "echo (hi"), "[]");
         assert_ne!(super::shell_check("bash", "if true; then echo x"), "[]");
+    }
+}
+
+#[cfg(test)]
+mod no_hang {
+    /// Helix's Perl grammar never finished parsing this (no newline at the
+    /// end); parsed as if it had one, it's quick. (Skipped without Helix's Perl.)
+    #[test]
+    fn perl_number_literals() {
+        if super::lang("perl").is_none() || !crate::grammars::available().iter().any(|n| n == "perl") {
+            return;
+        }
+        let code = "0\n12345\n4_294_967_296       # underscore for legibility\n0xff                # hex\n0Xdead_beef         # more hex\n0b01_1011           # binary\n0B110               # more binary\n0377                # octal (begins with 0 not followed by [bBxX])\n0o12_345            # alternative octal (introduced in Perl 5.33.5)";
+        let t = std::time::Instant::now();
+        let h = super::highlight_html("perl", code);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+        assert!(h.contains("0xff") && h.ends_with("5.33.5)</span>") || h.ends_with("5.33.5)"), "{h}");
     }
 }

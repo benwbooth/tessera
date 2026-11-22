@@ -56,7 +56,7 @@ impl Guide {
 const GNU_DROP: &str = ".contents, .shortcontents, .contents-heading, .shortcontents-heading, a.copiable-link, .nav-panel, .header, .navigation, hr, .chapter-toc, .section-toc";
 
 pub static GUIDES: &[Guide] = &[
-    gi(&["python"], "The Python Tutorial", "PSF License 2.0", "https://docs.python.org/3/license.html",
+    gi(&["python", "python3"], "The Python Tutorial", "PSF License 2.0", "https://docs.python.org/3/license.html",
         ("https://docs.python.org/3/tutorial/index.html", "div.toctree-wrapper li.toctree-l1 > a"), "div.body", "python"),
     g(&["rust"], "The Rust Programming Language", "MIT or Apache-2.0", "https://github.com/rust-lang/book/blob/main/LICENSE-MIT",
         &["https://doc.rust-lang.org/book/print.html"], "main", "rust").drop(".boring, .buttons"),
@@ -68,9 +68,9 @@ pub static GUIDES: &[Guide] = &[
         &["https://fishshell.com/docs/current/tutorial.html"], "div.body, div[role=main]", "fish"),
     g(&["lua"], "Lua 5.4 Reference Manual", "MIT (Lua license)", "https://www.lua.org/license.html",
         &["https://www.lua.org/manual/5.4/manual.html"], "body", "lua"),
-    g(&["go"], "Effective Go and the Go Spec", "CC BY 4.0 (code BSD-3-Clause)", "https://go.dev/copyright",
+    g(&["go", "golang"], "Effective Go and the Go Spec", "CC BY 4.0 (code BSD-3-Clause)", "https://go.dev/copyright",
         &["https://go.dev/doc/effective_go", "https://go.dev/ref/spec"], "#main-content article, article, main", "go"),
-    g(&["javascript"], "MDN JavaScript Guide", "CC BY-SA 2.5", "https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license", &[
+    g(&["javascript", "node", "js"], "MDN JavaScript Guide", "CC BY-SA 2.5", "https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license", &[
         "https://raw.githubusercontent.com/mdn/content/main/files/en-us/web/javascript/guide/introduction/index.md",
         "https://raw.githubusercontent.com/mdn/content/main/files/en-us/web/javascript/guide/grammar_and_types/index.md",
         "https://raw.githubusercontent.com/mdn/content/main/files/en-us/web/javascript/guide/control_flow_and_error_handling/index.md",
@@ -87,7 +87,7 @@ pub static GUIDES: &[Guide] = &[
         "https://raw.githubusercontent.com/mdn/content/main/files/en-us/web/javascript/guide/iterators_and_generators/index.md",
         "https://raw.githubusercontent.com/mdn/content/main/files/en-us/web/javascript/guide/modules/index.md",
     ], "", "javascript"),
-    g(&["typescript", "tsx"], "The TypeScript Handbook", "CC BY 4.0", "https://github.com/microsoft/TypeScript-Website/blob/v2/LICENSE", &[
+    g(&["typescript", "tsx", "ts"], "The TypeScript Handbook", "CC BY 4.0", "https://github.com/microsoft/TypeScript-Website/blob/v2/LICENSE", &[
         "https://www.typescriptlang.org/docs/handbook/intro.html",
         "https://www.typescriptlang.org/docs/handbook/2/basic-types.html",
         "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html",
@@ -104,7 +104,7 @@ pub static GUIDES: &[Guide] = &[
     ], "article", "typescript"),
     g(&["c"], "GNU C Language Intro and Reference Manual", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html",
         &["https://www.gnu.org/software/c-intro-and-ref/manual/c-intro-and-ref.html"], "body", "c").drop(GNU_DROP),
-    g(&["cpp"], "C++ language (cppreference.com)", "CC BY-SA 3.0", "https://en.cppreference.com/w/Cppreference:Copyright/CC-BY-SA", &[
+    g(&["cpp", "c++", "cxx"], "C++ language (cppreference.com)", "CC BY-SA 3.0", "https://en.cppreference.com/w/Cppreference:Copyright/CC-BY-SA", &[
         "https://en.cppreference.com/w/cpp/language/basic_concepts",
         "https://en.cppreference.com/w/cpp/language/types",
         "https://en.cppreference.com/w/cpp/language/declarations",
@@ -127,7 +127,7 @@ pub static GUIDES: &[Guide] = &[
         "https://perldoc.perl.org/perlintro", "https://perldoc.perl.org/perldata", "https://perldoc.perl.org/perlsyn",
         "https://perldoc.perl.org/perlop", "https://perldoc.perl.org/perlsub", "https://perldoc.perl.org/perlreftut",
         "https://perldoc.perl.org/perlretut", "https://perldoc.perl.org/perlootut",
-    ], "#perldocdiv, main", "perl"),
+    ], "#perldocdiv, main", "perl").drop("a.permalink, h1#toc, h1#toc + ul, #more, #breadcrumbs"),
     g(&["php"], "PHP Manual: Getting Started and Language Reference", "CC BY 3.0", "https://www.php.net/manual/en/copyright.php", &[
         "https://www.php.net/manual/en/introduction.php", "https://www.php.net/manual/en/tutorial.firstpage.php",
         "https://www.php.net/manual/en/tutorial.useful.php", "https://www.php.net/manual/en/tutorial.forms.php",
@@ -183,7 +183,7 @@ pub static GUIDES: &[Guide] = &[
         "https://raw.githubusercontent.com/MicrosoftDocs/PowerShell-Docs/main/reference/docs-conceptual/learn/ps101/09-functions.md",
         "https://raw.githubusercontent.com/MicrosoftDocs/PowerShell-Docs/main/reference/docs-conceptual/learn/ps101/10-script-modules.md",
     ], "", "powershell"),
-    g(&["nu"], "The Nushell Book", "MIT", "https://github.com/nushell/nushell.github.io/blob/main/LICENSE", &[
+    g(&["nu", "nushell"], "The Nushell Book", "MIT", "https://github.com/nushell/nushell.github.io/blob/main/LICENSE", &[
         "https://raw.githubusercontent.com/nushell/nushell.github.io/main/book/quick_tour.md",
         "https://raw.githubusercontent.com/nushell/nushell.github.io/main/book/moving_around.md",
         "https://raw.githubusercontent.com/nushell/nushell.github.io/main/book/thinking_in_nu.md",
@@ -207,13 +207,13 @@ pub static GUIDES: &[Guide] = &[
         &["https://nix.dev/tutorials/nix-language"], "article, div[role=main]", "nix"),
     gi(&["octave", "matlab"], "GNU Octave: Getting Started", "Verbatim copying permitted (GNU Octave manual)", "https://docs.octave.org/latest/",
         ("https://docs.octave.org/latest/Getting-Started.html", "ul.mini-toc a, ul.menu a"), "body", "octave").drop(GNU_DROP),
-    g(&["sql"], "SQL As Understood By SQLite", "Public domain", "https://www.sqlite.org/copyright.html", &[
+    g(&["sql", "sqlite", "duckdb"], "SQL As Understood By SQLite", "Public domain", "https://www.sqlite.org/copyright.html", &[
         "https://www.sqlite.org/lang_select.html", "https://www.sqlite.org/lang_insert.html", "https://www.sqlite.org/lang_update.html",
         "https://www.sqlite.org/lang_delete.html", "https://www.sqlite.org/lang_createtable.html", "https://www.sqlite.org/lang_expr.html",
         "https://www.sqlite.org/lang_with.html", "https://www.sqlite.org/lang_aggfunc.html", "https://www.sqlite.org/lang_corefunc.html",
         "https://www.sqlite.org/windowfunctions.html", "https://www.sqlite.org/lang_transaction.html",
     ], "div.fancy, body", "sql").drop(".nosearch, .menu, .tooltip, svg"),
-    gi(&["haskell"], "A Gentle Introduction to Haskell 98", "Free to copy (Hudak, Peterson, Fasel)", "https://www.haskell.org/tutorial/",
+    gi(&["haskell", "ghc"], "A Gentle Introduction to Haskell 98", "Free to copy (Hudak, Peterson, Fasel)", "https://www.haskell.org/tutorial/",
         ("https://www.haskell.org/tutorial/", "a[href$='.html']"), "body", "haskell").code_sel("tt:has(br)"),
     g(&["ocaml"], "The OCaml Manual: An Introduction to OCaml", "CC BY-SA 4.0", "https://ocaml.org/manual/latest/", &[
         "https://ocaml.org/manual/latest/coreexamples.html", "https://ocaml.org/manual/latest/moduleexamples.html",
@@ -230,7 +230,7 @@ pub static GUIDES: &[Guide] = &[
         "https://www.gnu.org/software/guile/manual/html_node/About-Expressions.html",
         "https://www.gnu.org/software/guile/manual/html_node/About-Closure.html",
     ], "body", "scheme").drop(GNU_DROP),
-    g(&["common-lisp", "lisp"], "The Common Lisp Cookbook", "See the Cookbook's license", "https://github.com/LispCookbook/cl-cookbook", &[
+    g(&["common-lisp", "lisp", "commonlisp"], "The Common Lisp Cookbook", "See the Cookbook's license", "https://github.com/LispCookbook/cl-cookbook", &[
         "https://raw.githubusercontent.com/LispCookbook/cl-cookbook/master/getting-started.md",
         "https://raw.githubusercontent.com/LispCookbook/cl-cookbook/master/data-structures.md",
         "https://raw.githubusercontent.com/LispCookbook/cl-cookbook/master/strings.md",
@@ -272,9 +272,9 @@ pub static GUIDES: &[Guide] = &[
     ], "", "crystal"),
     g(&["v"], "V Documentation", "MIT", "https://github.com/vlang/v/blob/master/LICENSE",
         &["https://raw.githubusercontent.com/vlang/v/master/doc/docs.md"], "", "v"),
-    g(&["fsharp"], "Tour of F#", "CC BY 4.0", "https://github.com/dotnet/docs/blob/main/LICENSE",
+    g(&["fsharp", "f#"], "Tour of F#", "CC BY 4.0", "https://github.com/dotnet/docs/blob/main/LICENSE",
         &["https://raw.githubusercontent.com/dotnet/docs/main/docs/fsharp/tour.md"], "", "fsharp"),
-    g(&["c-sharp"], "A tour of the C# language", "CC BY 4.0", "https://github.com/dotnet/docs/blob/main/LICENSE", &[
+    g(&["c-sharp", "csharp", "c#", "cs"], "A tour of the C# language", "CC BY 4.0", "https://github.com/dotnet/docs/blob/main/LICENSE", &[
         "https://raw.githubusercontent.com/dotnet/docs/main/docs/csharp/tour-of-csharp/overview.md",
         "https://raw.githubusercontent.com/dotnet/docs/main/docs/csharp/tour-of-csharp/strategy.md",
     ], "", "c-sharp"),
@@ -323,12 +323,21 @@ pub static GUIDES: &[Guide] = &[
         &["https://koka-lang.github.io/koka/doc/book.html"], "body", "koka").drop(".toc, .sidepanel, #sidetoc"),
     gi(&["lean"], "Functional Programming in Lean", "CC BY 4.0", "https://lean-lang.org/functional_programming_in_lean/",
         ("https://lean-lang.org/functional_programming_in_lean/", "a[href*='/#']"), "main", "lean"),
-    g(&["luau"], "Luau Syntax and Type Checking", "MIT", "https://github.com/luau-lang/luau/blob/master/LICENSE.txt",
-        &["https://luau.org/syntax", "https://luau.org/typecheck"], "main, article", "luau"),
+    g(&["luau"], "Luau: Syntax and Types", "MIT", "https://github.com/luau-lang/site/blob/master/LICENSE", &[
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/getting-started/intro.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/getting-started/syntax.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/types/overview.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/types/basic-types.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/types/tables.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/types/generics.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/types/unions-and-intersections.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/types/refinements.md",
+        "https://raw.githubusercontent.com/luau-lang/site/master/src/content/docs/types/object-oriented-programs.md",
+    ], "", "luau"),
     g(&["odin"], "Odin Overview", "BSD-3-Clause", "https://github.com/odin-lang/Odin/blob/master/LICENSE",
         &["https://odin-lang.org/docs/overview/"], "main, article", "odin").drop("#TableOfContents, nav"),
     gi(&["pascal"], "Free Pascal Reference Guide", "Free Pascal documentation license (free to copy)", "https://www.freepascal.org/docs.html",
-        ("https://www.freepascal.org/docs-html/ref/ref.html", "a[href^='refch'], a[href^='refse']"), "body", "pascal"),
+        ("https://www.freepascal.org/docs-html/ref/ref.html", "a[href^='refch'], a[href^='refse']"), "body", "pascal").code_sel("div.verbatim"),
     gi(&["ada"], "Introduction to Ada (learn.adacore.com)", "CC BY-SA 4.0", "https://github.com/AdaCore/learn/blob/main/LICENSE",
         ("https://learn.adacore.com/courses/intro-to-ada/index.html", "div.toctree-wrapper li.toctree-l1 > a"), "div[role=main], div.body", "ada"),
     g(&["gleam"], "The Gleam Language Tour", "Apache-2.0", "https://github.com/gleam-lang/language-tour/blob/main/LICENCE",
@@ -365,12 +374,119 @@ pub static GUIDES: &[Guide] = &[
     ], "", "nickel"),
     g(&["dhall"], "Dhall Language Tour", "BSD-3-Clause", "https://github.com/dhall-lang/dhall-lang/blob/master/LICENSE",
         &["https://raw.githubusercontent.com/dhall-lang/dhall-lang/master/docs/tutorials/Language-Tour.md"], "", "dhall"),
-    gi(&["cue"], "A Tour of CUE", "Apache-2.0", "https://github.com/cue-lang/cuelang.org/blob/master/LICENSE",
-        ("https://cuelang.org/docs/tour/", "main a[href^='/docs/tour/']"), "main article, main", "cue"),
+    g(&["cue"], "A Tour of CUE", "Apache-2.0", "https://github.com/cue-lang/cuelang.org/blob/master/LICENSE", &[
+        "https://cuelang.org/docs/tour/basics/json-superset/",
+        "https://cuelang.org/docs/tour/basics/types-are-values/",
+        "https://cuelang.org/docs/tour/basics/unification/",
+        "https://cuelang.org/docs/tour/basics/constraints/",
+        "https://cuelang.org/docs/tour/basics/definitions/",
+        "https://cuelang.org/docs/tour/basics/validation/",
+        "https://cuelang.org/docs/tour/basics/order-irrelevance/",
+        "https://cuelang.org/docs/tour/basics/folding-structs/",
+        "https://cuelang.org/docs/tour/types/types/",
+        "https://cuelang.org/docs/tour/types/bottom/",
+        "https://cuelang.org/docs/tour/types/top/",
+        "https://cuelang.org/docs/tour/types/numbers/",
+        "https://cuelang.org/docs/tour/types/stringlit/",
+        "https://cuelang.org/docs/tour/types/stringraw/",
+        "https://cuelang.org/docs/tour/types/bytes/",
+        "https://cuelang.org/docs/tour/types/structs/",
+        "https://cuelang.org/docs/tour/types/closed/",
+        "https://cuelang.org/docs/tour/types/definitions/",
+        "https://cuelang.org/docs/tour/types/value-constraints/",
+        "https://cuelang.org/docs/tour/types/disjunctions/",
+        "https://cuelang.org/docs/tour/types/defaults/",
+        "https://cuelang.org/docs/tour/types/sumstruct/",
+        "https://cuelang.org/docs/tour/types/bounds/",
+        "https://cuelang.org/docs/tour/types/bounddef/",
+        "https://cuelang.org/docs/tour/types/lists/",
+        "https://cuelang.org/docs/tour/types/templates/",
+        "https://cuelang.org/docs/tour/references/scopes/",
+        "https://cuelang.org/docs/tour/references/selectors/",
+        "https://cuelang.org/docs/tour/references/aliases/",
+        "https://cuelang.org/docs/tour/references/emit/",
+        "https://cuelang.org/docs/tour/references/cycle/",
+        "https://cuelang.org/docs/tour/references/cycleref/",
+        "https://cuelang.org/docs/tour/references/hidden/",
+        "https://cuelang.org/docs/tour/expressions/operators/",
+        "https://cuelang.org/docs/tour/expressions/interpolation/",
+        "https://cuelang.org/docs/tour/expressions/dynamic-fields/",
+        "https://cuelang.org/docs/tour/expressions/conditional/",
+        "https://cuelang.org/docs/tour/expressions/listcomp/",
+        "https://cuelang.org/docs/tour/expressions/fieldcomp/",
+        "https://cuelang.org/docs/tour/expressions/query-projection/",
+        "https://cuelang.org/docs/tour/expressions/regexp/",
+        "https://cuelang.org/docs/tour/expressions/coalesce/",
+        "https://cuelang.org/docs/tour/packages/packages/",
+        "https://cuelang.org/docs/tour/packages/imports/",
+        "https://cuelang.org/docs/tour/packages/standard-library/",
+    ], "main article, main", "cue"),
     gi(&["pkl"], "Pkl Language Tutorial", "Apache-2.0", "https://github.com/apple/pkl/blob/main/LICENSE.txt",
         ("https://pkl-lang.org/main/current/language-tutorial/index.html", "article a[href$='.html']"), "article.doc, article", "pkl"),
     g(&["rego"], "Rego: Policy Language", "Apache-2.0", "https://github.com/open-policy-agent/opa/blob/main/LICENSE",
         &["https://www.openpolicyagent.org/docs/policy-language"], "article, main", "rego"),
+    g(&["d"], "The D Language Tour: D's Basics", "Boost-1.0 (D Language Tour)", "https://github.com/dlang-tour/core/blob/master/LICENSE.txt", &[
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/imports-and-modules.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/basic-types.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/memory.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/type-qualifiers.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/controlling-flow.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/functions.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/structs.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/arrays.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/slices.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/alias-strings.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/loops.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/foreach.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/ranges.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/associative-arrays.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/classes.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/interfaces.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/templates.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/delegates.md",
+        "https://raw.githubusercontent.com/dlang-tour/english/master/basics/exceptions.md",
+    ], "", "d"),
+    g(&["sml"], "SML Help (Standard ML)", "© the SML Help authors; read from the site, not redistributed", "https://github.com/smlhelp/book", &[
+        "https://smlhelp.github.io/book/docs/start/install/", "https://smlhelp.github.io/book/docs/types/",
+        "https://smlhelp.github.io/book/docs/concepts/basic/", "https://smlhelp.github.io/book/docs/examples/basics/",
+        "https://smlhelp.github.io/book/docs/debugging/errors/", "https://smlhelp.github.io/book/docs/libs/basis/",
+    ], "article, main", "sml"),
+    g(&["prql"], "The PRQL Language Book", "Apache-2.0", "https://github.com/PRQL/prql/blob/main/LICENSE",
+        &["https://prql-lang.org/book/print.html"], "main", "prql").drop(".buttons"),
+    g(&["scss", "sass"], "Sass Basics", "MIT", "https://github.com/sass/sass-site/blob/main/LICENSE",
+        &["https://sass-lang.com/guide/"], "main", "scss").drop(".sl-c-callout--impl-status, nav, .sl-l-medium-holy-grail__navigation"),
+    g(&["make"], "GNU make Manual", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html",
+        &["https://www.gnu.org/software/make/manual/make.html"], "body", "make").drop(GNU_DROP),
+    gi(&["cmake"], "CMake Tutorial", "BSD-3-Clause", "https://cmake.org/licensing/",
+        ("https://cmake.org/cmake/help/latest/guide/tutorial/index.html", "div.toctree-wrapper a"), "div[role=main], div.body", "cmake"),
+    g(&["typst"], "Typst Tutorial", "Apache-2.0", "https://github.com/typst/typst/blob/main/LICENSE", &[
+        "https://typst.app/docs/tutorial/", "https://typst.app/docs/tutorial/writing-in-typst/", "https://typst.app/docs/tutorial/formatting/",
+        "https://typst.app/docs/tutorial/advanced-styling/", "https://typst.app/docs/tutorial/making-a-template/",
+    ], "main", "typst").drop("nav, .page-nav, .previews"),
+    g(&["dot", "graphviz"], "The DOT Language (Graphviz)", "EPL-2.0", "https://graphviz.org/license/", &[
+        "https://graphviz.org/doc/info/lang.html", "https://graphviz.org/doc/info/attrs.html", "https://graphviz.org/doc/info/shapes.html",
+    ], "main .td-content, main", "dot").drop(".td-page-meta, .td-toc, nav"),
+    g(&["latex", "tex"], "Learn LaTeX", "CC BY-SA 4.0", "https://github.com/learnlatex/learnlatex.github.io/blob/main/LICENSE.md", &[
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-01.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-02.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-03.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-04.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-05.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-06.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-07.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-08.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-09.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-10.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-11.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-12.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-13.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-14.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-15.md",
+        "https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-16.md",
+    ], "", "latex"),
+    g(&["openscad"], "The OpenSCAD Language (OpenSCAD User Manual)", "CC BY-SA 4.0 (Wikibooks)", "https://en.wikibooks.org/wiki/OpenSCAD_User_Manual",
+        &["https://en.wikibooks.org/wiki/OpenSCAD_User_Manual/The_OpenSCAD_Language"], "#mw-content-text", "openscad")
+        .drop(".mw-editsection, .toc, #toc, .navbox, .noprint, .mw-references-wrap"),
     g(&["json"], "Introducing JSON (json.org)", "© JSON.org; read from json.org, not redistributed", "https://www.json.org/json-en.html",
         &["https://www.json.org/json-en.html"], "body", "json"),
     g(&["yaml"], "YAML 1.2.2 Specification", "Free to copy (the YAML spec's own terms)", "https://yaml.org/spec/1.2.2/",
@@ -432,11 +548,68 @@ pub fn page_html(lang: &str, refresh: bool) -> Result<String, String> {
         return Ok(crate::cells::tessh_manual_html());
     }
     let g = find(lang).ok_or_else(|| format!("No guide for {lang}."))?;
+    let r = page_html_of(g, refresh);
+    set_progress(g.langs[0], "");
+    r
+}
+
+/// What a guide being fetched is doing now ("" when nothing): for the page
+/// to show while it waits.
+pub fn progress(lang: &str) -> String {
+    let key = find(lang).map(|g| g.langs[0]).unwrap_or(lang);
+    progress_map().lock().unwrap().get(key).cloned().unwrap_or_default()
+}
+
+fn progress_map() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static P: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+fn set_progress(key: &str, what: &str) {
+    let mut m = progress_map().lock().unwrap();
+    if what.is_empty() {
+        m.remove(key);
+    } else {
+        m.insert(key.to_string(), what.to_string());
+    }
+}
+
+/// The drawn page is kept too (`LANG.body.html`, marked with the drawing's
+/// version), so a guide opens at once the second time.
+const RENDER_VERSION: &str = "<!-- tessera-guide-render 3 -->";
+/// Marks the kept Markdown: a guide converted by an older Tessera is
+/// fetched and converted again.
+const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 2 -->";
+
+fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
     let path = cache_path(g);
-    let md = match std::fs::read_to_string(&path) {
-        Ok(md) if !refresh => md,
+    let body_path = path.with_extension("body.html");
+    if !refresh {
+        let newer = |a: &std::path::Path, b: &std::path::Path| match (std::fs::metadata(a).and_then(|m| m.modified()), std::fs::metadata(b).and_then(|m| m.modified())) {
+            (Ok(x), Ok(y)) => x >= y,
+            _ => false,
+        };
+        if newer(&body_path, &path) {
+            if let Ok(b) = std::fs::read_to_string(&body_path) {
+                if let Some(body) = b.strip_prefix(RENDER_VERSION).and_then(|b| b.strip_prefix(CONVERT_VERSION)) {
+                    return Ok(body.to_string());
+                }
+            }
+        }
+    }
+    let kept = std::fs::read_to_string(&path).ok();
+    let md = match kept {
+        Some(md) if !refresh && md.starts_with(CONVERT_VERSION) => md,
         _ => {
-            let md = fetch_markdown(g)?;
+            // (A copy from an older conversion is fetched again, but still
+            // shown when the site can't be reached.)
+            let md = match fetch_markdown(g) {
+                Ok(md) => format!("{CONVERT_VERSION}\n{md}"),
+                Err(e) => match kept {
+                    Some(old) if !refresh => old,
+                    _ => return Err(e),
+                },
+            };
             let _ = std::fs::create_dir_all(cache_dir());
             let tmp = path.with_extension("md.part");
             if std::fs::write(&tmp, &md).is_ok() {
@@ -445,7 +618,32 @@ pub fn page_html(lang: &str, refresh: bool) -> Result<String, String> {
             md
         }
     };
-    Ok(crate::manual::manual_html(&md, g.code))
+    // (The grammars its code is in, unpacked first if need be, as the
+    // editor does: the guide's language and those its code blocks name.)
+    let mut langs: Vec<String> = vec![g.code.to_string()];
+    for l in md.lines().filter_map(|l| l.strip_prefix("```")) {
+        let l = crate::manual::code_lang(l, "");
+        if !l.is_empty() && !langs.contains(&l) && langs.len() < 6 {
+            langs.push(l);
+        }
+    }
+    let mut grammars_ok = true;
+    for l in &langs {
+        if !crate::syntax::is_builtin(l) && crate::grammars::is_known(l) {
+            set_progress(g.langs[0], &format!("Getting the {l} grammar…"));
+            grammars_ok &= crate::grammars::ensure(l).is_ok();
+        }
+    }
+    set_progress(g.langs[0], "Drawing the page…");
+    let body = crate::manual::manual_html(&md, g.code);
+    let tmp = body_path.with_extension("part");
+    // (Kept only for this conversion: an older one is redrawn after it's fetched again.)
+    // (Not kept when a grammar couldn't be had: it's drawn again next time.)
+    let mark = if md.starts_with(CONVERT_VERSION) { CONVERT_VERSION } else { "" };
+    if grammars_ok && std::fs::write(&tmp, format!("{RENDER_VERSION}{mark}{body}")).is_ok() {
+        let _ = std::fs::rename(&tmp, &body_path);
+    }
+    Ok(body)
 }
 
 /// A guide's page written out whole (`head`: its style and script), for
@@ -477,17 +675,30 @@ fn today() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// A page from the first of its addresses that answers ("A | B": B is
-/// another copy of the same page).
+/// A page from whichever of its addresses answers first ("A | B": B is
+/// another copy of the same page; both are asked at once, so a site that
+/// doesn't answer costs no time).
 fn get_any(urls: &str) -> Result<String, String> {
-    let mut err = String::new();
-    for u in urls.split(" | ") {
-        match get(u.trim()) {
+    let urls: Vec<String> = urls.split(" | ").map(|u| u.trim().to_string()).collect();
+    if urls.len() == 1 {
+        return get(&urls[0]);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    for u in urls.clone() {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(get(&u));
+        });
+    }
+    drop(tx);
+    let mut errs = vec![];
+    for r in rx {
+        match r {
             Ok(t) => return Ok(t),
-            Err(e) => err = if err.is_empty() { e } else { format!("{err}; {e}") },
+            Err(e) => errs.push(e),
         }
     }
-    Err(err)
+    Err(errs.join("; "))
 }
 
 fn get(url: &str) -> Result<String, String> {
@@ -578,16 +789,6 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
     if urls.is_empty() {
         return Err("The guide has no pages.".into());
     }
-    // (Fetched side by side, a few at a time.)
-    let mut texts: Vec<Option<Result<String, String>>> = (0..urls.len()).map(|_| None).collect();
-    for (chunk_urls, chunk_out) in urls.chunks(6).zip(texts.chunks_mut(6)) {
-        std::thread::scope(|s| {
-            let hs: Vec<_> = chunk_urls.iter().map(|u| s.spawn(move || get_any(u))).collect();
-            for (h, o) in hs.into_iter().zip(chunk_out.iter_mut()) {
-                *o = Some(h.join().unwrap_or_else(|_| Err("fetch failed".into())));
-            }
-        });
-    }
     let page_ids: Vec<(String, usize)> = urls.iter().enumerate().flat_map(|(i, u)| u.split(" | ").map(move |u| (strip_fragment(u.trim()).to_string(), i))).collect();
     let mut out = String::new();
     let home = g.pages.first().copied().or(g.index.map(|i| i.0)).unwrap_or("").split(" | ").next().unwrap_or("").trim();
@@ -600,14 +801,42 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
         g.license,
         g.license_url
     ));
+    // (Fetched and converted side by side, eight at a time.)
+    let key = g.langs[0];
+    let n = urls.len();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    let mut parts: Vec<Option<Result<String, String>>> = (0..n).map(|_| None).collect();
+    set_progress(key, &format!("Fetching {n} page{}…", if n == 1 { "" } else { "s" }));
+    {
+        let slots: Vec<std::sync::Mutex<Option<Result<String, String>>>> = (0..n).map(|_| std::sync::Mutex::new(None)).collect();
+        std::thread::scope(|sc| {
+            for _ in 0..n.min(8) {
+                sc.spawn(|| loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if i >= n {
+                        break;
+                    }
+                    let r = get_any(&urls[i]).and_then(|text| {
+                        let u = urls[i].split(" | ").next().unwrap_or(&urls[i]).trim();
+                        let md = if u.ends_with(".md") { clean_markdown(&expand_includes(&text, u)) } else { html_to_markdown(&text, g)? };
+                        Ok(relink(&md, u, &page_ids))
+                    });
+                    *slots[i].lock().unwrap() = Some(r);
+                    let k = done.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    set_progress(key, &format!("Fetched {k} of {n} page{}…", if n == 1 { "" } else { "s" }));
+                });
+            }
+        });
+        for (o, s) in parts.iter_mut().zip(slots) {
+            *o = s.into_inner().unwrap();
+        }
+    }
     let mut got = 0;
     let mut failed = vec![];
-    for (i, (u, t)) in urls.iter().zip(texts).enumerate() {
-        match t.unwrap_or_else(|| Err("not fetched".into())) {
-            Ok(text) => {
-                let u = u.split(" | ").next().unwrap_or(u).trim();
-                let md = if u.ends_with(".md") { clean_markdown(&text) } else { html_to_markdown(&text, g)? };
-                let md = relink(&md, u, &page_ids);
+    for (i, part) in parts.into_iter().enumerate() {
+        match part.unwrap_or_else(|| Err("not fetched".into())) {
+            Ok(md) => {
                 out.push_str(&format!("<a id=\"page-{i}\"></a>\n\n{}\n\n", md.trim()));
                 got += 1;
             }
@@ -622,6 +851,77 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
         out.push_str(&format!("\n\n> {} page(s) couldn't be fetched: {}\n", failed.len(), failed.join("; ")));
     }
     Ok(out)
+}
+
+/// Code a Markdown page pulls in from its repository's files (Microsoft's
+/// docs: `[!code-fsharp[Name](~/path#L1-L9)]` and `:::code source="path"
+/// id="Region":::`), fetched and put in as code blocks.
+fn expand_includes(md: &str, page: &str) -> String {
+    use regex::Regex;
+    use std::sync::OnceLock;
+    static RES: OnceLock<[Regex; 2]> = OnceLock::new();
+    let [bang, colons] = RES.get_or_init(|| [
+        Regex::new(r"(?m)^[ \t>]*\[!code-([A-Za-z0-9#+-]+)\[[^\]]*\]\(([^)#\s]+)(?:#([^)\s]+))?\)\]\s*$").unwrap(),
+        Regex::new(r#"(?m)^[ \t>]*:::code\s+([^\n]*?):::\s*$"#).unwrap(),
+    ]);
+    if !md.contains("[!code-") && !md.contains(":::code") {
+        return md.to_string();
+    }
+    // (The repository's root, for "~/" paths: raw.githubusercontent.com/OWNER/REPO/BRANCH/.)
+    let root: String = page.splitn(7, '/').take(6).collect::<Vec<_>>().join("/") + "/";
+    let mut files: std::collections::HashMap<String, Option<String>> = Default::default();
+    let mut file = |path: &str| -> Option<String> {
+        let url = match path.strip_prefix("~/") {
+            Some(p) => format!("{root}{p}"),
+            None => join(page, path),
+        };
+        files.entry(url.clone()).or_insert_with(|| get(&url).ok()).clone()
+    };
+    let attr = |a: &str, name: &str| Regex::new(&format!(r#"\b{name}="([^"]*)""#)).ok().and_then(|r| r.captures(a).map(|c| c[1].to_string()));
+    let mut out = String::with_capacity(md.len());
+    for line in md.split_inclusive('\n') {
+        let (lang, path, part) = if let Some(c) = bang.captures(line) {
+            (c[1].to_string(), c[2].to_string(), c.get(3).map(|m| m.as_str().to_string()).unwrap_or_default())
+        } else if let Some(c) = colons.captures(line) {
+            let a = &c[1];
+            let part = attr(a, "id").or_else(|| attr(a, "range").map(|r| format!("L{}", r.replace('-', "-L")))).unwrap_or_default();
+            (attr(a, "language").unwrap_or_default(), attr(a, "source").unwrap_or_default(), part)
+        } else {
+            out.push_str(line);
+            continue;
+        };
+        let Some(text) = (if path.is_empty() { None } else { file(&path) }) else {
+            out.push_str(line);
+            continue;
+        };
+        let code = include_part(&text, &part);
+        out.push_str(&format!("\n```{}\n{}\n```\n", lang.to_lowercase(), code.trim_end()));
+    }
+    out
+}
+
+/// Lines `L5-L9`, or the region between `<Name>` and `</Name>` (in any
+/// comment), or the whole file.
+fn include_part(text: &str, part: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if let Some(r) = part.strip_prefix('L') {
+        let (a, b) = r.split_once("-L").or_else(|| r.split_once('-')).unwrap_or((r, r));
+        if let (Ok(a), Ok(b)) = (a.parse::<usize>(), b.trim_start_matches('L').parse::<usize>()) {
+            let (a, b) = (a.max(1) - 1, b.min(lines.len()));
+            if a < b {
+                return textwrap_dedent(&lines[a..b].join("\n"));
+            }
+        }
+    }
+    if !part.is_empty() {
+        let (open, close) = (format!("<{part}>"), format!("</{part}>"));
+        if let Some(s) = lines.iter().position(|l| l.contains(&open)) {
+            if let Some(e) = lines[s + 1..].iter().position(|l| l.contains(&close)) {
+                return textwrap_dedent(&lines[s + 1..s + 1 + e].join("\n"));
+            }
+        }
+    }
+    text.to_string()
 }
 
 /// Markdown from a repository, cleaned of what only its site understands:
@@ -708,6 +1008,15 @@ fn html_to_markdown(html: &str, g: &Guide) -> Result<String, String> {
     let inner = keep_ids(&code_in_pre(&inner));
     let conv = htmd::HtmlToMarkdown::builder().skip_tags(vec!["script", "style", "svg", "head", "form", "input", "select", "iframe"]).build();
     let md = conv.convert(&inner).map_err(|e| e.to_string())?;
+    // (A page with no top heading of its own (cppreference keeps its
+    // title outside the article) gets its title as one, for the contents.)
+    let md = if md.lines().any(|l| l.starts_with("# ")) {
+        md
+    } else {
+        let title = scraper::Selector::parse("h1#firstHeading, title").ok().and_then(|s| doc.select(&s).next()).map(|t| t.text().collect::<String>()).unwrap_or_default();
+        let title = title.split(" - ").next().unwrap_or("").split(" | ").next().unwrap_or("").split(" \u{2014} ").next().unwrap_or("").trim().to_string();
+        if title.is_empty() { md } else { format!("# {title}\n\n{md}") }
+    };
     let md = regex::Regex::new("\u{27e6}#([^\u{27e7}]*)\u{27e7}").unwrap().replace_all(&md, |c: &regex::Captures| format!("<a id=\"{}\"></a>", c[1].replace('\\', ""))).into_owned();
     // (Pilcrows and the like that headings carried as links.)
     Ok(md.replace(" ¶", "").replace("¶", "").replace("\u{a0}", " "))

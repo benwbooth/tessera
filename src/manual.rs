@@ -4,7 +4,10 @@
 /// Fence names as the editor's languages ("" for none to draw).
 pub fn code_lang(info: &str, default: &str) -> String {
     let l = info.split([' ', ',', '{']).next().unwrap_or("").trim().to_lowercase();
-    let l = l.trim_start_matches("language-");
+    // (Sites' class names: "language-rust", "mw-highlight-lang-cpp",
+    // "highlight-python3", "source-cpp": the name after the last prefix.)
+    let l = ["language-", "lang-", "highlight-", "source-"].iter().fold(l.as_str(), |l, p| l.rsplit_once(p).map(|(_, x)| x).unwrap_or(l)).to_string();
+    let l = l.as_str();
     let l = match l {
         "" => default,
         "py" | "python3" | "py3" | "pycon" | "ipython" | "ipython3" | "pytb" => "python",
@@ -173,6 +176,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn site_class_names() {
+        assert_eq!(code_lang("mw-highlight-lang-cpp", ""), "cpp");
+        assert_eq!(code_lang("language-rust", ""), "rust");
+        assert_eq!(code_lang("highlight-python3", ""), "python");
+        assert_eq!(code_lang("", "lua"), "lua");
+        assert_eq!(code_lang("text", "lua"), "");
+    }
+
+    #[test]
     fn raw_html_made_safe() {
         let m = manual_html("<p onclick=\"x()\">a</p>\n\n<script>alert(1)</script>\n\nb <a href=\"javascript:x()\">c</a> <img src=x onerror=y>\n", "");
         assert!(!m.contains("script") && !m.contains("onclick") && !m.contains("onerror") && !m.contains("javascript:"), "{m}");
@@ -186,3 +198,4 @@ mod tests {
     }
 
 }
+

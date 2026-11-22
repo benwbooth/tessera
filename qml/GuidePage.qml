@@ -18,6 +18,12 @@ Rectangle {
     color: Theme.bg
     function find(text) { findField.text = text; findField.forceActiveFocus() }
     function focusFind() { findField.forceActiveFocus() }
+    // (Test hook: a touchpad swipe, ten 30 px moves 16 ms apart, then how
+    // far it went by the end and after the glide.)
+    function testWheel() {
+        web.runJavaScript("(()=>{const m=document.querySelector('main');const y0=m.scrollTop;let n=0;const t=setInterval(()=>{m.dispatchEvent(new WheelEvent('wheel',{deltaY:30,deltaMode:0,bubbles:true,cancelable:true}));"
+            + "if(++n===10){clearInterval(t);const y1=m.scrollTop;setTimeout(()=>console.log('tessera-wheel-test: swipe '+(y1-y0)+' px, after glide '+(m.scrollTop-y0)+' px'),1500)}},16)})()")
+    }
 
     function css() {
         const c = (x) => String(x), a = ansi
@@ -55,12 +61,49 @@ Rectangle {
     property bool asked: false
     property bool busy: false
     property string error: ""
+    // (While it's fetched: what it's doing, asked every 300 ms; a quick read.)
+    property string progress: ""
+    Timer {
+        interval: 300; repeat: true; running: page.busy && page.lang !== "tessh"
+        onTriggered: {
+            const p = page.backend ? page.backend.guideProgress(page.lang) : ""
+            if (p === page.progress) return
+            page.progress = p
+            web.runJavaScript("(()=>{const e=document.getElementById('prog');if(e)e.textContent=" + JSON.stringify(p) + "})()")
+        }
+    }
     function head() {
         return "<style>" + page.css() + "</style>"
             // (Links in the guide go to their heading; others open in the browser.)
             + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(!a)return;const h=a.getAttribute('href');e.preventDefault();"
             + "if(h.startsWith('#')){const t=document.getElementById(decodeURIComponent(h.slice(1)));if(t)t.scrollIntoView({block:'start'})}else if(/^(https?|mailto):/.test(h))window.open(h)})</script>"
+            + "<script>" + momentum + "</script>"
     }
+    // Momentum scrolling in the page, as MomentumWheel does it in QML: a
+    // wheel notch eases 120 px to a set destination (quicker for longer
+    // runs, a notch mid-glide extends it); a touchpad follows the fingers,
+    // then glides on, slowing steadily, once they lift (no events for 60 ms).
+    readonly property string momentum: "(()=>{const S=new Map(),DEC=2300,MAXV=9000;"
+        + "function box(t){for(let e=t instanceof Element?t:t.parentElement;e;e=e.parentElement){const cs=getComputedStyle(e);if((cs.overflowY==='auto'||cs.overflowY==='scroll')&&e.scrollHeight>e.clientHeight+1)return e}return document.scrollingElement}"
+        + "function st(e){let s=S.get(e);if(!s){s={pos:e.scrollTop,v:0,anim:false,target:0,start:0,v0:0,t:0,dur:.2,last:0,pv:0,raf:0,pad:0};S.set(e,s)}return s}"
+        + "function hi(e){return Math.max(0,e.scrollHeight-e.clientHeight)}"
+        + "function put(e,s,y){s.pos=Math.max(0,Math.min(hi(e),y));e.scrollTop=s.pos}"
+        + "function stop(s){s.v=0;s.anim=false;cancelAnimationFrame(s.raf);s.raf=0;clearTimeout(s.pad);s.last=0;s.pv=0}"
+        + "function run(e,s){if(s.raf)return;let prev=performance.now();const f=now=>{const dt=(now-prev)/1000;prev=now;s.raf=0;if(step(e,s,dt))s.raf=requestAnimationFrame(f)};s.raf=requestAnimationFrame(f)}"
+        + "function step(e,s,dt){if(s.anim){s.t+=Math.max(0,dt);const p=Math.min(1,s.t/s.dur),t2=p*p,t3=t2*p,span=s.target-s.start,v0=s.v0*s.dur;"
+        + "put(e,s,s.start+v0*(t3-2*t2+p)+span*(3*t2-2*t3));s.v=p>=1?0:(v0*(3*t2-4*p+1)+span*(6*p-6*t2))/s.dur;if(p>=1||s.pos<=0||s.pos>=hi(e)){stop(s);return false}return true}"
+        + "dt=Math.min(.05,dt);if(dt<=0)return true;const want=s.pos+s.v*dt;put(e,s,want);const sp=Math.max(0,Math.abs(s.v)-DEC*dt);s.v=Math.sign(s.v)*sp;"
+        + "if(sp<1||s.pos!==want){stop(s);return false}return true}"
+        + "function notches(e,s,steps){const d=-steps*120,cur=s.pos,pend=s.anim?s.target-cur:0,origin=pend*d>0?s.target:cur;"
+        + "s.target=Math.max(0,Math.min(hi(e),origin+d));clearTimeout(s.pad);s.last=0;s.pv=0;if(s.target===cur){stop(s);return}"
+        + "const dist=Math.abs(s.target-cur);s.dur=Math.max(6,Math.min(12,14-dist/60))/60;s.v0=s.anim&&s.v*(s.target-cur)>0?s.v:0;s.start=cur;s.t=0;s.anim=true;run(e,s)}"
+        + "function pixels(e,s,dy){const now=performance.now(),el=s.last>0?(now-s.last)/1000:0;cancelAnimationFrame(s.raf);s.raf=0;s.anim=false;s.v=0;put(e,s,s.pos+dy);"
+        + "if(el>=.004&&el<=.08){const v=dy/el;s.pv=s.pv===0?v:s.pv*.65+v*.35}else s.pv=dy*60;s.pv=Math.max(-MAXV,Math.min(MAXV,s.pv));s.last=now;"
+        + "clearTimeout(s.pad);s.pad=setTimeout(()=>{s.last=0;s.v=s.pv;s.pv=0;if(Math.abs(s.v)<40){stop(s);return}run(e,s)},60)}"
+        + "addEventListener('wheel',ev=>{if(ev.ctrlKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY))return;const e=box(ev.target);if(!e||hi(e)<=0)return;ev.preventDefault();const s=st(e);"
+        + "if(!s.anim&&!s.raf&&!s.last)s.pos=e.scrollTop;"
+        + "const w=ev.wheelDeltaY||0;if(ev.deltaMode===0&&w!==0&&w%120===0)notches(e,s,w/120);else pixels(e,s,ev.deltaMode===1?ev.deltaY*40:ev.deltaY)},{passive:false});"
+        + "addEventListener('keydown',()=>S.forEach(stop));addEventListener('mousedown',()=>S.forEach(s=>{stop(s)}))})();"
     function shell(body) { return "<!doctype html><html><head><meta charset='utf-8'>" + head() + "</head><body>" + body + "</body></html>" }
     function load(refresh) {
         if (!backend || busy || (asked && !refresh)) return
@@ -69,10 +112,11 @@ Rectangle {
         error = ""
         if (lang !== "tessh")
             web.loadHtml(shell("<div class='msg'>Fetching <b>" + page.title
-                + "</b> from its official site and converting it to Markdown…<br><br>It's kept for next time (and offline).</div>"), "about:blank")
+                + "</b> from its official site and converting it to Markdown…<br><br><span id='prog'></span><br><br>It's kept for next time (and offline).</div>"), "about:blank")
         // (Written to a file and loaded from it: loadHtml shows at most 2 MB.)
         Async.call(backend, k => backend.guidePage(k, lang, !!refresh, head()), url => {
             busy = false
+            progress = ""
             if (url.startsWith("error: ")) {
                 error = url.slice(7)
                 web.loadHtml(shell("<div class='msg'>The " + page.title + " couldn't be fetched:<br><br><code>"
@@ -100,7 +144,7 @@ Rectangle {
                 Text { topPadding: 0.001; text: page.title; color: Theme.fg; font.pixelSize: 14; font.bold: true; renderType: Text.NativeRendering; elide: Text.ElideRight; Layout.maximumWidth: page.width * 0.4 }
                 Text {
                     topPadding: 0.001
-                    text: page.lang === "tessh" ? "help TOPIC in tessh shows one part" : page.busy ? "Fetching…" : "From the language's own documentation; source and license at the top"
+                    text: page.lang === "tessh" ? "help TOPIC in tessh shows one part" : page.busy ? (page.progress || "Fetching…") : "From the language's own documentation; source and license at the top"
                     color: Theme.textDim; font.pixelSize: 12; renderType: Text.NativeRendering; visible: page.width >= 900
                 }
                 Item { Layout.fillWidth: true }
@@ -135,6 +179,8 @@ Rectangle {
             // (The page is a file; its pictures are on the web.)
             settings.localContentCanAccessRemoteUrls: true
             onNewWindowRequested: (req) => Qt.openUrlExternally(req.requestedUrl)
+            // (The page's own test lines, to the log.)
+            onJavaScriptConsoleMessage: (level, message) => { if (message.startsWith("tessera-")) console.log(message) }
             // (Nothing navigates the page away: links open in the browser.)
             onNavigationRequested: (req) => { if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation) { req.reject(); Qt.openUrlExternally(req.url) } }
             onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus && findField.text !== "") findText(findField.text) }

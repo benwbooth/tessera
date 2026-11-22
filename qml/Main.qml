@@ -1867,7 +1867,12 @@ ApplicationWindow {
     }
     Timer {
         id: guideFind; interval: controller.testEnv("GUIDE_LANG") !== "" ? 20000 : 2500
-        onTriggered: { const t = win.tabs[win.currentTab]; if (t && t.pageItem) t.pageItem.find(controller.testEnv("GUIDE")) }
+        onTriggered: {
+            const t = win.tabs[win.currentTab]
+            if (!t || !t.pageItem) return
+            if (controller.testEnv("GUIDE_WHEEL") !== "") t.pageItem.testWheel()
+            else t.pageItem.find(controller.testEnv("GUIDE"))
+        }
     }
     // (Test hook: TESSERA_TEST_RESTART_DAEMON restarts tesserad at 6 s.)
     Timer { interval: 6000; running: controller.testEnv("RESTART_DAEMON") !== ""; onTriggered: win.restartDaemon() }
