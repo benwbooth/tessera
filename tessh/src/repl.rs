@@ -364,10 +364,13 @@ pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bo
     }
     let var = before.ends_with('$');
     if word.contains('/') || word.starts_with(['~', '.']) || (!first && !var) {
-        let pat = format!("{}*", runtime::expanduser(word));
+        // (What's typed is matched as written: a * in it isn't a pattern
+        // here (`*` + `*` would be `**`, every file under every folder),
+        // and only so many names are read.)
+        let pat = format!("{}*", glob::Pattern::escape(&runtime::expanduser(word)));
         if let Ok(it) = glob::glob(&pat) {
             let home = std::env::var("HOME").unwrap_or_default();
-            for p in it.flatten() {
+            for p in it.flatten().take(2000) {
                 let mut s = p.to_string_lossy().to_string();
                 if word.starts_with('~') && s.starts_with(&home) {
                     s = format!("~{}", &s[home.len()..]);
