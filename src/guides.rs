@@ -244,7 +244,7 @@ pub static GUIDES: &[Guide] = &[
     g(&["nix"], "Nix language basics (nix.dev)", "CC BY-SA 4.0", "https://github.com/NixOS/nix.dev/blob/master/LICENSE",
         &["https://nix.dev/tutorials/nix-language"], "article, div[role=main]", "nix"),
     gi(&["octave", "matlab"], "GNU Octave: Getting Started", "Verbatim copying permitted (GNU Octave manual)", "https://docs.octave.org/latest/",
-        ("https://docs.octave.org/latest/Getting-Started.html", "ul.mini-toc a, ul.menu a"), "body", "octave").drop(GNU_DROP),
+        ("https://docs.octave.org/latest/Getting-Started.html", "ul.mini-toc a, ul.menu a"), "body", "matlab").drop(GNU_DROP),
     g(&["sql", "sqlite", "duckdb"], "SQL As Understood By SQLite", "Public domain", "https://www.sqlite.org/copyright.html", &[
         "https://www.sqlite.org/lang_select.html", "https://www.sqlite.org/lang_insert.html", "https://www.sqlite.org/lang_update.html",
         "https://www.sqlite.org/lang_delete.html", "https://www.sqlite.org/lang_createtable.html", "https://www.sqlite.org/lang_expr.html",
@@ -259,7 +259,7 @@ pub static GUIDES: &[Guide] = &[
         "https://ocaml.org/manual/latest/polymorphism.html",
     ], "div.content, main, body", "ocaml").drop("#part-menu, .navbar, header, footer"),
     gi(&["racket"], "The Racket Guide: Racket Essentials", "MIT or Apache-2.0", "https://download.racket-lang.org/license.html",
-        ("https://docs.racket-lang.org/guide/to-scheme.html", "table.toctable a, .toclink"), "div.maincolumn", "racket").drop(".tocset, .navsettop, .navsetbottom, .tocview, .tocsub, .RForeground").code_sel(".SCodeFlow, .SInteraction").pages(&["https://docs.racket-lang.org/guide/to-scheme.html"]),
+        ("https://docs.racket-lang.org/guide/to-scheme.html", "table.toctable a, .toclink"), "div.maincolumn", "scheme").drop(".tocset, .navsettop, .navsetbottom, .tocview, .tocsub, .RForeground, .button-group").code_sel(".SCodeFlow, .SInteraction").pages(&["https://docs.racket-lang.org/guide/to-scheme.html"]),
     // (The one-page manual, its two introductory chapters: one request, so
     // the Internet Archive's copy works too when gnu.org doesn't answer.)
     g(&["scheme", "guile"], "Guile: Hello Guile! and Hello Scheme!", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html",
@@ -352,7 +352,7 @@ pub static GUIDES: &[Guide] = &[
         ("https://www.complang.tuwien.ac.at/forth/gforth/Docs-html/Tutorial.html", "ul.mini-toc a, ul.menu a"), "body", "forth").drop(GNU_DROP),
     g(&["hare"], "Hare: An introduction", "CC BY-ND 4.0", "https://harelang.org/", &["https://harelang.org/tutorials/introduction"], "main", "hare"),
     gi(&["janet", "janet-simple"], "Janet Documentation", "MIT", "https://github.com/janet-lang/janet/blob/master/LICENSE",
-        ("https://janet-lang.org/docs/index.html", "nav a[href^='/docs/'], .toc a[href^='/docs/']"), "main, .main", "janet").pages(&["https://janet-lang.org/docs/index.html"]),
+        ("https://janet-lang.org/docs/index.html", "nav a[href^='/docs/'], .toc a[href^='/docs/']"), "main, .main", "janet-simple").pages(&["https://janet-lang.org/docs/index.html"]),
     g(&["koka"], "The Koka Programming Language", "Apache-2.0", "https://github.com/koka-lang/koka/blob/master/LICENSE",
         &["https://koka-lang.github.io/koka/doc/book.html"], "body", "koka").drop(".toc, .sidepanel, #sidetoc"),
     gi(&["lean"], "Functional Programming in Lean", "CC BY 4.0", "https://lean-lang.org/functional_programming_in_lean/",
@@ -383,7 +383,12 @@ pub static GUIDES: &[Guide] = &[
     gi(&["amber"], "Amber Documentation", "GPL-3.0", "https://github.com/amber-lang/amber/blob/master/LICENSE",
         ("https://docs.amber-lang.com/", "a[href^='/getting_started'], a[href^='/basic_syntax'], a[href^='/advanced_syntax']"), "main, article", "amber"),
     g(&["uxntal"], "Uxntal (XXIIVV wiki)", "CC BY-NC-SA 4.0; read from the wiki, not redistributed", "https://wiki.xxiivv.com/site/about.html",
-        &["https://wiki.xxiivv.com/site/uxntal.html", "https://wiki.xxiivv.com/site/uxntal_syntax.html", "https://wiki.xxiivv.com/site/uxntal_opcodes.html"], "main", "uxntal"),
+        &[
+        "https://wiki.xxiivv.com/site/uxntal.html", "https://wiki.xxiivv.com/site/uxntal_notation.html", "https://wiki.xxiivv.com/site/uxntal_numbers.html",
+        "https://wiki.xxiivv.com/site/uxntal_labels.html", "https://wiki.xxiivv.com/site/uxntal_stacks.html", "https://wiki.xxiivv.com/site/uxntal_memory.html",
+        "https://wiki.xxiivv.com/site/uxntal_opcodes.html", "https://wiki.xxiivv.com/site/uxntal_macros.html", "https://wiki.xxiivv.com/site/uxntal_devices.html",
+        "https://wiki.xxiivv.com/site/uxntal_reference.html",
+    ], "main", "uxntal"),
     g(&["nasm"], "NASM Manual: The NASM Language", "BSD-2-Clause", "https://www.nasm.us/doc/nasmdoc1.html",
         &["https://www.nasm.us/doc/nasmdoc2.html", "https://www.nasm.us/doc/nasmdoc3.html"], "body", "nasm").drop(".navbar, #navbar, .nav, ul.nav"),
     g(&["gas"], "Using as: Syntax", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html", &[
@@ -427,7 +432,6 @@ pub static GUIDES: &[Guide] = &[
         "https://cuelang.org/docs/tour/types/structs/",
         "https://cuelang.org/docs/tour/types/closed/",
         "https://cuelang.org/docs/tour/types/definitions/",
-        "https://cuelang.org/docs/tour/types/value-constraints/",
         "https://cuelang.org/docs/tour/types/disjunctions/",
         "https://cuelang.org/docs/tour/types/defaults/",
         "https://cuelang.org/docs/tour/types/sumstruct/",
@@ -521,8 +525,8 @@ pub static GUIDES: &[Guide] = &[
     g(&["openscad"], "The OpenSCAD Language (OpenSCAD User Manual)", "CC BY-SA 4.0 (Wikibooks)", "https://en.wikibooks.org/wiki/OpenSCAD_User_Manual",
         &["https://en.wikibooks.org/wiki/OpenSCAD_User_Manual/The_OpenSCAD_Language"], "#mw-content-text", "openscad")
         .drop(".mw-editsection, .toc, #toc, .navbox, .noprint, .mw-references-wrap"),
-    g(&["json"], "Introducing JSON (json.org)", "© JSON.org; read from json.org, not redistributed", "https://www.json.org/json-en.html",
-        &["https://www.json.org/json-en.html"], "body", "json"),
+    g(&["json"], "MDN: Working with JSON", "CC BY-SA 2.5", "https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license",
+        &["https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/scripting/json/index.md"], "", "json"),
     g(&["yaml"], "YAML 1.2.2 Specification", "Free to copy (the YAML spec's own terms)", "https://yaml.org/spec/1.2.2/",
         &["https://yaml.org/spec/1.2.2/"], "main, article, body", "yaml").drop("#toc, #markdown-toc, nav"),
     g(&["toml"], "TOML v1.0.0", "MIT", "https://github.com/toml-lang/toml/blob/main/LICENSE",
@@ -545,8 +549,11 @@ pub static GUIDES: &[Guide] = &[
         "https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/styling_basics/handling_conflicts/index.md",
         "https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/styling_basics/values_and_units/index.md",
     ], "", "css"),
-    g(&["markdown"], "CommonMark: Markdown Reference", "CC BY-SA 4.0", "https://commonmark.org/help/",
-        &["https://commonmark.org/help/"], "body", "markdown").drop(".navbar, nav, header, footer"),
+    g(&["markdown"], "GitHub Docs: Basic writing and formatting syntax", "CC BY 4.0", "https://github.com/github/docs/blob/main/LICENSE", &[
+        "https://raw.githubusercontent.com/github/docs/main/content/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax.md",
+        "https://raw.githubusercontent.com/github/docs/main/content/get-started/writing-on-github/working-with-advanced-formatting/creating-and-highlighting-code-blocks.md",
+        "https://raw.githubusercontent.com/github/docs/main/content/get-started/writing-on-github/working-with-advanced-formatting/organizing-information-with-tables.md",
+    ], "", "markdown"),
 ];
 
 /// A guide by its own name, else the (first) guide for a language (its
@@ -619,10 +626,10 @@ fn set_progress(key: &str, what: &str) {
 
 /// The drawn page is kept too (`LANG.body.html`, marked with the drawing's
 /// version), so a guide opens at once the second time.
-const RENDER_VERSION: &str = "<!-- tessera-guide-render 3 -->";
+const RENDER_VERSION: &str = "<!-- tessera-guide-render 4 -->";
 /// Marks the kept Markdown: a guide converted by an older Tessera is
 /// fetched and converted again.
-const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 3 -->";
+const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 5 -->";
 
 fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
     let path = cache_path(g);
@@ -976,7 +983,7 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
     out.push_str(&format!(
         "> **{}**, from [{}]({}), converted to Markdown by Tessera on {}. License: [{}]({}).\n\n",
         g.title,
-        home.split('/').nth(2).unwrap_or(home),
+        if home.starts_with("https://raw.githubusercontent.com/") { "github.com" } else { home.split('/').nth(2).unwrap_or(home) },
         home.replace("raw.githubusercontent.com", "github.com").replacen("/main/", "/blob/main/", 1).replacen("/master/", "/blob/master/", 1),
         today(),
         g.license,
@@ -1057,6 +1064,7 @@ fn expand_includes(md: &str, page: &str) -> String {
         Regex::new(r"(?m)^[ \t>]*\[!code-([A-Za-z0-9#+-]+)\[[^\]]*\]\(([^)#\s]+)(?:#([^)\s]+))?\)\]\s*$").unwrap(),
         Regex::new(r#"(?m)^[ \t>]*:::code\s+([^\n]*?):::\s*$"#).unwrap(),
     ]);
+    let md = &liquid_data(md, page);
     if !md.contains("[!code-") && !md.contains(":::code") {
         return md.to_string();
     }
@@ -1089,6 +1097,43 @@ fn expand_includes(md: &str, page: &str) -> String {
         };
         let code = include_part(&text, &part);
         out.push_str(&format!("\n```{}\n{}\n```\n", lang.to_lowercase(), code.trim_end()));
+    }
+    out
+}
+
+/// GitHub Docs' `{% data variables.FILE.KEY %}` (a name, from the
+/// repository's data/variables/FILE.yml) and `{% data reusables.A.B %}` (a
+/// shared paragraph, data/reusables/A/B.md), filled in as its site does.
+fn liquid_data(md: &str, page: &str) -> String {
+    use regex::Regex;
+    if !md.contains("{% data ") {
+        return md.to_string();
+    }
+    let root: String = page.splitn(7, '/').take(6).collect::<Vec<_>>().join("/") + "/";
+    let re = Regex::new(r"\{%-?\s*data\s+(variables|reusables)\.([A-Za-z0-9_.-]+)\s*-?%\}").unwrap();
+    let mut vars: std::collections::HashMap<String, std::collections::HashMap<String, String>> = Default::default();
+    let mut out = md.to_string();
+    // (A shared paragraph can name things and bring in others: filled in
+    // again, a few passes at most.)
+    for _ in 0..3 {
+        if !re.is_match(&out) {
+            break;
+        }
+        out = re
+            .replace_all(&out, |c: &regex::Captures| {
+                let path = &c[2];
+                if &c[1] == "reusables" {
+                    return get(&format!("{root}data/reusables/{}.md", path.replace('.', "/"))).map(|t| t.trim().to_string()).unwrap_or_default();
+                }
+                let Some((file, key)) = path.split_once('.') else { return String::new() };
+                let table = vars.entry(file.to_string()).or_insert_with(|| {
+                    get(&format!("{root}data/variables/{file}.yml"))
+                        .map(|y| y.lines().filter(|l| !l.starts_with([' ', '#'])).filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_string(), v.trim().trim_matches(['\'', '"']).to_string())).collect())
+                        .unwrap_or_default()
+                });
+                table.get(key).cloned().unwrap_or_default()
+            })
+            .into_owned();
     }
     out
 }
@@ -1148,7 +1193,14 @@ fn clean_markdown(text: &str) -> String {
     text = re(r"<doc:([A-Za-z0-9_]+)(?:#[^>]*)?>").replace_all(&text, "$1").into_owned();
     // (Microsoft's "> [!NOTE]" callouts read fine as quotes.)
     text = re(r"(?m)^>\s*\[!(\w+)\]\s*$").replace_all(&text, "> **$1**").into_owned();
-    let has_h1 = text.lines().any(|l| l.starts_with("# "));
+    // (A "# " line in a code block isn't a heading.)
+    let mut fenced = false;
+    let has_h1 = text.lines().any(|l| {
+        if l.trim_start().starts_with("```") || l.trim_start().starts_with("~~~") {
+            fenced = !fenced;
+        }
+        !fenced && l.starts_with("# ")
+    });
     match title {
         Some(t) if !has_h1 => format!("# {t}\n\n{}", text.trim_start()),
         _ => text,
@@ -1406,7 +1458,13 @@ fn relink(md: &str, page: &str, pages: &[(String, usize)]) -> String {
         if href.starts_with('#') {
             return format!("]({href}{title})");
         }
-        let full = join(page, href);
+        // (A repository's file read raw: its site-wide paths are the
+        // repository's (GitHub Docs' /assets/images/...).)
+        let full = if href.starts_with('/') && !href.starts_with("//") && page.starts_with("https://raw.githubusercontent.com/") {
+            format!("{}{}", page.splitn(7, '/').take(6).collect::<Vec<_>>().join("/"), href)
+        } else {
+            join(page, href)
+        };
         let (base, frag) = match full.split_once('#') {
             Some((b, f)) => (b.to_string(), Some(f.to_string())),
             None => (full.clone(), None),
@@ -1458,6 +1516,8 @@ mod tests {
         let pages = vec![("https://a.org/t/one.html".to_string(), 0), ("https://a.org/t/two.html".to_string(), 1)];
         let md = relink("[a](two.html) [b](two.html#sec) [c](https://x.org/) [d](../img.png \"t\") [e](#here)", "https://a.org/t/one.html", &pages);
         assert_eq!(md, "[a](#page-1) [b](#sec) [c](https://x.org/) [d](https://a.org/img.png \"t\") [e](#here)");
+        let raw = "https://raw.githubusercontent.com/github/docs/main/content/a/b.md";
+        assert_eq!(relink("![x](/assets/images/y.png)", raw, &[]), "![x](https://raw.githubusercontent.com/github/docs/main/assets/images/y.png)");
     }
 
     #[test]
@@ -1494,6 +1554,62 @@ mod tests {
             }
         }
         eprintln!("failed: {bad:?}");
+    }
+}
+
+#[cfg(test)]
+mod sweep {
+    /// Every guide fetched, converted and drawn as the app does, into
+    /// $XDG_STATE_HOME/tessera/guides, four at a time: a line each with its
+    /// time and what's in it, and FLAG for one that failed, panicked, took
+    /// over a minute, or has no contents or no highlighted code
+    /// (`cargo test sweep -- --ignored --nocapture`; $SWEEP_ONLY=a,b).
+    #[test]
+    #[ignore]
+    fn sweep() {
+        let only = std::env::var("SWEEP_ONLY").unwrap_or_default();
+        let list: Vec<&'static super::Guide> = super::GUIDES.iter().filter(|g| only.is_empty() || only.split(',').any(|o| o == g.key() || g.langs.contains(&o))).collect();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|sc| {
+            for _ in 0..4 {
+                sc.spawn(|| loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(g) = list.get(i) else { break };
+                    let key = g.key();
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    let t = std::time::Instant::now();
+                    std::thread::spawn(move || {
+                        let r = std::panic::catch_unwind(|| super::page_html(key, true)).unwrap_or_else(|p| Err(format!("PANIC {}", p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default())));
+                        let _ = tx.send(r);
+                    });
+                    let line = match rx.recv_timeout(std::time::Duration::from_secs(240)) {
+                        Err(_) => format!("FLAG {key:14} still running after 240 s: {}", super::progress(key)),
+                        Ok(Err(e)) => format!("FLAG {key:14} {:>6.1}s failed: {}", t.elapsed().as_secs_f32(), e.chars().take(300).collect::<String>()),
+                        Ok(Ok(h)) => {
+                            let secs = t.elapsed().as_secs_f32();
+                            let parts = h.matches("<a class='part'").count();
+                            let topics = h.split("<nav>").nth(1).and_then(|n| n.split("</nav>").next()).map(|n| n.matches("<a href=").count()).unwrap_or(0);
+                            let blocks = h.matches("<pre").count();
+                            let lit = h.matches("<pre class='code'>").count();
+                            let spans = h.matches("<span class=\"t-").count();
+                            let md = std::fs::metadata(super::cache_path(g)).map(|m| m.len()).unwrap_or(0);
+                            let archived = std::fs::read_to_string(super::cache_path(g)).map(|t| t.matches("Internet Archive's copy").count()).unwrap_or(0);
+                            let failed = std::fs::read_to_string(super::cache_path(g)).map(|t| t.contains("couldn't be fetched")).unwrap_or(false);
+                            let mut why = vec![];
+                            if secs > 60.0 { why.push("slow") }
+                            if parts + topics < 2 { why.push("no contents") }
+                            if blocks == 0 { why.push("no code") } else if spans == 0 { why.push("no highlighting") }
+                            if failed { why.push("pages missing") }
+                            format!("{} {key:14} {secs:>6.1}s md {:>5} KB  parts {parts:>3} topics {topics:>4}  code {blocks:>4} ({lit} drawn, {spans} spans){}{}",
+                                if why.is_empty() { "ok  " } else { "FLAG" }, md / 1024,
+                                if archived > 0 { format!("  archive pages {archived}") } else { String::new() },
+                                if why.is_empty() { String::new() } else { format!("  <- {}", why.join(", ")) })
+                        }
+                    };
+                    eprintln!("{line}");
+                });
+            }
+        });
     }
 }
 

@@ -32,6 +32,10 @@ pub fn code_lang(info: &str, default: &str) -> String {
         "clj" | "cljs" => "clojure",
         "lisp" | "common-lisp" | "cl" => "common-lisp",
         "jl" | "julia-repl" | "jldoctest" => "julia",
+        // (Helix's names for these grammars; Racket's code drawn as Scheme.)
+        "janet" => "janet-simple",
+        "octave" => "matlab",
+        "racket" | "rkt" => "scheme",
         "pl" | "perl5" => "perl",
         "text" | "txt" | "plain" | "plaintext" | "output" | "none" | "nohighlight" | "default" | "raw" => "",
         l => l,

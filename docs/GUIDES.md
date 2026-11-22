@@ -29,6 +29,12 @@ but not redistribution). Fetched on the reader's own machine, nothing is
 redistributed with Tessera. Each kept file starts with its source, its
 license and the date it was fetched.
 
+All of them are checked by one test that fetches, converts and draws
+every guide as the app does and flags any that fail, take over a minute,
+or come out without contents or highlighted code:
+`cargo test guides::sweep -- --ignored --nocapture` (with a scratch
+`XDG_STATE_HOME`; `SWEEP_ONLY=lua,rust` for some).
+
 The sources are in `src/guides.rs` (`GUIDES`). To check them all:
 `TESSERA_GUIDES_OUT=/tmp/g cargo test fetch_all -- --ignored`.
 
@@ -117,9 +123,9 @@ The sources are in `src/guides.rs` (`GUIDES`). To check them all:
 | dot, graphviz | [The DOT Language (Graphviz)](https://graphviz.org/doc/info/lang.html) | [EPL-2.0](https://graphviz.org/license/) |
 | latex, tex | [Learn LaTeX](https://raw.githubusercontent.com/learnlatex/learnlatex.github.io/main/en/lesson-01.md) | [CC BY-SA 4.0](https://github.com/learnlatex/learnlatex.github.io/blob/main/LICENSE.md) |
 | openscad | [The OpenSCAD Language (OpenSCAD User Manual)](https://en.wikibooks.org/wiki/OpenSCAD_User_Manual/The_OpenSCAD_Language) | [CC BY-SA 4.0 (Wikibooks)](https://en.wikibooks.org/wiki/OpenSCAD_User_Manual) |
-| json | [Introducing JSON (json.org)](https://www.json.org/json-en.html) | [© JSON.org; read from json.org, not redistributed](https://www.json.org/json-en.html) |
+| json | [MDN: Working with JSON](https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/scripting/json/index.md) | [CC BY-SA 2.5](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license) |
 | yaml | [YAML 1.2.2 Specification](https://yaml.org/spec/1.2.2/) | [Free to copy (the YAML spec's own terms)](https://yaml.org/spec/1.2.2/) |
 | toml | [TOML v1.0.0](https://raw.githubusercontent.com/toml-lang/toml/1.0.0/toml.md) | [MIT](https://github.com/toml-lang/toml/blob/main/LICENSE) |
 | html | [MDN: Structuring content with HTML](https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/structuring_content/basic_html_syntax/index.md) | [CC BY-SA 2.5](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license) |
 | css | [MDN: CSS styling basics](https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/styling_basics/what_is_css/index.md) | [CC BY-SA 2.5](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license) |
-| markdown | [CommonMark: Markdown Reference](https://commonmark.org/help/) | [CC BY-SA 4.0](https://commonmark.org/help/) |
+| markdown | [GitHub Docs: Basic writing and formatting syntax](https://raw.githubusercontent.com/github/docs/main/content/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax.md) | [CC BY 4.0](https://github.com/github/docs/blob/main/LICENSE) |
