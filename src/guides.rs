@@ -652,7 +652,11 @@ fn page_html_of(g: &Guide, refresh: bool) -> Result<String, String> {
 /// A guide's page written out whole (`head`: its style and script), for
 /// the guide tab to load: its file URL.
 pub fn page_file(lang: &str, refresh: bool, head: &str) -> Result<String, String> {
-    let body = page_html(lang, refresh)?;
+    // (A panic in the background would leave the page waiting for ever: an error instead.)
+    let body = std::panic::catch_unwind(|| page_html(lang, refresh)).unwrap_or_else(|p| {
+        set_progress(find(lang).map(|g| g.langs[0]).unwrap_or(lang), "");
+        Err(format!("Tessera failed while making the page: {}", p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()))
+    })?;
     let dir = cache_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let name: String = lang.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
@@ -1348,5 +1352,23 @@ mod tests {
             }
         }
         eprintln!("failed: {bad:?}");
+    }
+}
+
+#[cfg(test)]
+mod stall_probe {
+    /// A kept guide drawn ($PROBE_LANG, from $XDG_STATE_HOME/tessera/guides), with what it's doing each second.
+    #[test]
+    #[ignore]
+    fn probe() {
+        let lang = std::env::var("PROBE_LANG").unwrap();
+        let l2 = lang.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            eprintln!("  … {}", super::progress(&l2));
+        });
+        let t = std::time::Instant::now();
+        let r = super::page_html(&lang, false);
+        eprintln!("done in {:.1}s: {}", t.elapsed().as_secs_f32(), r.map(|h| h.len().to_string()).unwrap_or_else(|e| e));
     }
 }

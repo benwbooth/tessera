@@ -369,7 +369,17 @@ fn capture_spans_within(lang_name: &str, l: &'static Lang, root: Node, text: &st
             std::ops::ControlFlow::Continue(())
         }
     };
-    let mut caps = cursor.captures_with_options(&l.query, root, text.as_bytes(), tree_sitter::QueryCursorOptions::new().progress_callback(&mut check));
+    // (The tree may reach one byte past the end, the newline the parse
+    // added: the query reads the text with it, or a rule that looks at a
+    // node's text reads past the end and panics.)
+    let padded;
+    let source: &[u8] = if root.end_byte() > text.len() {
+        padded = format!("{text}\n");
+        padded.as_bytes()
+    } else {
+        text.as_bytes()
+    };
+    let mut caps = cursor.captures_with_options(&l.query, root, source, tree_sitter::QueryCursorOptions::new().progress_callback(&mut check));
     while let Some((m, i)) = caps.next() {
         let c = m.captures()[*i];
         let (s, e) = (c.node.start_byte(), c.node.end_byte().min(text.len()));
@@ -1070,6 +1080,16 @@ mod shell_check_tests {
 mod no_hang {
     /// Helix's Perl grammar never finished parsing this (no newline at the
     /// end); parsed as if it had one, it's quick. (Skipped without Helix's Perl.)
+    #[test]
+    fn last_node_read_with_its_newline() {
+        // (Rust's rules read identifiers' text: a block ending in one read
+        // one byte past the end.)
+        for code in ["let x = y", "fn main() { foo }\nSOME_CONST", "x"] {
+            let h = super::highlight_html("rust", code);
+            assert!(h.contains(code.rsplit(['\n', ' ']).next().unwrap()), "{h}");
+        }
+    }
+
     #[test]
     fn perl_number_literals() {
         if super::lang("perl").is_none() || !crate::grammars::available().iter().any(|n| n == "perl") {
