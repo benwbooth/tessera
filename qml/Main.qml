@@ -1309,9 +1309,9 @@ ApplicationWindow {
     // work (a terminal keeps every other key for its shell). Ids are unique
     // across the whole model (the global menu updates items by id).
     readonly property bool hasSelection: activeView !== null && activeView.hasSelection
-    readonly property var tabColors: [["Red", "#e5534b"], ["Orange", "#e8853d"], ["Yellow", "#d9b43b"], ["Green", "#57ab5a"], ["Blue", "#4a90e2"], ["Purple", "#986ee2"], ["Gray", "#8b949e"]]
+    readonly property var tabColors: [["Red", "#e5534b", "folder-red"], ["Orange", "#e8853d", "folder-orange"], ["Yellow", "#d9b43b", "folder-yellow"], ["Green", "#57ab5a", "folder-green"], ["Blue", "#4a90e2", "folder-blue"], ["Purple", "#986ee2", "folder-violet"], ["Gray", "#8b949e", "folder-grey"]]
     readonly property var menuModel: [
-        { title: "Tessera", items: [
+        { title: "Tessera", icon: "utilities-terminal", items: [
             { id: "about", icon: "help-about", text: "About Tessera", inWindow: false },
             { separator: true },
             { id: "prefs", icon: "configure", text: "Preferences…", shortcut: "Ctrl+," },
@@ -1341,28 +1341,28 @@ ApplicationWindow {
             { id: "undo-close", icon: "edit-undo", text: "Undo Close", shortcut: "Ctrl+Shift+Z", enabled: closedStack.length > 0 },
             { id: "close-tab", icon: "tab-close", text: "Close Tab", shortcut: "Ctrl+Shift+W", enabled: tabs.length > 0 },
             { id: "close-pane", icon: "view-close", text: "Close Pane", shortcut: "Ctrl+Alt+W", enabled: activePane !== null },
-            { id: "close-all-panes", icon: "tab-close", text: "Close All Panes in Tab", enabled: tabs.length > 0 },
+            { id: "close-all-panes", icon: "tab-close-other", text: "Close All Panes in Tab", enabled: tabs.length > 0 },
             { id: "close-window", icon: "window-close", text: "Close Window", shortcut: "Ctrl+Shift+Q" },
             { separator: true },
-            { id: "broadcast", icon: "network-transmit", text: "Broadcast Input", items: [
-                { id: "broadcast-off", text: "Send Input to Current Session Only", checkable: true, checked: broadcastMode === "off" },
-                { id: "broadcast-all", text: "Broadcast Input to All Panes in All Tabs", checkable: true, checked: broadcastMode === "all" },
-                { id: "broadcast-tab", text: "Broadcast Input to All Panes in Current Tab", checkable: true, checked: broadcastMode === "tab" } ] } ]) },
+            { id: "broadcast", icon: "network-wireless-hotspot", text: "Broadcast Input", items: [
+                { id: "broadcast-off", icon: "network-disconnect", text: "Send Input to Current Session Only", checkable: true, checked: broadcastMode === "off" },
+                { id: "broadcast-all", icon: "view-grid", text: "Broadcast Input to All Panes in All Tabs", checkable: true, checked: broadcastMode === "all" },
+                { id: "broadcast-tab", icon: "object-columns", text: "Broadcast Input to All Panes in Current Tab", checkable: true, checked: broadcastMode === "tab" } ] } ]) },
         { title: "Edit", icon: "edit-entry", items: [
             { id: "copy", icon: "edit-copy", text: "Copy", shortcut: "Ctrl+Shift+C", enabled: win.hasSelection },
-            { id: "copy-styles", icon: "edit-copy", text: "Copy with Styles", enabled: win.hasSelection },
-            { id: "copy-control", icon: "edit-copy", text: "Copy with Control Sequences", enabled: win.hasSelection },
+            { id: "copy-styles", icon: "format-text-color", text: "Copy with Styles", enabled: win.hasSelection },
+            { id: "copy-control", icon: "format-text-code", text: "Copy with Control Sequences", enabled: win.hasSelection },
             { id: "paste", icon: "edit-paste", text: "Paste", shortcut: "Ctrl+Shift+V", enabled: activeView !== null },
-            { id: "paste-special", icon: "edit-paste", text: "Paste Special", enabled: activeView !== null, items: [
-                { id: "paste-selection", text: "Paste Selection", shortcut: "Shift+Ins" },
-                { id: "paste-slowly", text: "Paste Slowly" },
+            { id: "paste-special", icon: "edit-paste-style", text: "Paste Special", enabled: activeView !== null, items: [
+                { id: "paste-selection", icon: "edit-paste-in-place", text: "Paste Selection", shortcut: "Shift+Ins" },
+                { id: "paste-slowly", icon: "chronometer", text: "Paste Slowly" },
                 { separator: true },
-                { id: "warn-multiline", text: "Warn Before Multi-Line Paste", checkable: true, checked: !!settings.warn_multiline_paste } ] },
+                { id: "warn-multiline", icon: "dialog-warning", text: "Warn Before Multi-Line Paste", checkable: true, checked: !!settings.warn_multiline_paste } ] },
             { id: "paste-history", icon: "view-history", text: "Paste History", enabled: pasteHistory.length > 0 && activeView !== null,
-              items: pasteHistory.length > 0 ? pasteHistory.map((s, i) => ({ id: "paste-history-" + i, text: win.shortLabel(s) }))
-                                             : [{ id: "paste-history-none", text: "Nothing Pasted Yet", enabled: false }] },
+              items: pasteHistory.length > 0 ? pasteHistory.map((s, i) => ({ id: "paste-history-" + i, icon: "text-plain", text: win.shortLabel(s) }))
+                                             : [{ id: "paste-history-none", icon: "edit-none", text: "Nothing Pasted Yet", enabled: false }] },
             { id: "snippets", icon: "insert-text", text: "Snippets", items: (settings.snippets || []).map((s, i) => (
-                { id: "snippet-" + i, text: s.title, enabled: activeView !== null })).concat([
+                { id: "snippet-" + i, icon: "text-x-script", text: s.title, enabled: activeView !== null })).concat([
                 { separator: true },
                 { id: "edit-snippets", icon: "configure", text: "Edit Snippets…" } ]) },
             { separator: true },
@@ -1392,14 +1392,14 @@ ApplicationWindow {
             { separator: true },
             { id: "maximize-pane", icon: "zoom-fit-best", text: "Maximize Active Pane", shortcut: "Ctrl+Shift+Return", checkable: true,
               checked: maximizedPane !== null, enabled: maximizedPane !== null || (activePane !== null && activePane.split) },
-            { id: "transparency", text: "Use Transparency", checkable: true, checked: useTransparency, enabled: activeProfile.transparency > 0 },
+            { id: "transparency", icon: "edit-opacity", text: "Use Transparency", checkable: true, checked: useTransparency, enabled: activeProfile.transparency > 0 },
             { separator: true },
-            { id: "find-cursor", icon: "edit-find", text: "Find Cursor", shortcut: "Ctrl+Shift+/", enabled: activeView !== null },
-            { id: "cursor-guide", text: "Show Cursor Guide", checkable: true, checked: cursorGuide },
+            { id: "find-cursor", icon: "crosshairs", text: "Find Cursor", shortcut: "Ctrl+Shift+/", enabled: activeView !== null },
+            { id: "cursor-guide", icon: "draw-line", text: "Show Cursor Guide", checkable: true, checked: cursorGuide },
             { separator: true },
             { id: "tab-color", icon: "color-management", text: "Tab Color", enabled: tabs.length > 0, items: [
-                { id: "tab-color-none", text: "No Color" },
-                { separator: true } ].concat(win.tabColors.map((c, i) => ({ id: "tab-color-" + i, text: c[0] }))) } ] },
+                { id: "tab-color-none", icon: "edit-clear", text: "No Color" },
+                { separator: true } ].concat(win.tabColors.map((c, i) => ({ id: "tab-color-" + i, icon: c[2], text: c[0] }))) } ] },
         { title: "Session", icon: "system-run", items: [
             { id: "edit-session", icon: "document-edit", text: "Edit Session…" },
             { id: "restart-session", icon: "view-refresh", text: "Restart Session", enabled: activeView !== null },
@@ -1412,9 +1412,9 @@ ApplicationWindow {
             { id: "record", icon: activeView && activeView.recording ? "media-playback-stop" : "media-record",
               text: activeView && activeView.recording ? "Stop Recording" : "Record Pane (asciicast)", enabled: activeView !== null },
             { id: "shot-pane", icon: "camera-photo", text: "Screenshot of Pane", enabled: activeView !== null },
-            { id: "shot-window", icon: "camera-photo", text: "Screenshot of Window" } ] },
+            { id: "shot-window", icon: "preferences-system-windows-effect-screenshot", text: "Screenshot of Window" } ] },
         { title: "Profiles", icon: "bookmarks", items: profileList.map((p, i) => (
-            { id: "profile-" + i, icon: "utilities-terminal", text: p.name + (p.name === settings.default_profile ? "  (default)" : "") })).concat([
+            { id: "profile-" + i, icon: p.name === settings.default_profile ? "favorite" : "utilities-terminal", text: p.name + (p.name === settings.default_profile ? "  (default)" : "") })).concat([
             { separator: true },
             { id: "open-all-profiles", icon: "tab-new", text: "Open All" },
             { id: "edit-profiles", icon: "configure", text: "Edit Profiles…" } ]) },
@@ -1435,8 +1435,8 @@ ApplicationWindow {
                 { id: "pane-left", icon: "go-previous", text: "Select Pane Left", shortcut: "Ctrl+Alt+Left" },
                 { id: "pane-right", icon: "go-next", text: "Select Pane Right", shortcut: "Ctrl+Alt+Right" },
                 { separator: true },
-                { id: "pane-next", text: "Next Pane", shortcut: "Ctrl+Shift+]" },
-                { id: "pane-prev", text: "Previous Pane", shortcut: "Ctrl+Shift+[" } ] },
+                { id: "pane-next", icon: "go-next-view", text: "Next Pane", shortcut: "Ctrl+Shift+]" },
+                { id: "pane-prev", icon: "go-previous-view", text: "Previous Pane", shortcut: "Ctrl+Shift+[" } ] },
             { separator: true },
             { id: "arrangements", icon: "view-group", text: "Arrangements", items: [
                 { id: "save-arrangement", icon: "document-save", text: "Save Window Arrangement…" },
@@ -1549,16 +1549,24 @@ ApplicationWindow {
     // The menu's address goes on the window's surface, which exists only
     // while the window is shown.
     onVisibleChanged: if (visible) Qt.callLater(globalMenu.attach)
-    // The ☰ button's menu: the same model as a native menu, as it always
-    // was (the menus, then Restart tesserad…, Preferences…, Quit at the
-    // bottom; About is in Help there).
-    NativeAppMenu {
+    // The ☰ button's menu: the same model in the shared glass look (the
+    // menus, then Restart tesserad…, Preferences…, Quit at the bottom;
+    // About is in Help there). An in-window popup (Popup.Item): a separate
+    // popup window gets a different scale from the compositor and loses
+    // pixels.
+    onActiveChanged: if (!active) appMenu.close()
+    property real appMenuClosedAt: 0
+    AppMenu {
         id: appMenu
         model: win.menuModel
         appMenuAtEnd: true
+        accent: Theme.accent
+        dark: Theme.dark
+        popupType: Popup.Item
         onTriggered: id => win.menuAction(id)
         onAboutToShow: win.appMenuOpen = true
         onAboutToHide: win.appMenuOpen = false
+        onClosed: win.appMenuClosedAt = Date.now()
     }
 
     // The + button's menu: profiles, the shells installed, ssh hosts.
@@ -2410,7 +2418,7 @@ ApplicationWindow {
                 icon: "menu"
                 tip: "Menu"
                 open: win.appMenuOpen
-                onClicked: appMenu.openBelow(menuButton)
+                onClicked: if (appMenu.visible || Date.now() - win.appMenuClosedAt < 400) appMenu.close(); else appMenu.openAt(menuButton, 0, menuButton.height + 4)
             }
 
             Loader {
