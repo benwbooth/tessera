@@ -270,9 +270,56 @@ Rectangle {
     // (Preferences › Input editor: tabs or spaces, and how many columns a
     // level and a tab are.)
     readonly property var edPrefs: { const w = box.Window.window; return w && w.settings ? w.settings : ({}) }
-    readonly property int tabSize: edPrefs.editor_tab_size > 0 ? edPrefs.editor_tab_size : (lang === "python" ? 4 : 2)
-    readonly property bool useTabs: edPrefs.editor_indent === "tabs" || (edPrefs.editor_indent !== "spaces" && /(^|\n)\t/.test(edit.text))
+    // Each language's usual indentation ([mode, size]); the indent chip's
+    // choice for a language is kept per language (editor_indent_langs).
+    readonly property var indentDefaults: ({
+        python: ["spaces", 4], rust: ["spaces", 4], go: ["tabs", 4], c: ["spaces", 4], cpp: ["spaces", 4], java: ["spaces", 4],
+        "c-sharp": ["spaces", 4], csharp: ["spaces", 4], kotlin: ["spaces", 4], swift: ["spaces", 4], php: ["spaces", 4], perl: ["spaces", 4],
+        julia: ["spaces", 4], zig: ["spaces", 4], d: ["spaces", 4], groovy: ["spaces", 4], fsharp: ["spaces", 4], make: ["tabs", 8], makefile: ["tabs", 8],
+        javascript: ["spaces", 2], typescript: ["spaces", 2], tsx: ["spaces", 2], json: ["spaces", 2], yaml: ["spaces", 2], html: ["spaces", 2], css: ["spaces", 2],
+        ruby: ["spaces", 2], lua: ["spaces", 2], nix: ["spaces", 2], haskell: ["spaces", 2], ocaml: ["spaces", 2], elixir: ["spaces", 2], erlang: ["spaces", 4],
+        scala: ["spaces", 2], dart: ["spaces", 2], r: ["spaces", 2], nim: ["spaces", 2], sql: ["spaces", 2], clojure: ["spaces", 2], racket: ["spaces", 2],
+        lisp: ["spaces", 2], scheme: ["spaces", 2], fennel: ["spaces", 2], janet: ["spaces", 2], elisp: ["spaces", 2],
+        tessh: ["spaces", 2], bash: ["spaces", 2], zsh: ["spaces", 2], fish: ["spaces", 4], powershell: ["spaces", 4], markdown: ["spaces", 2]
+    })
+    readonly property var indentPref: {
+        const d = indentDefaults[lang] || ["spaces", 4]
+        const m = (edPrefs.editor_indent_langs || {})[lang] || {}
+        return { mode: ["spaces", "tabs", "mixed"].indexOf(m.mode) >= 0 ? m.mode : d[0], size: m.size > 0 ? m.size : d[1], defMode: d[0], defSize: d[1], own: m.mode !== undefined || m.size !== undefined }
+    }
+    function setIndentPref(key, value) {
+        if (!controller) return
+        const all = JSON.parse(JSON.stringify(edPrefs.editor_indent_langs || {}))
+        const m = all[lang] || {}
+        if (value === null) delete m[key]; else m[key] = value
+        if (Object.keys(m).length) all[lang] = m; else delete all[lang]
+        controller.setSetting("editor_indent_langs", JSON.stringify(all))
+    }
+    readonly property int tabSize: indentPref.size
+    // "spaces", "tabs", or "mixed" (levels of tabSize, every 8 columns a
+    // tab, as Emacs and vi do it).
+    readonly property string indentMode: indentPref.mode
+    readonly property bool useTabs: indentMode === "tabs"
+    // (A tab's width on screen: a level, but 8 when they're mixed.)
+    readonly property int tabWidth: indentMode === "mixed" ? 8 : tabSize
     readonly property string indentUnit: useTabs ? "\t" : " ".repeat(tabSize)
+    // Leading whitespace <-> its width in columns.
+    function colsOf(ws) { let c = 0; for (const ch of ws) { if (ch === "\t") c += tabWidth - c % tabWidth; else if (ch === " ") c++; else break } return c }
+    function indentFor(cols) {
+        cols = Math.max(0, cols)
+        if (indentMode === "spaces") return " ".repeat(cols)
+        const w = indentMode === "mixed" ? 8 : tabSize
+        return "\t".repeat(Math.floor(cols / w)) + " ".repeat(cols % w)
+    }
+    // Replace the leading whitespace of the line at `a` with `cols` columns'.
+    function setIndent(a, cols) {
+        const m = /^[ \t]*/.exec(edit.text.substring(a, lineEnd(a)))[0]
+        const ws = indentFor(cols)
+        if (ws === m) return 0
+        edit.remove(a, a + m.length)
+        edit.insert(a, ws)
+        return ws.length - m.length
+    }
     // Line numbers: each line's top (y), when there are several and they're on.
     readonly property var lineStarts: {
         if (edPrefs.editor_line_numbers === false) return []
@@ -296,7 +343,7 @@ Rectangle {
         edit.width; edit.contentHeight; edit.font.pointSize
         if (text.indexOf("\n") < 0 && !/^[ \t]/.test(text)) return []
         const lines = text.split("\n"), n = lines.length
-        const cols = l => { let c = 0; for (const ch of l) { if (ch === " ") c++; else if (ch === "\t") c += tabSize - c % tabSize; else break } return c }
+        const cols = l => box.colsOf(l)
         const blank = l => l.trim() === ""
         const ind = lines.map(l => blank(l) ? -1 : cols(l))
         // (A blank line: as deep as the shallower of the lines around it.)
@@ -426,7 +473,7 @@ Rectangle {
         const opens = lang === "python" ? /[:([{]$/.test(before)
                     : lang === "tessh" ? tesshOpens(before)
                     : /(\b(do|then|else|in)|[{(\[]|\|\||&&|\||\\)$/.test(before)
-        const deeper = opens ? ind + indentUnit : ind
+        const deeper = opens ? indentFor(colsOf(ind) + tabSize) : ind
         const next = edit.text[p]
         if (opens && next && ")]}".indexOf(next) >= 0 && before.slice(-1) === Object.keys(pairs).find(k => pairs[k] === next)) {
             insert("\n" + deeper + "\n" + ind)
@@ -456,17 +503,23 @@ Rectangle {
         const p = edit.cursorPosition, a = lineStart(p)
         const line = edit.text.substring(a, p)
         if (!/^\s+(done|fi|esac|else|elif|\}|\))$/.test(line)) return
-        const ind = indentOf(p)
-        if (ind.length < indentUnit.length) return
-        edit.remove(a, a + indentUnit.length)
+        const c = colsOf(indentOf(p))
+        if (c < tabSize) return
+        const pos = edit.cursorPosition
+        edit.cursorPosition = pos + setIndent(a, Math.ceil(c / tabSize) * tabSize - tabSize)
     }
     function shiftLines(dir) {
         // Indent (1) or outdent (-1) the current line or every selected one.
         const s = edit.selectionStart, e = edit.selectionEnd
         let a = lineStart(s)
         const lines = edit.text.substring(a, lineEnd(e)).split("\n")
-        const out = lines.map(l => dir > 0 ? indentUnit + l
-                                           : l.replace(new RegExp("^( {1," + indentUnit.length + "}|\t)"), ""))
+        // (A level in or out, onto the levels: 3 columns at size 2 go to 4, or 2.)
+        const out = lines.map(l => {
+            const m = /^[ \t]*/.exec(l)[0], c = colsOf(m)
+            if (l.trim() === "" && dir > 0) return l
+            const to = dir > 0 ? Math.floor(c / tabSize) * tabSize + tabSize : Math.ceil(c / tabSize) * tabSize - tabSize
+            return indentFor(to) + l.substring(m.length)
+        })
         const block = out.join("\n")
         const pos = edit.cursorPosition, delta = out[0].length - lines[0].length
         edit.remove(a, lineEnd(e))
@@ -482,7 +535,13 @@ Rectangle {
             // In the indentation (or over several lines): indent.
             const lead = /^\s*$/.test(t.substring(lineStart(p), p))
             if (edit.selectedText.indexOf("\u2029") >= 0 || edit.selectedText.indexOf("\n") >= 0) { shiftLines(1); return true }
-            if (lead) { insert(indentUnit); return true }
+            if (lead) {
+                // (To the next level, written as the indent setting says.)
+                const a = lineStart(p), c = colsOf(t.substring(a, p))
+                setIndent(a, Math.floor(c / tabSize) * tabSize + tabSize)
+                edit.cursorPosition = a + /^[ \t]*/.exec(edit.text.substring(a, lineEnd(a)))[0].length
+                return true
+            }
             return false   // (completion takes Tab elsewhere)
         }
         if (e.key === Qt.Key_Backspace && p > 0 && !edit.selectedText) {
@@ -491,9 +550,12 @@ Rectangle {
             const k = autoPairAt(p)
             if (pairs[o] && t[p] === pairs[o] && k >= 0 && autoPairs[k].open === p - 1) { edit.remove(p - 1, p + 1); return true }
             const lead = t.substring(lineStart(p), p)
-            if (lead.length > 0 && /^ +$/.test(lead)) {
-                const n = ((lead.length - 1) % indentUnit.length) + 1
-                edit.remove(p - n, p)
+            if (lead.length > 0 && /^[ \t]+$/.test(lead)) {
+                // (Back a level, onto the levels.)
+                const a = lineStart(p), c = colsOf(lead)
+                const rest = /^[ \t]*/.exec(t.substring(a, lineEnd(a)))[0].length - lead.length
+                setIndent(a, Math.ceil(c / tabSize) * tabSize - tabSize)
+                edit.cursorPosition = a + /^[ \t]*/.exec(edit.text.substring(a, lineEnd(a)))[0].length - rest
                 return true
             }
             return false
@@ -961,7 +1023,7 @@ Rectangle {
             persistentSelection: false
             font.family: box.view ? box.view.fontFamily : "monospace"
             font.pointSize: box.view && box.view.fontPointSize > 0 ? box.view.fontPointSize : 11
-            tabStopDistance: box.tabSize * fm.advanceWidth(" ")
+            tabStopDistance: box.tabWidth * fm.advanceWidth(" ")
             color: Theme.fg
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
@@ -1283,6 +1345,37 @@ Rectangle {
             label: (box.runShell !== "" ? box.shellNames[box.runShell] : box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
             tip: "Input language: highlighting, checks, completion (Ctrl+Alt+I)"
             onClicked: box.openLanguages()
+        }
+        // Indentation, as VS Code's status bar has it: spaces, tabs or mixed,
+        // and how wide a level is; kept per language.
+        Chip {
+            id: indentChip
+            base: box.color
+            label: ({ spaces: "Spaces: ", tabs: "Tabs: ", mixed: "Mixed: " })[box.indentMode] + box.tabSize
+            tip: "Indentation for " + box.lang + ": spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language."
+            onClicked: indentMenu.popup(indentChip, 0, -indentMenu.implicitHeight - 4)
+        }
+        SlimMenu {
+            id: indentMenu
+            readonly property var p: box.indentPref
+            SlimMenuItem { text: "Indent with spaces"; checkable: true; checked: indentMenu.p.mode === "spaces"; onTriggered: box.setIndentPref("mode", "spaces") }
+            SlimMenuItem { text: "Indent with tabs"; checkable: true; checked: indentMenu.p.mode === "tabs"; onTriggered: box.setIndentPref("mode", "tabs") }
+            SlimMenuItem { text: "Mixed (a tab for every 8 columns)"; checkable: true; checked: indentMenu.p.mode === "mixed"; onTriggered: box.setIndentPref("mode", "mixed") }
+            SlimMenuItem { text: "Size"; enabled: false }
+            Repeater {
+                model: [1, 2, 4, 8]
+                SlimMenuItem { required property int modelData; text: String(modelData); checkable: true; checked: indentMenu.p.size === modelData; onTriggered: box.setIndentPref("size", modelData) }
+            }
+            SlimMenuItem {
+                text: "Custom…" + ([1, 2, 4, 8].indexOf(indentMenu.p.size) < 0 ? " (" + indentMenu.p.size + ")" : "")
+                checkable: true; checked: [1, 2, 4, 8].indexOf(indentMenu.p.size) < 0
+                onTriggered: Window.window.askText("Indent size", "Columns per level for " + box.lang + ":", String(indentMenu.p.size), v => { const n = parseInt(v); if (n > 0 && n <= 32) box.setIndentPref("size", n) })
+            }
+            SlimMenuItem {
+                text: "Use " + box.lang + "'s default (" + ({ spaces: "spaces", tabs: "tabs", mixed: "mixed" })[indentMenu.p.defMode] + ", " + indentMenu.p.defSize + ")"
+                enabled: indentMenu.p.own
+                onTriggered: { box.setIndentPref("mode", null); box.setIndentPref("size", null) }
+            }
         }
         Chip {
             base: box.color

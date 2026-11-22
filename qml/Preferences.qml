@@ -675,23 +675,8 @@ Window {
                                 Item { Layout.fillWidth: true }
                             }
                             Row2 {
-                                label: "Indent with"
-                                hint: "Auto: tabs when what you're editing is indented with tabs, otherwise spaces. Tab and Shift+Tab indent and outdent a level, and Backspace in the indentation removes one."
-                                Segmented {
-                                    options: [{ label: "Auto", value: "auto" }, { label: "Spaces", value: "spaces" }, { label: "Tabs", value: "tabs" }]
-                                    value: prefs.settings.editor_indent || "auto"
-                                    onPicked: (v) => prefs.setG("editor_indent", v)
-                                }
-                                Item { Layout.fillWidth: true }
-                            }
-                            Row2 {
-                                label: "Indent size"
-                                hint: "Columns per level, the width of a tab and the number of spaces it stands for. Language default: 4 for Python, 2 for the rest."
-                                ChoiceBox {
-                                    values: [["0", "Language default"], ["2", "2"], ["3", "3"], ["4", "4"], ["8", "8"]]
-                                    value: String(prefs.settings.editor_tab_size || 0)
-                                    onChosen: (v) => prefs.setG("editor_tab_size", parseInt(v))
-                                }
+                                label: "Indentation"
+                                hint: "Spaces, tabs or mixed, and the size of a level: the indent chip beside the input language, kept for each language (each starts with its usual one: 4 spaces for Python, tabs for Go, 2 spaces for JavaScript...)."
                                 Item { Layout.fillWidth: true }
                             }
                             ToggleRow {
