@@ -96,6 +96,7 @@ impl Zmtp {
         Ok(Zmtp { stream: self.stream.try_clone()? })
     }
 
+
     fn write_frame(&mut self, body: &[u8], more: bool, command: bool) -> std::io::Result<()> {
         let mut flags = 0u8;
         if more {
@@ -759,8 +760,17 @@ pub struct Kernel {
     asking: Mutex<Option<Vec<u8>>>,
     /// Where its events go (to say it was stopped).
     sink: Sink,
-    /// busy / idle, as it last said; when it started.
+    /// busy / idle, as it last said, and since when; when it started.
     state: Mutex<String>,
+    state_at: Mutex<Instant>,
+    /// Cells sent that it hasn't said a word about yet: message id ->
+    /// (cell, code, when sent or last woken, wakes). (ipykernel can sit on a
+    /// request that comes while it's finishing starting up, idle, until
+    /// something else wakes it: the card waited for good. See
+    /// wake_if_stuck.)
+    unacked: Arc<Mutex<HashMap<String, (String, String, Instant, u32)>>>,
+    /// Its ports (shell, iopub, stdin, control, hb).
+    ports: Vec<u16>,
     started: Instant,
     /// The environment and folder it has (as started, then as synced).
     synced: Mutex<(HashMap<String, String>, String)>,
@@ -874,6 +884,9 @@ impl Kernel {
             answered: Mutex::default(),
             sink: sink.clone(),
             state: Mutex::new("starting".into()),
+            state_at: Mutex::new(Instant::now()),
+            unacked: Arc::default(),
+            ports: ports.clone(),
             started: Instant::now(),
             asking: Mutex::new(None),
             running,
@@ -1007,6 +1020,13 @@ impl Kernel {
 
     fn spawn_readers(self: &Arc<Self>, mut iopub: Zmtp, mut shell: Zmtp, sink: Sink) {
         let k = self.clone();
+        std::thread::spawn(move || {
+            while !k.gone.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(500));
+                k.wake_if_stuck();
+            }
+        });
+        let k = self.clone();
         let s2 = sink.clone();
         std::thread::spawn(move || {
             while let Ok(parts) = iopub.recv() {
@@ -1024,11 +1044,16 @@ impl Kernel {
                     continue;
                 };
                 let cell = k.pending.lock().unwrap().get(&parent).cloned();
+                // (Heard about: it has it.)
+                if !parent.is_empty() {
+                    k.unacked.lock().unwrap().remove(&parent);
+                }
                 match ty.as_str() {
                     "status" => {
                         let st = c["execution_state"].as_str().unwrap_or("");
                         if st == "idle" || st == "busy" {
                             *k.state.lock().unwrap() = st.to_string();
+                            *k.state_at.lock().unwrap() = Instant::now();
                             if k.ready.load(Ordering::SeqCst) {
                                 s2(json!({"type": "status", "state": st}));
                             }
@@ -1058,6 +1083,11 @@ impl Kernel {
                 }
             }
         });
+        self.spawn_shell_reader(shell, sink);
+    }
+
+    /// Replies on the shell connection (kernel_info, execute, complete).
+    fn spawn_shell_reader(self: &Arc<Self>, mut shell: Zmtp, sink: Sink) {
         let k = self.clone();
         std::thread::spawn(move || {
             while let Ok(parts) = shell.recv() {
@@ -1092,6 +1122,10 @@ impl Kernel {
                     }
                     "execute_reply" => {
                         let status = c["status"].as_str().unwrap_or("ok");
+                        // (Skipped: queued behind a cell that failed.)
+                        if status == "aborted" {
+                            sink(json!({"type": "output", "cell": what, "output": {"output_type": "error", "ename": "Not run", "evalue": "", "traceback": ["Not run: a cell before it failed."]}}));
+                        }
                         // (tessh: the last program's exit status, for the card.)
                         sink(json!({"type": "done", "cell": what, "status": status, "count": c["execution_count"],
                                     "exit": c["tessera_exit"].as_i64().unwrap_or(0)}));
@@ -1107,10 +1141,75 @@ impl Kernel {
     }
 
     fn send_shell(&self, msg_type: &str, content: Value, tag: &str) -> bool {
+        self.send_shell_id(msg_type, content, tag).is_some()
+    }
+
+    /// As send_shell; the message's id when it went.
+    fn send_shell_id(&self, msg_type: &str, content: Value, tag: &str) -> Option<String> {
         let (id, parts) = self.signer.message(msg_type, content);
-        self.pending.lock().unwrap().insert(id, tag.to_string());
+        self.pending.lock().unwrap().insert(id.clone(), tag.to_string());
         let mut g = self.shell.lock().unwrap();
-        g.as_mut().is_some_and(|s| s.send(&parts).is_ok())
+        g.as_mut().is_some_and(|s| s.send(&parts).is_ok()).then_some(id)
+    }
+
+    fn send_execute(&self, cell: &str, code: &str) -> bool {
+        let id = self.send_shell_id(
+            "execute_request",
+            // (tessera_tty: this side runs a tessh kernel's programs in the pane's terminal.)
+            json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": true, "stop_on_error": true, "tessera_tty": true}),
+            cell,
+        );
+        if let Some(id) = &id {
+            self.unacked.lock().unwrap().insert(id.clone(), (cell.to_string(), code.to_string(), Instant::now(), 0));
+        }
+        id.is_some()
+    }
+
+    /// Cells it's sat on (see `unacked`): once it has been idle 2 s with one
+    /// unanswered, it's woken by a connection of another (ipykernel picks
+    /// up the waiting request then; the answers come back as usual), up to
+    /// three times; still nothing, the cell's given up on.
+    fn wake_if_stuck(&self) {
+        let idle_for = { if *self.state.lock().unwrap() == "idle" { self.state_at.lock().unwrap().elapsed() } else { Duration::ZERO } };
+        if idle_for < Duration::from_secs(2) {
+            return;
+        }
+        let mut give_up = Vec::new();
+        let mut wake = false;
+        {
+            let mut u = self.unacked.lock().unwrap();
+            for (id, v) in u.iter_mut() {
+                if v.2.elapsed() < Duration::from_secs(2) {
+                    continue;
+                }
+                if v.3 >= 3 {
+                    give_up.push((id.clone(), v.0.clone()));
+                } else {
+                    v.3 += 1;
+                    v.2 = Instant::now();
+                    wake = true;
+                }
+            }
+            for (id, _) in &give_up {
+                u.remove(id);
+            }
+        }
+        if wake {
+            if std::env::var_os("TESSERA_KERNEL_DEBUG").is_some() {
+                eprintln!("{}: a request unanswered while idle: woken", self.spec.name);
+            }
+            let identity = format!("tessera-wake-{}", random_hex(6)).into_bytes();
+            if let Ok(mut z) = Zmtp::connect_as(self.ports[0], "DEALER", Duration::from_secs(2), &identity) {
+                let (_, parts) = self.signer.message("kernel_info_request", json!({}));
+                let _ = z.send(&parts);
+                std::thread::sleep(Duration::from_millis(300));
+                z.shutdown();
+            }
+        }
+        for (_, cell) in give_up {
+            (self.sink)(json!({"type": "output", "cell": cell, "output": {"output_type": "error", "ename": "No answer", "evalue": "", "traceback": ["The kernel never started this: run it again, or restart the kernel."]}}));
+            (self.sink)(json!({"type": "done", "cell": cell, "status": "error", "count": Value::Null, "exit": 0}));
+        }
     }
 
     pub fn execute(&self, cell: &str, code: &str) -> bool {
@@ -1124,12 +1223,7 @@ impl Kernel {
         } else {
             code
         };
-        self.send_shell(
-            "execute_request",
-            // (tessera_tty: this side runs a tessh kernel's programs in the pane's terminal.)
-            json!({"code": code, "silent": false, "store_history": true, "user_expressions": {}, "allow_stdin": true, "stop_on_error": true, "tessera_tty": true}),
-            cell,
-        )
+        self.send_execute(cell, code)
     }
 
     /// Code run quietly (no output, no count): the sync below.
