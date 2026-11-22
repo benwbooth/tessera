@@ -43,6 +43,8 @@ T.MenuItem {
     rightPadding: 8
     background: Rectangle {
         radius: 4
-        color: item.highlighted || item.hovered ? Theme.mix(Theme.panel, Theme.accent, 0.3) : "transparent"
+        // (Never a disabled row: the keyboard's place left on one looked like a
+        // second choice beside the hovered row.)
+        color: item.enabled && (item.highlighted || item.hovered) ? Theme.mix(Theme.panel, Theme.accent, 0.3) : "transparent"
     }
 }

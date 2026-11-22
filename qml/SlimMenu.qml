@@ -19,7 +19,9 @@ T.Menu {
         y += Math.round(p.y) - p.y + 0.001
     }
     margins: 4
-    delegate: SlimMenuItem {}
+    // (A submenu that doesn't apply, disabled, isn't shown at all: menus
+    // show only what applies.)
+    delegate: SlimMenuItem { visible: !subMenu || subMenu.enabled }
     contentItem: ListView {
         implicitHeight: contentHeight
         implicitWidth: {
