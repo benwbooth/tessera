@@ -1798,6 +1798,11 @@ impl<'py, 's> Compiler<'py, 's> {
                 slots.push(("redir", op.clone()));
             }
             Kind::Comma => return err("arguments are separated by spaces, not commas", Some(x)),
+            // (A glob: a Glob, which a function iterates for the names.)
+            _ if is_glob_word(x) => {
+                rs.push(self.cmd_word(x)?);
+                slots.push(("arg", String::new()));
+            }
             _ => {
                 rs.push(self.compile_value(x, Ctx::Value)?);
                 slots.push(("arg", String::new()));
@@ -1820,6 +1825,7 @@ impl<'py, 's> Compiler<'py, 's> {
                 "False" => self.c(false)?,
                 "None" => self.cnone()?,
                 "..." => self.n("Constant", vec![("value", self.py.Ellipsis().into_bound(self.py))])?,
+                n if n.contains(['*', '?', '[']) => self.rcall("g", vec![self.c(n)?])?,
                 n if is_path_word(n) => self.rcall("path_word", vec![self.c(n)?])?,
                 n if n.starts_with('~') => self.rcall("t", vec![self.c(n)?])?,
                 n => self.c(n)?,
@@ -1832,6 +1838,12 @@ impl<'py, 's> Compiler<'py, 's> {
                 } else {
                     self.c(value.as_str())?
                 }
+            }
+            // (A word with a glob in it: a Glob of what it spells.)
+            Kind::Word(_) if is_glob_word(x) => {
+                let w = self.word_value(x, false)?;
+                let e = self.val(w.expr)?;
+                return Ok(Res::s(w.stmts, self.rcall("g", vec![e])?));
             }
             Kind::IStr(_) | Kind::Word(_) => return self.word_value(x, true),
             Kind::Var(_) => self.var_load(x)?,
@@ -3753,4 +3765,15 @@ pub fn is_path_word(n: &str) -> bool {
 /// How a path starts.
 fn is_path_start(t: &str) -> bool {
     t.starts_with('/') && t.len() > 1 && !t.starts_with("//") || t == "~" || t.starts_with("~/") || t.starts_with("./") || t.starts_with("../") || t == "." || t == ".."
+}
+
+/// A bare word with glob characters (*, ?, […]): *, *.txt, src/**/x, a$n*.
+fn is_glob_word(x: &Form) -> bool {
+    let glob = |t: &str| t.contains(['*', '?', '[']);
+    match &x.kind {
+        Kind::Sym { name, .. } => glob(name),
+        Kind::Op { name, tick: false } => name == "*",
+        Kind::Word(ps) => ps.iter().any(|p| matches!(p, Part::Text(t) if glob(t))),
+        _ => false,
+    }
 }

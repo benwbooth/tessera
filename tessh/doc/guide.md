@@ -543,7 +543,24 @@ c.txt
 True
 ```
 
-In a Python call, a bareword is just a string; use `glob` to expand one.
+To Python, a pattern written bare is a **Glob**. There's no glob object in
+Python itself (`glob.glob` and `Path.glob` are functions), so tessh has its
+own. Iterating it gives the matching paths, sorted and read again each time.
+`len`, `in` and `[i]` work, and printed (or in `"$g"`) it's the names, as
+`echo` shows them. Quote a pattern to keep it text: `'*.py'`.
+
+```tessh
+touch a.py b.py
+g = *.py
+print $g (len $g) ([$p.stem for p in $g]) (repr $g)
+f = ./a.py
+print ($f in $g) $g[0] "found: $g"
+```
+
+```output
+a.py b.py 2 ['a' 'b'] Glob('*.py')
+True a.py found: a.py b.py
+```
 
 ## Pipes
 <!-- help: pipes pipe | stage stages pipeline -->

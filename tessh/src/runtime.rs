@@ -144,6 +144,11 @@ def _bare_path(t):
     import re
     return bool(re.fullmatch(r"(/|\./|\.\./|~/)[A-Za-z0-9_./+@%=,:~-]*|/|\.|\.\.", t))
 
+def _bare_glob(t):
+    """Whether t, written bare, reads back as this glob."""
+    import re
+    return bool(re.fullmatch(r"[A-Za-z0-9_./+@%=,:~*?\[\]!-]+", t)) and any(c in t for c in "*?[")
+
 def _str_lit(x):
     """A str as tessh reads it back: 'raw' when it can be, else "escaped"."""
     if "'" not in x and x.isprintable():
@@ -258,6 +263,8 @@ def pretty(x, color=None, width=None, indent=0, _tree_of=None):
             return c("punct", "(") + "float " + c("str", "'" + repr(x) + "'") + c("punct", ")")
         if type(x) is complex:
             return c("punct", "(") + "complex " + c("num", repr(x.real)) + " " + c("num", repr(x.imag)) + c("punct", ")")
+        if type(x) is Glob and _bare_glob(x.pattern):
+            return c("str", x.pattern)
         if isinstance(x, _pathlib.PurePath) and _bare_path(str(x)):
             return c("str", str(x))
         if type(x) is _Name:
@@ -432,8 +439,66 @@ class _NeedHint:
         pkg = cls._pypi.get(name, name)
         raise ModuleNotFoundError(f"No module named {name!r}: `need {pkg}` installs it (from PyPI, once)", name=name)
 
-class _Glob(str):
-    pass
+class Glob:
+    """A pattern written bare: *, *.txt, src/**/*.rs, ?.log, [ab]*.  A
+    program gets the names it matches; Python gets this: iterate it for
+    the matching paths (sorted, read each time), len, in ($p in *.txt),
+    [i], .paths.  Printed, or in "$g", it's the names (the pattern itself
+    when nothing matches), as echo shows them.  Glob 'x*' makes one."""
+    __slots__ = ("pattern",)
+    def __init__(self, pattern):
+        self.pattern = str(pattern)
+    @property
+    def paths(self):
+        import glob, os
+        found = sorted(glob.glob(os.path.expanduser(self.pattern), recursive=True))
+        return [Path(m, spelled=m) for m in found]
+    def __iter__(self):
+        return iter(self.paths)
+    def __len__(self):
+        return len(self.paths)
+    def __bool__(self):
+        return bool(self.paths)
+    def __getitem__(self, i):
+        return self.paths[i]
+    def __contains__(self, x):
+        import os
+        pat = os.path.expanduser(self.pattern)
+        p = _pathlib.PurePath(os.fspath(x))
+        # (A pattern for here, a path written in full: the part under here.)
+        if p.is_absolute() and not os.path.isabs(pat):
+            try:
+                p = p.relative_to(os.getcwd())
+            except ValueError:
+                return False
+        return p.full_match(pat)
+    def __str__(self):
+        names = self.paths
+        return " ".join(str(p) for p in names) if names else self.pattern
+    def __repr__(self):
+        return f"Glob({self.pattern!r})"
+    def __eq__(self, other):
+        return isinstance(other, Glob) and other.pattern == self.pattern
+    def __hash__(self):
+        return hash(("Glob", self.pattern))
+
+_Glob = Glob
+
+def _words_as_program(f):
+    """f, called with a glob's names where it's given a Glob (as a program
+    would be: the pattern itself when nothing matches)."""
+    import functools
+    @functools.wraps(f)
+    def run(*args, **kw):
+        out = []
+        for a in args:
+            if type(a) is Glob:
+                names = a.paths
+                out.extend(str(p) for p in names) if names else out.append(a.pattern)
+            else:
+                out.append(a)
+        return f(*out, **kw)
+    return run
 
 def pick(d, keys, defaults, rest):
     """{a b c=0 **more} = d"""
@@ -874,7 +939,7 @@ fn argv(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     for x in items.try_iter()? {
         let x = x?;
         if x.is_instance(&globc)? {
-            out.extend(glob_expand(&x.extract::<String>()?));
+            out.extend(glob_expand(&x.getattr("pattern")?.extract::<String>()?));
         } else if x.is_instance_of::<PyList>() || x.is_instance_of::<PyTuple>() {
             for y in x.try_iter()? {
                 out.push(word(&y?)?);
@@ -2148,8 +2213,10 @@ pub fn which(n: &str) -> Option<String> {
 /// Make a function a command function: its arguments are read as words.
 #[pyfunction]
 fn command(f: Bound<'_, PyAny>) -> PyResult<Bound<'_, PyAny>> {
-    f.setattr("_tessh_command", true)?;
-    Ok(f)
+    // (Its words as a program's: a glob, the names it matches.)
+    let w = prelude(f.py())?.getattr("_words_as_program")?.call1((&f,))?;
+    w.setattr("_tessh_command", true)?;
+    Ok(w)
 }
 
 pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
@@ -2185,6 +2252,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     }
     m.add("print", prelude(py)?.getattr("print")?)?;
     m.add("Path", prelude(py)?.getattr("Path")?)?;
+    m.add("Glob", prelude(py)?.getattr("Glob")?)?;
     m.add("path_word", prelude(py)?.getattr("_path_word")?)?;
     m.add("pretty", prelude(py)?.getattr("pretty")?)?;
     m.add("env", Py::new(py, Env)?)?;
@@ -2199,7 +2267,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help", "print", "pretty", "Path"].iter()).chain(CORE.iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help", "print", "pretty", "Path", "Glob"].iter()).chain(CORE.iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }

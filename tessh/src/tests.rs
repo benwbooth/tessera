@@ -567,3 +567,19 @@ fn a_lone_folder_goes_there() {
     assert!(lines[0] == "/tmp" || std::path::Path::new(lines[0]) == tmp, "{out}");
     assert_eq!(lines[1], "/", "{out}");
 }
+
+#[test]
+fn globs_are_glob_objects() {
+    let here = std::env::current_dir().unwrap();
+    let d = std::env::temp_dir().join(format!("tessh-glob-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    for f in ["a.txt", "b.txt", "c.py"] {
+        std::fs::write(d.join(f), "").unwrap();
+    }
+    std::env::set_current_dir(&d).unwrap();
+    let (ns, out) = run("g = *.txt\nprint *.txt\nprint (len $g) *.none (3 * 4)\nf = ./a.txt\nprint ($f in $g)\necho *.py");
+    std::env::set_current_dir(&here).unwrap();
+    let _ = std::fs::remove_dir_all(&d);
+    Python::attach(|py| assert_eq!(ns.bind(py).get_item("g").unwrap().unwrap().get_type().name().unwrap().to_string(), "Glob"));
+    assert_eq!(out, "a.txt b.txt\n2 *.none 12\nTrue\nc.py\n");
+}
