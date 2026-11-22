@@ -183,6 +183,8 @@ Rectangle {
     property string submitMode: ""
     // A command's running with the keys (the editor's shown, waiting).
     property bool waiting: false
+    // Ctrl held down now (its press seen, not its release).
+    property bool ctrlDown: false
     // Commands waiting for the one running to finish (the pane's), and a
     // signal to drop them.
     property int queued: 0
@@ -803,8 +805,11 @@ Rectangle {
         const shift = e.modifiers & Qt.ShiftModifier
         if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
             if (shift || (e.modifiers & Qt.AltModifier)) { newline(); return true }
-            // (Ctrl+Enter: in the background, alongside what's running.)
-            if (ctrl) { submitBackground(); return true }
+            // (Ctrl+Enter: in the background, alongside what's running. Ctrl
+            // really held: keyd's Enter (overload(control, enter)) sends a
+            // Ctrl tap just before a tapped Enter, and that Enter can come
+            // still marked Ctrl.)
+            if (ctrl && box.ctrlDown) { submitBackground(); return true }
             submit()
             return true
         }
@@ -1171,6 +1176,7 @@ Rectangle {
                 return 0
             }
             Keys.onReleased: (e) => {
+                if (e.key === Qt.Key_Control) box.ctrlDown = false
                 if (e.key === Qt.Key_Shift && shiftSide !== 0 && Date.now() - shiftAt < 450) {
                     if (shiftSide === 2) box.newline()
                     else if (!box.acceptGhost()) box.askGhostNow()
@@ -1179,6 +1185,7 @@ Rectangle {
                 if (e.key === Qt.Key_Shift) shiftSide = 0
             }
             Keys.onPressed: (e) => {
+                if (e.key === Qt.Key_Control) box.ctrlDown = true
                 exLine.dismiss()
                 if (e.key !== Qt.Key_Up && e.key !== Qt.Key_Down) box.fromHistory = false
                 if (e.key === Qt.Key_Shift && !e.isAutoRepeat) { shiftSide = shiftSideOf(e); shiftAt = Date.now() }
@@ -1437,10 +1444,12 @@ Rectangle {
         }
         Chip {
             base: box.color
-            visible: box.lang === "tessh"
+            readonly property string guide: Window.window && Window.window.guideFor ? Window.window.guideFor(box.lang, box.runShell || box.shellName) : ""
+            visible: guide !== ""
             label: "? Guide"
-            tip: "The tessh guide, in a tab: every feature, with examples"
-            onClicked: Window.window.openGuide()
+            tip: guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
+                : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept"
+            onClicked: Window.window.openGuide(guide)
         }
         Chip {
             visible: box.jobsAll > 0

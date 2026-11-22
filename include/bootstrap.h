@@ -56,7 +56,7 @@ public:
             // (Which one: right Ctrl's tap runs the editor's command in the
             // background; left's switches between editor and terminal. 105:
             // right Ctrl's evdev code + 8.)
-            right = k->nativeScanCode() == 105;
+            right = k->nativeScanCode() == 105 || k->nativeVirtualKey() == 0xffe4 || k->nativeScanCode() == 0x11d;
             if (armed) since.start();
             return false;
         }
