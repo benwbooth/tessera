@@ -200,7 +200,8 @@ impl Completer for TesshHelper {
         let head = before[..start].trim_end();
         let first = head.is_empty() || head.ends_with(['|', ';', '(', '\n']) || head.ends_with("&&") || head.ends_with("||");
         let names = Python::attach(|py| completions(py, self.ns.bind(py), word, first, &before[..start]));
-        Ok((start, names.into_iter().map(|n| Pair { display: n.clone(), replacement: n }).collect()))
+        let quoted = before[..start].ends_with(['\'', '"']);
+        Ok((start, names.into_iter().map(|n| Pair { display: n.clone(), replacement: if quoted { n } else { quote_path(&n) } }).collect()))
     }
 }
 
@@ -348,7 +349,10 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
         } else {
             ("command", "program".to_string())
         };
-        items.push(serde_json::json!({"insert": n, "label": n, "kind": kind, "detail": detail, "doc": doc}));
+        // (A name that needs quoting comes quoted, so it works as inserted:
+        // '7th Heaven'/ — unless it's inside a quote already.)
+        let insert = if (kind == "dir" || kind == "file") && !before[..start].ends_with(['\'', '"']) { quote_path(&n) } else { n.clone() };
+        items.push(serde_json::json!({"insert": insert, "label": n, "kind": kind, "detail": detail, "doc": doc}));
     }
     serde_json::json!({"start": u16_of(start), "end": u16_of(pos), "items": items})
 }
@@ -731,5 +735,36 @@ mod tests {
         assert!(h.contains("\x1b[1;34mls"), "{h:?}");
         assert!(h.contains("\x1b[36m$x"), "{h:?}");
         assert!(h.contains("\x1b[32m\"s\""), "{h:?}");
+    }
+}
+
+/// A path as tessh reads it back: each part that has a space or another
+/// special character in it quoted ('7th Heaven'/, ~/'My Docs'/x), the rest
+/// (and a leading ~) bare, so the path can go on after it.
+pub fn quote_path(p: &str) -> String {
+    let safe = |part: &str| part.chars().all(|c| c.is_alphanumeric() || "_-.+@%=,:~".contains(c));
+    p.split('/')
+        .map(|part| {
+            if part.is_empty() || safe(part) {
+                part.to_string()
+            } else if !part.contains('\'') {
+                format!("'{part}'")
+            } else {
+                format!("\"{}\"", part.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(test)]
+mod quote_tests {
+    #[test]
+    fn quotes_what_needs_it() {
+        assert_eq!(super::quote_path("7th Heaven/"), "'7th Heaven'/");
+        assert_eq!(super::quote_path("~/My Docs/a.txt"), "~/'My Docs'/a.txt");
+        assert_eq!(super::quote_path("src/main.rs"), "src/main.rs");
+        assert_eq!(super::quote_path("it's here"), "\"it's here\"");
+        assert_eq!(super::quote_path("a$b"), "'a$b'");
     }
 }

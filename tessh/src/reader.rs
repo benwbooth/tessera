@@ -26,6 +26,8 @@ impl std::fmt::Display for ReadError {
 }
 
 const DELIMS: &str = " \t\r\n()[]{}\"'`;$,";
+/// What a backslash makes literal in a bare word: 7th\ Heaven, \$5, \*.
+const ESCAPABLE: &str = " \t()[]{}\"'`;,$#*?&|<>";
 const CLOSERS: &str = ")]}";
 pub const OPCHARS: &str = "+-*/<>=!&|%^~@?:.";
 
@@ -270,7 +272,7 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
     let string_piece = with_postfix(string.clone()).map(Piece::F).boxed();
 
     let raw_text = choice((
-        none_of(DELIMS).ignored(),
+        just('\\').then(one_of(ESCAPABLE)).not().ignore_then(none_of(DELIMS)).ignored(),
         just(',').then_ignore(none_of(" \t\r\n)]}").rewind()).ignored(),
     ))
     .repeated()
@@ -305,7 +307,14 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
         }))
     };
 
+    // (\ and a space or special character: that character, as if quoted —
+    // 7th\ Heaven/, a\(b, \$5, \*. A \ before a letter is \ls: the program.)
+    let escaped = just('\\')
+        .ignore_then(one_of(ESCAPABLE))
+        .map_with(|c: char, e| Piece::F(Form::new(Kind::Str { value: c.to_string(), kind: '\'' }, sp(e.span()))))
+        .boxed();
     let first_piece = choice((
+        escaped.clone(),
         string_piece.clone(),
         dollar_piece.clone(),
         with_postfix(paren.clone()).map(Piece::F).boxed(),
@@ -315,6 +324,7 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
     ))
     .boxed();
     let more_piece = choice((
+        escaped.clone(),
         string_piece.clone(),
         dollar_piece.clone(),
         with_postfix(paren.clone()).map(Piece::F).boxed(),

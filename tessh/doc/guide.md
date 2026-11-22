@@ -42,6 +42,21 @@ hello -a --all --color=auto ./run.sh ../x /etc/hosts foo.txt g++
 str hello
 ```
 
+A backslash takes the next space or special character into the word, as in a
+shell: `7th\ Heaven/`, `\$5`, `a\;b`, `\*` (not a glob). At the end of a line
+it carries the line on to the next.
+
+```tessh
+print 7th\ Heaven/ \$5 a\;b \*
+echo one \
+  two
+```
+
+```output
+7th Heaven/ $5 a;b *
+one two
+```
+
 Operator characters glued to other text are part of the word. Spaced, they're
 operators.
 

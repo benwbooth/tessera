@@ -88,6 +88,7 @@ module.exports = grammar({
 
     symbol: _ => token(seq(':', /[A-Za-z_][A-Za-z0-9_]*/)),
 
-    bareword: _ => token(/[^\s()\[\]{}"'`;$,#][^\s()\[\]{}"'`;,]*/),
+    // (A backslash takes the next character into the word: 7th\ Heaven, \$5.)
+    bareword: _ => token(/([^\s()\[\]{}"'`;$,#\\]|\\[^\r\n])([^\s()\[\]{}"'`;,\\]|\\[^\r\n])*/),
   },
 });

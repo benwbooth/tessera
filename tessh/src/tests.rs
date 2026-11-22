@@ -583,3 +583,10 @@ fn globs_are_glob_objects() {
     Python::attach(|py| assert_eq!(ns.bind(py).get_item("g").unwrap().unwrap().get_type().name().unwrap().to_string(), "Glob"));
     assert_eq!(out, "a.txt b.txt\n2 *.none 12\nTrue\nc.py\n");
 }
+
+#[test]
+fn backslash_escapes_in_words() {
+    let (ns, out) = run("x = 7th\\ Heaven/\nprint $x a\\(b \\$HOME \\*\necho one \\\n  two");
+    Python::attach(|py| assert_eq!(ns.bind(py).get_item("x").unwrap().unwrap().str().unwrap().to_string(), "7th Heaven/"));
+    assert_eq!(out, "7th Heaven/ a(b $HOME *\none two\n");
+}
