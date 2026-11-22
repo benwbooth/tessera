@@ -420,6 +420,18 @@ def _path_word(text):
         return Path(os.path.expanduser(text))
     return Path(text, spelled=text)
 
+class _NeedHint:
+    """Last on sys.meta_path: a module nothing found says how to get it."""
+    _pypi = {"cv2": "opencv-python", "PIL": "pillow", "sklearn": "scikit-learn", "yaml": "pyyaml",
+             "bs4": "beautifulsoup4", "skimage": "scikit-image", "dateutil": "python-dateutil",
+             "mpl_toolkits": "matplotlib", "Crypto": "pycryptodome", "dotenv": "python-dotenv"}
+    @classmethod
+    def find_spec(cls, name, path=None, target=None):
+        if path is not None or "." in name or name.startswith("_"):
+            return None
+        pkg = cls._pypi.get(name, name)
+        raise ModuleNotFoundError(f"No module named {name!r}: `need {pkg}` installs it (from PyPI, once)", name=name)
+
 class _Glob(str):
     pass
 
@@ -761,6 +773,16 @@ pub fn pretty_text(py: Python<'_>, v: &Bound<'_, PyAny>, color: Option<bool>) ->
     let kw = PyDict::new(py);
     kw.set_item("color", color)?;
     prelude(py)?.getattr("pretty")?.call((v,), Some(&kw))?.extract()
+}
+
+/// A missing module's error says `need` gets it.
+pub fn install_import_hint(py: Python<'_>) -> PyResult<()> {
+    let hint = prelude(py)?.getattr("_NeedHint")?;
+    let mp = py.import("sys")?.getattr("meta_path")?;
+    if !mp.contains(&hint)? {
+        mp.call_method1("append", (hint,))?;
+    }
+    Ok(())
 }
 
 /// In the kernel: values go to notebook cards, which show color.

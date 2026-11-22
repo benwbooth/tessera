@@ -61,17 +61,17 @@ pub fn init(py: Python<'_>) -> PyResult<()> {
     if py.import("sys")?.getattr("modules")?.contains("__tessh__")? {
         return Ok(());
     }
-    // The packages the build's Nix Python has (numpy, pandas, matplotlib),
-    // after the user's own: a dev build's tessh gets them as the Nix
-    // package's wrapper does (TESSH_SITE_PACKAGES is set by the dev shell).
-    if let Some(site) = option_env!("TESSH_SITE_PACKAGES") {
-        let path = py.import("sys")?.getattr("path")?;
-        if std::path::Path::new(site).is_dir() && !path.contains(site)? {
-            path.call_method1("append", (site,))?;
+    // (PyPI's wheels — numpy, pandas, matplotlib — want the system's
+    // libstdc++; on NixOS there's none on the path: this build's, loaded
+    // now, is the one they get. Programs tessh runs don't see it.)
+    if let Some(lib) = option_env!("TESSH_LIBSTDCXX") {
+        if let Ok(c) = std::ffi::CString::new(lib) {
+            unsafe { libc::dlopen(c.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
         }
     }
     let m = crate::runtime::module(py)?;
     m.add_function(wrap_pyfunction!(run_module, &m)?)?;
+    crate::runtime::install_import_hint(py)?;
     // (`import name` finds name.tsh too, from tessh and from Python it runs;
     // the folder you're in is on the path, as for `python -c`.)
     let path = py.import("sys")?.getattr("path")?;

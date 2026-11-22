@@ -1255,18 +1255,21 @@ a number big 11 what?
 <!-- help: import imports from modules module -->
 
 ```tessh
-import os sys
-import numpy as np
+import os sys math
 from os.path import join basename
 from collections import Counter as C
 print (join a b) (basename /x/y.txt) ((C abca).most_common 1)
-print (np.arange 3)
+print (math.sqrt 16)
 ```
 
 ```output
 a/b y.txt [('a', 2)]
-[0 1 2]
+4.0
 ```
+
+Packages from PyPI (numpy, pandas, matplotlib, ...) come with `need`: uv
+installs them once into a cache, and they import from the next line. A module
+that isn't there says so: `No module named 'numpy': need numpy installs it`.
 
 ## Do
 <!-- help: do block progn -->
@@ -1975,6 +1978,7 @@ screen) gets the live terminal in the card while it runs. The cell goes on
 when it exits, with its status in `$?`.
 
 ```tessh no-run
+need pandas matplotlib
 import pandas as pd
 df = pd.DataFrame {a: [1 2 3] b: [4 5 6]}
 display $df

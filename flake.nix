@@ -78,12 +78,11 @@
             };
           };
           # tessh, Tessera's shell language: a Rust program that embeds Python
-          # (PyO3), with the packages the Nix Python kernel has.
-          tesshPython = pkgs.python3;
-          tesshPackages = pkgs.python3.withPackages (p: with p; [ numpy pandas matplotlib ]);
+          # (PyO3). Packages come from PyPI with uv (`need numpy`): ready-made,
+          # where nixpkgs only prebuilds its default Python's.
+          tesshPython = pkgs.python315;
           tesshWrap = bin: ''
             wrapProgram ${bin} \
-              --prefix PYTHONPATH : ${tesshPackages}/${tesshPython.sitePackages} \
               --suffix PATH : ${pkgs.uv}/bin
           '';
           tessh = pkgs.rustPlatform.buildRustPackage {
@@ -172,10 +171,9 @@
         in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec pkgs.python3 ];
-            # tessh (built here) adds these to its Python's path at the end:
-            # the packages the Nix package's tessh has.
-            TESSH_SITE_PACKAGES = "${pkgs.python3.withPackages (p: with p; [ numpy pandas matplotlib ])}/${pkgs.python3.sitePackages}";
+            packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt pkgs.pkg-config qtEnv pkgs.libGL pkgs.zig_0_15 pkgs.git pkgs.watchexec pkgs.python315 pkgs.uv ];
+            # (tessh's Python, pkgs.python315 as in the package: what PyO3 builds against.)
+            PYO3_PYTHON = "${pkgs.python315}/bin/python3";
             QMAKE = "${qtEnv}/bin/qmake";
             TESSERA_MUSL_TARGET = muslTarget;
             "CARGO_TARGET_${muslVar}_LINKER" = "${muslCc}cc";
