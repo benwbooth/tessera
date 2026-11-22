@@ -187,7 +187,7 @@ Rectangle {
             const old = h.indexOf(t)
             if (old >= 0) h.splice(old, 1)
             h.push(t)
-            if (controller) controller.historyAdd(t, box.cwd)
+            if (controller) controller.historyAdd(t, box.cwd, box.lang)
         }
         histIndex = -1
         draft = ""
@@ -485,6 +485,28 @@ Rectangle {
     property int compIndex: 0
     property bool historyMode: false   // the dropdown lists history (Ctrl+R, the clock)
     property string historyQuery: ""
+    // A history entry's text colored as the editor colors it (its spans from
+    // history::search), as StyledText.
+    function coloredLine(text, spans) {
+        const n = text.length
+        if (!spans || spans.length === 0) return box.escapeStyled(text)
+        const col = new Array(n).fill("")
+        for (const s of spans) {
+            const c = hl.colors[s[2]]
+            if (!c) continue
+            for (let i = s[0]; i < s[0] + s[1] && i < n; i++) col[i] = "" + c
+        }
+        let out = "", i = 0
+        while (i < n) {
+            let j = i
+            while (j < n && col[j] === col[i]) j++
+            const t = box.escapeStyled(text.substring(i, j))
+            out += col[i] !== "" ? "<font color=\"" + col[i] + "\">" + t + "</font>" : t
+            i = j
+        }
+        return out
+    }
+    function escapeStyled(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/ /g, "&nbsp;") }
     function openHistory() {
         historyMode = true; compOpen = true; compChosen = true; compIndex = 0
         historyQuery = edit.text.trim()
@@ -502,7 +524,7 @@ Rectangle {
         const text = edit.text, cursor = edit.cursorPosition
         // (tessh: its own names, programs and files, not the shell's.)
         const tessh = box.lang === "tessh" && box.sshHost === ""
-        Async.call(controller, k => hist ? controller.historySearch(k, query)
+        Async.call(controller, k => hist ? controller.historySearch(k, query, box.lang)
                                  : tessh ? controller.completeTessh(k, text, cursor, box.cwd)
                                          : controller.complete(k, text, cursor, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid, box.sshHost), json => {
             if (!box || seq !== box.compSeq || !box.compOpen || box.historyMode !== hist) return
@@ -1737,7 +1759,9 @@ Rectangle {
                     width: compPopup.hist ? compList.width - kindTag.width - 32 - Math.min(histDetail.implicitWidth, 260)
                                           : Math.min(implicitWidth, compList.width * 0.45)
                     elide: Text.ElideRight
-                    text: modelData.label
+                    // (History: colored as the editor would color it.)
+                    text: compPopup.hist && modelData.spans ? box.coloredLine(modelData.label, modelData.spans) : modelData.label
+                    textFormat: compPopup.hist && modelData.spans ? Text.StyledText : Text.PlainText
                     color: Theme.text
                     font.family: edit.font.family
                     font.pointSize: edit.font.pointSize

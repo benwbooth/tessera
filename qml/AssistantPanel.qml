@@ -173,7 +173,7 @@ Rectangle {
         if (cmd.indexOf("\n") < 0) v.sendText(cmd + "\r")
         else { v.pasteText(cmd); v.sendText("\r") }
         v.scrollToBottom()
-        if (pane.controller) pane.controller.historyAdd(cmd, context().cwd)
+        if (pane.controller) pane.controller.historyAdd(cmd, context().cwd, "bash")
     }
     property int startLine: 0
     function insert(cmd) {

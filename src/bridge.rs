@@ -654,10 +654,11 @@ pub mod ffi {
         #[qinvokable]
         fn history_all(self: &Controller, reply: &QString, limit: i32);
         #[qinvokable]
-        fn history_add(self: &Controller, cmd: &QString, cwd: &QString);
+        fn history_add(self: &Controller, cmd: &QString, cwd: &QString, lang: &QString);
         /// History matches for the dropdown (completion JSON).
+        /// `lang`: the editor's language, for entries that don't say theirs.
         #[qinvokable]
-        fn history_search(self: &Controller, reply: &QString, query: &QString);
+        fn history_search(self: &Controller, reply: &QString, query: &QString, lang: &QString);
         /// How the running daemon compared with this build at startup:
         /// "none", "current", "upgraded", "waiting", "outdated", "newer".
         #[qinvokable]
@@ -1026,13 +1027,13 @@ impl ffi::Controller {
         self.answer_on(reply, None, move || crate::history::all_json(limit.max(1) as usize))
     }
 
-    fn history_add(&self, cmd: &ffi::QString, cwd: &ffi::QString) {
-        let (cmd, cwd) = (cmd.to_string(), cwd.to_string());
+    fn history_add(&self, cmd: &ffi::QString, cwd: &ffi::QString, lang: &ffi::QString) {
+        let (cmd, cwd, lang) = (cmd.to_string(), cwd.to_string(), lang.to_string());
         let cwd = match cwd.strip_prefix("file://") {
             Some(rest) => percent_decode(&rest[rest.find('/').unwrap_or(rest.len())..]),
             None => cwd,
         };
-        crate::background::in_order_on("history", move || crate::history::add(&cmd, &cwd));
+        crate::background::in_order_on("history", move || crate::history::add(&cmd, &cwd, &lang));
     }
 
     fn jupyter_running(&self, reply: &ffi::QString) {
@@ -1412,9 +1413,9 @@ impl ffi::Controller {
         self.answer_on(reply, None, crate::cells::tessh_manual_html)
     }
 
-    fn history_search(&self, reply: &ffi::QString, query: &ffi::QString) {
-        let query = query.to_string();
-        self.answer_on(reply, None, move || crate::history::search(&query))
+    fn history_search(&self, reply: &ffi::QString, query: &ffi::QString, lang: &ffi::QString) {
+        let (query, lang) = (query.to_string(), lang.to_string());
+        self.answer_on(reply, None, move || crate::history::search(&query, &lang))
     }
 
 

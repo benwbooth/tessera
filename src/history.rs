@@ -15,6 +15,10 @@ pub struct Entry {
     pub t: u64,
     #[serde(default)]
     pub cwd: String,
+    /// The editor's language it was run in ("" for a shell's history file,
+    /// or before this was kept: the editor's language now).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub lang: String,
 }
 
 fn own_file() -> PathBuf {
@@ -30,14 +34,14 @@ fn now() -> u64 {
 }
 
 /// Record a command run from the editor.
-pub fn add(cmd: &str, cwd: &str) {
+pub fn add(cmd: &str, cwd: &str, lang: &str) {
     let cmd = cmd.trim_end();
     if cmd.trim().is_empty() {
         return;
     }
     let _ = std::fs::create_dir_all(crate::settings::state_dir());
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(own_file()) {
-        let line = serde_json::to_string(&Entry { cmd: cmd.to_string(), t: now(), cwd: cwd.to_string() }).unwrap_or_default();
+        let line = serde_json::to_string(&Entry { cmd: cmd.to_string(), t: now(), cwd: cwd.to_string(), lang: lang.to_string() }).unwrap_or_default();
         let _ = writeln!(f, "{line}");
     }
 }
@@ -60,7 +64,7 @@ pub fn parse_zsh(text: &str) -> Vec<Entry> {
             Some((meta, cmd)) => (meta.split(':').next().and_then(|s| s.trim().parse().ok()).unwrap_or(0), cmd),
             None => (0, line),
         };
-        let e = Entry { cmd: cmd.strip_suffix('\\').unwrap_or(cmd).to_string(), t, cwd: String::new() };
+        let e = Entry { cmd: cmd.strip_suffix('\\').unwrap_or(cmd).to_string(), t, cwd: String::new(), lang: String::new() };
         if cmd.ends_with('\\') {
             cur = Some(e);
         } else {
@@ -80,7 +84,7 @@ pub fn parse_bash(text: &str) -> Vec<Entry> {
             t = ts;
             continue;
         }
-        out.push(Entry { cmd: line.to_string(), t, cwd: String::new() });
+        out.push(Entry { cmd: line.to_string(), t, cwd: String::new(), lang: String::new() });
         t = 0;
     }
     out
@@ -91,7 +95,7 @@ pub fn parse_fish(text: &str) -> Vec<Entry> {
     let mut out: Vec<Entry> = Vec::new();
     for line in text.lines() {
         if let Some(c) = line.strip_prefix("- cmd: ") {
-            out.push(Entry { cmd: c.replace("\\n", "\n").replace("\\\\", "\\"), t: 0, cwd: String::new() });
+            out.push(Entry { cmd: c.replace("\\n", "\n").replace("\\\\", "\\"), t: 0, cwd: String::new(), lang: String::new() });
         } else if let Some(w) = line.trim().strip_prefix("when: ") {
             if let Some(e) = out.last_mut() {
                 e.t = w.trim().parse().unwrap_or(0);
@@ -164,7 +168,7 @@ pub fn merge(lists: Vec<Vec<Entry>>) -> Vec<Entry> {
 
 /// For the history dropdown: matches for `query`, newest first, as
 /// completion items ({label, insert, detail, kind}).
-pub fn search(query: &str) -> String {
+pub fn search(query: &str, default_lang: &str) -> String {
     let q = query.trim().to_lowercase();
     let words: Vec<&str> = q.split_whitespace().collect();
     let now = now();
@@ -178,10 +182,41 @@ pub fn search(query: &str) -> String {
         .take(300)
         .map(|e| {
             let label = e.cmd.replace('\n', " \u{21b5} ");
-            json!({"label": label, "insert": e.cmd, "detail": when(now, e.t, &e.cwd), "kind": "history"})
+            let lang = if e.lang.is_empty() { default_lang } else { e.lang.as_str() };
+            json!({"label": label, "insert": e.cmd, "detail": when(now, e.t, &e.cwd), "kind": "history", "spans": label_spans(&e.cmd, lang)})
         })
         .collect();
     json!({"start": 0, "end": 0, "items": items, "pending": false, "history": true}).to_string()
+}
+
+/// The command's syntax colors ([[start, length, kind]], UTF-16) for its
+/// one-line label, where each line break is " ↵ ".
+fn label_spans(cmd: &str, lang: &str) -> serde_json::Value {
+    let a: serde_json::Value = serde_json::from_str(&crate::syntax::analyze(lang, cmd)).unwrap_or_default();
+    // (UTF-16 offset in the command -> offset in the label.)
+    let mut at = Vec::with_capacity(cmd.len() + 1);
+    let mut l = 0u64;
+    for c in cmd.chars() {
+        for _ in 0..c.len_utf16() {
+            at.push(l);
+        }
+        l += if c == '\n' { 3 } else { c.len_utf16() as u64 };
+    }
+    at.push(l);
+    let map = |o: u64| at.get(o as usize).copied().unwrap_or(l);
+    let spans: Vec<serde_json::Value> = a["spans"]
+        .as_array()
+        .map(|v| {
+            v.iter()
+                .filter_map(|s| {
+                    let (st, len, kind) = (s[0].as_u64()?, s[1].as_u64()?, s[2].as_str()?);
+                    let (b, e) = (map(st), map(st + len));
+                    Some(json!([b, e.saturating_sub(b), kind]))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::Value::Array(spans)
 }
 
 fn when(now: u64, t: u64, cwd: &str) -> String {
@@ -220,7 +255,7 @@ mod tests {
     #[test]
     fn formats() {
         let z = parse_zsh(": 100:0;ls -la\n: 200:0;for x in a; do\\\necho $x\\\ndone\n");
-        assert_eq!(z[0], Entry { cmd: "ls -la".into(), t: 100, cwd: String::new() });
+        assert_eq!(z[0], Entry { cmd: "ls -la".into(), t: 100, cwd: String::new(), lang: String::new() });
         assert_eq!(z[1].cmd, "for x in a; do\necho $x\ndone");
         let b = parse_bash("#150\ngit status\nmake\n");
         assert_eq!((b[0].t, b[1].t), (150, 0));
@@ -230,8 +265,8 @@ mod tests {
 
     #[test]
     fn merged_once_in_time_order() {
-        let a = vec![Entry { cmd: "ls".into(), t: 100, cwd: String::new() }, Entry { cmd: "make".into(), t: 300, cwd: String::new() }];
-        let b = vec![Entry { cmd: "git".into(), t: 200, cwd: String::new() }, Entry { cmd: "ls".into(), t: 400, cwd: String::new() }];
+        let a = vec![Entry { cmd: "ls".into(), t: 100, cwd: String::new(), lang: String::new() }, Entry { cmd: "make".into(), t: 300, cwd: String::new(), lang: String::new() }];
+        let b = vec![Entry { cmd: "git".into(), t: 200, cwd: String::new(), lang: String::new() }, Entry { cmd: "ls".into(), t: 400, cwd: String::new(), lang: String::new() }];
         let m: Vec<String> = merge(vec![a, b]).into_iter().map(|e| e.cmd).collect();
         assert_eq!(m, ["git", "make", "ls"]);
     }

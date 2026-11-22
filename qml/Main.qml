@@ -707,6 +707,8 @@ ApplicationWindow {
     // (TESSERA_TEST_NEWTAB=<dir>: a new tab at 6 s, each frame after it saved.)
     Timer { interval: 6000; running: controller.testEnv("NEWTAB") !== ""; onTriggered: { win.closeTabFrames = 0; newTab({ view: controller.testEnv("CLOSETAB_VIEW") }) } }
     Connections { target: win; function onFrameSwapped() { if (win.closeTabFrames >= 0 && win.closeTabFrames < 20) { const n = win.closeTabFrames++; rootLayout.grabToImage(r => r.saveToFile((controller.testEnv("CLOSETAB") || controller.testEnv("NEWTAB")) + "/f-" + n + ".png")) } } }
+    // (Test hook: TESSERA_TEST_HISTORY=<query>: the history list for it.)
+    Timer { interval: 5000; running: controller.testEnv("HISTORY") !== ""; onTriggered: if (activePane) { activePane.compose.setText(controller.testEnv("HISTORY")); activePane.compose.openHistory() } }
     // (Test hook: TESSERA_TEST_NIXHELP=<program> shows it.)
     Timer { interval: 3000; running: controller.testEnv("NIXHELP") !== ""; onTriggered: win.nixHelp(controller.testEnv("NIXHELP"), "") }
     NixHelp {
