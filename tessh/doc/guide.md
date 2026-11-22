@@ -55,6 +55,24 @@ print (1 + 2)
 3
 ```
 
+A bareword written as a path — starting with `/`, `~`, `./` or `../` — is a
+**Path**: a `pathlib` path, so `$p.name`, `$p.parent`, `$p / more` and
+`$p.exists` work. It keeps how it was written, which is what a command, `print`
+and `"$p"` get, and `~` is your home. `+` joins it as text; `Path 'x y'` makes
+one from text.
+
+```tessh
+p = /tmp/notes/todo.txt
+print (type $p).__name__ $p.name $p.parent $p.suffix ($p / more)
+r = ./run.sh
+print $r "in $r" ($r + .bak) (Path 'a b' / c)
+```
+
+```output
+Path todo.txt /tmp/notes .txt /tmp/notes/todo.txt/more
+./run.sh in ./run.sh ./run.sh.bak a b/c
+```
+
 `True`, `False` and `None` are Python's constants.
 
 ```tessh

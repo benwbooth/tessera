@@ -1820,6 +1820,7 @@ impl<'py, 's> Compiler<'py, 's> {
                 "False" => self.c(false)?,
                 "None" => self.cnone()?,
                 "..." => self.n("Constant", vec![("value", self.py.Ellipsis().into_bound(self.py))])?,
+                n if is_path_word(n) => self.rcall("path_word", vec![self.c(n)?])?,
                 n if n.starts_with('~') => self.rcall("t", vec![self.c(n)?])?,
                 n => self.c(n)?,
             },
@@ -1985,7 +1986,10 @@ impl<'py, 's> Compiler<'py, 's> {
             });
         }
         let mut e = self.at(self.joined(vals)?, x);
-        if tilde && matches!(&x.kind, Kind::Word(ps) if matches!(ps.first(), Some(Part::Text(t)) if t.starts_with('~'))) {
+        // (/tmp/$x, ~/$name, ./$f: a path, its parts filled in.)
+        if tilde && matches!(&x.kind, Kind::Word(ps) if matches!(ps.first(), Some(Part::Text(t)) if is_path_start(t))) {
+            e = self.rcall("path_word", vec![e])?;
+        } else if tilde && matches!(&x.kind, Kind::Word(ps) if matches!(ps.first(), Some(Part::Text(t)) if t.starts_with('~'))) {
             e = self.rcall("t", vec![e])?;
         }
         Ok(Res::s(stmts, e))
@@ -3738,4 +3742,15 @@ fn target_names(t: &Form, out: &mut HashSet<String>) {
 /// `name := …`: an assignment expression, whoever `name` is.
 fn walrus(items: &[Form]) -> bool {
     items.len() > 2 && matches!(&items[1].kind, Kind::Op { name, .. } if name == ":=")
+}
+
+/// A bare word written as a path: /…, ~ or ~/…, ./…, ../…, . or .. — not a
+/// glob (that's a list of names).
+pub fn is_path_word(n: &str) -> bool {
+    is_path_start(n) && !n.contains(['*', '?', '['])
+}
+
+/// How a path starts.
+fn is_path_start(t: &str) -> bool {
+    t.starts_with('/') && t.len() > 1 && !t.starts_with("//") || t == "~" || t.starts_with("~/") || t.starts_with("./") || t.starts_with("../") || t == "." || t == ".."
 }

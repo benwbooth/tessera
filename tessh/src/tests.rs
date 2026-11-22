@@ -540,3 +540,19 @@ fn printed_values_read_back() {
     });
     assert!(checked >= 72);
 }
+
+#[test]
+fn path_words_are_paths() {
+    let (ns, out) = run("p = /tmp/x/y.txt\nr = ./run.sh\nh = ~/n\nd = /tmp/$r\nl = [/tmp ./a]\nprint (pretty $l color=False) $r\necho $r ~");
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        let g = |k: &str| ns.get_item(k).unwrap().unwrap();
+        assert_eq!(g("p").get_type().name().unwrap().to_string(), "Path");
+        assert_eq!(g("p").getattr("name").unwrap().to_string(), "y.txt");
+        assert_eq!(g("r").str().unwrap().to_string(), "./run.sh", "keeps its spelling");
+        assert!(g("h").str().unwrap().to_string().ends_with("/n") && !g("h").str().unwrap().to_string().starts_with('~'));
+        assert_eq!(g("d").str().unwrap().to_string(), "/tmp/./run.sh");
+    });
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(out, format!("[/tmp ./a] ./run.sh\n./run.sh {home}\n"), "printed as written; commands get text");
+}

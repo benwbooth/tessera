@@ -139,6 +139,11 @@ def _kind(x):
 class _Name(str):
     """A function's name, shown as its variable: (defaultdict $list {…})."""
 
+def _bare_path(t):
+    """Whether t, written bare, reads back as this path."""
+    import re
+    return bool(re.fullmatch(r"(/|\./|\.\./|~/)[A-Za-z0-9_./+@%=,:~-]*|/|\.|\.\.", t))
+
 def _str_lit(x):
     """A str as tessh reads it back: 'raw' when it can be, else "escaped"."""
     if "'" not in x and x.isprintable():
@@ -216,6 +221,8 @@ def pretty(x, color=None, width=None, indent=0, _tree_of=None):
             import collections, pathlib
             t = type(x)
             if isinstance(x, pathlib.PurePath):
+                if _bare_path(str(x)):
+                    return None
                 name, args = "Path", [str(x)]
             elif t is range:
                 name, args = "range", ([x.start] if x.start else []) + [x.stop] + ([x.step] if x.step != 1 else [])
@@ -251,6 +258,8 @@ def pretty(x, color=None, width=None, indent=0, _tree_of=None):
             return c("punct", "(") + "float " + c("str", "'" + repr(x) + "'") + c("punct", ")")
         if type(x) is complex:
             return c("punct", "(") + "complex " + c("num", repr(x.real)) + " " + c("num", repr(x.imag)) + c("punct", ")")
+        if isinstance(x, _pathlib.PurePath) and _bare_path(str(x)):
+            return c("str", str(x))
         if type(x) is _Name:
             return c("name", "$" + x if x != "None" else x)
         if type(x) is str:
@@ -375,8 +384,41 @@ def print(*args, sep=" ", end="\n", file=None, flush=False):
     out = file if file is not None else sys.stdout
     if file is None or file is sys.stdout:
         color = _wants_color(out)
-        args = [pretty(a, color=color) if _kind(a) else a for a in args]
+        # (A path printed is its text; containers are laid out.)
+        args = [pretty(a, color=color) if _kind(a) and not isinstance(a, _pathlib.PurePath) else a for a in args]
     builtins.print(*args, sep=sep, end=end, file=out, flush=flush)
+
+import pathlib as _pathlib
+
+class Path(_pathlib.PosixPath):
+    """A path: what /tmp/x, ~/notes, ./run.sh and ../up are as values.  A
+    pathlib path ($p.name, $p.parent, $p / 'more', $p.exists, $p.read_text)
+    that keeps how it was written (./run.sh stays ./run.sh), which is what
+    a command, print and "$p" get; ~ is your home.  + joins as text.
+    Path 'x y' makes one from text."""
+    def __init__(self, *args, spelled=None):
+        super().__init__(*args)
+        self._spelled = spelled
+    def with_segments(self, *args):
+        return Path(*args)
+    def __str__(self):
+        s = getattr(self, "_spelled", None)
+        return s if s is not None else super().__str__()
+    def __fspath__(self):
+        return str(self)
+    def __repr__(self):
+        return f"Path({str(self)!r})"
+    def __add__(self, other):
+        return str(self) + str(other)
+    def __radd__(self, other):
+        return str(other) + str(self)
+
+def _path_word(text):
+    """A path-shaped bare word as a Path (~ expanded; else as written)."""
+    import os
+    if text.startswith("~"):
+        return Path(os.path.expanduser(text))
+    return Path(text, spelled=text)
 
 class _Glob(str):
     pass
@@ -2109,6 +2151,8 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         m.add(*n, prelude(py)?.getattr(*n)?)?;
     }
     m.add("print", prelude(py)?.getattr("print")?)?;
+    m.add("Path", prelude(py)?.getattr("Path")?)?;
+    m.add("path_word", prelude(py)?.getattr("_path_word")?)?;
     m.add("pretty", prelude(py)?.getattr("pretty")?)?;
     m.add("env", Py::new(py, Env)?)?;
     for n in COMMAND_BUILTINS {
@@ -2122,7 +2166,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help", "print", "pretty"].iter()).chain(CORE.iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help", "print", "pretty", "Path"].iter()).chain(CORE.iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }
