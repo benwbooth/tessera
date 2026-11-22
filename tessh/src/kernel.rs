@@ -369,6 +369,10 @@ fn execute(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
     }
     let filename = format!("<cell {count}>");
     RAN_PROGRAM.store(false, Ordering::SeqCst);
+    // (The folder it starts in, for its card: the kernel's, which a cd in an
+    // earlier cell moved, before the pane's shell hears of it.)
+    let start_cwd = std::env::var("PWD").ok().filter(|p| p.starts_with('/'))
+        .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string())).unwrap_or_default();
     let r = runner::run_source(py, &code, ns, &filename, !silent);
     show_figures(py);
     drain(py);
@@ -382,7 +386,7 @@ fn execute(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
     // (The exit status of the last program it ran, for the card's ✓ or ✘:
     // a program failing isn't an error to tessh, but it is to the card.)
     let exit = if RAN_PROGRAM.load(Ordering::SeqCst) { runtime::STATUS.load(Ordering::SeqCst) } else { 0 };
-    let ok = json!({"status": "ok", "execution_count": count, "user_expressions": {}, "payload": [], "tessera_exit": exit});
+    let ok = json!({"status": "ok", "execution_count": count, "user_expressions": {}, "payload": [], "tessera_exit": exit, "tessera_cwd": start_cwd});
     let (ename, evalue, tb) = match r {
         Ok(()) => return ok,
         Err(TesshError::Py(e)) => {
@@ -408,7 +412,7 @@ fn execute(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
         }
     };
     publish("error", json!({"ename": ename, "evalue": evalue, "traceback": tb}));
-    json!({"status": "error", "execution_count": count, "ename": ename, "evalue": evalue, "traceback": tb})
+    json!({"status": "error", "execution_count": count, "ename": ename, "evalue": evalue, "traceback": tb, "tessera_cwd": start_cwd})
 }
 
 fn complete(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {

@@ -1127,8 +1127,9 @@ impl Kernel {
                             sink(json!({"type": "output", "cell": what, "output": {"output_type": "error", "ename": "Not run", "evalue": "", "traceback": ["Not run: a cell before it failed."]}}));
                         }
                         // (tessh: the last program's exit status, for the card.)
+                        // (tessh: also the folder the cell started in.)
                         sink(json!({"type": "done", "cell": what, "status": status, "count": c["execution_count"],
-                                    "exit": c["tessera_exit"].as_i64().unwrap_or(0)}));
+                                    "exit": c["tessera_exit"].as_i64().unwrap_or(0), "cwd": c["tessera_cwd"].as_str().unwrap_or("")}));
                     }
                     "complete_reply" => {
                         sink(json!({"type": "complete", "request": what, "matches": c["matches"],
