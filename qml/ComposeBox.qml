@@ -267,7 +267,68 @@ Rectangle {
     }
 
     // ---- VS Code-style editing: indentation, pairs -------------------------
-    readonly property string indentUnit: lang === "python" ? "    " : "  "
+    // (Preferences › Input editor: tabs or spaces, and how many columns a
+    // level and a tab are.)
+    readonly property var edPrefs: { const w = box.Window.window; return w && w.settings ? w.settings : ({}) }
+    readonly property int tabSize: edPrefs.editor_tab_size > 0 ? edPrefs.editor_tab_size : (lang === "python" ? 4 : 2)
+    readonly property bool useTabs: edPrefs.editor_indent === "tabs" || (edPrefs.editor_indent !== "spaces" && /(^|\n)\t/.test(edit.text))
+    readonly property string indentUnit: useTabs ? "\t" : " ".repeat(tabSize)
+    // Line numbers: each line's top (y), when there are several and they're on.
+    readonly property var lineStarts: {
+        if (edPrefs.editor_line_numbers === false) return []
+        const text = edit.text
+        edit.width; edit.contentHeight; edit.font.pointSize
+        if (text.indexOf("\n") < 0) return []
+        const out = []
+        let p = 0
+        for (const l of text.split("\n")) { out.push(edit.positionToRectangle(p).y); p += l.length + 1 }
+        return out
+    }
+    readonly property int cursorLine: edit.text.substring(0, edit.cursorPosition).split("\n").length - 1
+    readonly property int lineCount: edPrefs.editor_line_numbers === false ? 1 : edit.text.split("\n").length
+    readonly property real gutterWidth: lineCount > 1 ? String(lineCount).length * fm.advanceWidth("0") + 10 : 0
+    // Indent guides: [{x, y, h, on}], a line per indent level down the lines
+    // indented past it (blank lines between them included), the one around
+    // the cursor's block brighter, as VS Code draws them.
+    readonly property var indentGuides: {
+        if (edPrefs.editor_indent_guides === false) return []
+        const text = edit.text, cw = fm.advanceWidth(" ")
+        edit.width; edit.contentHeight; edit.font.pointSize
+        if (text.indexOf("\n") < 0 && !/^[ \t]/.test(text)) return []
+        const lines = text.split("\n"), n = lines.length
+        const cols = l => { let c = 0; for (const ch of l) { if (ch === " ") c++; else if (ch === "\t") c += tabSize - c % tabSize; else break } return c }
+        const blank = l => l.trim() === ""
+        const ind = lines.map(l => blank(l) ? -1 : cols(l))
+        // (A blank line: as deep as the shallower of the lines around it.)
+        for (let i = 0; i < n; i++) if (ind[i] < 0) {
+            let a = 0, b = 0
+            for (let j = i - 1; j >= 0; j--) if (ind[j] >= 0 && !blank(lines[j])) { a = ind[j]; break }
+            for (let j = i + 1; j < n; j++) if (!blank(lines[j])) { b = cols(lines[j]); break }
+            ind[i] = Math.min(a, b)
+        }
+        const starts = []
+        let p = 0
+        for (let i = 0; i < n; i++) { starts.push(p); p += lines[i].length + 1 }
+        const top = i => edit.positionToRectangle(starts[i]).y
+        const bottom = i => i + 1 < n ? edit.positionToRectangle(starts[i + 1]).y : edit.contentHeight
+        // (The cursor's block: its line's deepest level.)
+        const cl = text.substring(0, edit.cursorPosition).split("\n").length - 1
+        const cLevel = Math.floor(ind[cl] / tabSize) - 1
+        const out = []
+        const maxLevel = Math.max(0, ...ind.map(c => Math.ceil(c / tabSize)))
+        for (let k = 0; k < maxLevel; k++) {
+            let i = 0
+            while (i < n) {
+                if (ind[i] <= k * tabSize) { i++; continue }
+                let j = i
+                while (j + 1 < n && ind[j + 1] > k * tabSize) j++
+                const on = k === cLevel && cl >= i && cl <= j
+                out.push({ x: k * tabSize * cw, y: top(i), h: bottom(j) - top(i), on: on })
+                i = j + 1
+            }
+        }
+        return out
+    }
     readonly property var pairs: ({ "(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'", "`": "`" })
     // As VS Code does it: a pair is typed only before whitespace, the line's
     // end or one of these (autoCloseBefore), a quote not inside a string or
@@ -871,9 +932,28 @@ Rectangle {
             else if (contentY + height <= r.y + r.height) contentY = r.y + r.height - height
         }
 
+        // Line numbers, once there's more than one line (each line's number
+        // at its first row: a wrapped line's other rows have none).
+        Repeater {
+            model: box.lineStarts
+            Text {
+                required property var modelData
+                required property int index
+                x: 0
+                width: box.gutterWidth - 8
+                y: modelData + 0.001
+                horizontalAlignment: Text.AlignRight
+                text: index + 1
+                color: index === box.cursorLine ? Theme.text : Theme.textDim
+                opacity: index === box.cursorLine ? 0.8 : 0.5
+                font: edit.font
+                renderType: Text.NativeRendering
+            }
+        }
         TextEdit {
             id: edit
-            width: flick.width
+            x: box.gutterWidth
+            width: flick.width - box.gutterWidth
             wrapMode: TextEdit.Wrap
             textFormat: TextEdit.PlainText
             renderType: Text.NativeRendering
@@ -881,11 +961,26 @@ Rectangle {
             persistentSelection: false
             font.family: box.view ? box.view.fontFamily : "monospace"
             font.pointSize: box.view && box.view.fontPointSize > 0 ? box.view.fontPointSize : 11
+            tabStopDistance: box.tabSize * fm.advanceWidth(" ")
             color: Theme.fg
             selectionColor: Theme.accent
             selectedTextColor: Theme.bg
             // A block cursor like the terminal's, the character under it in
             // the background color (a hollow box when the editor isn't typing).
+            // The indent guides, under the text.
+            Repeater {
+                model: box.indentGuides
+                Rectangle {
+                    required property var modelData
+                    z: -1
+                    x: Math.round(modelData.x) + 0.5
+                    y: modelData.y
+                    width: 1
+                    height: modelData.h
+                    color: Theme.fg
+                    opacity: modelData.on ? 0.32 : 0.12
+                }
+            }
             cursorDelegate: Rectangle {
                 id: cur
                 readonly property string under: {

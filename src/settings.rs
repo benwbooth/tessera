@@ -61,6 +61,16 @@ pub struct Settings {
     // ("emacs", "vi", "vscode").
     pub input_editor: bool,
     pub editor_keys: String,
+    /// Indenting in the input editor: "auto" (tabs when the text is
+    /// indented with them, else spaces), "spaces" or "tabs".
+    pub editor_indent: String,
+    /// Columns per indent level and per tab (0: the language's own, 4 for
+    /// Python, 2 for the rest).
+    pub editor_tab_size: u32,
+    /// Lines down the indentation, one per level, as VS Code draws them.
+    pub editor_indent_guides: bool,
+    /// Line numbers in the input editor once it has more than one line.
+    pub editor_line_numbers: bool,
     /// A file card's terminal editor ("" = the shell's $VISUAL or $EDITOR).
     pub terminal_editor: String,
     // -- Notebook: Markdown output as a page ("rich") or as styled
@@ -134,6 +144,10 @@ impl Default for Settings {
             undo_close_seconds: 5,
             input_editor: true,
             editor_keys: "emacs".into(),
+            editor_indent: "auto".into(),
+            editor_tab_size: 0,
+            editor_indent_guides: true,
+            editor_line_numbers: true,
             terminal_editor: String::new(),
             markdown_style: "rich".into(),
             notebook_kernel: "tessh".into(),

@@ -675,6 +675,38 @@ Window {
                                 Item { Layout.fillWidth: true }
                             }
                             Row2 {
+                                label: "Indent with"
+                                hint: "Auto: tabs when what you're editing is indented with tabs, otherwise spaces. Tab and Shift+Tab indent and outdent a level, and Backspace in the indentation removes one."
+                                Segmented {
+                                    options: [{ label: "Auto", value: "auto" }, { label: "Spaces", value: "spaces" }, { label: "Tabs", value: "tabs" }]
+                                    value: prefs.settings.editor_indent || "auto"
+                                    onPicked: (v) => prefs.setG("editor_indent", v)
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Row2 {
+                                label: "Indent size"
+                                hint: "Columns per level, the width of a tab and the number of spaces it stands for. Language default: 4 for Python, 2 for the rest."
+                                ChoiceBox {
+                                    values: [["0", "Language default"], ["2", "2"], ["3", "3"], ["4", "4"], ["8", "8"]]
+                                    value: String(prefs.settings.editor_tab_size || 0)
+                                    onChosen: (v) => prefs.setG("editor_tab_size", parseInt(v))
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            ToggleRow {
+                                label: "Indent guides"
+                                hint: "A faint line down each level of indentation, brighter for the block the cursor is in, as VS Code draws them."
+                                checked: prefs.settings.editor_indent_guides !== false
+                                onToggled: (on) => prefs.setG("editor_indent_guides", on)
+                            }
+                            ToggleRow {
+                                label: "Line numbers"
+                                hint: "Numbers beside the lines once a command has more than one."
+                                checked: prefs.settings.editor_line_numbers !== false
+                                onToggled: (on) => prefs.setG("editor_line_numbers", on)
+                            }
+                            Row2 {
                                 label: "Markdown in the notebook"
                                 hint: "Rich: a page, with proportional type and pictures. Text: monospace, the way a terminal Markdown viewer draws it. Each cell's view menu can switch."
                                 ChoiceBox {

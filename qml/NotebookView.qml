@@ -360,6 +360,51 @@ FocusScope {
     property var seenH: ({})
     // The tessh guide, in a tab of its own (Main's openGuide).
     function openGuide() { Window.window.openGuide() }
+    // ---- a card's command, colored as the editor colors it -------------------
+    readonly property var synColors: ({
+        keyword: nb.ansi(5, "#c678dd"), string: nb.ansi(2, "#98c379"), comment: Theme.textDim,
+        number: nb.ansi(3, "#d19a66"), constant: nb.ansi(3, "#d19a66"), function: nb.ansi(4, "#61afef"),
+        operator: nb.ansi(6, "#56b6c2"), property: nb.ansi(6, "#56b6c2"),
+        embedded: nb.ansi(13, "#c678dd"), type: nb.ansi(3, "#e5c07b"), constructor: nb.ansi(3, "#e5c07b"),
+        punctuation: Theme.textDim, escape: nb.ansi(6, "#56b6c2"), attribute: nb.ansi(3, "#e5c07b"),
+        tag: nb.ansi(1, "#e06c75")
+    })
+    // (Each character's color, kept per language and text: the syntax is
+    // read once per command, not on every redraw.)
+    property var colorCache: ({})
+    function charColors(text, lang) {
+        const key = lang + "\u0000" + text
+        if (colorCache[key]) return colorCache[key]
+        const col = new Array(text.length).fill("")
+        try {
+            const r = JSON.parse(nb.controller.syntax(lang, text))
+            for (const s of r.spans) {
+                const c = synColors[s[2]]
+                if (!c) continue
+                for (let i = s[0]; i < s[0] + s[1] && i < text.length; i++) col[i] = "" + c
+            }
+        } catch (e) {}
+        const keys = Object.keys(colorCache)
+        if (keys.length > 400) colorCache = ({})
+        colorCache[key] = col
+        return col
+    }
+    // `text` (its first `upTo` characters) as StyledText (rich: HTML for a
+    // tooltip, line breaks kept).
+    function coloredCode(text, lang, upTo, rich) {
+        const col = charColors(text, lang)
+        const n = upTo >= 0 ? Math.min(upTo, text.length) : text.length
+        const esc = t => { t = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/ /g, "&nbsp;"); return rich ? t.replace(/\n/g, "<br>") : t }
+        let out = "", i = 0
+        while (i < n) {
+            let j = i
+            while (j < n && col[j] === col[i]) j++
+            const t = esc(text.substring(i, j))
+            out += col[i] !== "" ? "<font color=\"" + col[i] + "\">" + t + "</font>" : t
+            i = j
+        }
+        return out
+    }
     property string expandedId: ""      // the cell filling the window, if any
     Connections { target: cells; function onCountChanged() { if (nb.expandedId !== "" && nb.indexOf(nb.expandedId) < 0) nb.expandedId = "" } }
     property int execCount: 0
@@ -2902,14 +2947,20 @@ FocusScope {
                     // the whole of it in the tooltip, and in ⓘ Details.)
                     readonly property string whole: cell.source.replace(/^\s*\n|\s+$/g, "")
                     readonly property bool more: whole.indexOf("\n") >= 0
+                    // (Code: colored as the editor colors it.)
+                    readonly property bool colored: cell.viewPath === "" && !cell.editing && cell.code && whole !== ""
+                    readonly property string codeLang: cell.lang !== "" ? cell.lang : nb.codeLang
+                    textFormat: colored ? Text.StyledText : Text.PlainText
                     text: cell.viewPath !== "" ? cell.viewPath.replace(/^ssh:\/\/([^\/]*)/, (m, h) => { try { return "ssh://" + decodeURIComponent(h) } catch (e) { return m } })
-                        : cell.editing ? (cell.code ? "" : "Markdown") : whole !== "" ? whole.split("\n")[0] + (more ? "  \u2026" : "") : "(empty)"
+                        : cell.editing ? (cell.code ? "" : "Markdown")
+                        : colored ? nb.coloredCode(whole, codeLang, more ? whole.indexOf("\n") : -1, false) + (more ? "&nbsp;&nbsp;\u2026" : "")
+                        : whole !== "" ? whole.split("\n")[0] + (more ? "  \u2026" : "") : "(empty)"
                     maximumLineCount: cell.viewPath !== "" ? 6 : 1
                     wrapMode: cell.viewPath !== "" ? Text.WrapAnywhere : Text.NoWrap
                     elide: cell.viewPath !== "" ? Text.ElideNone : Text.ElideRight
                     ToolTip.visible: srcHover.hovered && cell.viewPath === "" && !cell.editing && (truncated || more)
                     ToolTip.delay: 500
-                    ToolTip.text: whole
+                    ToolTip.text: colored ? "<tt>" + nb.coloredCode(whole, codeLang, -1, true) + "</tt>" : whole
                     color: cell.editing ? Theme.textDim : Theme.text
                     font.family: nb.fontFamily
                     font.pointSize: 9
