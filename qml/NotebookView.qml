@@ -1761,8 +1761,8 @@ FocusScope {
         return ""
     }
     function lsViewable(args) {
-        const shortOk = /^-[aAlh1tSXUfr]+$/
-        const longOk = ["--all", "--almost-all", "--human-readable", "--reverse", "--group-directories-first", "--color", "--color=auto", "--color=always", "--color=never"]
+        const shortOk = /^-[aAlh1tSXUfrd]+$/
+        const longOk = ["--directory", "--all", "--almost-all", "--human-readable", "--reverse", "--group-directories-first", "--color", "--color=auto", "--color=always", "--color=never"]
         let paths = 0
         for (const x of args) {
             const a = x.text
@@ -3822,7 +3822,18 @@ FocusScope {
             fontFamily: nb.fontFamily
             pointSize: nb.outputPointSize
             rowHeight: nb.outputRow > 0 ? nb.outputRow : 18
-            flagAll: !isCd && args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all")
+            // (ls -d: the folder itself, as an entry of the one it's in.)
+            readonly property bool selfOnly: !isCd && args.some(a => /^-[a-zA-Z]*d/.test(a) || a === "--directory") && target !== "/"
+            readonly property string target: {
+                const base = nb.localPath(src.cwd) || nb.shellDir
+                const home = nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
+                const a = args.find(x => !x.startsWith("-") || x === "-")
+                if (!a) return base
+                const p = a.replace(/^['"]|['"]$/g, "").replace(/^~(?=\/|$)/, home)
+                return (p.startsWith("/") ? p : base + "/" + p).replace(/\/+$/, "") || "/"
+            }
+            onlyName: selfOnly ? target.replace(/^.*\//, "") : ""
+            flagAll: !isCd && (args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all") || onlyName.startsWith("."))
             flagLong: !isCd && (args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test(words[0]))
             // (ls's order flags; the last one given wins, as in ls.)
             readonly property string shortFlags: isCd ? "" : args.filter(a => /^-[a-zA-Z]+$/.test(a)).map(a => a.slice(1)).join("")
@@ -3839,14 +3850,12 @@ FocusScope {
             flagReverse: !isCd && (/r/.test(shortFlags) || args.indexOf("--reverse") >= 0)
             flagFoldersFirst: !isCd && args.indexOf("--group-directories-first") >= 0
             startDir: {
-                const base = nb.localPath(src.cwd) || nb.shellDir
                 const home = nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
-                const a = args.find(x => !x.startsWith("-") || x === "-")
                 // (cd: where it went, as the shell has it.)
                 if (isCd) return nb.onHost(nb.cwdAfter(src.cid) || home)
-                if (!a) return nb.onHost(base)
-                const p = a.replace(/^['"]|['"]$/g, "").replace(/^~(?=\/|$)/, home)
-                return nb.onHost(p.startsWith("/") ? p : base + "/" + p)
+                // (ls -d: the folder it's in, showing just it.)
+                if (selfOnly) return nb.onHost(target.replace(/\/[^\/]*$/, "") || "/")
+                return nb.onHost(target)
             }
             refresh: src.tick ? src.tick.length : 0
             kept: nb.fileViews[src.cid] || null

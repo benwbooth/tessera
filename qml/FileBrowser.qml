@@ -18,6 +18,7 @@ Item {
     property string startDir: ""
     property bool flagAll: false        // ls -a
     property bool flagLong: false       // ls -l
+    property string onlyName: ""        // ls -d: just this entry of the folder (the folder itself)
     // ls's order: "date" (-t), "size" (-S), "type" (-X), "none" (-U), or "" (by
     // name); flagReverse: -r. Given, they're the card's, over the last choice.
     property string flagSort: ""
@@ -99,7 +100,7 @@ Item {
     onShowHiddenChanged: list()
     onControllerChanged: list()
     readonly property var entries: {
-        const a = raw.slice()
+        const a = onlyName === "" ? raw.slice() : raw.filter(x => x.name === onlyName)
         const name = (x) => x.name.toLowerCase().replace(/^\./, "")
         const cmp = {
             name: (x, y) => name(x).localeCompare(name(y), undefined, { numeric: true }),
