@@ -65,6 +65,9 @@ pub struct Settings {
     /// chip: {lang: {"mode": "spaces"|"tabs"|"mixed", "size": n}} (a
     /// language not here has its usual one).
     pub editor_indent_langs: serde_json::Value,
+    /// Indentation detected from the text (tabs, spaces and their size)
+    /// over the language's setting, once the text has indented lines.
+    pub editor_detect_indent: bool,
     /// Lines down the indentation, one per level, as VS Code draws them.
     pub editor_indent_guides: bool,
     /// Line numbers in the input editor once it has more than one line.
@@ -143,6 +146,7 @@ impl Default for Settings {
             input_editor: true,
             editor_keys: "emacs".into(),
             editor_indent_langs: serde_json::json!({}),
+            editor_detect_indent: true,
             editor_indent_guides: true,
             editor_line_numbers: true,
             terminal_editor: String::new(),

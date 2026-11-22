@@ -287,18 +287,48 @@ Rectangle {
         const m = (edPrefs.editor_indent_langs || {})[lang] || {}
         return { mode: ["spaces", "tabs", "mixed"].indexOf(m.mode) >= 0 ? m.mode : d[0], size: m.size > 0 ? m.size : d[1], defMode: d[0], defSize: d[1], own: m.mode !== undefined || m.size !== undefined }
     }
+    // (Picked on the chip: that, not what's detected, until the editor's
+    // emptied.)
+    property bool indentPicked: false
+    Connections { target: edit; function onTextChanged() { if (edit.text === "") box.indentPicked = false } }
     function setIndentPref(key, value) {
         if (!controller) return
+        indentPicked = value !== null
         const all = JSON.parse(JSON.stringify(edPrefs.editor_indent_langs || {}))
         const m = all[lang] || {}
         if (value === null) delete m[key]; else m[key] = value
         if (Object.keys(m).length) all[lang] = m; else delete all[lang]
         controller.setSetting("editor_indent_langs", JSON.stringify(all))
     }
-    readonly property int tabSize: indentPref.size
+    // What the text itself is indented with, as VS Code detects it: tabs,
+    // spaces (and how many a level: the commonest step in from one line to
+    // the next), or both (mixed); null when it has no indented lines yet.
+    // Followed over the language's setting unless detecting is off.
+    readonly property var detectedIndent: {
+        if (edPrefs.editor_detect_indent === false || indentPicked) return null
+        const lines = edit.text.split("\n").filter(l => l.trim() !== "")
+        let tabs = 0, spaces = 0
+        const steps = {}
+        let prev = 0
+        for (const l of lines) {
+            const ws = /^[ \t]*/.exec(l)[0]
+            if (ws.indexOf("\t") >= 0) tabs++
+            else if (ws.length > 0) spaces++
+            const c = ws.indexOf("\t") >= 0 ? -1 : ws.length
+            if (c >= 0 && c > prev && c - prev <= 8) steps[c - prev] = (steps[c - prev] || 0) + 1
+            if (c >= 0) prev = c
+        }
+        if (tabs === 0 && spaces === 0) return null
+        let size = 0, best = 0
+        for (const k in steps) if (steps[k] > best || (steps[k] === best && Number(k) < size)) { best = steps[k]; size = Number(k) }
+        if (tabs > 0 && spaces === 0) return { mode: "tabs", size: indentPref.size }
+        if (size === 0) return null
+        return { mode: tabs > 0 ? "mixed" : "spaces", size: size }
+    }
+    readonly property int tabSize: detectedIndent ? detectedIndent.size : indentPref.size
     // "spaces", "tabs", or "mixed" (levels of tabSize, every 8 columns a
     // tab, as Emacs and vi do it).
-    readonly property string indentMode: indentPref.mode
+    readonly property string indentMode: detectedIndent ? detectedIndent.mode : indentPref.mode
     readonly property bool useTabs: indentMode === "tabs"
     // (A tab's width on screen: a level, but 8 when they're mixed.)
     readonly property int tabWidth: indentMode === "mixed" ? 8 : tabSize
@@ -1338,6 +1368,7 @@ Rectangle {
             tip: "Show the last command's output formatted"
             onClicked: box.openRich()
         }
+        Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {
             id: langChip
             base: box.color
@@ -1351,8 +1382,8 @@ Rectangle {
         Chip {
             id: indentChip
             base: box.color
-            label: ({ spaces: "Spaces: ", tabs: "Tabs: ", mixed: "Mixed: " })[box.indentMode] + box.tabSize
-            tip: "Indentation for " + box.lang + ": spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language."
+            label: ({ spaces: "Spaces: ", tabs: "Tabs: ", mixed: "Mixed: " })[box.indentMode] + box.tabSize + (box.detectedIndent ? " \u00b7 detected" : "")
+            tip: (box.detectedIndent ? "Detected from the text. " : "") + "Indentation for " + box.lang + ": spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language."
             onClicked: indentMenu.popup(indentChip, 0, -indentMenu.implicitHeight - 4)
         }
         SlimMenu {
@@ -1372,6 +1403,11 @@ Rectangle {
                 onTriggered: Window.window.askText("Indent size", "Columns per level for " + box.lang + ":", String(indentMenu.p.size), v => { const n = parseInt(v); if (n > 0 && n <= 32) box.setIndentPref("size", n) })
             }
             SlimMenuItem {
+                text: "Detect from the text"
+                checkable: true; checked: box.edPrefs.editor_detect_indent !== false
+                onTriggered: if (box.controller) box.controller.setSetting("editor_detect_indent", JSON.stringify(box.edPrefs.editor_detect_indent === false))
+            }
+            SlimMenuItem {
                 text: "Use " + box.lang + "'s default (" + ({ spaces: "spaces", tabs: "tabs", mixed: "mixed" })[indentMenu.p.defMode] + ", " + indentMenu.p.defSize + ")"
                 enabled: indentMenu.p.own
                 onTriggered: { box.setIndentPref("mode", null); box.setIndentPref("size", null) }
@@ -1384,7 +1420,6 @@ Rectangle {
             tip: "The tessh guide, in a tab: every feature, with examples"
             onClicked: Window.window.openGuide()
         }
-        Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {
             visible: box.jobsAll > 0
             base: box.jobsRunning > 0 ? Theme.mix(box.color, Theme.accent, 0.35) : box.color
