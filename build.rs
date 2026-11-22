@@ -78,7 +78,7 @@ fn main() {
         QmlFile::from("qml/CapShape.qml"),
         QmlFile::from("qml/SlimMenu.qml"),
         QmlFile::from("qml/SlimMenuItem.qml"),
-        QmlFile::from("qml/AppMenu.qml"),
+        QmlFile::from("qml/NativeAppMenu.qml"),
         QmlFile::from("qml/StarshipLine.qml"),
         QmlFile::from("qml/FileBrowser.qml"),
         QmlFile::from("qml/FilePreview.qml"),

@@ -1307,13 +1307,13 @@ ApplicationWindow {
     readonly property var tabColors: [["Red", "#e5534b"], ["Orange", "#e8853d"], ["Yellow", "#d9b43b"], ["Green", "#57ab5a"], ["Blue", "#4a90e2"], ["Purple", "#986ee2"], ["Gray", "#8b949e"]]
     readonly property var menuModel: [
         { title: "Tessera", items: [
-            { id: "about", icon: "help-about", text: "About Tessera" },
+            { id: "about", icon: "help-about", text: "About Tessera", inWindow: false },
             { separator: true },
             { id: "prefs", icon: "configure", text: "Preferences…", shortcut: "Ctrl+," },
             { id: "restart-daemon", icon: "view-refresh", text: "Restart tesserad…" },
             { separator: true },
             { id: "quit", icon: "application-exit", text: "Quit Tessera", shortcut: "Ctrl+Shift+Q" } ] },
-        { title: "Shell", items: [
+        { title: "Shell", icon: "utilities-terminal", items: [
             { id: "new-tab", icon: "tab-new", text: "New Tab", shortcut: "Ctrl+Shift+T" },
             { id: "new-notebook-tab", icon: "view-list-details", text: "New Notebook Tab", shortcut: "Ctrl+Shift+J" },
             { id: "new-notebook", icon: "document-new", text: "New Jupyter Notebook" },
@@ -1343,7 +1343,7 @@ ApplicationWindow {
                 { id: "broadcast-off", text: "Send Input to Current Session Only", checkable: true, checked: broadcastMode === "off" },
                 { id: "broadcast-all", text: "Broadcast Input to All Panes in All Tabs", checkable: true, checked: broadcastMode === "all" },
                 { id: "broadcast-tab", text: "Broadcast Input to All Panes in Current Tab", checkable: true, checked: broadcastMode === "tab" } ] } ]) },
-        { title: "Edit", items: [
+        { title: "Edit", icon: "edit-entry", items: [
             { id: "copy", icon: "edit-copy", text: "Copy", shortcut: "Ctrl+Shift+C", enabled: win.hasSelection },
             { id: "copy-styles", icon: "edit-copy", text: "Copy with Styles", enabled: win.hasSelection },
             { id: "copy-control", icon: "edit-copy", text: "Copy with Control Sequences", enabled: win.hasSelection },
@@ -1377,7 +1377,7 @@ ApplicationWindow {
             { separator: true },
             { id: "clear-buffer", icon: "edit-clear-history", text: "Clear Buffer", shortcut: "Ctrl+Shift+K", enabled: activeView !== null },
             { id: "clear-scrollback", icon: "edit-clear-history", text: "Clear Scrollback Buffer", enabled: activeView !== null } ] },
-        { title: "View", items: [
+        { title: "View", icon: "view-visible", items: [
             { id: "fullscreen", icon: "view-fullscreen", text: "Full Screen", shortcut: "F11", checkable: true, checked: win.visibility === Window.FullScreen },
             { id: "assistant", icon: "help-hint", text: "Show Assistant", shortcut: "Ctrl+Shift+I", checkable: true, checked: win.assistantOpen },
             { separator: true },
@@ -1395,7 +1395,7 @@ ApplicationWindow {
             { id: "tab-color", icon: "color-management", text: "Tab Color", enabled: tabs.length > 0, items: [
                 { id: "tab-color-none", text: "No Color" },
                 { separator: true } ].concat(win.tabColors.map((c, i) => ({ id: "tab-color-" + i, text: c[0] }))) } ] },
-        { title: "Session", items: [
+        { title: "Session", icon: "system-run", items: [
             { id: "edit-session", icon: "document-edit", text: "Edit Session…" },
             { id: "restart-session", icon: "view-refresh", text: "Restart Session", enabled: activeView !== null },
             { id: "duplicate-session", icon: "tab-duplicate", text: "Duplicate Session", enabled: activeView !== null },
@@ -1408,12 +1408,12 @@ ApplicationWindow {
               text: activeView && activeView.recording ? "Stop Recording" : "Record Pane (asciicast)", enabled: activeView !== null },
             { id: "shot-pane", icon: "camera-photo", text: "Screenshot of Pane", enabled: activeView !== null },
             { id: "shot-window", icon: "camera-photo", text: "Screenshot of Window" } ] },
-        { title: "Profiles", items: profileList.map((p, i) => (
+        { title: "Profiles", icon: "bookmarks", items: profileList.map((p, i) => (
             { id: "profile-" + i, icon: "utilities-terminal", text: p.name + (p.name === settings.default_profile ? "  (default)" : "") })).concat([
             { separator: true },
             { id: "open-all-profiles", icon: "tab-new", text: "Open All" },
             { id: "edit-profiles", icon: "configure", text: "Edit Profiles…" } ]) },
-        { title: "Window", items: [
+        { title: "Window", icon: "window", items: [
             { id: "minimize", icon: "window-minimize", text: "Minimize" },
             { id: "zoom-window", icon: "window-maximize", text: "Zoom", checkable: true, checked: win.visibility === Window.Maximized },
             { separator: true },
@@ -1439,7 +1439,7 @@ ApplicationWindow {
                 { id: "arrangement-" + i, icon: "document-open", text: "Restore “" + n + "”" }))).concat([
                 { separator: true },
                 { id: "manage-arrangements", icon: "configure", text: "Manage Arrangements…" } ]) } ] },
-        { title: "Help", items: [
+        { title: "Help", icon: "help-contents", items: [
             { id: "help", icon: "help-contents", text: "Tessera Help" },
             { id: "about-help", icon: "help-about", text: "About Tessera" } ] }
     ]
@@ -1544,123 +1544,16 @@ ApplicationWindow {
     // The menu's address goes on the window's surface, which exists only
     // while the window is shown.
     onVisibleChanged: if (visible) Qt.callLater(globalMenu.attach)
-    // Drawn inside the window, so a click in another window never reaches
-    // it: closed when the window loses focus.
-    onActiveChanged: if (!active) appMenu.close()
-    // (The press on ☰ that closed the menu mustn't open it again.)
-    property real appMenuClosedAt: 0
-    // The ☰ button's menu: the same model, drawn in the window, in the
-    // look of the app's other menus (SlimMenu): compact rows, a check mark,
-    // the key at the right. Its own windows (popups), so a long submenu
-    // isn't cut off at the window's edge.
-    AppMenu {
+    // The ☰ button's menu: the same model as a native menu, as it always
+    // was (the menus, then Restart tesserad…, Preferences…, Quit at the
+    // bottom; About is in Help there).
+    NativeAppMenu {
         id: appMenu
         model: win.menuModel
+        appMenuAtEnd: true
         onTriggered: id => win.menuAction(id)
-        onAboutToShow: { win.appMenuOpen = true; win.styleMenu(appMenu) }
+        onAboutToShow: win.appMenuOpen = true
         onAboutToHide: win.appMenuOpen = false
-        onClosed: win.appMenuClosedAt = Date.now()
-        popupType: Popup.Window
-        padding: 4
-        topPadding: 4.001   // (off the half pixel: 130% scale smears native text there)
-        palette.window: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.03)
-        palette.dark: Theme.divider
-        palette.windowText: Theme.text
-        palette.text: Theme.text
-        palette.highlight: Theme.mix(Theme.panel, Theme.accent, 0.3)
-        palette.highlightedText: Theme.text
-        delegate: AppMenuRow {}
-        itemDelegate: Component { AppMenuRow {} }
-    }
-    component AppMenuRow: MenuItem {
-        id: row
-        // The key is the window's own Shortcut; this only shows it.
-        property string shortcutText
-        implicitWidth: leftPadding + 16 + label.implicitWidth + (shortcutText !== "" ? 28 + keyLabel.implicitWidth : 0) + (subMenu ? 20 : 4) + rightPadding
-        implicitHeight: 24
-        leftPadding: 8
-        rightPadding: 8
-        topPadding: 0
-        bottomPadding: 0
-        indicator: null
-        arrow: AppMenuArrow { visible: !!row.subMenu; enabled: row.enabled }
-        contentItem: Item {
-            Text {
-                x: -2
-                width: 14
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: 0.001
-                text: row.checked ? "✓" : ""
-                color: Theme.accent
-                font.pixelSize: 11
-                horizontalAlignment: Text.AlignHCenter
-                renderType: Text.NativeRendering
-            }
-            Text {
-                id: label
-                x: 16
-                width: parent.width - x - (row.shortcutText !== "" ? keyLabel.implicitWidth + 20 : 0)
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: 0.001
-                text: row.text
-                color: row.enabled ? Theme.text : Theme.textDim
-                font.pixelSize: 12
-                elide: Text.ElideRight
-                renderType: Text.NativeRendering
-            }
-            Text {
-                id: keyLabel
-                visible: row.shortcutText !== ""
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.verticalCenterOffset: 0.001
-                text: row.shortcutText
-                color: Theme.textDim
-                opacity: row.enabled ? 1 : 0.6
-                font.pixelSize: 11
-                renderType: Text.NativeRendering
-            }
-        }
-        background: Rectangle {
-            radius: 4
-            color: row.enabled && (row.highlighted || row.hovered) ? Theme.mix(Theme.panel, Theme.accent, 0.3) : "transparent"
-        }
-    }
-    // A submenu's ›.
-    component AppMenuArrow: Text {
-        x: parent ? parent.width - width - 8 : 0
-        y: parent ? Math.round((parent.height - height) / 2) + 0.001 : 0
-        text: "›"
-        color: enabled ? Theme.textDim : Theme.divider
-        font.pixelSize: 14
-        renderType: Text.NativeRendering
-    }
-    Component { id: appMenuArrow; AppMenuArrow {} }
-    // AppMenu makes its submenus as plain Menus: given the ☰ menu's look
-    // (colours, own window, width to fit their rows) before they open.
-    function styleMenu(m) {
-        let w = 140
-        for (let i = 0; i < m.count; i++) {
-            const it = m.itemAt(i)
-            if (!it) continue
-            if (it.subMenu) {
-                // (A submenu's own row in a submenu: the style's MenuItem.)
-                if (it.shortcutText === undefined) {
-                    it.implicitHeight = 24; it.font.pixelSize = 12; it.topPadding = 0; it.bottomPadding = 0; it.leftPadding = 24
-                    it.arrow = appMenuArrow.createObject(it, { enabled: it.enabled })
-                    for (const k of ["windowText", "text", "highlight", "highlightedText"]) it.palette[k] = appMenu.palette[k]
-                    it.palette.light = it.palette.midlight = appMenu.palette.highlight
-                }
-                const sub = it.subMenu
-                sub.popupType = Popup.Window
-                sub.padding = 4
-                sub.topPadding = 4.001
-                for (const k of ["window", "dark", "windowText", "text", "highlight", "highlightedText"]) sub.palette[k] = appMenu.palette[k]
-                win.styleMenu(sub)
-            }
-            w = Math.max(w, it.implicitWidth)
-        }
-        m.width = w + m.leftPadding + m.rightPadding
     }
 
     // The + button's menu: profiles, the shells installed, ssh hosts.
@@ -2505,7 +2398,7 @@ ApplicationWindow {
                 icon: "menu"
                 tip: "Menu"
                 open: win.appMenuOpen
-                onClicked: if (appMenu.visible || Date.now() - win.appMenuClosedAt < 400) appMenu.close(); else appMenu.openAt(menuButton, 0, menuButton.height + 4)
+                onClicked: appMenu.openBelow(menuButton)
             }
 
             Loader {
