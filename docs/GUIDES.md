@@ -10,6 +10,14 @@ it from the official site, converts it to Markdown (HTML pages through
 (`LANG.body.html`), so it opens at once the next time. **Refresh** on the
 page fetches it again.
 
+When a page's own site fails or hasn't answered in 5 seconds, the Internet
+Archive's latest copy of it is asked too (`web.archive.org/web/2id_/URL`:
+the page as it was saved, without the archive's toolbar), and the first to
+answer is used. A page taken from the archive says so at its top, with the
+day it was saved; **Refresh** later fetches it from its site again. The
+archive turns away bursts, so at most two of its pages are asked for at a
+time.
+
 Why fetched and not bundled: together the documents are tens of megabytes,
 and their licenses differ (GNU FDL, CC BY-SA, and some that allow reading
 but not redistribution). Fetched on the reader's own machine, nothing is
@@ -52,7 +60,7 @@ The sources are in `src/guides.rs` (`GUIDES`). To check them all:
 | haskell, ghc | [A Gentle Introduction to Haskell 98](https://www.haskell.org/tutorial/) | [Free to copy (Hudak, Peterson, Fasel)](https://www.haskell.org/tutorial/) |
 | ocaml | [The OCaml Manual: An Introduction to OCaml](https://ocaml.org/manual/latest/coreexamples.html) | [CC BY-SA 4.0](https://ocaml.org/manual/latest/) |
 | racket | [The Racket Guide: Racket Essentials](https://docs.racket-lang.org/guide/to-scheme.html) | [MIT or Apache-2.0](https://download.racket-lang.org/license.html) |
-| scheme | [Guile: Hello Guile! and Programming in Scheme](https://www.gnu.org/software/guile/manual/html_node/Hello-Guile_0021.html) | [GNU FDL 1.3](https://www.gnu.org/licenses/fdl-1.3.html) |
+| scheme, guile | [Guile: Hello Guile! and Hello Scheme!](https://www.gnu.org/software/guile/manual/guile.html) | [GNU FDL 1.3](https://www.gnu.org/licenses/fdl-1.3.html) |
 | common-lisp, lisp, commonlisp | [The Common Lisp Cookbook](https://raw.githubusercontent.com/LispCookbook/cl-cookbook/master/getting-started.md) | [See the Cookbook's license](https://github.com/LispCookbook/cl-cookbook) |
 | dart | [Dart Language Tour](https://dart.dev/language) | [CC BY 4.0 (code BSD-3-Clause)](https://dart.dev/terms) |
 | swift | [The Swift Programming Language](https://raw.githubusercontent.com/swiftlang/swift-book/main/TSPL.docc/GuidedTour/GuidedTour.md) | [Apache-2.0 with Runtime Library Exception](https://github.com/swiftlang/swift-book/blob/main/LICENSE.txt) |

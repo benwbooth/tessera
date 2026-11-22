@@ -28,19 +28,26 @@ pub struct Guide {
     /// Elements that are code drawn some other way (tables of tokens, lines
     /// with <br>): made code blocks of their text (CSS selector).
     pub code_sel: &'static str,
+    /// Every part `select` matches, in order, not just the first (chapters
+    /// of a one-page manual).
+    pub all: bool,
 }
 
 const fn g(langs: &'static [&'static str], title: &'static str, license: &'static str, license_url: &'static str, pages: &'static [&'static str], select: &'static str, code: &'static str) -> Guide {
-    Guide { langs, title, license, license_url, pages, index: None, select, drop: "", code, code_sel: "" }
+    Guide { langs, title, license, license_url, pages, index: None, select, drop: "", code, code_sel: "", all: false }
 }
 
 const fn gi(langs: &'static [&'static str], title: &'static str, license: &'static str, license_url: &'static str, index: (&'static str, &'static str), select: &'static str, code: &'static str) -> Guide {
-    Guide { langs, title, license, license_url, pages: &[], index: Some(index), select, drop: "", code, code_sel: "" }
+    Guide { langs, title, license, license_url, pages: &[], index: Some(index), select, drop: "", code, code_sel: "", all: false }
 }
 
 impl Guide {
     const fn pages(mut self, p: &'static [&'static str]) -> Self {
         self.pages = p;
+        self
+    }
+    const fn all(mut self) -> Self {
+        self.all = true;
         self
     }
     const fn code_sel(mut self, c: &'static str) -> Self {
@@ -222,14 +229,10 @@ pub static GUIDES: &[Guide] = &[
     ], "div.content, main, body", "ocaml").drop("#part-menu, .navbar, header, footer"),
     gi(&["racket"], "The Racket Guide: Racket Essentials", "MIT or Apache-2.0", "https://download.racket-lang.org/license.html",
         ("https://docs.racket-lang.org/guide/to-scheme.html", "table.toctable a, .toclink"), "div.maincolumn", "racket").drop(".tocset, .navsettop, .navsetbottom, .tocview, .tocsub, .RForeground").code_sel(".SCodeFlow, .SInteraction").pages(&["https://docs.racket-lang.org/guide/to-scheme.html"]),
-    g(&["scheme"], "Guile: Hello Guile! and Programming in Scheme", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html", &[
-        "https://www.gnu.org/software/guile/manual/html_node/Hello-Guile_0021.html",
-        "https://www.gnu.org/software/guile/manual/html_node/Running-Guile-Interactively.html",
-        "https://www.gnu.org/software/guile/manual/html_node/About-Data.html",
-        "https://www.gnu.org/software/guile/manual/html_node/About-Procedures.html",
-        "https://www.gnu.org/software/guile/manual/html_node/About-Expressions.html",
-        "https://www.gnu.org/software/guile/manual/html_node/About-Closure.html",
-    ], "body", "scheme").drop(GNU_DROP),
+    // (The one-page manual, its two introductory chapters: one request, so
+    // the Internet Archive's copy works too when gnu.org doesn't answer.)
+    g(&["scheme", "guile"], "Guile: Hello Guile! and Hello Scheme!", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html",
+        &["https://www.gnu.org/software/guile/manual/guile.html"], "div#Hello-Guile_0021, div#Hello-Scheme_0021", "scheme").all().drop(GNU_DROP),
     g(&["common-lisp", "lisp", "commonlisp"], "The Common Lisp Cookbook", "See the Cookbook's license", "https://github.com/LispCookbook/cl-cookbook", &[
         "https://raw.githubusercontent.com/LispCookbook/cl-cookbook/master/getting-started.md",
         "https://raw.githubusercontent.com/LispCookbook/cl-cookbook/master/data-structures.md",
@@ -701,6 +704,103 @@ fn get_any(urls: &str) -> Result<String, String> {
     Err(errs.join("; "))
 }
 
+/// The Wayback Machine's latest copy of a page, as the page itself (`id_`:
+/// without the archive's toolbar or rewritten links).
+fn archive_url(url: &str) -> String {
+    format!("https://web.archive.org/web/2id_/{url}")
+}
+
+/// A page from its site; if the site fails, or hasn't answered in 5 s, the
+/// Internet Archive's copy too, whichever comes first. Some(date) when it's
+/// the archive's (the day it was saved).
+fn get_or_archived(urls: &str) -> Result<(String, Option<String>), String> {
+    let first = urls.split(" | ").next().unwrap_or(urls).trim().to_string();
+    let (tx, rx) = std::sync::mpsc::channel::<(bool, Result<(String, Option<String>), String>)>();
+    {
+        let (tx, urls) = (tx.clone(), urls.to_string());
+        std::thread::spawn(move || {
+            let _ = tx.send((false, get_any(&urls).map(|t| (t, None))));
+        });
+    }
+    let ask_archive = |tx: std::sync::mpsc::Sender<_>| {
+        let first = first.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send((true, get_archived(&first).map(|(t, d)| (t, Some(d)))));
+        });
+    };
+    let mut archive_asked = false;
+    let mut errs: Vec<String> = vec![];
+    let mut pending = 1;
+    loop {
+        let got = if archive_asked { rx.recv().ok() } else { rx.recv_timeout(std::time::Duration::from_secs(5)).ok() };
+        match got {
+            Some((_, Ok(r))) => return Ok(r),
+            Some((from_archive, Err(e))) => {
+                pending -= 1;
+                errs.push(if from_archive { format!("Internet Archive: {e}") } else { e });
+                if !archive_asked {
+                    archive_asked = true;
+                    pending += 1;
+                    ask_archive(tx.clone());
+                } else if pending == 0 {
+                    return Err(errs.join("; "));
+                }
+            }
+            // (No answer yet in 5 s: the archive too.)
+            None if !archive_asked => {
+                archive_asked = true;
+                pending += 1;
+                ask_archive(tx.clone());
+            }
+            None => return Err(errs.join("; ")),
+        }
+    }
+}
+
+/// The archive's copy, and the day it was saved. (Two at a time, and
+/// asked again after a pause when it refuses: it turns away bursts.)
+fn get_archived(url: &str) -> Result<(String, String), String> {
+    static SLOTS: (std::sync::Mutex<usize>, std::sync::Condvar) = (std::sync::Mutex::new(0), std::sync::Condvar::new());
+    {
+        let mut n = SLOTS.0.lock().unwrap();
+        while *n >= 2 {
+            n = SLOTS.1.wait(n).unwrap();
+        }
+        *n += 1;
+    }
+    struct Release;
+    impl Drop for Release {
+        fn drop(&mut self) {
+            *SLOTS.0.lock().unwrap() -= 1;
+            SLOTS.1.notify_one();
+        }
+    }
+    let _release = Release;
+    let mut wait = 2;
+    loop {
+        match get_archived_once(url) {
+            Err(e) if wait <= 8 && (e.contains("refused") || e.contains("429") || e.contains("503")) => {
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+                wait *= 2;
+            }
+            r => return r,
+        }
+    }
+}
+
+fn get_archived_once(url: &str) -> Result<(String, String), String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_connect(Some(std::time::Duration::from_secs(10))).timeout_global(Some(std::time::Duration::from_secs(120))).build().into();
+    let mut r = agent.get(&archive_url(url)).header("User-Agent", concat!("Tessera/", env!("CARGO_PKG_VERSION"), " (language guide)")).call().map_err(|e| e.to_string())?;
+    let at = {
+        use ureq::ResponseExt;
+        let u = r.get_uri().to_string();
+        u.split("/web/").nth(1).map(|t| t.chars().take_while(|c| c.is_ascii_digit()).collect::<String>()).unwrap_or_default()
+    };
+    let date = if at.len() >= 8 { format!("{}-{}-{}", &at[..4], &at[4..6], &at[6..8]) } else { "date unknown".into() };
+    let bytes = r.body_mut().with_config().limit(32 << 20).read_to_vec().map_err(|e| e.to_string())?;
+    Ok((String::from_utf8(bytes).unwrap_or_else(|e| e.into_bytes().iter().map(|&b| b as char).collect()), date))
+}
+
 fn get(url: &str) -> Result<String, String> {
     use ureq::config::IpFamily;
     let fetch = |family: IpFamily| -> Result<Vec<u8>, ureq::Error> {
@@ -773,7 +873,7 @@ fn strip_fragment(u: &str) -> &str {
 pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
     let mut urls: Vec<String> = g.pages.iter().map(|s| s.to_string()).collect();
     if let Some((index, links)) = g.index {
-        let html = get(index)?;
+        let (html, _) = get_or_archived(index)?;
         let doc = scraper::Html::parse_document(&html);
         let sel = scraper::Selector::parse(links).map_err(|e| format!("{links}: {e}"))?;
         let host = |u: &str| u.split('/').nth(2).unwrap_or("").to_string();
@@ -817,10 +917,14 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
                     if i >= n {
                         break;
                     }
-                    let r = get_any(&urls[i]).and_then(|text| {
+                    let r = get_or_archived(&urls[i]).and_then(|(text, snapshot)| {
                         let u = urls[i].split(" | ").next().unwrap_or(&urls[i]).trim();
                         let md = if u.ends_with(".md") { clean_markdown(&expand_includes(&text, u)) } else { html_to_markdown(&text, g)? };
-                        Ok(relink(&md, u, &page_ids))
+                        let md = relink(&md, u, &page_ids);
+                        Ok(match snapshot {
+                            Some(date) => format!("> From the [Internet Archive's copy]({}) of [{u}]({u}) (saved {date}): the site didn't answer.\n\n{md}", archive_url(u)),
+                            None => md,
+                        })
                     });
                     *slots[i].lock().unwrap() = Some(r);
                     let k = done.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -974,7 +1078,36 @@ fn html_to_markdown(html: &str, g: &Guide) -> Result<String, String> {
             }
         }
     }
+    if g.all {
+        if let Ok(sel) = scraper::Selector::parse(g.select) {
+            let mut out = String::new();
+            for e in doc.select(&sel) {
+                out.push_str(&part_markdown(e, g)?);
+                out.push_str("\n\n");
+            }
+            if !out.trim().is_empty() {
+                return Ok(titled(out, &doc));
+            }
+        }
+    }
     let Some(part) = part else { return Ok(String::new()) };
+    Ok(titled(part_markdown(part, g)?, &doc))
+}
+
+fn titled(md: String, doc: &scraper::Html) -> String {
+    // (A page with no top heading of its own (cppreference keeps its
+    // title outside the article) gets its title as one, for the contents.)
+    if md.lines().any(|l| l.starts_with("# ")) {
+        md
+    } else {
+        let title = scraper::Selector::parse("h1#firstHeading, title").ok().and_then(|s| doc.select(&s).next()).map(|t| t.text().collect::<String>()).unwrap_or_default();
+        let title = title.split(" - ").next().unwrap_or("").split(" | ").next().unwrap_or("").split(" \u{2014} ").next().unwrap_or("").trim().to_string();
+        if title.is_empty() { md } else { format!("# {title}\n\n{md}") }
+    }
+}
+
+/// One part of a page (its document) as Markdown.
+fn part_markdown(part: scraper::ElementRef, g: &Guide) -> Result<String, String> {
     let mut inner = part.inner_html();
     // (Leave out what isn't the document: its HTML cut out of the part's.)
     let drop = format!("script, style, noscript, button, template, a.headerlink, a.anchor, .headerlink, .anchorjs-link, .copybutton, .sr-only, .visually-hidden{}{}", if g.drop.is_empty() { "" } else { ", " }, g.drop);
@@ -1008,15 +1141,6 @@ fn html_to_markdown(html: &str, g: &Guide) -> Result<String, String> {
     let inner = keep_ids(&code_in_pre(&inner));
     let conv = htmd::HtmlToMarkdown::builder().skip_tags(vec!["script", "style", "svg", "head", "form", "input", "select", "iframe"]).build();
     let md = conv.convert(&inner).map_err(|e| e.to_string())?;
-    // (A page with no top heading of its own (cppreference keeps its
-    // title outside the article) gets its title as one, for the contents.)
-    let md = if md.lines().any(|l| l.starts_with("# ")) {
-        md
-    } else {
-        let title = scraper::Selector::parse("h1#firstHeading, title").ok().and_then(|s| doc.select(&s).next()).map(|t| t.text().collect::<String>()).unwrap_or_default();
-        let title = title.split(" - ").next().unwrap_or("").split(" | ").next().unwrap_or("").split(" \u{2014} ").next().unwrap_or("").trim().to_string();
-        if title.is_empty() { md } else { format!("# {title}\n\n{md}") }
-    };
     let md = regex::Regex::new("\u{27e6}#([^\u{27e7}]*)\u{27e7}").unwrap().replace_all(&md, |c: &regex::Captures| format!("<a id=\"{}\"></a>", c[1].replace('\\', ""))).into_owned();
     // (Pilcrows and the like that headings carried as links.)
     Ok(md.replace(" ¶", "").replace("¶", "").replace("\u{a0}", " "))
