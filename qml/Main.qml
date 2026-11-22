@@ -6,6 +6,7 @@ import QtQuick.Window
 import Qt.labs.platform as P
 import Tessera
 import Tessera.Native
+import GlobalMenu
 
 ApplicationWindow {
     id: win
@@ -1283,252 +1284,369 @@ ApplicationWindow {
     readonly property var arrangementMap: { rev; return JSON.parse(controller.arrangements()) }
     readonly property var arrangementNames: Object.keys(arrangementMap)
 
-    P.Menu {
+    // Defined once: exported to the desktop's global menu bar (GlobalMenuBar:
+    // hearth's top bar, Plasma's Global Menu) and shown by the ☰ button
+    // (AppMenu). Shortcuts are only shown there: the Shortcut{}s above do the
+    // work (a terminal keeps every other key for its shell). Ids are unique
+    // across the whole model (the global menu updates items by id).
+    readonly property bool hasSelection: activeView !== null && activeView.hasSelection
+    readonly property var tabColors: [["Red", "#e5534b"], ["Orange", "#e8853d"], ["Yellow", "#d9b43b"], ["Green", "#57ab5a"], ["Blue", "#4a90e2"], ["Purple", "#986ee2"], ["Gray", "#8b949e"]]
+    readonly property var menuModel: [
+        { title: "Tessera", items: [
+            { id: "about", icon: "help-about", text: "About Tessera" },
+            { separator: true },
+            { id: "prefs", icon: "configure", text: "Preferences…", shortcut: "Ctrl+," },
+            { id: "restart-daemon", icon: "view-refresh", text: "Restart tesserad…" },
+            { separator: true },
+            { id: "quit", icon: "application-exit", text: "Quit Tessera", shortcut: "Ctrl+Shift+Q" } ] },
+        { title: "Shell", items: [
+            { id: "new-tab", icon: "tab-new", text: "New Tab", shortcut: "Ctrl+Shift+T" },
+            { id: "new-notebook-tab", icon: "view-list-details", text: "New Notebook Tab", shortcut: "Ctrl+Shift+J" },
+            { id: "new-notebook", icon: "document-new", text: "New Jupyter Notebook" },
+            { id: "open-notebook", icon: "document-open", text: "Open Jupyter Notebook…", shortcut: "Ctrl+O" },
+            { id: "new-tab-profile", icon: "tab-new", text: "New Tab with Current Profile" },
+            { id: "new-window", icon: "window-new", text: "New Window", shortcut: "Ctrl+Shift+N" } ]
+            .concat(Qt.platform.os === "windows" && !controller.isAdmin()
+                ? [{ id: "new-admin-window", icon: "security-high", text: "New Administrator Window" }] : [])
+            .concat([
+            { id: "duplicate-tab", icon: "tab-duplicate", text: "Duplicate Tab", enabled: tabs.length > 0 },
+            { separator: true },
+            { id: "split-right-current", icon: "view-split-left-right", text: "Split Right with Current Profile", shortcut: "Ctrl+Shift+D" },
+            { id: "split-down-current", icon: "view-split-top-bottom", text: "Split Down with Current Profile", shortcut: "Ctrl+Shift+E" },
+            { id: "split-right", icon: "view-split-left-right", text: "Split Right" },
+            { id: "split-down", icon: "view-split-top-bottom", text: "Split Down" },
+            { separator: true },
+            { id: "save-contents", icon: "document-save", text: "Save Contents…", enabled: activeView !== null },
+            { id: "save-selection", icon: "document-save-as", text: "Save Selected Text…", enabled: win.hasSelection },
+            { separator: true },
+            { id: "undo-close", icon: "edit-undo", text: "Undo Close", shortcut: "Ctrl+Shift+Z", enabled: closedStack.length > 0 },
+            { id: "close-tab", icon: "tab-close", text: "Close Tab", shortcut: "Ctrl+Shift+W", enabled: tabs.length > 0 },
+            { id: "close-pane", icon: "view-close", text: "Close Pane", shortcut: "Ctrl+Alt+W", enabled: activePane !== null },
+            { id: "close-all-panes", icon: "tab-close", text: "Close All Panes in Tab", enabled: tabs.length > 0 },
+            { id: "close-window", icon: "window-close", text: "Close Window", shortcut: "Ctrl+Shift+Q" },
+            { separator: true },
+            { id: "broadcast", icon: "network-transmit", text: "Broadcast Input", items: [
+                { id: "broadcast-off", text: "Send Input to Current Session Only", checkable: true, checked: broadcastMode === "off" },
+                { id: "broadcast-all", text: "Broadcast Input to All Panes in All Tabs", checkable: true, checked: broadcastMode === "all" },
+                { id: "broadcast-tab", text: "Broadcast Input to All Panes in Current Tab", checkable: true, checked: broadcastMode === "tab" } ] } ]) },
+        { title: "Edit", items: [
+            { id: "copy", icon: "edit-copy", text: "Copy", shortcut: "Ctrl+Shift+C", enabled: win.hasSelection },
+            { id: "copy-styles", icon: "edit-copy", text: "Copy with Styles", enabled: win.hasSelection },
+            { id: "copy-control", icon: "edit-copy", text: "Copy with Control Sequences", enabled: win.hasSelection },
+            { id: "paste", icon: "edit-paste", text: "Paste", shortcut: "Ctrl+Shift+V", enabled: activeView !== null },
+            { id: "paste-special", icon: "edit-paste", text: "Paste Special", enabled: activeView !== null, items: [
+                { id: "paste-selection", text: "Paste Selection", shortcut: "Shift+Ins" },
+                { id: "paste-slowly", text: "Paste Slowly" },
+                { separator: true },
+                { id: "warn-multiline", text: "Warn Before Multi-Line Paste", checkable: true, checked: !!settings.warn_multiline_paste } ] },
+            { id: "paste-history", icon: "view-history", text: "Paste History", enabled: pasteHistory.length > 0 && activeView !== null,
+              items: pasteHistory.length > 0 ? pasteHistory.map((s, i) => ({ id: "paste-history-" + i, text: win.shortLabel(s) }))
+                                             : [{ id: "paste-history-none", text: "Nothing Pasted Yet", enabled: false }] },
+            { id: "snippets", icon: "insert-text", text: "Snippets", items: (settings.snippets || []).map((s, i) => (
+                { id: "snippet-" + i, text: s.title, enabled: activeView !== null })).concat([
+                { separator: true },
+                { id: "edit-snippets", icon: "configure", text: "Edit Snippets…" } ]) },
+            { separator: true },
+            { id: "select-all", icon: "edit-select-all", text: "Select All", shortcut: "Ctrl+Shift+A", enabled: activeView !== null },
+            { id: "marks", icon: "bookmarks", text: "Marks", enabled: activeView !== null, items: [
+                { id: "prev-prompt", icon: "go-up", text: "Previous Prompt", shortcut: "Ctrl+Shift+Up" },
+                { id: "next-prompt", icon: "go-down", text: "Next Prompt", shortcut: "Ctrl+Shift+Down" },
+                { separator: true },
+                { id: "select-last-output", icon: "edit-select", text: "Select Output of Last Command", shortcut: "Ctrl+Shift+L" } ] },
+            { separator: true },
+            { id: "find-menu", icon: "edit-find", text: "Find", items: [
+                { id: "find", icon: "edit-find", text: "Find…", shortcut: "Ctrl+Shift+F" },
+                { id: "find-next", icon: "go-up", text: "Find Next", shortcut: "F3" },
+                { id: "find-prev", icon: "go-down", text: "Find Previous", shortcut: "Shift+F3" },
+                { separator: true },
+                { id: "find-urls", icon: "link", text: "Find URLs" } ] },
+            { separator: true },
+            { id: "clear-buffer", icon: "edit-clear-history", text: "Clear Buffer", shortcut: "Ctrl+Shift+K", enabled: activeView !== null },
+            { id: "clear-scrollback", icon: "edit-clear-history", text: "Clear Scrollback Buffer", enabled: activeView !== null } ] },
+        { title: "View", items: [
+            { id: "fullscreen", icon: "view-fullscreen", text: "Full Screen", shortcut: "F11", checkable: true, checked: win.visibility === Window.FullScreen },
+            { id: "assistant", icon: "help-hint", text: "Show Assistant", shortcut: "Ctrl+Shift+I", checkable: true, checked: win.assistantOpen },
+            { separator: true },
+            { id: "zoom-in", icon: "zoom-in", text: "Make Text Bigger", shortcut: "Ctrl+=" },
+            { id: "zoom-out", icon: "zoom-out", text: "Make Text Smaller", shortcut: "Ctrl+-" },
+            { id: "zoom-reset", icon: "zoom-original", text: "Make Text Normal Size", shortcut: "Ctrl+0", enabled: fontSize > 0 },
+            { separator: true },
+            { id: "maximize-pane", icon: "zoom-fit-best", text: "Maximize Active Pane", shortcut: "Ctrl+Shift+Return", checkable: true,
+              checked: maximizedPane !== null, enabled: maximizedPane !== null || (activePane !== null && activePane.split) },
+            { id: "transparency", text: "Use Transparency", checkable: true, checked: useTransparency, enabled: activeProfile.transparency > 0 },
+            { separator: true },
+            { id: "find-cursor", icon: "edit-find", text: "Find Cursor", shortcut: "Ctrl+Shift+/", enabled: activeView !== null },
+            { id: "cursor-guide", text: "Show Cursor Guide", checkable: true, checked: cursorGuide },
+            { separator: true },
+            { id: "tab-color", icon: "color-management", text: "Tab Color", enabled: tabs.length > 0, items: [
+                { id: "tab-color-none", text: "No Color" },
+                { separator: true } ].concat(win.tabColors.map((c, i) => ({ id: "tab-color-" + i, text: c[0] }))) } ] },
+        { title: "Session", items: [
+            { id: "edit-session", icon: "document-edit", text: "Edit Session…" },
+            { id: "restart-session", icon: "view-refresh", text: "Restart Session", enabled: activeView !== null },
+            { id: "duplicate-session", icon: "tab-duplicate", text: "Duplicate Session", enabled: activeView !== null },
+            { id: "reset", icon: "edit-clear", text: "Reset", enabled: activeView !== null },
+            { separator: true },
+            { id: "log", icon: "text-x-log", text: "Log", enabled: activeView !== null, items: [
+                { id: "log-start", icon: "media-record", text: "Log to File…", enabled: activeView !== null && !activeView.logging },
+                { id: "log-stop", icon: "media-playback-stop", text: "Stop Logging", enabled: activeView !== null && activeView.logging } ] },
+            { id: "record", icon: activeView && activeView.recording ? "media-playback-stop" : "media-record",
+              text: activeView && activeView.recording ? "Stop Recording" : "Record Pane (asciicast)", enabled: activeView !== null },
+            { id: "shot-pane", icon: "camera-photo", text: "Screenshot of Pane", enabled: activeView !== null },
+            { id: "shot-window", icon: "camera-photo", text: "Screenshot of Window" } ] },
+        { title: "Profiles", items: profileList.map((p, i) => (
+            { id: "profile-" + i, icon: "utilities-terminal", text: p.name + (p.name === settings.default_profile ? "  (default)" : "") })).concat([
+            { separator: true },
+            { id: "open-all-profiles", icon: "tab-new", text: "Open All" },
+            { id: "edit-profiles", icon: "configure", text: "Edit Profiles…" } ]) },
+        { title: "Window", items: [
+            { id: "minimize", icon: "window-minimize", text: "Minimize" },
+            { id: "zoom-window", icon: "window-maximize", text: "Zoom", checkable: true, checked: win.visibility === Window.Maximized },
+            { separator: true },
+            { id: "window-title", icon: "edit-rename", text: "Edit Window Title…" },
+            { id: "tab-title", icon: "edit-rename", text: "Edit Tab Title…", enabled: tabs.length > 0 },
+            { separator: true },
+            { id: "next-tab", icon: "go-next", text: "Select Next Tab", shortcut: "Ctrl+PgDown", enabled: tabs.length > 1 },
+            { id: "prev-tab", icon: "go-previous", text: "Select Previous Tab", shortcut: "Ctrl+PgUp", enabled: tabs.length > 1 },
+            { id: "move-tab-left", icon: "arrow-left", text: "Move Tab Left", shortcut: "Ctrl+Shift+PgUp", enabled: currentTab > 0 },
+            { id: "move-tab-right", icon: "arrow-right", text: "Move Tab Right", shortcut: "Ctrl+Shift+PgDown", enabled: currentTab < tabs.length - 1 },
+            { id: "select-pane", icon: "view-split-left-right", text: "Select Split Pane", items: [
+                { id: "pane-up", icon: "go-up", text: "Select Pane Above", shortcut: "Ctrl+Alt+Up" },
+                { id: "pane-down", icon: "go-down", text: "Select Pane Below", shortcut: "Ctrl+Alt+Down" },
+                { id: "pane-left", icon: "go-previous", text: "Select Pane Left", shortcut: "Ctrl+Alt+Left" },
+                { id: "pane-right", icon: "go-next", text: "Select Pane Right", shortcut: "Ctrl+Alt+Right" },
+                { separator: true },
+                { id: "pane-next", text: "Next Pane", shortcut: "Ctrl+Shift+]" },
+                { id: "pane-prev", text: "Previous Pane", shortcut: "Ctrl+Shift+[" } ] },
+            { separator: true },
+            { id: "arrangements", icon: "view-group", text: "Arrangements", items: [
+                { id: "save-arrangement", icon: "document-save", text: "Save Window Arrangement…" },
+                { separator: true } ].concat(arrangementNames.map((n, i) => (
+                { id: "arrangement-" + i, icon: "document-open", text: "Restore “" + n + "”" }))).concat([
+                { separator: true },
+                { id: "manage-arrangements", icon: "configure", text: "Manage Arrangements…" } ]) } ] },
+        { title: "Help", items: [
+            { id: "help", icon: "help-contents", text: "Tessera Help" },
+            { id: "about-help", icon: "help-about", text: "About Tessera" } ] }
+    ]
+
+    function menuAction(id) {
+        const v = activeView
+        const num = (prefix) => Number(id.slice(prefix.length))
+        if (id.startsWith("paste-history-")) { const s = pasteHistory[num("paste-history-")]; if (s !== undefined) pasteInto(v, s); return }
+        if (id.startsWith("snippet-")) { const s = (settings.snippets || [])[num("snippet-")]; if (s && v) v.sendText(win.unescapeText(s.text)); return }
+        if (id.startsWith("tab-color-") && id !== "tab-color-none") { const c = tabColors[num("tab-color-")]; if (c && tabs[currentTab]) tabs[currentTab].tabColor = c[1]; return }
+        if (id.startsWith("profile-")) { const p = profileList[num("profile-")]; if (p) newTab({ profile: p.name }); return }
+        if (id.startsWith("arrangement-")) { const n = arrangementNames[num("arrangement-")]; if (n !== undefined) restoreArrangement(arrangementMap[n], null); return }
+        switch (id) {
+        case "about": case "about-help": prefs.showPage("about"); break
+        case "prefs": prefs.showPage(""); break
+        case "restart-daemon": win.askRestartDaemon(); break
+        case "quit": case "close-window": win.close(); break
+        case "new-tab": newTab({}); break
+        case "new-notebook-tab": newTab({ view: "notebook" }); break
+        case "new-notebook": newNotebook(); break
+        case "open-notebook": notebookDialog.open(); break
+        case "new-tab-profile": newTab({ profile: activeProfile.name }); break
+        case "new-window": controller.newWindow(); break
+        case "new-admin-window": controller.newAdminWindow(); break
+        case "duplicate-tab": if (tabs.length > 0) newTab({ layout: serializeTab(tabs[currentTab], false), profile: tabs[currentTab].profile }); break
+        case "split-right-current": splitPane(activePane, Qt.Horizontal); break
+        case "split-down-current": splitPane(activePane, Qt.Vertical); break
+        case "split-right": splitPane(activePane, Qt.Horizontal, settings.default_profile); break
+        case "split-down": splitPane(activePane, Qt.Vertical, settings.default_profile); break
+        case "save-contents": if (v) saveContentsTo(v.contentsText(), "Save Contents"); break
+        case "save-selection": if (v && v.hasSelection) saveContentsTo(v.selectedText(), "Save Selected Text"); break
+        case "undo-close": undoClose(); break
+        case "close-tab": case "close-all-panes": if (tabs.length > 0) closeTab(tabs[currentTab]); break
+        case "close-pane": closeActivePane(); break
+        case "broadcast-off": broadcastMode = "off"; break
+        case "broadcast-all": broadcastMode = "all"; break
+        case "broadcast-tab": broadcastMode = "tab"; break
+        case "copy": if (v) v.copy(); break
+        case "copy-styles": if (v) v.copyWithStyles(); break
+        case "copy-control": if (v) v.copyWithControlSequences(); break
+        case "paste": pasteClipboard(v); break
+        case "paste-selection": if (v) v.pasteSelection(); break
+        case "paste-slowly": if (v) v.pasteSlowly(); break
+        case "warn-multiline": setSetting("warn_multiline_paste", !settings.warn_multiline_paste); break
+        case "edit-snippets": prefs.showPage("snippets"); break
+        case "select-all": if (v) v.selectAll(); break
+        case "prev-prompt": if (v) v.jumpToPrompt(-1); break
+        case "next-prompt": if (v) v.jumpToPrompt(1); break
+        case "select-last-output": if (v) v.selectLastOutput(); break
+        case "find": openFind(false); break
+        case "find-next": findStep(-1); break
+        case "find-prev": findStep(1); break
+        case "find-urls": openFind(true); break
+        case "clear-buffer": if (v) v.clearScrollback(); break
+        case "clear-scrollback": if (v) v.showMessage("\u001b[3J"); break
+        case "fullscreen": toggleFullScreen(); break
+        case "assistant": win.toggleAssistant(); break
+        case "zoom-in": zoomBy(1); break
+        case "zoom-out": zoomBy(-1); break
+        case "zoom-reset": fontSize = 0; break
+        case "maximize-pane": toggleMaximize(); break
+        case "transparency": useTransparency = !useTransparency; break
+        case "find-cursor": if (v) v.findCursor(); break
+        case "cursor-guide": cursorGuide = !cursorGuide; break
+        case "tab-color-none": if (tabs[currentTab]) tabs[currentTab].tabColor = "transparent"; break
+        case "edit-session": case "edit-profiles": prefs.showProfile(activeProfile.name); break
+        case "restart-session": if (v) confirmJobs([paneOf(v)], function() { v.restart() }); break
+        case "duplicate-session": if (v) newTab({ profile: activeProfile.name, cwd: v.pwd }); break
+        case "reset": if (v) v.resetTerminal(); break
+        case "log-start": if (v && !v.logging) logDialog.open(); break
+        case "log-stop": if (v && v.logging) v.stopLogging(); break
+        case "record": if (v) win.toggleRecording(v); break
+        case "shot-pane": if (v) win.screenshot(paneOf(v)); break
+        case "shot-window": win.screenshot(rootLayout); break
+        case "open-all-profiles": for (const p of profileList) newTab({ profile: p.name }); break
+        case "minimize": win.showMinimized(); break
+        case "zoom-window": win.visibility === Window.Maximized ? win.showNormal() : win.showMaximized(); break
+        case "window-title": askText("Window Title", "Title (empty: the program's title)", customTitle, (t) => customTitle = t); break
+        case "tab-title": if (tabs.length > 0) { const t = tabs[currentTab]; askText("Tab Title", "Title (empty: automatic)", t.customTitle, (s) => { t.customTitle = s; treeRev++ }) } break
+        case "next-tab": focusTab((currentTab + 1) % tabs.length); break
+        case "prev-tab": focusTab((currentTab + tabs.length - 1) % tabs.length); break
+        case "move-tab-left": moveTab(-1); break
+        case "move-tab-right": moveTab(1); break
+        case "pane-up": moveFocus(0, -1); break
+        case "pane-down": moveFocus(0, 1); break
+        case "pane-left": moveFocus(-1, 0); break
+        case "pane-right": moveFocus(1, 0); break
+        case "pane-next": cyclePane(1); break
+        case "pane-prev": cyclePane(-1); break
+        case "save-arrangement": askText("Save Window Arrangement", "Name", "", (n) => { if (n.trim() !== "") controller.saveArrangement(n.trim(), JSON.stringify(serializeWindow(false))) }); break
+        case "manage-arrangements": prefs.showPage("arrangements"); break
+        case "help": Qt.openUrlExternally("https://github.com/benwbooth/tessera#readme"); break
+        }
+    }
+
+    GlobalMenuBar {
+        id: globalMenu
+        window: win
+        model: win.menuModel
+        onTriggered: id => win.menuAction(id)
+    }
+    // The menu's address goes on the window's surface, which exists only
+    // while the window is shown.
+    onVisibleChanged: if (visible) Qt.callLater(globalMenu.attach)
+    // Drawn inside the window, so a click in another window never reaches
+    // it: closed when the window loses focus.
+    onActiveChanged: if (!active) appMenu.close()
+    // (The press on ☰ that closed the menu mustn't open it again.)
+    property real appMenuClosedAt: 0
+    // The ☰ button's menu: the same model, drawn in the window, in the
+    // look of the app's other menus (SlimMenu): compact rows, a check mark,
+    // the key at the right. Its own windows (popups), so a long submenu
+    // isn't cut off at the window's edge.
+    AppMenu {
         id: appMenu
-        onAboutToShow: win.appMenuOpen = true
+        model: win.menuModel
+        onTriggered: id => win.menuAction(id)
+        onAboutToShow: { win.appMenuOpen = true; win.styleMenu(appMenu) }
         onAboutToHide: win.appMenuOpen = false
-
-        P.Menu {
-            title: "Shell"
-            icon.name: "utilities-terminal"
-            P.MenuItem { icon.name: "tab-new"; text: "New Tab\tCtrl+Shift+T"; onTriggered: newTab({}) }
-            P.MenuItem { icon.name: "view-list-details"; text: "New Notebook Tab\tCtrl+Shift+J"; onTriggered: newTab({ view: "notebook" }) }
-            P.MenuItem { icon.name: "document-new"; text: "New Jupyter Notebook"; onTriggered: newNotebook() }
-            P.MenuItem { icon.name: "document-open"; text: "Open Jupyter Notebook\u2026\tCtrl+O"; onTriggered: notebookDialog.open() }
-            P.MenuItem { icon.name: "tab-new"; text: "New Tab with Current Profile"; onTriggered: newTab({ profile: activeProfile.name }) }
-            P.MenuItem { icon.name: "window-new"; text: "New Window\tCtrl+Shift+N"; onTriggered: controller.newWindow() }
-            P.MenuItem { icon.name: "security-high"; text: "New Administrator Window"; visible: Qt.platform.os === "windows" && !controller.isAdmin(); onTriggered: controller.newAdminWindow() }
-            P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Tab"; enabled: tabs.length > 0
-                onTriggered: newTab({ layout: serializeTab(tabs[currentTab], false), profile: tabs[currentTab].profile }) }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "view-split-left-right"; text: "Split Right with Current Profile\tCtrl+Shift+D"; onTriggered: splitPane(activePane, Qt.Horizontal) }
-            P.MenuItem { icon.name: "view-split-top-bottom"; text: "Split Down with Current Profile\tCtrl+Shift+E"; onTriggered: splitPane(activePane, Qt.Vertical) }
-            P.MenuItem { icon.name: "view-split-left-right"; text: "Split Right"; onTriggered: splitPane(activePane, Qt.Horizontal, settings.default_profile) }
-            P.MenuItem { icon.name: "view-split-top-bottom"; text: "Split Down"; onTriggered: splitPane(activePane, Qt.Vertical, settings.default_profile) }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "document-save"; text: "Save Contents…"; enabled: activeView !== null
-                onTriggered: saveContentsTo(activeView.contentsText(), "Save Contents") }
-            P.MenuItem { icon.name: "document-save-as"; text: "Save Selected Text…"; enabled: activeView !== null && activeView.hasSelection
-                onTriggered: saveContentsTo(activeView.selectedText(), "Save Selected Text") }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "edit-undo"; text: "Undo Close\tCtrl+Shift+Z"; enabled: closedStack.length > 0; onTriggered: undoClose() }
-            P.MenuItem { icon.name: "tab-close"; text: "Close Tab\tCtrl+Shift+W"; enabled: tabs.length > 0; onTriggered: closeTab(tabs[currentTab]) }
-            P.MenuItem { icon.name: "view-close"; text: "Close Pane\tCtrl+Alt+W"; onTriggered: closeActivePane() }
-            P.MenuItem { icon.name: "tab-close"; text: "Close All Panes in Tab"; enabled: tabs.length > 0; onTriggered: closeTab(tabs[currentTab]) }
-            P.MenuItem { icon.name: "window-close"; text: "Close Window\tCtrl+Shift+Q"; onTriggered: win.close() }
-            P.MenuSeparator {}
-            P.Menu {
-                title: "Broadcast Input"
-                icon.name: "network-transmit"
-                P.MenuItemGroup { id: broadcastGroup }
-                P.MenuItem { text: "Send Input to Current Session Only"; checkable: true; group: broadcastGroup; checked: broadcastMode === "off"; onTriggered: broadcastMode = "off" }
-                P.MenuItem { text: "Broadcast Input to All Panes in All Tabs"; checkable: true; group: broadcastGroup; checked: broadcastMode === "all"; onTriggered: broadcastMode = "all" }
-                P.MenuItem { text: "Broadcast Input to All Panes in Current Tab"; checkable: true; group: broadcastGroup; checked: broadcastMode === "tab"; onTriggered: broadcastMode = "tab" }
+        onClosed: win.appMenuClosedAt = Date.now()
+        popupType: Popup.Window
+        padding: 4
+        topPadding: 4.001   // (off the half pixel: 130% scale smears native text there)
+        palette.window: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.03)
+        palette.dark: Theme.divider
+        palette.windowText: Theme.text
+        palette.text: Theme.text
+        palette.highlight: Theme.mix(Theme.panel, Theme.accent, 0.3)
+        palette.highlightedText: Theme.text
+        delegate: AppMenuRow {}
+        itemDelegate: Component { AppMenuRow {} }
+    }
+    component AppMenuRow: MenuItem {
+        id: row
+        // The key is the window's own Shortcut; this only shows it.
+        property string shortcutText
+        implicitWidth: leftPadding + 16 + label.implicitWidth + (shortcutText !== "" ? 28 + keyLabel.implicitWidth : 0) + (subMenu ? 20 : 4) + rightPadding
+        implicitHeight: 24
+        leftPadding: 8
+        rightPadding: 8
+        topPadding: 0
+        bottomPadding: 0
+        indicator: null
+        arrow: AppMenuArrow { visible: !!row.subMenu; enabled: row.enabled }
+        contentItem: Item {
+            Text {
+                x: -2
+                width: 14
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: 0.001
+                text: row.checked ? "✓" : ""
+                color: Theme.accent
+                font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+                renderType: Text.NativeRendering
+            }
+            Text {
+                id: label
+                x: 16
+                width: parent.width - x - (row.shortcutText !== "" ? keyLabel.implicitWidth + 20 : 0)
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: 0.001
+                text: row.text
+                color: row.enabled ? Theme.text : Theme.textDim
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                renderType: Text.NativeRendering
+            }
+            Text {
+                id: keyLabel
+                visible: row.shortcutText !== ""
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: 0.001
+                text: row.shortcutText
+                color: Theme.textDim
+                opacity: row.enabled ? 1 : 0.6
+                font.pixelSize: 11
+                renderType: Text.NativeRendering
             }
         }
-
-        P.Menu {
-            title: "Edit"
-            icon.name: "edit-entry"
-            P.MenuItem { icon.name: "edit-copy"; text: "Copy\tCtrl+Shift+C"; enabled: activeView !== null && activeView.hasSelection; onTriggered: activeView.copy() }
-            P.MenuItem { icon.name: "edit-copy"; text: "Copy with Styles"; enabled: activeView !== null && activeView.hasSelection; onTriggered: activeView.copyWithStyles() }
-            P.MenuItem { icon.name: "edit-copy"; text: "Copy with Control Sequences"; enabled: activeView !== null && activeView.hasSelection; onTriggered: activeView.copyWithControlSequences() }
-            P.MenuItem { icon.name: "edit-paste"; text: "Paste\tCtrl+Shift+V"; onTriggered: pasteClipboard(activeView) }
-            P.Menu {
-                title: "Paste Special"
-                icon.name: "edit-paste"
-                P.MenuItem { text: "Paste Selection\tShift+Insert"; onTriggered: if (activeView) activeView.pasteSelection() }
-                P.MenuItem { text: "Paste Slowly"; onTriggered: if (activeView) activeView.pasteSlowly() }
-                P.MenuSeparator {}
-                P.MenuItem { text: "Warn Before Multi-Line Paste"; checkable: true; checked: settings.warn_multiline_paste
-                    onTriggered: setSetting("warn_multiline_paste", !settings.warn_multiline_paste) }
-            }
-            P.Menu {
-                id: pasteHistoryMenu
-                title: "Paste History"
-                icon.name: "view-history"
-                enabled: pasteHistory.length > 0
-                Instantiator {
-                    model: win.pasteHistory
-                    delegate: P.MenuItem { text: win.shortLabel(modelData); onTriggered: pasteInto(activeView, modelData) }
-                    onObjectAdded: (i, o) => pasteHistoryMenu.insertItem(i, o)
-                    onObjectRemoved: (i, o) => pasteHistoryMenu.removeItem(o)
+        background: Rectangle {
+            radius: 4
+            color: row.enabled && (row.highlighted || row.hovered) ? Theme.mix(Theme.panel, Theme.accent, 0.3) : "transparent"
+        }
+    }
+    // A submenu's ›.
+    component AppMenuArrow: Text {
+        x: parent ? parent.width - width - 8 : 0
+        y: parent ? Math.round((parent.height - height) / 2) + 0.001 : 0
+        text: "›"
+        color: enabled ? Theme.textDim : Theme.divider
+        font.pixelSize: 14
+        renderType: Text.NativeRendering
+    }
+    Component { id: appMenuArrow; AppMenuArrow {} }
+    // AppMenu makes its submenus as plain Menus: given the ☰ menu's look
+    // (colours, own window, width to fit their rows) before they open.
+    function styleMenu(m) {
+        let w = 140
+        for (let i = 0; i < m.count; i++) {
+            const it = m.itemAt(i)
+            if (!it) continue
+            if (it.subMenu) {
+                // (A submenu's own row in a submenu: the style's MenuItem.)
+                if (it.shortcutText === undefined) {
+                    it.implicitHeight = 24; it.font.pixelSize = 12; it.topPadding = 0; it.bottomPadding = 0; it.leftPadding = 24
+                    it.arrow = appMenuArrow.createObject(it, { enabled: it.enabled })
+                    for (const k of ["windowText", "text", "highlight", "highlightedText"]) it.palette[k] = appMenu.palette[k]
+                    it.palette.light = it.palette.midlight = appMenu.palette.highlight
                 }
+                const sub = it.subMenu
+                sub.popupType = Popup.Window
+                sub.padding = 4
+                sub.topPadding = 4.001
+                for (const k of ["window", "dark", "windowText", "text", "highlight", "highlightedText"]) sub.palette[k] = appMenu.palette[k]
+                win.styleMenu(sub)
             }
-            P.Menu {
-                id: snippetsMenu
-                title: "Snippets"
-                icon.name: "insert-text"
-                Instantiator {
-                    model: win.settings.snippets
-                    delegate: P.MenuItem { text: modelData.title; onTriggered: if (activeView) activeView.sendText(win.unescapeText(modelData.text)) }
-                    onObjectAdded: (i, o) => snippetsMenu.insertItem(i, o)
-                    onObjectRemoved: (i, o) => snippetsMenu.removeItem(o)
-                }
-                P.MenuSeparator {}
-                P.MenuItem { icon.name: "configure"; text: "Edit Snippets\u2026"; onTriggered: prefs.showPage("snippets") }
-            }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "edit-select-all"; text: "Select All\tCtrl+Shift+A"; onTriggered: if (activeView) activeView.selectAll() }
-            P.Menu {
-                title: "Marks"
-                icon.name: "bookmarks"
-                P.MenuItem { icon.name: "go-up"; text: "Previous Prompt\tCtrl+Shift+Up"; onTriggered: if (activeView) activeView.jumpToPrompt(-1) }
-                P.MenuItem { icon.name: "go-down"; text: "Next Prompt\tCtrl+Shift+Down"; onTriggered: if (activeView) activeView.jumpToPrompt(1) }
-                P.MenuSeparator {}
-                P.MenuItem { icon.name: "edit-select"; text: "Select Output of Last Command\tCtrl+Shift+L"; onTriggered: if (activeView) activeView.selectLastOutput() }
-            }
-            P.MenuSeparator {}
-            P.Menu {
-                title: "Find"
-                icon.name: "edit-find"
-                P.MenuItem { icon.name: "edit-find"; text: "Find\u2026\tCtrl+Shift+F"; onTriggered: openFind(false) }
-                P.MenuItem { icon.name: "go-up"; text: "Find Next\tF3"; onTriggered: findStep(-1) }
-                P.MenuItem { icon.name: "go-down"; text: "Find Previous\tShift+F3"; onTriggered: findStep(1) }
-                P.MenuSeparator {}
-                P.MenuItem { icon.name: "link"; text: "Find URLs"; onTriggered: openFind(true) }
-            }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Buffer\tCtrl+Shift+K"; onTriggered: if (activeView) activeView.clearScrollback() }
-            P.MenuItem { icon.name: "edit-clear-history"; text: "Clear Scrollback Buffer"; onTriggered: if (activeView) activeView.showMessage("\u001b[3J") }
+            w = Math.max(w, it.implicitWidth)
         }
-
-        P.Menu {
-            title: "View"
-            icon.name: "view-visible"
-            P.MenuItem { icon.name: "view-fullscreen"; text: "Toggle Full Screen\tF11"; onTriggered: toggleFullScreen() }
-            P.MenuItem { icon.name: "help-hint"; text: (win.assistantOpen ? "Hide" : "Show") + " Assistant\tCtrl+Shift+I"; onTriggered: win.toggleAssistant() }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "zoom-in"; text: "Make Text Bigger\tCtrl+="; onTriggered: zoomBy(1) }
-            P.MenuItem { icon.name: "zoom-out"; text: "Make Text Smaller\tCtrl+-"; onTriggered: zoomBy(-1) }
-            P.MenuItem { icon.name: "zoom-original"; text: "Make Text Normal Size\tCtrl+0"; enabled: fontSize > 0; onTriggered: fontSize = 0 }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "zoom-fit-best"; text: "Maximize Active Pane\tCtrl+Shift+Enter"; checkable: true; checked: maximizedPane !== null
-                enabled: maximizedPane !== null || (activePane !== null && activePane.split); onTriggered: toggleMaximize() }
-            P.MenuItem { text: "Use Transparency"; checkable: true; checked: useTransparency; enabled: activeProfile.transparency > 0
-                onTriggered: useTransparency = !useTransparency }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "edit-find"; text: "Find Cursor\tCtrl+Shift+/"; onTriggered: if (activeView) activeView.findCursor() }
-            P.MenuItem { text: "Show Cursor Guide"; checkable: true; checked: cursorGuide; onTriggered: cursorGuide = !cursorGuide }
-            P.MenuSeparator {}
-            P.Menu {
-                id: tabColorMenu
-                title: "Tab Color"
-                icon.name: "color-management"
-                P.MenuItem { text: "No Color"; onTriggered: if (tabs[currentTab]) tabs[currentTab].tabColor = "transparent" }
-                P.MenuSeparator {}
-                Instantiator {
-                    model: [["Red", "#e5534b"], ["Orange", "#e8853d"], ["Yellow", "#d9b43b"], ["Green", "#57ab5a"], ["Blue", "#4a90e2"], ["Purple", "#986ee2"], ["Gray", "#8b949e"]]
-                    delegate: P.MenuItem {
-                        text: modelData[0]
-                        onTriggered: if (tabs[currentTab]) tabs[currentTab].tabColor = modelData[1]
-                    }
-                    onObjectAdded: (i, o) => tabColorMenu.insertItem(i + 2, o)
-                    onObjectRemoved: (i, o) => tabColorMenu.removeItem(o)
-                }
-            }
-        }
-
-        P.Menu {
-            title: "Session"
-            icon.name: "system-run"
-            P.MenuItem { icon.name: "document-edit"; text: "Edit Session…"; onTriggered: prefs.showProfile(activeProfile.name) }
-            P.MenuItem { icon.name: "view-refresh"; text: "Restart Session"; enabled: activeView !== null
-                onTriggered: { const v = activeView; confirmJobs([paneOf(v)], function() { v.restart() }) } }
-            P.MenuItem { icon.name: "tab-duplicate"; text: "Duplicate Session"; enabled: activeView !== null
-                onTriggered: newTab({ profile: activeProfile.name, cwd: activeView.pwd }) }
-            P.MenuItem { icon.name: "edit-clear"; text: "Reset"; onTriggered: if (activeView) activeView.resetTerminal() }
-            P.MenuSeparator {}
-            P.Menu {
-                title: "Log"
-                icon.name: "text-x-log"
-                P.MenuItem { icon.name: "media-record"; text: "Log to File…"; enabled: activeView !== null && !activeView.logging; onTriggered: logDialog.open() }
-                P.MenuItem { icon.name: "media-playback-stop"; text: "Stop Logging"; enabled: activeView !== null && activeView.logging; onTriggered: activeView.stopLogging() }
-            }
-            P.MenuItem { icon.name: activeView && activeView.recording ? "media-playback-stop" : "media-record"; text: activeView && activeView.recording ? "Stop Recording" : "Record Pane (asciicast)"
-                enabled: activeView !== null; onTriggered: win.toggleRecording(activeView) }
-            P.MenuItem { icon.name: "camera-photo"; text: "Screenshot of Pane"; enabled: activeView !== null; onTriggered: win.screenshot(paneOf(activeView)) }
-            P.MenuItem { icon.name: "camera-photo"; text: "Screenshot of Window"; onTriggered: win.screenshot(rootLayout) }
-        }
-
-        P.Menu {
-            id: profilesMenu
-            title: "Profiles"
-            icon.name: "bookmarks"
-            Instantiator {
-                model: win.profileList
-                delegate: P.MenuItem {
-                    icon.name: "utilities-terminal"
-                    text: modelData.name + (modelData.name === win.settings.default_profile ? "  (default)" : "")
-                    onTriggered: newTab({ profile: modelData.name })
-                }
-                onObjectAdded: (i, o) => profilesMenu.insertItem(i, o)
-                onObjectRemoved: (i, o) => profilesMenu.removeItem(o)
-            }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "tab-new"; text: "Open All"; onTriggered: { for (const p of profileList) newTab({ profile: p.name }) } }
-            P.MenuItem { icon.name: "configure"; text: "Edit Profiles…"; onTriggered: prefs.showProfile(activeProfile.name) }
-        }
-
-        P.Menu {
-            title: "Window"
-            icon.name: "window"
-            P.MenuItem { icon.name: "window-minimize"; text: "Minimize"; onTriggered: win.showMinimized() }
-            P.MenuItem { icon.name: "window-maximize"; text: "Zoom"; onTriggered: win.visibility === Window.Maximized ? win.showNormal() : win.showMaximized() }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "edit-rename"; text: "Edit Window Title…"; onTriggered: askText("Window Title", "Title (empty: the program's title)", customTitle, (t) => customTitle = t) }
-            P.MenuItem { icon.name: "edit-rename"; text: "Edit Tab Title…"; enabled: tabs.length > 0
-                onTriggered: { const t = tabs[currentTab]; askText("Tab Title", "Title (empty: automatic)", t.customTitle, (s) => { t.customTitle = s; treeRev++ }) } }
-            P.MenuSeparator {}
-            P.MenuItem { icon.name: "go-next"; text: "Select Next Tab\tCtrl+PgDown"; enabled: tabs.length > 1; onTriggered: focusTab((currentTab + 1) % tabs.length) }
-            P.MenuItem { icon.name: "go-previous"; text: "Select Previous Tab\tCtrl+PgUp"; enabled: tabs.length > 1; onTriggered: focusTab((currentTab + tabs.length - 1) % tabs.length) }
-            P.MenuItem { icon.name: "arrow-left"; text: "Move Tab Left\tCtrl+Shift+PgUp"; enabled: currentTab > 0; onTriggered: moveTab(-1) }
-            P.MenuItem { icon.name: "arrow-right"; text: "Move Tab Right\tCtrl+Shift+PgDown"; enabled: currentTab < tabs.length - 1; onTriggered: moveTab(1) }
-            P.Menu {
-                title: "Select Split Pane"
-                icon.name: "view-split-left-right"
-                P.MenuItem { icon.name: "go-up"; text: "Select Pane Above\tCtrl+Alt+Up"; onTriggered: moveFocus(0, -1) }
-                P.MenuItem { icon.name: "go-down"; text: "Select Pane Below\tCtrl+Alt+Down"; onTriggered: moveFocus(0, 1) }
-                P.MenuItem { icon.name: "go-previous"; text: "Select Pane Left\tCtrl+Alt+Left"; onTriggered: moveFocus(-1, 0) }
-                P.MenuItem { icon.name: "go-next"; text: "Select Pane Right\tCtrl+Alt+Right"; onTriggered: moveFocus(1, 0) }
-                P.MenuSeparator {}
-                P.MenuItem { text: "Next Pane\tCtrl+Shift+]"; onTriggered: cyclePane(1) }
-                P.MenuItem { text: "Previous Pane\tCtrl+Shift+["; onTriggered: cyclePane(-1) }
-            }
-            P.MenuSeparator {}
-            P.Menu {
-                id: arrangementsMenu
-                title: "Arrangements"
-                icon.name: "view-group"
-                P.MenuItem { icon.name: "document-save"; text: "Save Window Arrangement…"
-                    onTriggered: askText("Save Window Arrangement", "Name", "", (n) => { if (n.trim() !== "") controller.saveArrangement(n.trim(), JSON.stringify(serializeWindow(false))) }) }
-                P.MenuSeparator {}
-                Instantiator {
-                    model: win.arrangementNames
-                    delegate: P.MenuItem {
-                        icon.name: "document-open"
-                        text: "Restore “" + modelData + "”"
-                        onTriggered: restoreArrangement(win.arrangementMap[modelData], null)
-                    }
-                    onObjectAdded: (i, o) => arrangementsMenu.insertItem(i + 2, o)
-                    onObjectRemoved: (i, o) => arrangementsMenu.removeItem(o)
-                }
-                P.MenuSeparator {}
-                P.MenuItem { icon.name: "configure"; text: "Manage Arrangements…"; onTriggered: prefs.showPage("arrangements") }
-            }
-        }
-
-        P.Menu {
-            title: "Help"
-            icon.name: "help-contents"
-            P.MenuItem { icon.name: "help-contents"; text: "Tessera Help"; onTriggered: Qt.openUrlExternally("https://github.com/benwbooth/tessera#readme") }
-            P.MenuItem { icon.name: "help-about"; text: "About Tessera"; onTriggered: prefs.showPage("about") }
-        }
-
-        P.MenuSeparator {}
-        P.MenuItem { icon.name: "view-refresh"; text: "Restart tesserad…"; onTriggered: win.askRestartDaemon() }
-        P.MenuItem { icon.name: "configure"; text: "Preferences…\tCtrl+,"; onTriggered: prefs.showPage("") }
-        P.MenuItem { icon.name: "application-exit"; text: "Quit Tessera\tCtrl+Shift+Q"; onTriggered: win.close() }
+        m.width = w + m.leftPadding + m.rightPadding
     }
 
     // The + button's menu: profiles, the shells installed, ssh hosts.
@@ -1961,7 +2079,7 @@ ApplicationWindow {
     Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
     Timer { id: composeTestTimer; interval: Number(controller.testEnv("COMPOSE_DELAY") || 4000); onTriggered: if (activePane) { activePane.compose.focusEditor(); if (controller.testEnv("COMPOSE_LANG") !== "") activePane.compose.pickLanguage(controller.testEnv("COMPOSE_LANG")); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_TAB") !== "") activePane.compose.openComp(); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory() } }
-    Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.open(menuButton); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
+    Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.openAt(menuButton, 0, menuButton.height + 4); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
     P.Menu {
         id: zoomMenu
@@ -2372,7 +2490,7 @@ ApplicationWindow {
                 icon: "menu"
                 tip: "Menu"
                 open: win.appMenuOpen
-                onClicked: appMenu.open(menuButton)
+                onClicked: if (appMenu.visible || Date.now() - win.appMenuClosedAt < 400) appMenu.close(); else appMenu.openAt(menuButton, 0, menuButton.height + 4)
             }
 
             Loader {

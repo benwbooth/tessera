@@ -78,6 +78,7 @@ fn main() {
         QmlFile::from("qml/CapShape.qml"),
         QmlFile::from("qml/SlimMenu.qml"),
         QmlFile::from("qml/SlimMenuItem.qml"),
+        QmlFile::from("qml/AppMenu.qml"),
         QmlFile::from("qml/StarshipLine.qml"),
         QmlFile::from("qml/FileBrowser.qml"),
         QmlFile::from("qml/FilePreview.qml"),
@@ -102,6 +103,9 @@ fn main() {
     .cpp_file("include/syntax_highlighter.h")
     .cpp_file("include/file_clip.h")
     .cpp_file("cpp/terminal_item.cpp")
+    // The menus in the desktop's global menu bar (QPA private headers).
+    .cpp_file("include/global_menu.h")
+    .cpp_file("cpp/global_menu.cpp")
     .files(["src/bridge.rs"])
     .build();
 }
