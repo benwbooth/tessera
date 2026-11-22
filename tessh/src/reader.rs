@@ -261,6 +261,24 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
         }
     };
     let string = choice((
+        // (re'…', re"…": a regex, raw — re'^\d+$' — with Perl's flags after
+        // it: re'abc'i ignores case; i m s x a, as (?ims) at its start.)
+        just("re")
+            .ignore_then(choice((sq(true), sq(false))))
+            .then(one_of("imsxa").repeated().collect::<String>())
+            .map_with(|(s, fl), e| Form::new(Kind::Str { value: regex_flags(s, &fl), kind: 'x' }, sp(e.span())))
+            .boxed(),
+        just("re")
+            .ignore_then(choice((dq(true, true, false), dq(false, true, false))))
+            .then(one_of("imsxa").repeated().collect::<String>())
+            .map_with(move |(ps, fl), e| {
+                let mut f = pieces_to_string(ps, 'x', sp(e.span()));
+                if let Kind::Str { value, .. } = &mut f.kind {
+                    *value = regex_flags(std::mem::take(value), &fl);
+                }
+                f
+            })
+            .boxed(),
         one_of("bB").then(one_of("rR")).ignore_then(choice((dq(true, true, false), dq(false, true, false)))).map_with(move |ps, e| { let f = pieces_to_string(ps, 'b', sp(e.span())); f }).boxed(),
         one_of("rR").then(one_of("bB")).ignore_then(choice((dq(true, true, false), dq(false, true, false)))).map_with(move |ps, e| pieces_to_string(ps, 'b', sp(e.span()))).boxed(),
         one_of("bB").ignore_then(choice((dq(true, false, false), dq(false, false, false)))).map_with(move |ps, e| pieces_to_string(ps, 'b', sp(e.span()))).boxed(),
@@ -1090,5 +1108,17 @@ mod tests {
         assert!(incomplete("echo \\"));
         assert!(!incomplete("echo hi"));
         assert!(!incomplete("x = 1)"));
+    }
+}
+
+/// A regex with Perl's flags (re'abc'i): Python's inline flags at its start.
+fn regex_flags(pattern: String, flags: &str) -> String {
+    let mut fl: Vec<char> = flags.chars().collect();
+    fl.sort();
+    fl.dedup();
+    if fl.is_empty() {
+        pattern
+    } else {
+        format!("(?{}){pattern}", fl.into_iter().collect::<String>())
     }
 }

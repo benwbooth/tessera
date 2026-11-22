@@ -577,6 +577,39 @@ a.py b.py 2 ['a' 'b'] Glob('*.py')
 True a.py found: a.py b.py
 ```
 
+## Regexes
+<!-- help: regex regexes regular expression re =~ !~ match matching flags -->
+
+`re'…'` (or `re"…"`) is a regular expression: raw, so `\d` means a digit,
+compiled once. Perl's flags go after it: `i` ignores case, `m` makes `^` and
+`$` match at every line, `s` lets `.` match a newline, `x` allows spaces and
+comments, `a` keeps `\w` to ASCII. It's Python's `re.Pattern`, so `.sub`,
+`.findall`, `.split` and the `re` module all work with it.
+
+`=~` matches and `!~` doesn't. On the right, a regex gives the match (with
+its groups) or `None`; a glob (`*.py`) tests a name or path against it; text
+counts as a regex, as in bash.
+
+```tessh
+line = "Build 42 ok"
+m = $line =~ re'(\d+)'
+print ($m.group 1) ($m.start 1) ($line !~ re'^\d+$')
+print (bool ($line =~ re'^build'i)) (bool ($line =~ re'^build'))
+f = ./main.py
+print ($f =~ *.py) ($f !~ *.rs)
+if $line =~ 'ok$'
+  print done
+print (re'o'.sub '0' $line) re'\w+'i
+```
+
+```output
+42 6 True
+True False
+True True
+done
+Build 42 0k re'\w+'i
+```
+
 ## Pipes
 <!-- help: pipes pipe | stage stages pipeline -->
 

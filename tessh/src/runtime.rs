@@ -144,6 +144,20 @@ def _bare_path(t):
     import re
     return bool(re.fullmatch(r"(/|\./|\.\./|~/)[A-Za-z0-9_./+@%=,:~-]*|/|\.|\.\.", t))
 
+def _regex_lit(p):
+    """A compiled regex as tessh writes it: re'…' with its flags after it
+    (re'abc'i), as it reads back."""
+    import re
+    flags = "".join(ch for ch, f in (("a", re.ASCII), ("i", re.IGNORECASE), ("m", re.MULTILINE), ("s", re.DOTALL), ("x", re.VERBOSE)) if p.flags & f)
+    body = p.pattern
+    m = re.match(r"\(\?([aimsx]+)\)", body)
+    if m and set(m.group(1)) <= set(flags):
+        body = body[m.end():]
+    q = "'" if "'" not in body else '"""' if '"""' not in body and not body.endswith('"') else None
+    if q is None or ("\n" in body and q == "'"):
+        return repr(p)
+    return "re" + q + body + q + flags
+
 def _bare_glob(t):
     """Whether t, written bare, reads back as this glob."""
     import re
@@ -263,6 +277,9 @@ def pretty(x, color=None, width=None, indent=0, _tree_of=None):
             return c("punct", "(") + "float " + c("str", "'" + repr(x) + "'") + c("punct", ")")
         if type(x) is complex:
             return c("punct", "(") + "complex " + c("num", repr(x.real)) + " " + c("num", repr(x.imag)) + c("punct", ")")
+        import re as _re
+        if isinstance(x, _re.Pattern) and isinstance(x.pattern, str):
+            return c("str", _regex_lit(x))
         if type(x) is Glob and _bare_glob(x.pattern):
             return c("str", x.pattern)
         if isinstance(x, _pathlib.PurePath) and _bare_path(str(x)):
@@ -392,7 +409,8 @@ def print(*args, sep=" ", end="\n", file=None, flush=False):
     if file is None or file is sys.stdout:
         color = _wants_color(out)
         # (A path printed is its text; containers are laid out.)
-        args = [pretty(a, color=color) if _kind(a) and not isinstance(a, _pathlib.PurePath) else a for a in args]
+        import re as _re
+        args = [pretty(a, color=color) if (_kind(a) and not isinstance(a, _pathlib.PurePath)) or isinstance(a, _re.Pattern) else a for a in args]
     builtins.print(*args, sep=sep, end=end, file=out, flush=flush)
 
 import pathlib as _pathlib
@@ -483,6 +501,23 @@ class Glob:
         return hash(("Glob", self.pattern))
 
 _Glob = Glob
+
+def regex(text):
+    """re'…': the pattern compiled (re keeps the compiled ones)."""
+    import re
+    return re.compile(text)
+
+def matches(s, pattern):
+    """s =~ pattern: a regex (re'…', or text taken as one) searched in s —
+    the match, or None; a Glob (*.py) — whether s, a name or path, fits it."""
+    import re, os
+    if type(pattern) is Glob:
+        return os.fspath(s) in pattern if isinstance(s, (str, os.PathLike)) else False
+    if isinstance(s, os.PathLike):
+        s = os.fspath(s)
+    if isinstance(pattern, re.Pattern):
+        return pattern.search(s)
+    return re.search(str(pattern), s)
 
 def _words_as_program(f):
     """f, called with a glob's names where it's given a Glob (as a program
@@ -2253,6 +2288,8 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     m.add("print", prelude(py)?.getattr("print")?)?;
     m.add("Path", prelude(py)?.getattr("Path")?)?;
     m.add("Glob", prelude(py)?.getattr("Glob")?)?;
+    m.add("regex", prelude(py)?.getattr("regex")?)?;
+    m.add("matches", prelude(py)?.getattr("matches")?)?;
     m.add("path_word", prelude(py)?.getattr("_path_word")?)?;
     m.add("pretty", prelude(py)?.getattr("pretty")?)?;
     m.add("env", Py::new(py, Env)?)?;

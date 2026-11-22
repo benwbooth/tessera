@@ -134,7 +134,7 @@ fn bare_iterable(iter: &[Form]) -> R<()> {
 const RT: &str = "__tessh__";
 const FM: &str = "__tessh_forms__";
 
-const BINOPS: &[(&str, &str)] = &[("+", "Add"), ("-", "Sub"), ("*", "Mult"), ("/", "Div"), ("//", "FloorDiv"), ("%", "Mod"), ("@", "MatMult"), ("**", "Pow"), ("<<", "LShift"), (">>", "RShift"), ("^", "BitXor"), ("&", "BitAnd"), ("|", "BitOr")];
+const BINOPS: &[(&str, &str)] = &[("+", "Add"), ("-", "Sub"), ("*", "Mult"), ("/", "Div"), ("//", "FloorDiv"), ("%", "Mod"), ("@", "MatMult"), ("**", "Pow"), ("<<", "LShift"), (">>", "RShift"), ("^", "BitXor"), ("&", "BitAnd"), ("|", "BitOr"), ("=~", "Match"), ("!~", "NotMatch")];
 const CMPOPS: &[(&str, &str)] = &[("==", "Eq"), ("!=", "NotEq"), ("<", "Lt"), (">", "Gt"), ("<=", "LtE"), (">=", "GtE"), ("in", "In"), ("not in", "NotIn"), ("is", "Is"), ("is not", "IsNot")];
 const ASSIGN_OPS: &[(&str, &str)] = &[("=", ""), ("+=", "Add"), ("-=", "Sub"), ("*=", "Mult"), ("/=", "Div"), ("//=", "FloorDiv"), ("%=", "Mod"), ("**=", "Pow"), ("@=", "MatMult"), ("&=", "BitAnd"), ("|=", "BitOr"), ("^=", "BitXor"), ("<<=", "LShift"), (">>=", "RShift")];
 const WORD_OPS: &[&str] = &["and", "or", "not", "in", "is"];
@@ -167,6 +167,7 @@ fn prec(n: &str) -> u8 {
         "+" | "-" => 10,
         "*" | "/" | "//" | "%" | "@" => 11,
         "**" => 13,
+        "=~" | "!~" => 5,
         _ if cmpop(n).is_some() => 5,
         _ => 6,
     }
@@ -1446,6 +1447,14 @@ impl<'py, 's> Compiler<'py, 's> {
             let func = func.clone();
             return self.call(self.name_load(&func)?, vec![a, b], vec![]);
         }
+        // (=~: a match — regex, glob or text as a regex; !~: none.)
+        if op == "=~" {
+            return self.rcall("matches", vec![a, b]);
+        }
+        if op == "!~" {
+            let m = self.rcall("matches", vec![a, b])?;
+            return self.n("UnaryOp", vec![("op", self.n0("Not")?), ("operand", m)]);
+        }
         match binop(op) {
             Some(n) => self.n("BinOp", vec![("left", a), ("op", self.n0(n)?), ("right", b)]),
             None => err(format!("unknown operator '{op}'"), Some(f)),
@@ -1832,6 +1841,9 @@ impl<'py, 's> Compiler<'py, 's> {
             },
             Kind::Num(t) => self.num(t)?,
             Kind::Str { value, kind } => {
+                if *kind == 'x' {
+                    return Ok(Res::e(self.rcall("regex", vec![self.c(value.as_str())?])?));
+                }
                 if *kind == 'b' {
                     let bytes: Vec<u8> = value.chars().map(|c| c as u32 as u8).collect();
                     self.c(pyo3::types::PyBytes::new(self.py, &bytes))?

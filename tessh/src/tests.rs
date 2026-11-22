@@ -590,3 +590,9 @@ fn backslash_escapes_in_words() {
     Python::attach(|py| assert_eq!(ns.bind(py).get_item("x").unwrap().unwrap().str().unwrap().to_string(), "7th Heaven/"));
     assert_eq!(out, "7th Heaven/ a(b $HOME *\none two\n");
 }
+
+#[test]
+fn regexes_and_matching() {
+    let (_, out) = run("s = \"Build 42\"\nm = $s =~ re'(\\d+)'\nprint ($m.group 1) (($s =~ re'^build'i) != None) ($s =~ re'^build') ($s !~ re'x')\nf = ./a.py\nprint ($f =~ *.py) ($f =~ *.rs) ($s =~ '42$' != None)\nprint re'a\\d'ms (\"a\\nb\" =~ re'^b'm != None)");
+    assert_eq!(out, "42 True None True\nTrue False True\nre'a\\d'ms True\n");
+}
