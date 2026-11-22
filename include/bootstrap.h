@@ -52,6 +52,10 @@ public:
             if (k->key() != Qt::Key_Control) { armed = false; pending.clear(); return false; }
             if (!qobject_cast<QQuickWindow*>(o) || k->isAutoRepeat()) return false;
             armed = !(k->modifiers() & ~Qt::ControlModifier & ~Qt::KeypadModifier);
+            // (Which one: right Ctrl's tap runs the editor's command in the
+            // background; left's switches between editor and terminal. 105:
+            // right Ctrl's evdev code + 8.)
+            right = k->nativeScanCode() == 105;
             if (armed) since.start();
             return false;
         }
@@ -67,8 +71,9 @@ public:
             // enter): Enter held is Ctrl) sends a Ctrl tap and then the key
             // itself when it's tapped. A key right after cancels it.)
             pending = w;
+            tappedRight = right;
             QTimer::singleShot(120, this, [this] {
-                if (pending) QMetaObject::invokeMethod(pending.data(), "toggleEditor");
+                if (pending) QMetaObject::invokeMethod(pending.data(), "ctrlTapped", Q_ARG(QVariant, QVariant(tappedRight)));
                 pending.clear();
             });
             return false;
@@ -89,6 +94,7 @@ public:
 
 private:
     bool armed = false;
+    bool right = false, tappedRight = false;
     QElapsedTimer since;
     QPointer<QQuickWindow> pending;   // (a tap waiting to see no key follows)
 };

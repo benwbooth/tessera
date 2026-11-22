@@ -637,6 +637,20 @@ FocusScope {
         // own, in tesserad, and the notebook carries on.)
         const bl = bgLang(c)
         if (bl !== "" && (bg || isBgLine(c.source))) { runJob(i, c.source.trim().replace(/\s*&$/, ""), bl, retried); return }
+        // (Another language asked for in the background: its own runner's
+        // command line (python3 -c ..., as the editor runs a snippet), as a
+        // shell job.)
+        if (bg) {
+            const L = c.lang !== "" ? c.lang : language, cid = c.cid
+            Async.call(controller, k => controller.snippetCommand(k, L, c.source, shellDir, shellName, sshHost), cmd => {
+                const j = indexOf(cid)
+                if (j < 0) return
+                if (cmd !== "") { runJob(j, cmd, "shell", retried); cells.setProperty(j, "ranIn", L + " \u00b7 bg"); return }
+                cells.setProperty(j, "running", false); cells.setProperty(j, "failed", true); cells.setProperty(j, "ended", Date.now())
+                addOutput(j, { output_type: "error", ename: "Not started", evalue: "", traceback: ["Couldn't run " + L + " in the background: no way to run it on its own."] })
+            })
+            return
+        }
         // (A cell in another language: that language's kernel.)
         if (c.lang !== "" && !sameLang(c.lang, runsIn)) { runLang(c.cid, c.lang); return }
         if (shellKernel) { shellRun(c.cid, c.source); return }
@@ -1364,6 +1378,18 @@ FocusScope {
         if (liveIndex >= 0) followLive()
     }
     function reveal(cid) { if (unseenCid === cid) Qt.callLater(() => { if (nb.unseenCid === cid) nb.showUnseen() }) }
+    // In the background at once (Ctrl+Enter, a tap of right Ctrl): a card run
+    // as a job alongside whatever runs, as a shell's & does, in any language
+    // (`lang`: the editor's; "" the notebook's).
+    function submitBackground(code, lang) {
+        expandedId = ""
+        const c = newCell("code", code)
+        if (lang && !sameLang(lang, runsIn)) c.lang = lang
+        cells.append(c)
+        current = cells.count - 1
+        run(cells.count - 1, true)
+        follow()
+    }
     function submit(code) {
         expandedId = ""         // (a new card shows: nothing hides it)
         const c = newCell("code", code)
@@ -3197,7 +3223,7 @@ FocusScope {
                 SlimMenuItem { text: header.fileView && header.fileView.dirty ? "Done, discarding the changes" : "Done editing"; visible: header.fileView !== null && header.fileView.editing; onTriggered: header.fileView.stopEdit() }
                 SlimMenuItem { text: "\u24d8 Details (command line, environment)"; visible: cell.code && cell.viewPath === ""; onTriggered: nb.showExec(cell.index) }
                 SlimMenuItem { text: cell.code ? "Edit" : "Edit the Markdown"; visible: cell.viewPath === ""; onTriggered: nb.focusCell(cell.index, true) }
-                SlimMenuItem { text: "Run in the background"; visible: cell.code && cell.viewPath === "" && !cell.running && nb.bgLang(cells.get(cell.index)) !== ""; onTriggered: nb.run(cell.index, true) }
+                SlimMenuItem { text: "Run in the background"; visible: cell.code && cell.viewPath === "" && !cell.running; onTriggered: nb.run(cell.index, true) }
                 SlimMenuItem { text: "Move to the background\tCtrl+Alt+Z"; visible: cell.running && (cell.job <= 0 && (cell.tid > 0 || nb.ttyRun !== null) || nb.fgJob === cell.cid) && nb.canBg(cells.get(cell.index)); onTriggered: nb.moveToBg(cell.index) }
                 SlimMenuItem { text: "Bring to the foreground"; visible: cell.job > 0 && cell.jobTty && cell.running && nb.fgJob !== cell.cid; onTriggered: nb.foregroundJob(cell.index) }
                 SlimMenuItem { text: "Stop the background job"; visible: cell.job > 0 && cell.running; onTriggered: nb.stopJob(cell.index) }

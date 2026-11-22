@@ -133,14 +133,36 @@ Item {
         if (editorOn && focused) { preferEditor = true; Qt.callLater(compose.focusEditor) }
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
-    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && promptHeld
+    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (promptHeld || editorCalled)
     // (At the prompt, or was a moment ago: a quick command (ls) leaves the
     // editor up rather than taking it away and back, which resizes
     // everything above it twice. One that's still going after 250 ms hides
     // it; a full-screen program does at once.)
     readonly property bool promptish: term.atPrompt || idleShell || replLang !== "" || awaitingPrompt
     property bool promptHeld: promptish
-    onPromptishChanged: { if (promptish) { promptDrop.stop(); promptHeld = true } else promptDrop.restart() }
+    onPromptishChanged: { if (promptish) { promptDrop.stop(); promptHeld = true; if (cmdQueue.length) queueTimer.restart() } else promptDrop.restart() }
+    // Commands typed while one ran (Enter in the editor then): run in turn,
+    // each at the next prompt.
+    property var cmdQueue: []
+    // (A moment after the prompt comes: sent the instant it starts, the
+    // command was echoed above the prompt as the shell drew it.)
+    Timer { id: queueTimer; interval: 200; onTriggered: pane.runQueued() }
+    property bool flushing: false
+    function runQueued() {
+        if (!promptish || cmdQueue.length === 0) return
+        const q = cmdQueue[0]
+        cmdQueue = cmdQueue.slice(1)
+        const L = compose.runLang, S = compose.runShellUsed
+        compose.runLang = q.L; compose.runShellUsed = q.S; compose.submitMode = ""
+        flushing = true
+        compose.submitted(q.t)
+        flushing = false
+        compose.runLang = L; compose.runShellUsed = S
+    }
+    // (Called up while a command runs (a tap of left Ctrl): the editor's there
+    // to type the next one, queued; it goes when the keys go back.)
+    property bool editorCalled: false
+    Connections { target: compose; function onEditingChanged() { if (!compose.editing) Qt.callLater(() => { if (!compose.editing) pane.editorCalled = false }) } }
     Timer { id: promptDrop; interval: 250; onTriggered: pane.promptHeld = pane.promptish }
     // (A new shell: the editor's room kept from the start, so the terminal
     // opens at the size it'll have at the prompt instead of shrinking when
@@ -319,7 +341,21 @@ Item {
         promptSegments: pane.promptSegments
         // (A shell picked: its kernel starts now, ready by the first Enter.)
         onRunShellChanged: if (runShell !== "" && notebook.hasKernelFor(runShell)) notebook.warmLang(runShell)
+        queued: pane.cmdQueue.length
+        onClearQueue: pane.cmdQueue = []
         onSubmitted: (t) => {
+            // (In the background: a card run as a job, the shell's & for any
+            // language; in the terminal it's in Jobs.)
+            if (compose.submitMode === "bg" && !compose.commandRun) {
+                notebook.submitBackground(t, compose.runShellUsed !== "" ? compose.runShellUsed : compose.runLang)
+                return
+            }
+            // (The terminal busy with a command: this one waits for its
+            // prompt, then runs as it would have.)
+            if (!forNotebook && !compose.commandRun && !pane.flushing && !pane.promptish) {
+                pane.cmdQueue = pane.cmdQueue.concat([{ t: t, L: compose.runLang, S: compose.runShellUsed }])
+                return
+            }
             // (A notebook: its kernel's language, unless another is picked or
             // recognised in the editor: that one's kernel (or its program,
             // once); the pane's own shell picked: the terminal, a card of its own.)

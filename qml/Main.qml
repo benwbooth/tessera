@@ -101,9 +101,21 @@ ApplicationWindow {
     // Ctrl tapped on its own (include/bootstrap.h TesseraCtrlTap): over to
     // the active pane's terminal from its input editor, else to the editor
     // (when it's up: at a prompt).
+    // A tap of Ctrl on its own (include/bootstrap.h): right Ctrl runs the
+    // editor's command in the background (Ctrl+Enter's); left Ctrl, or right
+    // with nothing to run, switches between the editor and the terminal.
+    function ctrlTapped(right) {
+        const p = activePane
+        if (right && p && p.editorOn && p.compose.editing && p.compose.text.trim() !== "") { p.compose.submitBackground(); return }
+        toggleEditor()
+    }
     function toggleEditor() {
         const p = activePane
-        if (!p || !p.editorOn) return
+        if (!p) return
+        // (A command running: the editor called up to type the next one,
+        // which waits for it, queued.)
+        if (!p.editorOn && p.inputEditor && !p.view.exited && !p.view.fullScreen) { p.editorCalled = true; Qt.callLater(backToEditor); return }
+        if (!p.editorOn) return
         if (p.compose.editing) { p.compose.handBack(); return }
         backToEditor()
     }
@@ -1857,14 +1869,14 @@ ApplicationWindow {
             const k = keysTestTimer.keys.shift()
             if (k === "wait") { if (activePane) console.log("key test: wait ghost=" + JSON.stringify(activePane.compose.ghost) + " ready=" + activePane.compose.inlineReady); return }   // (a pause: let the AI answer)
             const named = { space: [Qt.Key_Space, 0, " ", 65], tab: [Qt.Key_Tab, 0, "\t", 23], bs: [Qt.Key_Backspace, 0, "\b", 22], enter: [Qt.Key_Return, 0, "\r", 36],
-                            lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62], esc: [Qt.Key_Escape, 0, "\x1b", 9], ctrl: [Qt.Key_Control, 0, "", 37], stab: [Qt.Key_Backtab, Qt.ShiftModifier, "", 23],
+                            lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62], esc: [Qt.Key_Escape, 0, "\x1b", 9], ctrl: [Qt.Key_Control, 0, "", 37], rctrl: [Qt.Key_Control, 0, "", 105], stab: [Qt.Key_Backtab, Qt.ShiftModifier, "", 23],
                             up: [Qt.Key_Up, 0, "", 111], down: [Qt.Key_Down, 0, "", 116],
                             pgup: [Qt.Key_PageUp, 0, "", 112], pgdn: [Qt.Key_PageDown, 0, "", 117] }
-            // (ca:x: Ctrl+Alt+x; ca:enter for Return. al:x: Alt+x.)
-            const ca = k.startsWith("ca:"), al = k.startsWith("al:")
-            const kk = ca || al ? k.slice(3) : k
+            // (ca:x: Ctrl+Alt+x; ca:enter for Return. al:x: Alt+x. ct:x: Ctrl+x.)
+            const ca = k.startsWith("ca:"), al = k.startsWith("al:"), ct = k.startsWith("ct:")
+            const kk = ca || al || ct ? k.slice(3) : k
             const d0 = named[kk] || [kk.toUpperCase().charCodeAt(0), 0, kk, 0]
-            const d = ca ? [d0[0], Qt.ControlModifier | Qt.AltModifier, "", d0[3]] : al ? [d0[0], Qt.AltModifier, "", d0[3]] : d0
+            const d = ca ? [d0[0], Qt.ControlModifier | Qt.AltModifier, "", d0[3]] : al ? [d0[0], Qt.AltModifier, "", d0[3]] : ct ? [d0[0], Qt.ControlModifier, "", d0[3]] : d0
             controller.testKey(d[0], d[1], d[2], d[3])
             if (activePane) console.log("key test: after " + k + " termFocus=" + activePane.view.activeFocus + " editorFocus=" + activePane.compose.editing + " focusItem=" + win.activeFocusItem + " editor=" + JSON.stringify(activePane.compose.text) + " ghost=" + JSON.stringify(activePane.compose.ghost) + " dropdown=" + activePane.compose.compOpen)
         }

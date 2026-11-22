@@ -177,7 +177,17 @@ Rectangle {
     function insert(t) { edit.insert(edit.cursorPosition, t) }
     function setText(t) { edit.text = t; edit.cursorPosition = t.length }
 
-    function submit() {
+    // How the last submit wants it run: "" (now, or queued behind what's
+    // running) or "bg" (in the background at once, alongside it: as a
+    // shell's &, for any language). Ctrl+Enter or a tap of right Ctrl.
+    property string submitMode: ""
+    // Commands waiting for the one running to finish (the pane's), and a
+    // signal to drop them.
+    property int queued: 0
+    signal clearQueue()
+    function submitBackground() { if (edit.text.trim() === "") return; submit("bg") }
+    function submit(mode) {
+        submitMode = mode || ""
         const t = edit.text
         // "# what I want": the AI writes the command, for you to check first.
         if (aiNL && /^#\s*\S/.test(t) && t.indexOf("\n") < 0 && chatReady) { askCommand(t.replace(/^#\s*/, "")); return }
@@ -791,6 +801,8 @@ Rectangle {
         const shift = e.modifiers & Qt.ShiftModifier
         if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
             if (shift || (e.modifiers & Qt.AltModifier)) { newline(); return true }
+            // (Ctrl+Enter: in the background, alongside what's running.)
+            if (ctrl) { submitBackground(); return true }
             submit()
             return true
         }
@@ -1367,6 +1379,13 @@ Rectangle {
             label: "\u25eb " + (({ json: "JSON", csv: "Table", tsv: "Table", html: "HTML", markdown: "Markdown", svg: "SVG" })[box.view ? box.view.richKind : ""] || "View")
             tip: "Show the last command's output formatted"
             onClicked: box.openRich()
+        }
+        Chip {
+            visible: box.queued > 0
+            base: Theme.mix(box.color, Theme.accent, 0.3)
+            label: "\u23f3 " + box.queued + " queued"
+            tip: "Commands waiting for the running one to finish, run in turn. Click to drop them. (Ctrl+Enter or a tap of right Ctrl runs a command in the background instead.)"
+            onClicked: box.clearQueue()
         }
         Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {
