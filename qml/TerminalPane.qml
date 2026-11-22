@@ -354,6 +354,10 @@ Item {
             // language; in the terminal it's in Jobs.)
             if (compose.submitMode === "bg" && !compose.commandRun) {
                 notebook.submitBackground(t, compose.runShellUsed !== "" ? compose.runShellUsed : compose.runLang)
+                // (Said, so it doesn't look like it vanished.)
+                const line = t.split("\n")[0]
+                Window.window.notice("Running in the background: " + (line.length > 60 ? line.substring(0, 60) + "\u2026" : line) + (t.indexOf("\n") >= 0 ? " \u2026" : ""),
+                                     [{ label: "Show in Jobs", run: () => notebook.setJobsView(true) }])
                 return
             }
             // (The terminal busy with a command: this one waits for its
