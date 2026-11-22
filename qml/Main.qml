@@ -107,6 +107,7 @@ ApplicationWindow {
     // with nothing to run, switches between the editor and the terminal.
     function ctrlTapped(right) {
         const p = activePane
+        console.warn("TEMPORARY ctrl tap: right=" + right + " editorOn=" + (p ? p.editorOn : "-") + " editing=" + (p ? p.compose.editing : "-") + " text=" + (p ? JSON.stringify(p.compose.text.substring(0, 20)) : "-"))
         if (right && p && p.editorOn && p.compose.editing && p.compose.text.trim() !== "") { p.compose.submitBackground(); return }
         toggleEditor()
     }

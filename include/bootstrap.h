@@ -57,6 +57,8 @@ public:
             // background; left's switches between editor and terminal. 105:
             // right Ctrl's evdev code + 8.)
             right = k->nativeScanCode() == 105 || k->nativeVirtualKey() == 0xffe4 || k->nativeScanCode() == 0x11d;
+            // TEMPORARY: which Ctrl Ben's keyboard (through keyd) sends.
+            qWarning("ctrl press: scan %u sym 0x%x mods 0x%x right %d", k->nativeScanCode(), k->nativeVirtualKey(), unsigned(k->modifiers()), int(right));
             if (armed) since.start();
             return false;
         }
