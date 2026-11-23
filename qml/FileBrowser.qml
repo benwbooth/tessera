@@ -255,7 +255,9 @@ Item {
     readonly property bool windowed: viewTop > -1e8
     readonly property int totalLines: lined ? rows.length : view === "list" ? grid.rows : 0
     readonly property int firstLine: windowed ? Math.max(0, Math.floor((viewTop - headerH - 4) / row) - 40) : 0
-    readonly property int slotLines: windowed ? 160 : Math.max(1, totalLines)
+    // (No more than it has lines: a small folder's pane in ls * made 160
+    // a column all the same, thousands of items for nothing.)
+    readonly property int slotLines: Math.max(1, windowed ? Math.min(160, totalLines) : totalLines)
     readonly property var blank: ({ name: "", path: "", dir: false, mode: "", user: "", group: "", size: 0, mtime: 0, items: -1 })
     // (Open folders in the window, not read yet: read now — ls -R's tree
     // fills in as it's scrolled.)

@@ -2510,6 +2510,17 @@ FocusScope {
         interval: 16; repeat: true; running: nb.stallLog
         onTriggered: { const t = Date.now(); if (nb.stallLast > 0 && t - nb.stallLast > 60) console.log("stall " + (t - nb.stallLast) + "ms ending " + t % 1000000); nb.stallLast = t }
     }
+    // (Test hook: TESSERA_TEST_ITEMS logs, at 18 s, how many items the notebook has made, by type.)
+    Timer {
+        interval: 18000; running: nb.controller !== null && nb.controller.testEnv("ITEMS") !== ""
+        onTriggered: {
+            const n = {}
+            let all = 0
+            const walk = (it) => { all++; const t = String(it).replace(/[_(].*$/, ""); n[t] = (n[t] || 0) + 1; for (const c of it.children) walk(c) }
+            walk(nb)
+            console.log("items " + all + ": " + Object.keys(n).sort((a, b) => n[b] - n[a]).slice(0, 25).map(k => k + " " + n[k]).join(", "))
+        }
+    }
     // (TESSERA_TEST_NB_FRAMES=<dir>: the 40 frames after NB_CELL2 is sent, grabbed there.)
     property int testFrames: -1
     // (For the frame log: each card in view, its kind and what its body shows.)
