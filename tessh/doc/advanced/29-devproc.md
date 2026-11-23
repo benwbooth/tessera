@@ -213,8 +213,8 @@ e2 = mknote 24
 n = mknote 32767
 # European notation.
 
-tune = [$g ${e2} $d $c $d $c $a $g $n $g $e $n $g ${e2} $d $c $c $b $c $cis $n $cis $d
-        $n $g ${e2} $d $c $d $c $a $g $n $g $e $n $g $a $d $c $b $a $b $c]
+tune = [$g $e2 $d $c $d $c $a $g $n $g $e $n $g $e2 $d $c $c $b $c $cis $n $cis $d
+        $n $g $e2 $d $c $d $c $a $g $n $g $e $n $g $a $d $c $b $a $b $c]
 
 with (open music.raw wb) as dsp    # (/dev/dsp in the original)
   $dsp.write (b"".join $tune)
