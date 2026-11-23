@@ -7,9 +7,8 @@ letters work after the `#!` line (`#!/bin/bash -x`) or on the command line
 (`bash -v script`). `shopt -s name` sets the newer ones.
 
 tessh has no such switches. Its behavior is fixed, mostly at what bash's
-careful scripters turn on, and Python modules cover the rest. Note that
-`set -x` in a tessh script is not an error but Python's `set`, which makes
-a set and does nothing else (chapter 32): don't carry `set` lines over.
+careful scripters turn on, and Python modules cover the rest. A `set -x`
+line carried over is an error saying so (`set` alone is Python's set type).
 
 ```bash no-run
 #!/bin/bash

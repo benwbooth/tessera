@@ -1569,6 +1569,11 @@ impl<'py, 's> Compiler<'py, 's> {
 
     fn compile_application(&mut self, items: &[Form], children: &[Form], ctx: Ctx) -> R<Res<'py>> {
         let head = &items[0];
+        // (set -e, set -x, set -euo pipefail: bash's options, which tessh
+        // hasn't; Python's set would make a set of the words and go on.)
+        if head.is_sym("set") && items.get(1).and_then(|x| x.sym_name()).is_some_and(|n| n.len() > 1 && (n.starts_with('-') || n.starts_with('+')) && !is_number(n)) {
+            return err("tessh has no set options (set -e, -x, -u, -o pipefail): see help abs-options for what to do instead", Some(head));
+        }
         let mode = if ctx == Ctx::Value { "capture" } else { "attach" };
         // (True, False, None, ... alone: the constant.)
         if items.len() == 1 && children.is_empty() && head.sym_name().is_some_and(|n| ["True", "False", "None", "..."].contains(&n)) {
@@ -3005,6 +3010,9 @@ impl<'py, 's> Compiler<'py, 's> {
 
     fn sf_if(&mut self, items: &[Form], children: &[Form], ctx: Ctx, conts: &[Form]) -> R<Res<'py>> {
         let head = &items[0];
+        if children.is_empty() && !items.iter().any(|x| x.is_sym("then")) {
+            return err("'if' needs an indented block under it, or `then` on its line", Some(head));
+        }
         if let Some(k) = items.iter().position(|x| x.is_sym("then")) {
             if children.is_empty() {
                 let els = items.iter().enumerate().skip(k).find(|(_, x)| x.is_sym("else")).map(|(i, _)| i);
@@ -3070,6 +3078,9 @@ impl<'py, 's> Compiler<'py, 's> {
     }
 
     fn sf_while(&mut self, items: &[Form], children: &[Form], conts: &[Form]) -> R<Res<'py>> {
+        if children.is_empty() {
+            return err("'while' needs an indented block under it (bash's do … done)", Some(&items[0]));
+        }
         let c = self.cond(&items[1..], &items[0])?;
         let body = self.branch(children, Ctx::Stmt, &None)?;
         let mut orelse = vec![];
@@ -3092,6 +3103,9 @@ impl<'py, 's> Compiler<'py, 's> {
 
     fn sf_for(&mut self, items: &[Form], children: &[Form], conts: &[Form], is_async: bool) -> R<Res<'py>> {
         let Some(k) = items.iter().position(|x| x.is_sym("in")) else { return err("for name in iterable", Some(&items[0])) };
+        if children.is_empty() {
+            return err("'for' needs an indented block under it (bash's do … done)", Some(&items[0]));
+        }
         bare_iterable(&items[k + 1..])?;
         if let Some(f) = children.iter().find_map(|c| bare_in(c, &bound_names(&items[1..k]))) {
             return bare_loop_var(f);

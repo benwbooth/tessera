@@ -11,8 +11,8 @@ script becomes; and Python's own tools (`pdb`, `sys.settrace`, `inspect`,
 `atexit`, `signal`) work on tessh scripts and report tessh line numbers.
 
 What tessh does not have is bash's switches: `set -e`, `set -u`, `set -x`,
-`set -v` and `trap` don't exist (and `set -x` is quietly Python's `set`,
-see below). This chapter shows what to use instead.
+`set -v` and `trap` don't exist (a `set -x` line is an error that says
+so). This chapter shows what to use instead.
 
 ### Example 32-1. A buggy script (`ex74.sh`)
 
@@ -98,10 +98,9 @@ exit 0     # Will not exit here!
 Bash reports `line 16: syntax error: unexpected end of file`: where it
 noticed, not where the mistake was. tessh has no `done`; the loop's body is
 its indented lines. Forget the indent and you get the tessh form of this
-mistake, and no message at all: the loop runs with nothing in it, and the
-`print` runs once, after it.
+mistake, which tessh reports at the loop, before running anything:
 
-```tessh
+```tessh no-run no-check
 # missing-indent: what will this script print? And why?
 
 for a in [1 2 3]
@@ -110,8 +109,9 @@ print "$a"       # The loop's body, not indented.
 exit 0
 ```
 
-```output
-3
+```text
+$ tessh --check missing-indent.tsh
+missing-indent.tsh:3:1: 'for' needs an indented block under it (bash's do … done)
 ```
 
 An unclosed bracket or string, on the other hand, is reported where it
@@ -260,10 +260,9 @@ shows what passes through at that point, in tessh as in bash.
 - `set -u` (`set -o nounset`) makes an unset variable an error. In tessh it
   always is.
 
-A word of warning: `set -x` in a tessh script is not an error. `set` is
-Python's set type, so `set -x` makes the set `{'-', 'x'}` and throws it
-away, and the script goes on with no tracing. The same goes for `set -e`,
-`set -u` and the rest.
+`set -x` carried over from bash is an error in tessh ("tessh has no set
+options"), as are `set -e`, `set -u` and the rest, so a script doesn't
+quietly run without what it asked for. (`set` alone is Python's set type.)
 
 ```bash no-run
 set -u   # Or   set -o nounset

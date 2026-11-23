@@ -457,6 +457,16 @@ fn bracket_test_condition_is_an_error() {
     assert!(check_one("xs = [1]\nif $xs\n  print x\n").is_empty());
 }
 
+/// A for/while/if with nothing under it (bash's missing done) and bash's
+/// `set -e` are errors, not quietly nothing.
+#[test]
+fn empty_blocks_and_set_options_are_errors() {
+    for src in ["for a in [1 2]\nprint $a\n", "while False\nprint 1\n", "if True\nprint 1\n", "set -euo pipefail\n"] {
+        assert!(!check_one(src).is_empty(), "{src}");
+    }
+    assert!(check_one("x = set [1]\nif True then 1\n").is_empty());
+}
+
 #[test]
 fn macro_errors_have_positions() {
     let e = check_one("defmacro m a\n  quasi\n    ~a\nm\n");
