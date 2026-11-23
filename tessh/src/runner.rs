@@ -72,6 +72,16 @@ pub fn init(py: Python<'_>) -> PyResult<()> {
     let m = crate::runtime::module(py)?;
     m.add_function(wrap_pyfunction!(run_module, &m)?)?;
     crate::runtime::sync_pwd(py)?;
+    // (Line-buffered even into a pipe or a file, as a shell's echo is: what a
+    // script prints stays in order with what its programs and background
+    // jobs print, and isn't lost when it execs or is killed.)
+    for s in ["stdout", "stderr"] {
+        if let Ok(f) = py.import("sys")?.getattr(s) {
+            let kw = pyo3::types::PyDict::new(py);
+            kw.set_item("line_buffering", true)?;
+            let _ = f.call_method("reconfigure", (), Some(&kw));
+        }
+    }
     crate::runtime::install_import_hint(py)?;
     // (`import name` finds name.tsh too, from tessh and from Python it runs;
     // the folder you're in is on the path, as for `python -c`.)

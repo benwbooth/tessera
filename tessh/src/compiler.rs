@@ -2053,11 +2053,22 @@ impl<'py, 's> Compiler<'py, 's> {
         }
         let mut rs = vec![];
         let mut slots = vec![];
+        let globbed = is_glob_word(x);
         for p in &parts {
             match p {
                 Part::Text(t) => slots.push(Slot::T(t.clone())),
                 Part::F(f) => match &f.kind {
                     Kind::Str { value, .. } => slots.push(Slot::T(value.clone())),
+                    // ([ab]*, [!0-9]*, [^.]*: in a glob, a bracket of one word is
+                    // its character set, not a list.)
+                    Kind::Group { open: '[', items } if globbed && items.len() == 1 && matches!(&items[0].kind, Kind::Sym { .. } | Kind::Num(_)) => {
+                        let t = match &items[0].kind {
+                            Kind::Sym { name, .. } => name.clone(),
+                            Kind::Num(n) => n.clone(),
+                            _ => unreachable!(),
+                        };
+                        slots.push(Slot::T(format!("[{t}]")));
+                    }
                     Kind::IStr(qs) => {
                         for q in qs {
                             match q {

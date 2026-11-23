@@ -457,6 +457,12 @@ class _NeedHint:
         pkg = cls._pypi.get(name, name)
         raise ModuleNotFoundError(f"No module named {name!r}: `need {pkg}` installs it (from PyPI, once)", name=name)
 
+def _glob_pat(pattern):
+    """A pattern as Python's glob reads it: ~ expanded, and bash's [^…] (a
+    set not matching) as [!…]."""
+    import os, re
+    return re.sub(r"\[\^", "[!", os.path.expanduser(pattern))
+
 class Glob:
     """A pattern written bare: *, *.txt, src/**/*.rs, ?.log, [ab]*.  A
     program gets the names it matches; Python gets this: iterate it for
@@ -469,7 +475,7 @@ class Glob:
     @property
     def paths(self):
         import glob, os
-        found = sorted(glob.glob(os.path.expanduser(self.pattern), recursive=True))
+        found = sorted(glob.glob(_glob_pat(self.pattern), recursive=True))
         return [Path(m, spelled=m) for m in found]
     def __iter__(self):
         return iter(self.paths)
@@ -481,7 +487,7 @@ class Glob:
         return self.paths[i]
     def __contains__(self, x):
         import os
-        pat = os.path.expanduser(self.pattern)
+        pat = _glob_pat(self.pattern)
         p = _pathlib.PurePath(os.fspath(x))
         # (A pattern for here, a path written in full: the part under here.)
         if p.is_absolute() and not os.path.isabs(pat):
@@ -976,8 +982,21 @@ fn glob_expand(p: &str) -> Vec<String> {
     if !p.contains(['*', '?', '[']) {
         return vec![p];
     }
-    let opts = glob::MatchOptions { case_sensitive: true, require_literal_separator: true, require_literal_leading_dot: true };
-    let mut m: Vec<String> = glob::glob_with(&p, opts).map(|it| it.filter_map(|x| x.ok()).map(|x| x.to_string_lossy().to_string()).collect()).unwrap_or_default();
+    // (bash's [^…] is the glob crate's [!…].)
+    let p = p.replace("[^", "[!");
+    // (A dot file only for a part of the pattern that starts with a dot, and
+    // never . or .., as bash has it. The glob crate's own require_literal_
+    // leading_dot drops every dot file, .b* too, and gives . and .. for .*;
+    // with ** its way is kept.)
+    let deep = p.contains("**");
+    let opts = glob::MatchOptions { case_sensitive: true, require_literal_separator: true, require_literal_leading_dot: deep };
+    let pat_parts: Vec<&str> = p.split('/').collect();
+    let dot_ok = |m: &str| {
+        let parts: Vec<&str> = m.split('/').collect();
+        // (From the end: the crate leaves out a leading ./ of the pattern.)
+        deep || parts.iter().rev().zip(pat_parts.iter().rev()).all(|(n, q)| if *n == "." || *n == ".." { n == q } else { !n.starts_with('.') || q.starts_with('.') })
+    };
+    let mut m: Vec<String> = glob::glob_with(&p, opts).map(|it| it.filter_map(|x| x.ok()).map(|x| x.to_string_lossy().to_string()).filter(|x| dot_ok(x)).collect()).unwrap_or_default();
     m.sort();
     if m.is_empty() {
         vec![p]

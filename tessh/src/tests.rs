@@ -222,6 +222,20 @@ fn value_head_runs_program() {
     assert_eq!(get::<i64>(&ns, "y"), 42);
 }
 
+/// Globs that start with a set: `[ab]*`, `[!ab]*` and bash's `[^ab]*`.
+#[test]
+fn globs_starting_with_a_set() {
+    let d = std::env::temp_dir().join(format!("tessh-gs-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    for n in ["a.1", "b.1", "c.1", ".bashrc"] {
+        std::fs::write(d.join(n), "").unwrap();
+    }
+    let d = d.to_string_lossy().to_string();
+    let (_, out) = run(&format!("cd {d}\necho [ab]*\necho [!ab]*\necho [^ab]*\nprint (\"c.1\" =~ [!ab]*) (\"a.1\" =~ [^ab]*)\necho .ba?hrc .b* ./.b*\necho .*\ncd -"));
+    let _ = std::fs::remove_dir_all(&d);
+    assert_eq!(out.lines().filter(|l| !l.starts_with('/')).collect::<Vec<_>>(), ["a.1 b.1", "c.1", "c.1", "True False", ".bashrc .bashrc .bashrc", ".bashrc"]);
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");
