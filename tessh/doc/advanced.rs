@@ -39,4 +39,6 @@
     ("A3-contributed-scripts.md", include_str!("advanced/A3-contributed-scripts.md")),
     ("B-refcards.md", include_str!("advanced/B-refcards.md")),
     ("C-sedawk.md", include_str!("advanced/C-sedawk.md")),
+    ("D-pathmanagement.md", include_str!("advanced/D-pathmanagement.md")),
+    ("E-exitcodes.md", include_str!("advanced/E-exitcodes.md")),
 ]
