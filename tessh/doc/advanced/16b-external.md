@@ -3018,3 +3018,1212 @@ exit
 Hypotenuse of 3 and 4.5 = 5.4083269
 Hypotenuse of 3 and 4.5 = 5.4083269
 ```
+
+## 16.9 Miscellaneous Commands
+<!-- help: abs-misc-commands seq jot getopt run-parts yes banner printenv lp tee mkfifo pathchk dd od hexdump objdump mcookie units m4 xmessage zenity doexec dialog sox -->
+
+`seq` (and BSD's `jot`) prints a sequence of numbers (`seq 5`, `seq -s :
+5`, `seq FIRST STEP LAST`), for `for` loops; `getopt` parses options, long
+ones too; `run-parts` runs every script in a folder; `yes` prints `y` (or
+its arguments) forever, to answer a program's questions; `banner` prints
+big letters; `printenv` the environment; `lp`/`lpr` print on paper; `tee`
+copies a pipe to a file on the way through; `mkfifo` makes a named pipe;
+`pathchk` checks a file name; `dd` copies with conversions, block sizes,
+skips and counts (disk images, too); `od`, `hexdump` and `objdump` dump
+binary files; `mcookie` makes a random 128-bit hex number; `units`
+converts between units; `m4` is a macro processor; `xmessage`, `zenity` and
+`dialog` show dialogs; `doexec` runs a program under another `argv[0]`;
+`sox` converts sound files.
+
+In tessh, `seq` in a loop is `range` (no process, no splitting of text), and
+`yes`, `mcookie` and `units` have small Python stand-ins, but the programs
+all run as they are.
+
+### Example 16-54. Using `seq` to generate loop arguments (`ex53.sh`)
+
+```bash
+#!/bin/bash
+# Using "seq"
+
+echo
+
+for a in `seq 80`  # or   for a in $( seq 80 )
+# Same as   for a in 1 2 3 4 5 ... 80   (saves much typing!).
+# May also use 'jot' (if present on system).
+do
+  echo -n "$a "
+done      # 1 2 3 4 5 ... 80
+# Example of using the output of a command to generate 
+# the [list] in a "for" loop.
+
+echo; echo
+
+
+COUNT=80  # Yes, 'seq' also accepts a replaceable parameter.
+
+for a in `seq $COUNT`  # or   for a in $( seq $COUNT )
+do
+  echo -n "$a "
+done      # 1 2 3 4 5 ... 80
+
+echo; echo
+
+BEGIN=75
+END=80
+
+for a in `seq $BEGIN $END`
+#  Giving "seq" two arguments starts the count at the first one,
+#+ and continues until it reaches the second.
+do
+  echo -n "$a "
+done      # 75 76 77 78 79 80
+
+echo; echo
+
+BEGIN=45
+INTERVAL=5
+END=80
+
+for a in `seq $BEGIN $INTERVAL $END`
+#  Giving "seq" three arguments starts the count at the first one,
+#+ uses the second for a step interval,
+#+ and continues until it reaches the third.
+do
+  echo -n "$a "
+done      # 45 50 55 60 65 70 75 80
+
+echo; echo
+
+exit 0
+```
+
+`range` takes the same one, two or three numbers as `seq`, except that it
+stops *before* its end and its step comes last. `(seq 80).lines` would
+work too, as text.
+
+```tessh
+# Using "range" (where bash uses "seq")
+
+print
+
+for a in (range 1 81)        # or   for a in (seq 80).lines
+  print "$a " end=""
+print ; print
+
+COUNT = 80
+for a in (range 1 ($COUNT + 1))
+  print "$a " end=""
+print ; print
+
+BEGIN = 75
+END = 80
+for a in (range $BEGIN ($END + 1))
+  print "$a " end=""         # 75 76 77 78 79 80
+print ; print
+
+BEGIN = 45
+INTERVAL = 5
+END = 80
+for a in (range $BEGIN ($END + 1) $INTERVAL)
+  print "$a " end=""         # 45 50 55 60 65 70 75 80
+print ; print
+
+exit 0
+```
+
+```output
+
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 
+
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 
+
+75 76 77 78 79 80 
+
+45 50 55 60 65 70 75 80 
+
+```
+
+The ABS Guide's simpler example makes ten files named `file.1` to
+`file.10`:
+
+```bash
+COUNT=10
+PREFIX=file
+
+for filename in `seq $COUNT`
+do
+  touch $PREFIX.$filename
+  #  Or, can do other operations,
+  #+ such as rm, grep, etc.
+done
+ls
+```
+
+```tessh
+COUNT = 10
+PREFIX = file
+
+for n in (range 1 ($COUNT + 1))
+  touch "$PREFIX.$n"
+ls
+```
+
+```output
+file.1
+file.10
+file.2
+file.3
+file.4
+file.5
+file.6
+file.7
+file.8
+file.9
+```
+
+### Example 16-55. Letter Count (`letter-count.sh`)
+
+```bash no-run
+#!/bin/bash
+# letter-count.sh: Counting letter occurrences in a text file.
+# Written by Stefano Palmeri.
+# Used in ABS Guide with permission.
+# Slightly modified by document author.
+
+MINARGS=2          # Script requires at least two arguments.
+E_BADARGS=65
+FILE=$1
+
+let LETTERS=$#-1   # How many letters specified (as command-line args).
+                   # (Subtract 1 from number of command-line args.)
+
+
+show_help(){
+	   echo
+           echo Usage: `basename $0` file letters  
+           echo Note: `basename $0` arguments are case sensitive.
+           echo Example: `basename $0` foobar.txt G n U L i N U x.
+	   echo
+}
+
+# Checks number of arguments.
+if [ $# -lt $MINARGS ]; then
+   echo
+   echo "Not enough arguments."
+   echo
+   show_help
+   exit $E_BADARGS
+fi  
+
+
+# Checks if file exists.
+if [ ! -f $FILE ]; then
+    echo "File \"$FILE\" does not exist."
+    exit $E_BADARGS
+fi
+
+
+
+# Counts letter occurrences .
+for n in `seq $LETTERS`; do
+      shift
+      if [[ `echo -n "$1" | wc -c` -eq 1 ]]; then             #  Checks arg.
+             echo "$1" -\> `cat $FILE | tr -cd  "$1" | wc -c` #  Counting.
+      else
+             echo "$1 is not a  single char."
+      fi  
+done
+
+exit $?
+
+#  This script has exactly the same functionality as letter-count2.sh,
+#+ but executes faster.
+#  Why?
+```
+
+Stefano Palmeri's script runs `cat | tr -cd | wc -c` for every letter;
+Python's `str.count` counts in the text read once. The arguments are the
+file and then the letters, so `[FILE *letters] = $args` takes them apart
+where bash `shift`s through them.
+
+```tessh
+printf 'GNU is Not Unix, and Linux is not GNU.\n' > foobar.txt   # (made up)
+
+MINARGS = 2          # Script requires at least two arguments.
+E_BADARGS = 65
+ME = (Path $argv[0]).name
+
+def show_help
+  print
+  print "Usage: $ME file letters"
+  print "Note: $ME arguments are case sensitive."
+  print "Example: $ME foobar.txt G n U L i N U x."
+  print
+
+# (sample arguments, when none are given)
+args = $argv[1:] or [foobar.txt G n U L i N U x xy]
+
+# Checks number of arguments.
+if (len $args) < $MINARGS
+  print
+  print "Not enough arguments."
+  print
+  show_help
+  exit $E_BADARGS
+[FILE *letters] = $args
+
+# Checks if file exists.
+if not ((Path $FILE).is_file)
+  print "File \"$FILE\" does not exist."
+  exit $E_BADARGS
+
+text = ((Path $FILE).read_text)
+# Counts letter occurrences.
+for letter in $letters
+  if (len $letter) == 1                  # Checks arg.
+    print "$letter -> $($text.count $letter)"
+  else
+    print "$letter is not a  single char."
+
+exit 0
+```
+
+```output
+G -> 2
+n -> 4
+U -> 3
+L -> 1
+i -> 4
+N -> 3
+U -> 3
+x -> 2
+xy is not a  single char.
+```
+
+`getopt` sorts the options out and prints them back, one per word, with
+`--` before the other arguments. bash `set`s its output as the new
+arguments; tessh splits it into a list.
+
+### Example 16-56. Using `getopt` to parse command-line options (`ex33a.sh`)
+
+```bash no-run
+#!/bin/bash
+# Using getopt
+
+# Try the following when invoking this script:
+#   sh ex33a.sh -a
+#   sh ex33a.sh -abc
+#   sh ex33a.sh -a -b -c
+#   sh ex33a.sh -d
+#   sh ex33a.sh -dXYZ
+#   sh ex33a.sh -d XYZ
+#   sh ex33a.sh -abcd
+#   sh ex33a.sh -abcdZ
+#   sh ex33a.sh -z
+#   sh ex33a.sh a
+# Explain the results of each of the above.
+
+E_OPTERR=65
+
+if [ "$#" -eq 0 ]
+then   # Script needs at least one command-line argument.
+  echo "Usage $0 -[options a,b,c]"
+  exit $E_OPTERR
+fi  
+
+set -- `getopt "abcd:" "$@"`
+# Sets positional parameters to command-line arguments.
+# What happens if you use "$*" instead of "$@"?
+
+while [ ! -z "$1" ]
+do
+  case "$1" in
+    -a) echo "Option \"a\"";;
+    -b) echo "Option \"b\"";;
+    -c) echo "Option \"c\"";;
+    -d) echo "Option \"d\" $2";;
+     *) break;;
+  esac
+
+  shift
+done
+
+#  It is usually better to use the 'getopts' builtin in a script.
+#  See "ex33.sh."
+
+exit 0
+```
+
+Here the script's body is a function, run with each of the argument lists
+its comments suggest. `getopt "abcd:"` (the old-style call) prints its
+answer without quotes, so `.split` takes it apart; `match` on a list
+pattern takes `-d` and its value together. `getopt`'s own complaints go to
+stderr. (Python's `argparse` is the tessh way to take options; chapter 15
+compares it with `getopts`.)
+
+```tessh
+E_OPTERR = 65
+
+def main args
+  print "--- $(' '.join $args)"
+  if not $args                     # Script needs at least one argument.
+    print "Usage $argv[0] -[options a,b,c]"
+    return $E_OPTERR
+
+  words = ((getopt "abcd:" *$args 2>/dev/null).split)
+  while $words
+    match $words
+      case ["-a" *$rest]
+        print "Option \"a\""
+      case ["-b" *$rest]
+        print "Option \"b\""
+      case ["-c" *$rest]
+        print "Option \"c\""
+      case ["-d" $value *$rest]
+        print "Option \"d\" $value"
+        words = $words[1:]
+      case _
+        break
+    words = $words[1:]
+
+# (The argument lists the original suggests, when none are given.)
+if $argv[1:]
+  main $argv[1:]
+else
+  for args in [[-a] [-abc] [-a -b -c] [-d] [-dXYZ] [-d XYZ] [-abcd] [-abcdZ] [-z] [a]]
+    main $args
+exit 0
+```
+
+```output
+--- -a
+Option "a"
+--- -abc
+Option "a"
+Option "b"
+Option "c"
+--- -a -b -c
+Option "a"
+Option "b"
+Option "c"
+--- -d
+--- -dXYZ
+Option "d" XYZ
+--- -d XYZ
+Option "d" XYZ
+--- -abcd
+Option "a"
+Option "b"
+Option "c"
+--- -abcdZ
+Option "a"
+Option "b"
+Option "c"
+Option "d" Z
+--- -z
+--- a
+```
+
+`run-parts` runs a folder's scripts in order, as cron does with
+`/etc/cron.daily`. `yes` repeats a line forever, to answer a program that
+asks questions (`yes | fsck …`, with care). The ABS Guide's bash function
+that emulates it never ends; a tessh generator yields lines only as they're
+asked for, so `take` can take a few:
+
+```bash no-run
+yes ()
+{ # Trivial emulation of "yes" ...
+  local DEFAULT_TEXT="y"
+  while [ true ]   # Endless loop.
+  do
+    if [ -z "$1" ]
+    then
+      echo "$DEFAULT_TEXT"
+    else           # If argument ...
+      echo "$1"    # ... expand and echo it.
+    fi
+  done             #  The only things missing are the
+}                  #+ --help and --version options.
+```
+
+```tessh
+def yes text="y"
+  while True
+    yield $text
+
+print (take 3 (yes))
+print (take 2 (yes "I agree"))
+\yes | head -n 2                 # (The program: \yes, as yes is now ours.)
+```
+
+```output
+['y' 'y' 'y']
+['I agree' 'I agree']
+y
+y
+```
+
+`banner` is gone from most systems, `printenv` prints the environment
+(`$env` in tessh), and `lp` and `lpr` send files to the printer. `tee`
+saves what goes through a pipe without stopping it:
+
+```bash
+printf 'b\na\nb\n' > listfile1 ; printf 'c\na\n' > listfile2
+cat listfile* | sort | tee check.file | uniq > result.file
+cat check.file
+echo ---
+cat result.file
+```
+
+```tessh
+printf 'b\na\nb\n' > listfile1 ; printf 'c\na\n' > listfile2
+cat listfile* | sort | tee check.file | uniq > result.file
+cat check.file
+echo ---
+cat result.file
+```
+
+```output
+a
+a
+b
+b
+c
+---
+a
+b
+c
+```
+
+`mkfifo` makes a named pipe: one process writes into it, another reads
+from it. Omair Eshkenazi's example sends `ls -l`'s owner column through
+one into a background job; it's the same in tessh, with the background
+job's two programs piped together and `&` at the end (the listing has
+your user name in it, hence no output here):
+
+```bash no-run
+#!/bin/bash
+# This short script by Omair Eshkenazi.
+# Used in ABS Guide with permission (thanks!).
+
+mkfifo pipe1   # Yes, pipes can be given names.
+mkfifo pipe2   # Hence the designation "named pipe."
+
+(cut -d' ' -f1 | tr "a-z" "A-Z") >pipe2 <pipe1 &
+ls -l | tr -s ' ' | cut -d' ' -f3,9- | tee pipe1 |
+cut -d' ' -f2 | paste - pipe2
+
+rm -f pipe1
+rm -f pipe2
+
+# No need to kill background processes when script terminates (why not?).
+
+exit $?
+```
+
+```tessh no-run
+mkfifo pipe1 pipe2
+
+cut -d' ' -f1 <pipe1 | tr "a-z" "A-Z" >pipe2 &
+ls -l | tr -s ' ' | cut -d' ' -f3,9- | tee pipe1 | cut -d' ' -f2 | paste - pipe2
+
+rm -f pipe1 pipe2
+```
+
+`pathchk` checks that a name is a valid path. `dd` copies with conversions
+(`conv=ucase`, `lcase`, `swab`, `ebcdic`), from `if=` to `of=`, in blocks of
+`bs=` bytes, skipping `skip=` blocks of the input, `seek=` blocks of the
+output, and copying `count=` blocks.
+
+### Example 16-57. A script that copies itself (`self-copy.sh`)
+
+```bash no-run
+#!/bin/bash
+# self-copy.sh
+
+# This script copies itself.
+
+file_subscript=copy
+
+dd if=$0 of=$0.$file_subscript 2>/dev/null
+# Suppress messages from dd:   ^^^^^^^^^^^
+
+exit $?
+
+#  A program whose only output is its own source code
+#+ is called a "quine" per Willard Quine.
+#  Does this script qualify as a quine?
+```
+
+The copy goes in the current folder (the bash writes it next to the
+script), and `cmp` shows it's the same.
+
+```tessh
+# self-copy.tsh
+# This script copies itself.
+
+file_subscript = copy
+copy = "$((Path $argv[0]).name).$file_subscript"
+
+dd if=$argv[0] of=$copy 2>/dev/null
+# Suppress messages from dd:  ^^^^^^^^^^^
+
+cmp $argv[0] $copy && print "$copy is the same as the script."
+exit $?
+```
+
+```output
+ex.tsh.copy is the same as the script.
+```
+
+### Example 16-58. Exercising `dd` (`exercising-dd.sh`)
+
+```bash
+#!/bin/bash
+# exercising-dd.sh
+
+# Script by Stephane Chazelas.
+# Somewhat modified by ABS Guide author.
+
+infile=$0           # This script.
+outfile=log.txt     # Output file left behind.
+n=8
+p=11
+
+dd if=$infile of=$outfile bs=1 skip=$((n-1)) count=$((p-n+1)) 2> /dev/null
+# Extracts characters n to p (8 to 11) from this script ("bash").
+
+# ----------------------------------------------------------------
+
+echo -n "hello vertical world" | dd cbs=1 conv=unblock 2> /dev/null
+# Echoes "hello vertical world" vertically downward.
+# Why? A newline follows each character dd emits.
+
+exit $?
+```
+
+```output bash
+h
+e
+l
+l
+o
+
+v
+e
+r
+t
+i
+c
+a
+l
+
+w
+o
+r
+l
+d
+```
+
+The script's own first line is `#!/usr/bin/env tessh`, so characters 16 to
+20 pick out "tessh" as 8 to 11 picked "bash", and the tessh version shows
+what it left in `log.txt`. Python slices do the first part
+(`(Path $infile).read_text)[15:20]`).
+
+```tessh
+#!/usr/bin/env tessh
+# exercising-dd.tsh
+# After Stephane Chazelas' exercising-dd.sh.
+
+infile = $argv[0]   # This script.
+outfile = log.txt   # Output file left behind.
+n = 16
+p = 20
+
+dd if=$infile of=$outfile bs=1 skip=($n - 1) count=($p - $n + 1) 2>/dev/null
+# Extracts characters n to p (16 to 20) from this script ("tessh").
+print (cat $outfile)
+
+# ----------------------------------------------------------------
+
+echo -n "hello vertical world" | dd cbs=1 conv=unblock 2>/dev/null
+# Echoes "hello vertical world" vertically downward.
+# Why? A newline follows each character dd emits.
+
+exit $?
+```
+
+```output
+tessh
+h
+e
+l
+l
+o
+
+v
+e
+r
+t
+i
+c
+a
+l
+
+w
+o
+r
+l
+d
+```
+
+`dd` reads keys one at a time once `stty` has turned off line editing:
+
+### Example 16-59. Capturing Keystrokes (`dd-keypress.sh`)
+
+```bash no-run
+#!/bin/bash
+# dd-keypress.sh: Capture keystrokes without needing to press ENTER.
+
+
+keypresses=4                      # Number of keypresses to capture.
+
+
+old_tty_setting=$(stty -g)        # Save old terminal settings.
+
+echo "Press $keypresses keys."
+stty -icanon -echo                # Disable canonical mode.
+                                  # Disable local echo.
+keys=$(dd bs=1 count=$keypresses 2> /dev/null)
+# 'dd' uses stdin, if "if" (input file) not specified.
+
+stty "$old_tty_setting"           # Restore old terminal settings.
+
+echo "You pressed the \"$keys\" keys."
+
+# Thanks, Stephane Chazelas, for showing the way.
+exit 0
+```
+
+The same in tessh, with `try`/`finally` so the terminal's settings come
+back even when the script is interrupted. It needs a terminal to type in.
+
+```tessh no-run
+# dd-keypress.tsh: Capture keystrokes without needing to press ENTER.
+
+keypresses = 4                    # Number of keypresses to capture.
+
+old_tty_setting = stty -g         # Save old terminal settings.
+
+print "Press $keypresses keys."
+stty -icanon -echo                # Disable canonical mode and local echo.
+keys = try
+  dd bs=1 count=$keypresses 2>/dev/null   # dd reads stdin: the keys.
+finally
+  stty $old_tty_setting           # Restore old terminal settings.
+
+print "You pressed the \"$keys\" keys."
+exit 0
+```
+
+`dd` also does random access: `seek=` writes at an offset in a file, and
+`conv=notrunc` keeps the rest of it. Python opens the file for reading and
+writing and `seek`s:
+
+```bash
+printf 'abcdefgh' > file
+echo -n . | dd bs=1 seek=4 of=file conv=notrunc 2>/dev/null
+cat file ; echo
+```
+
+```output bash
+abcd.fgh
+```
+
+```tessh
+printf 'abcdefgh' > file
+echo -n . | dd bs=1 seek=4 of=file conv=notrunc 2>/dev/null
+cat file ; echo
+with (open file "r+b") as f
+  $f.seek 6
+  $f.write b"!"
+cat file ; echo
+```
+
+```output
+abcd.fgh
+abcd.f!h
+```
+
+`dd` copies disk images to and from devices: boot floppies once, SD cards
+and USB sticks now (`dd if=image.iso of=/dev/sdb`).
+
+### Example 16-60. Preparing a bootable SD card for the *Raspberry Pi* (`rp.sdcard.sh`)
+
+```bash no-run
+#!/bin/bash
+# rp.sdcard.sh
+# Preparing an SD card with a bootable image for the Raspberry Pi.
+
+# $1 = imagefile name
+# $2 = sdcard (device file)
+# Otherwise defaults to the defaults, see below.
+
+DEFAULTbs=4M                                 # Block size, 4 mb default.
+DEFAULTif="2013-07-26-wheezy-raspbian.img"   # Commonly used distro.
+DEFAULTsdcard="/dev/mmcblk0"                 # May be different. Check!
+ROOTUSER_NAME=root                           # Must run as root!
+E_NOTROOT=81
+E_NOIMAGE=82
+
+username=$(id -nu)                           # Who is running this script?
+if [ "$username" != "$ROOTUSER_NAME" ]
+then
+  echo "This script must run as root or with root privileges."
+  exit $E_NOTROOT
+fi
+
+if [ -n "$1" ]
+then
+  imagefile="$1"
+else
+  imagefile="$DEFAULTif"
+fi
+
+if [ -n "$2" ]
+then
+  sdcard="$2"
+else
+  sdcard="$DEFAULTsdcard"
+fi
+
+if [ ! -e $imagefile ]
+then
+  echo "Image file \"$imagefile\" not found!"
+  exit $E_NOIMAGE
+fi
+
+echo "Last chance to change your mind!"; echo
+read -s -n1 -p "Hit a key to write $imagefile to $sdcard [Ctl-c to exit]."
+echo; echo
+
+echo "Writing $imagefile to $sdcard ..."
+dd bs=$DEFAULTbs if=$imagefile of=$sdcard
+
+exit $?
+
+# Exercises:
+# ---------
+# 1) Provide additional error checking.
+# 2) Have script autodetect device file for SD card (difficult!).
+# 3) Have script sutodetect image file (*img) in $PWD.
+```
+
+It must run as root and writes to a device, so it doesn't run here.
+`os.getuid` checks for root without `id`, exercise 3 (find the image in the
+folder) is a Glob, and the key press is `input` (which waits for Enter).
+
+```tessh no-run
+# rp.sdcard.tsh
+# Preparing an SD card with a bootable image for the Raspberry Pi.
+import os
+
+DEFAULTbs = 4M                                  # Block size, 4 mb default.
+DEFAULTsdcard = /dev/mmcblk0                    # May be different. Check!
+E_NOTROOT = 81
+E_NOIMAGE = 82
+
+if (os.getuid) != 0                             # Who is running this script?
+  print "This script must run as root or with root privileges."
+  exit $E_NOTROOT
+
+# Exercise 3: the image file is the first *.img here, unless one is given.
+images = *.img
+imagefile = if $argv[1:] then Path $argv[1] elif $images then $images[0] else None
+sdcard = if $argv[2:] then $argv[2] else $DEFAULTsdcard
+
+if $imagefile is None or not ($imagefile.exists)
+  print "Image file \"$imagefile\" not found!"
+  exit $E_NOIMAGE
+
+print "Last chance to change your mind!" ; print
+input "Hit Enter to write $imagefile to $sdcard [Ctl-c to exit]."
+print ; print
+
+print "Writing $imagefile to $sdcard ..."
+dd bs=$DEFAULTbs if=$imagefile of=$sdcard
+
+exit $?
+```
+
+### Example 16-61. Securely deleting a file (`blot-out.sh`)
+
+```bash no-run
+#!/bin/bash
+# blot-out.sh: Erase "all" traces of a file.
+
+#  This script overwrites a target file alternately
+#+ with random bytes, then zeros before finally deleting it.
+#  After that, even examining the raw disk sectors by conventional methods
+#+ will not reveal the original file data.
+
+PASSES=7         #  Number of file-shredding passes.
+                 #  Increasing this slows script execution,
+                 #+ especially on large target files.
+BLOCKSIZE=1      #  I/O with /dev/urandom requires unit block size,
+                 #+ otherwise you get weird results.
+E_BADARGS=70     #  Various error exit codes.
+E_NOT_FOUND=71
+E_CHANGED_MIND=72
+
+if [ -z "$1" ]   # No filename specified.
+then
+  echo "Usage: `basename $0` filename"
+  exit $E_BADARGS
+fi
+
+file=$1
+
+if [ ! -e "$file" ]
+then
+  echo "File \"$file\" not found."
+  exit $E_NOT_FOUND
+fi  
+
+echo; echo -n "Are you absolutely sure you want to blot out \"$file\" (y/n)? "
+read answer
+case "$answer" in
+[nN]) echo "Changed your mind, huh?"
+      exit $E_CHANGED_MIND
+      ;;
+*)    echo "Blotting out file \"$file\".";;
+esac
+
+
+flength=$(ls -l "$file" | awk '{print $5}')  # Field 5 is file length.
+pass_count=1
+
+chmod u+w "$file"   # Allow overwriting/deleting the file.
+
+echo
+
+while [ "$pass_count" -le "$PASSES" ]
+do
+  echo "Pass #$pass_count"
+  sync         # Flush buffers.
+  dd if=/dev/urandom of=$file bs=$BLOCKSIZE count=$flength
+               # Fill with random bytes.
+  sync         # Flush buffers again.
+  dd if=/dev/zero of=$file bs=$BLOCKSIZE count=$flength
+               # Fill with zeros.
+  sync         # Flush buffers yet again.
+  let "pass_count += 1"
+  echo
+done  
+
+
+rm -f $file    # Finally, delete scrambled and shredded file.
+sync           # Flush buffers a final time.
+
+echo "File \"$file\" blotted out and deleted."; echo
+
+
+exit 0
+
+#  This is a fairly secure, if inefficient and slow method
+#+ of thoroughly "shredding" a file.
+#  The "shred" command, part of the GNU "fileutils" package,
+#+ does the same thing, although more efficiently.
+
+#  The file cannot not be "undeleted" or retrieved by normal methods.
+#  However . . .
+#+ this simple method would *not* likely withstand
+#+ sophisticated forensic analysis.
+
+#  This script may not play well with a journaled file system.
+#  Exercise (difficult): Fix it so it does.
+
+
+
+#  Tom Vier's "wipe" file-deletion package does a much more thorough job
+#+ of file shredding than this simple script.
+#     http://www.ibiblio.org/pub/Linux/utils/file/wipe-2.0.0.tar.bz2
+
+#  For an in-depth analysis on the topic of file deletion and security,
+#+ see Peter Gutmann's paper,
+#+     "Secure Deletion of Data From Magnetic and Solid-State Memory".
+#       http://www.cs.auckland.ac.nz/~pgut001/pubs/secure_del.html
+```
+
+It runs on a made-up file here, with the answer canned. The length comes
+from `stat` rather than cutting field 5 out of `ls -l`, and `sync` is given
+the file, so only it is flushed. `dd` prints its record counts on stderr,
+so the passes show only their numbers. (`shred -u file` does all this in
+one command.)
+
+```tessh
+import os
+print "Top secret. Burn after reading." >secret.txt   # (made up)
+
+PASSES = 7         #  Number of file-shredding passes.
+BLOCKSIZE = 1      #  I/O with /dev/urandom requires unit block size.
+E_BADARGS = 70
+E_NOT_FOUND = 71
+E_CHANGED_MIND = 72
+
+args = $argv[1:] or [secret.txt]   # (sample argument, when none is given)
+if not $args or not $args[0]       # No filename specified.
+  print "Usage: $(Path $argv[0]).name filename"
+  exit $E_BADARGS
+file = Path $args[0]
+
+if not ($file.exists)
+  print "File \"$file\" not found."
+  exit $E_NOT_FOUND
+
+print ; print "Are you absolutely sure you want to blot out \"$file\" (y/n)? " end=""
+answer = y         # (canned; the original reads it from the terminal)
+print $answer
+match $answer
+  case "n" | "N"
+    print "Changed your mind, huh?"
+    exit $E_CHANGED_MIND
+  case _
+    print "Blotting out file \"$file\"."
+
+flength = ($file.stat).st_size
+chmod u+w $file    # Allow overwriting/deleting the file.
+print
+
+for pass_count in (range 1 ($PASSES + 1))
+  print "Pass #$pass_count"
+  sync $file       # Flush buffers.
+  dd if=/dev/urandom of=$file bs=$BLOCKSIZE count=$flength 2>/dev/null
+  sync $file       # Fill with random bytes, flush again.
+  dd if=/dev/zero of=$file bs=$BLOCKSIZE count=$flength 2>/dev/null
+  sync $file       # Fill with zeros, flush yet again.
+  print
+
+rm -f $file        # Finally, delete scrambled and shredded file.
+print "File \"$file\" blotted out and deleted." ; print
+exit 0
+```
+
+```output
+
+Are you absolutely sure you want to blot out "secret.txt" (y/n)? y
+Blotting out file "secret.txt".
+
+Pass #1
+
+Pass #2
+
+Pass #3
+
+Pass #4
+
+Pass #5
+
+Pass #6
+
+Pass #7
+
+File "secret.txt" blotted out and deleted.
+
+```
+
+`od` dumps a file in octal, decimal or hex (`od -tu4` in the random number
+example), as do `hexdump -C` and `xxd`; `objdump -d` disassembles a
+program. `mcookie` prints 32 random hex digits, and a checksum of the
+script itself is another "random" number: `random001 = ((md5sum
+$argv[0]).split)[0]`.
+
+### Example 16-62. Filename generator (`tempfile-name.sh`)
+
+```bash
+#!/bin/bash
+# tempfile-name.sh:  temp filename generator
+
+BASE_STR=`mcookie`   # 32-character magic cookie.
+POS=11               # Arbitrary position in magic cookie string.
+LEN=5                # Get $LEN consecutive characters.
+
+prefix=temp          #  This is, after all, a "temp" file.
+                     #  For more "uniqueness," generate the
+                     #+ filename prefix using the same method
+                     #+ as the suffix, below.
+
+suffix=${BASE_STR:POS:LEN}
+                     #  Extract a 5-character string,
+                     #+ starting at position 11.
+
+temp_filename=$prefix.$suffix
+                     # Construct the filename.
+
+echo "Temp filename = "$temp_filename""
+
+# sh tempfile-name.sh
+# Temp filename = temp.e19ea
+
+#  Compare this method of generating "unique" filenames
+#+ with the 'date' method in ex51.sh.
+
+exit 0
+```
+
+bash's `${BASE_STR:POS:LEN}` is a slice, `$BASE_STR[$POS : $POS + $LEN]`.
+Python's `secrets.token_hex 16` makes the same kind of cookie without a
+program (and `tempfile`, in 16.5, makes the file itself).
+
+```tessh
+import secrets
+
+BASE_STR = (mcookie)  # 32-character magic cookie.
+POS = 11              # Arbitrary position in magic cookie string.
+LEN = 5               # Get $LEN consecutive characters.
+
+prefix = temp         #  This is, after all, a "temp" file.
+
+suffix = $BASE_STR[$POS : $POS + $LEN]
+temp_filename = "$prefix.$suffix"
+print "Temp filename = $temp_filename"
+print "From Python:   = $prefix.$((secrets.token_hex 16)[$POS : $POS + $LEN])"
+exit 0
+```
+
+```text
+(one run)
+Temp filename = temp.950c8
+From Python:   = temp.87b39
+```
+
+`units` converts between units of measure, interactively or in a script.
+
+### Example 16-63. Converting meters to miles (`unit-conversion.sh`)
+
+```bash no-run
+#!/bin/bash
+# unit-conversion.sh
+# Must have 'units' utility installed.
+
+
+convert_units ()  # Takes as arguments the units to convert.
+{
+  cf=$(units "$1" "$2" | sed --silent -e '1p' | awk '{print $2}')
+  # Strip off everything except the actual conversion factor.
+  echo "$cf"
+}  
+
+Unit1=miles
+Unit2=meters
+cfactor=`convert_units $Unit1 $Unit2`
+quantity=3.73
+
+result=$(echo $quantity*$cfactor | bc)
+
+echo "There are $result $Unit2 in $quantity $Unit1."
+
+#  What happens if you pass incompatible units,
+#+ such as "acres" and "miles" to the function?
+
+exit 0
+
+# Exercise: Edit this script to accept command-line parameters,
+#           with appropriate error checking, of course.
+```
+
+`units` isn't installed here, so the conversion factors are a small dict
+of meters per unit (with `units` it would be `cf = ((units $a $b).split)[1]`,
+the second word of its first line). The exercise is done too: units and
+quantity from the command line, and a clear error for a unit it doesn't
+know.
+
+```tessh
+METERS_PER = {meters: 1 miles: 1609.344 feet: 0.3048 kilometers: 1000}
+
+def convert_units unit1 unit2   # Takes as arguments the units to convert.
+  $METERS_PER[$unit1] / $METERS_PER[$unit2]
+
+# (The exercise: Unit1, Unit2 and quantity from the command line.)
+args = $argv[1:] or [miles meters "3.73"]   # (sample arguments)
+if (len $args) != 3
+  print "Usage: $(Path $argv[0]).name from-unit to-unit quantity"
+  exit 1
+[Unit1 Unit2 quantity] = $args
+cfactor = try
+  convert_units $Unit1 $Unit2
+except KeyError as e
+  print "Unknown unit: $e"
+  exit 1
+
+result = (float $quantity) * $cfactor
+print "There are $result $Unit2 in $quantity $Unit1."
+exit 0
+```
+
+```output
+There are 6002.85312 meters in 3.73 miles.
+```
+
+`m4` is a macro processor, a language of its own with string, regex and
+arithmetic built-ins.
+
+### Example 16-64. Using `m4` (`m4.sh`)
+
+```bash no-run
+#!/bin/bash
+# m4.sh: Using the m4 macro processor
+
+# Strings
+string=abcdA01
+echo "len($string)" | m4                            #   7
+echo "substr($string,4)" | m4                       # A01
+echo "regexp($string,[0-1][0-1],\&Z)" | m4      # 01Z
+
+# Arithmetic
+var=99
+echo "incr($var)" | m4                              #  100
+echo "eval($var / 3)" | m4                          #   33
+
+exit
+```
+
+`m4` isn't installed here. Each of its built-ins used here is a Python
+expression in tessh: `len`, a slice for `substr`, `re.sub` for `regexp`
+(its `\&` is the whole match, `\g<0>` in Python), `+ 1` and `//`. (tessh's
+own macros, `defmacro`, work on tessh code as it compiles, not on text.)
+
+```tessh
+import re
+# Strings
+string = abcdA01
+print (len $string)                                    #   7
+print $string[4:]                                      # A01
+m = re.search '[0-1][0-1]' $string
+print ($m.expand '\g<0>Z')                             # 01Z
+
+# Arithmetic
+var = 99
+print ($var + 1)                                       #  100
+print ($var // 3)                                      #   33
+exit
+```
+
+```output
+7
+A01
+01Z
+100
+33
+```
+
+`xmessage` and `zenity` pop up dialogs on the desktop, and `dialog` (with
+`gdialog`, `Xdialog` and `kdialog`) in a terminal. `doexec` runs a program
+under another name, which it can `match` on, as Example 16-2 does with
+`$argv[0]`. `sox` converts and plays sound files, a job for a script's
+loop over a Glob of them:
+
+```tessh no-run
+for f in *.wav
+  sox $f ($f.with_suffix .au)
+```
