@@ -33,6 +33,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const TRAILER: u64 = 64;
+#[cfg(tessh_embedded)]
+static EMBEDDED: &[u8] = include_bytes!(env!("TESSH_PAYLOAD_FILE"));
 const PLACEHOLDER: &[u8] = b"/TESSH-INTERP-";
 const MIN_MINOR: u32 = 12;
 
@@ -104,7 +106,7 @@ fn patch_loader(bin: &Path, loader: &Path) -> std::io::Result<()> {
 
 /// The payload, unpacked once into `rt` (made in a temporary folder and
 /// renamed, so two starting at once don't trip over each other).
-fn unpack(exe: &Path, off: u64, len: u64, rt: &Path) -> std::io::Result<()> {
+fn unpack(payload: &dyn Fn() -> std::io::Result<Box<dyn Read>>, rt: &Path) -> std::io::Result<()> {
     if rt.join(".done").exists() {
         return Ok(());
     }
@@ -112,14 +114,15 @@ fn unpack(exe: &Path, off: u64, len: u64, rt: &Path) -> std::io::Result<()> {
     fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(".unpack-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
-    let mut f = fs::File::open(exe)?;
-    f.seek(SeekFrom::Start(off))?;
-    let dec = ruzstd::decoding::StreamingDecoder::new(f.take(len)).map_err(|e| std::io::Error::other(format!("payload: {e}")))?;
+    let dec = ruzstd::decoding::StreamingDecoder::new(payload()?).map_err(|e| std::io::Error::other(format!("payload: {e}")))?;
     let mut ar = tar::Archive::new(dec);
     ar.set_preserve_permissions(true);
     ar.unpack(&tmp)?;
-    let loader_name = fs::read_dir(tmp.join("lib"))?.flatten().map(|e| e.file_name()).find(|n| n.as_bytes().starts_with(b"ld-musl-")).ok_or_else(|| std::io::Error::other("payload has no loader"))?;
-    patch_loader(&tmp.join("bin/tessh"), &rt.join("lib").join(&loader_name))?;
+    // (Linux: musl's tessh gets the loader beside it. macOS has only dyld.)
+    if cfg!(target_os = "linux") {
+        let loader_name = fs::read_dir(tmp.join("lib"))?.flatten().map(|e| e.file_name()).find(|n| n.as_bytes().starts_with(b"ld-musl-")).ok_or_else(|| std::io::Error::other("payload has no loader"))?;
+        patch_loader(&tmp.join("bin/tessh"), &rt.join("lib").join(&loader_name))?;
+    }
     fs::write(tmp.join(".done"), b"")?;
     if fs::rename(&tmp, rt).is_err() {
         let _ = fs::remove_dir_all(&tmp);
@@ -134,6 +137,8 @@ fn unpack(exe: &Path, off: u64, len: u64, rt: &Path) -> std::io::Result<()> {
 enum Libc {
     Gnu,
     Musl,
+    /// macOS: the system's libraries only (uv's "none").
+    None,
 }
 
 impl Libc {
@@ -141,14 +146,33 @@ impl Libc {
         match self {
             Libc::Gnu => "gnu",
             Libc::Musl => "musl",
+            Libc::None => "none",
         }
     }
     /// This libc's tessh in the unpacked payload.
     fn tessh(self, rt: &Path) -> PathBuf {
         rt.join(match self {
             Libc::Gnu => "bin/tessh-gnu",
-            Libc::Musl => "bin/tessh",
+            Libc::Musl | Libc::None => "bin/tessh",
         })
+    }
+}
+
+/// The system, as uv's Python names say it.
+fn os_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+/// libpython as tessh links it: libpython3.so, or .dylib on macOS.
+fn libpython_link() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "libpython3.dylib"
+    } else {
+        "libpython3.so"
     }
 }
 
@@ -163,6 +187,9 @@ fn gnu_loader() -> &'static str {
 /// Which tessh to run: TESSH_LIBC, else the one found to work here before,
 /// else glibc's where the system has its loader.
 fn pick_libc(rt: &Path) -> (Libc, bool) {
+    if cfg!(target_os = "macos") {
+        return (Libc::None, true);
+    }
     match std::env::var("TESSH_LIBC").as_deref() {
         Ok("musl") => return (Libc::Musl, true),
         Ok("gnu") | Ok("glibc") => return (Libc::Gnu, true),
@@ -190,7 +217,7 @@ struct Py {
 /// `cpython-3.14.6-linux-x86_64-musl` → (3, 14, 6), not a pre-release.
 /// (Free-threaded and debug builds aren't stable-ABI ones: left out.)
 fn parse_name(name: &str, libc: Libc) -> Option<((u32, u32, u32), bool)> {
-    let v = name.strip_prefix("cpython-")?.strip_suffix(&format!("-linux-{}-{}", std::env::consts::ARCH, libc.suffix()))?;
+    let v = name.strip_prefix("cpython-")?.strip_suffix(&format!("-{}-{}-{}", os_name(), std::env::consts::ARCH, libc.suffix()))?;
     if v.contains('+') {
         return None;
     }
@@ -287,7 +314,7 @@ fn install(rt: &Path, libc: Libc, want: &[u32], want_text: &str, have: Option<&P
         die("tessh gets its Python from uv, and uv isn't installed. Install it (one static file) with\n\n    curl -LsSf https://astral.sh/uv/install.sh | sh\n\nor see https://docs.astral.sh/uv/ , then run tessh again.");
     };
     let arch = std::env::consts::ARCH;
-    let request = format!("cpython-{}-linux-{arch}-{}", if want_text.is_empty() { "3".to_string() } else { want_text.to_string() }, libc.suffix());
+    let request = format!("cpython-{}-{}-{arch}-{}", if want_text.is_empty() { "3".to_string() } else { want_text.to_string() }, os_name(), libc.suffix());
     // (uv's own list of what it can install: no network needed.)
     let out = Command::new(&uv).args(["python", "list", "--only-downloads", "--all-platforms", "--output-format", "json", &request]).output();
     let list: Vec<serde_json::Value> = out.ok().filter(|o| o.status.success()).and_then(|o| serde_json::from_slice(&o.stdout).ok()).unwrap_or_default();
@@ -376,14 +403,14 @@ fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
 /// `rt/py/<name>`: tessh with this Python linked in beside it.
 fn version_dir(rt: &Path, py: &Py, libc: Libc) -> std::io::Result<PathBuf> {
     let vdir = rt.join("py").join(&py.name);
-    if vdir.join(".done").exists() && fs::metadata(vdir.join("lib/libpython3.so")).is_ok() {
+    if vdir.join(".done").exists() && fs::metadata(vdir.join("lib").join(libpython_link())).is_ok() {
         return Ok(vdir);
     }
     let lib = py.dir.join("lib");
     let (mut libpy, mut stdlib) = (None, None);
     for e in fs::read_dir(&lib)?.flatten() {
         let n = e.file_name().to_string_lossy().to_string();
-        if n.starts_with("libpython3.") && n.ends_with(".so.1.0") {
+        if n.starts_with("libpython3.") && (n.ends_with(".so.1.0") || (n.ends_with(".dylib") && n != "libpython3.dylib")) {
             libpy = Some(e.path());
         } else if n.starts_with("python3.") && e.path().join("os.py").exists() {
             stdlib = Some(n);
@@ -407,7 +434,7 @@ fn version_dir(rt: &Path, py: &Py, libc: Libc) -> std::io::Result<PathBuf> {
     if rt.join("bin/uv").is_file() {
         symlink(&rt.join("bin/uv"), &tmp.join("bin/uv"))?;
     }
-    symlink(&libpy, &tmp.join("lib/libpython3.so"))?;
+    symlink(&libpy, &tmp.join("lib").join(libpython_link()))?;
     symlink(&lib.join(&stdlib), &tmp.join("lib").join(&stdlib))?;
     if py.dir.join("include").is_dir() {
         symlink(&py.dir.join("include"), &tmp.join("include"))?;
@@ -454,8 +481,26 @@ fn config_want() -> Option<String> {
 }
 
 fn main() {
-    let exe = fs::read_link("/proc/self/exe").unwrap_or_else(|e| die(&format!("can't find myself: {e}")));
-    let (off, len, hash) = trailer(&exe).unwrap_or_else(|e| die(&e.to_string()));
+    let exe = std::env::current_exe().unwrap_or_else(|e| die(&format!("can't find myself: {e}")));
+    // (The payload: built in (macOS), else after this program in the file.)
+    #[cfg(tessh_embedded)]
+    let (payload, hash): (Box<dyn Fn() -> std::io::Result<Box<dyn Read>>>, String) = {
+        let _ = &exe;
+        (Box::new(|| Ok(Box::new(EMBEDDED) as Box<dyn Read>)), env!("TESSH_PAYLOAD_HASH").to_string())
+    };
+    #[cfg(not(tessh_embedded))]
+    let (payload, hash): (Box<dyn Fn() -> std::io::Result<Box<dyn Read>>>, String) = {
+        let (off, len, hash) = trailer(&exe).unwrap_or_else(|e| die(&e.to_string()));
+        let exe = exe.clone();
+        (
+            Box::new(move || {
+                let mut f = fs::File::open(&exe)?;
+                f.seek(SeekFrom::Start(off))?;
+                Ok(Box::new(f.take(len)) as Box<dyn Read>)
+            }),
+            hash,
+        )
+    };
     let mut args: Vec<OsString> = std::env::args_os().collect();
     if args.is_empty() {
         args.push("tessh".into());
@@ -479,7 +524,7 @@ fn main() {
         die(&format!("tessh needs Python 3.{MIN_MINOR} or later (asked for {want_text})"));
     }
     let rt = cache_base().join(format!("rt-{hash}"));
-    if let Err(e) = unpack(&exe, off, len, &rt) {
+    if let Err(e) = unpack(&*payload, &rt) {
         die(&format!("couldn't unpack into {}: {e}", rt.display()));
     }
     let (mut libc, mut settled) = pick_libc(&rt);

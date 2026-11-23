@@ -110,17 +110,29 @@
           # python-build-standalone CPython 3.12, the oldest it takes), and
           # carried inside tessh/launcher with musl's loader; the launcher
           # links in the CPython uv installs (any 3.12+) when it starts.
-          standalone = pkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") (
+          standalone = pkgs.lib.optionalAttrs (builtins.elem pkgs.stdenv.hostPlatform.system [ "x86_64-linux" "aarch64-linux" ]) (
             let
-              cross = pkgs.pkgsCross.musl64;
-              pbs = pkgs.fetchurl {
-                url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.12.16%2B20261123-x86_64-unknown-linux-musl-install_only_stripped.tar.gz";
-                hash = "sha256-dpPyfF8VNrbEt1EIrm04iLf4T6HUMAAfoPDMmy/Arzs=";
-              };
+              # (For this machine's architecture: x86_64 or aarch64.)
+              arch = pkgs.stdenv.hostPlatform.parsed.cpu.name;
+              hashes = {
+                x86_64 = {
+                  musl = "sha256-dpPyfF8VNrbEt1EIrm04iLf4T6HUMAAfoPDMmy/Arzs=";
+                  gnu = "sha256-yFgR01lx0GYSWFoFfbO3GAY3jfbqhHYnX7Fqpcn+VqA=";
+                  uv = "sha256-WMz18XkrilqI0BvJEOoTGos9tKMZoXrV+tdeCEWj4nE=";
+                };
+                aarch64 = {
+                  musl = "sha256-a6ocPUQsOAoFIdakUAVDDch3tweJ9WcTczvqeJSQL0I=";
+                  gnu = "sha256-l7yh0JYCQLchtuWOwtwIBRn80R+Xm/ZDVkNK6dD5aUc=";
+                  uv = "sha256-N/u3xbxmz5nBKqiBlJ0hYYHiAd7ESXcsQynlZIfWEXk=";
+                };
+              }.${arch};
+              pbsUrl = libc: "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.12.16%2B20261123-${arch}-unknown-linux-${libc}-install_only_stripped.tar.gz";
+              cross = if arch == "aarch64" then pkgs.pkgsCross.aarch64-multiplatform-musl else pkgs.pkgsCross.musl64;
+              pbs = pkgs.fetchurl { url = pbsUrl "musl"; hash = hashes.musl; };
               # uv, carried along (its own static build): Python, and packages.
               uvStatic = pkgs.fetchurl {
-                url = "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-unknown-linux-musl.tar.gz";
-                hash = "sha256-WMz18XkrilqI0BvJEOoTGos9tKMZoXrV+tdeCEWj4nE=";
+                url = "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-${arch}-unknown-linux-musl.tar.gz";
+                hash = hashes.uv;
               };
               # (Linked as libpython3.so, the name the launcher gives
               # whichever version's library it links in.)
@@ -156,10 +168,7 @@
               # The glibc build, for systems with glibc (the launcher picks):
               # linked against glibc 2.17 by zig, so it runs on any
               # distribution of the last decade, with uv's glibc CPython.
-              pbsGnu = pkgs.fetchurl {
-                url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.12.16%2B20261123-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz";
-                hash = "sha256-yFgR01lx0GYSWFoFfbO3GAY3jfbqhHYnX7Fqpcn+VqA=";
-              };
+              pbsGnu = pkgs.fetchurl { url = pbsUrl "gnu"; hash = hashes.gnu; };
               pyLinkGnu = pkgs.runCommand "tessh-python-abi3-link-gnu" { nativeBuildInputs = [ pkgs.patchelf ]; } ''
                 tar xzf ${pbsGnu}
                 mkdir -p $out/lib
@@ -190,11 +199,11 @@
                 buildPhase = ''
                   runHook preBuild
                   export HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR/cache ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig
-                  cargo zigbuild --release --offline -p tessh --features standalone --target x86_64-unknown-linux-gnu.2.17
+                  cargo zigbuild --release --offline -p tessh --features standalone --target ${arch}-unknown-linux-gnu.2.17
                   runHook postBuild
                 '';
                 installPhase = ''
-                  install -Dm755 target/x86_64-unknown-linux-gnu/release/tessh $out/bin/tessh
+                  install -Dm755 target/${arch}-unknown-linux-gnu/release/tessh $out/bin/tessh
                 '';
                 # (The system's loader, libpython beside it: leave both be.)
                 dontPatchELF = true;
@@ -213,8 +222,8 @@
                 mkdir -p root/bin root/lib $out
                 cp ${tesshMusl}/bin/tessh root/bin/tessh
                 cp ${tesshGnu}/bin/tessh root/bin/tessh-gnu
-                cp ${cross.stdenv.cc.libc}/lib/libc.so root/lib/ld-musl-x86_64.so.1
-                tar xzf ${uvStatic} --strip-components=1 -C root/bin uv-x86_64-unknown-linux-musl/uv
+                cp ${cross.stdenv.cc.libc}/lib/libc.so root/lib/ld-musl-${arch}.so.1
+                tar xzf ${uvStatic} --strip-components=1 -C root/bin uv-${arch}-unknown-linux-musl/uv
                 # (What else it needs: libgcc_s, for unwinding.)
                 for n in $(readelf -d root/bin/tessh | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p'); do
                   case $n in libc.so|libpython3.so) ;; *)

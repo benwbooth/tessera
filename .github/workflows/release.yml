@@ -102,6 +102,15 @@ jobs:
     with:
       tag: ${{ needs.version.outputs.tag == '' && 'tesserad-dev' || '' }}
 
+  # tessh as one file per platform (Linux and macOS): on the release, or
+  # tessh-dev when only trying the builds.
+  tessh:
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    uses: ./.github/workflows/tessh.yml
+    with:
+      tag: ${{ needs.version.outputs.tag == '' && 'tessh-dev' || '' }}
+
   windows:
     needs: [version, tesserad]
     if: needs.version.outputs.skip != 'true'
@@ -431,7 +440,7 @@ jobs:
   publish:
     # Attaches everything to the release and updates the Homebrew cask.
     if: needs.version.outputs.tag != ''
-    needs: [version, tesserad, windows, macos, appimage, flatpak, nix]
+    needs: [version, tesserad, tessh, windows, macos, appimage, flatpak, nix]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}

@@ -20,7 +20,7 @@ extern "C" {
 /// The version folder this binary runs from, when it is one (bin/tessh,
 /// with lib/python3.X beside).
 fn home() -> Option<PathBuf> {
-    let exe = std::fs::read_link("/proc/self/exe").ok()?;
+    let exe = std::env::current_exe().ok()?;
     let home = exe.parent()?.parent()?.to_path_buf();
     let lib = std::fs::read_dir(home.join("lib")).ok()?;
     lib.flatten().any(|e| e.file_name().to_string_lossy().starts_with("python3.")).then_some(home)

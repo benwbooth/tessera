@@ -21,7 +21,9 @@ fn main() {
     // (The standalone glibc build, picked by the launcher where the system
     // has glibc: the system's loader, libpython3.so beside it.)
     if std::env::var_os("CARGO_FEATURE_STANDALONE").is_some() {
-        println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN/../lib");
+        // (macOS says "beside me" its own way.)
+        let here = if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") { "@executable_path" } else { "$ORIGIN" };
+        println!("cargo:rustc-link-arg-bins=-Wl,-rpath,{here}/../lib");
         return;
     }
     if musl {
