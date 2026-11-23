@@ -38,4 +38,5 @@
     ("A2-contributed-scripts.md", include_str!("advanced/A2-contributed-scripts.md")),
     ("A3-contributed-scripts.md", include_str!("advanced/A3-contributed-scripts.md")),
     ("B-refcards.md", include_str!("advanced/B-refcards.md")),
+    ("C-sedawk.md", include_str!("advanced/C-sedawk.md")),
 ]
