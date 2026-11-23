@@ -1163,6 +1163,12 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::SymLit(s) => Ok(Res::e(self.c(format!(":{}", show(s)))?)),
             Kind::Comma => Ok(Res::e(self.c(",")?)),
             Kind::Caret(_) => Ok(Res::e(self.c(show(x))?)),
+            // (*$xs: its items, one word each, whatever it is: a range, a set…)
+            Kind::Splat { value, n: 1 } => {
+                let r = self.compile_value(value, Ctx::Value)?;
+                let e = self.val(r.expr)?;
+                Ok(Res::s(r.stmts, self.list_node(vec![self.starred(e, false)?])?))
+            }
             Kind::Splat { value, .. } => self.compile_value(value, Ctx::Value),
             Kind::Line { .. } => self.compile_line(x, Ctx::Value),
             _ => self.compile_value(x, Ctx::Value),
@@ -3512,6 +3518,8 @@ impl<'py, 's> Compiler<'py, 's> {
         match &x.kind {
             Kind::Sym { name, .. } => match name.as_str() {
                 "_" => self.n("MatchAs", vec![]),
+                // ([1 *_]: the rest, whatever it is, as Python's *_.)
+                "*_" => self.n("MatchStar", vec![("name", self.none())]),
                 "None" => self.n("MatchSingleton", vec![("value", self.none())]),
                 "True" | "False" => self.n("MatchSingleton", vec![("value", PyBool::new(self.py, name == "True").to_owned().into_any())]),
                 n if n.contains('.') && is_dotted(n) => self.n("MatchValue", vec![("value", self.name_load(x)?)]),

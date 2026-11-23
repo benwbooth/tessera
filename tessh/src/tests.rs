@@ -253,6 +253,16 @@ fn slice_to_a_calculation() {
     assert_eq!(get::<String>(&ns, "z"), "bcd");
 }
 
+/// `*$r` in a command splats any iterable; `*_` in a pattern is the rest;
+/// a method not called, given to a program, is an error, not its repr.
+#[test]
+fn splats_and_uncalled_methods() {
+    let (ns, out) = run("r = range 3\necho *$r\nm = match [1 2 3]\n  case [1 *_]\n    'rest'\ns = Hi\nbad = try\n  echo $s.lower\nexcept TypeError\n  'error'");
+    assert_eq!(out, "0 1 2\n");
+    assert_eq!(get::<String>(&ns, "m"), "rest");
+    assert_eq!(get::<String>(&ns, "bad"), "error");
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");

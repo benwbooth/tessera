@@ -1029,6 +1029,9 @@ fn argv(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
             }
         } else if x.is_none() || is_attached_output(&x) {
             continue;
+        } else if py.import("inspect")?.call_method1("isroutine", (&x,))?.is_truthy()? {
+            // (A method not called, $s.lower: its repr isn't what was meant.)
+            return Err(PyTypeError::new_err(format!("a function, not its value, given to a program: {} (call it: put it in parentheses alone, or give it its arguments)", x.repr()?)));
         } else {
             out.push(word(&x)?);
         }
