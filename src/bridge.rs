@@ -254,6 +254,10 @@ pub mod ffi {
         /// A notebook named on the command line (tessera x.ipynb), or "".
         #[qinvokable]
         fn open_doc(self: &Controller) -> QString;
+        /// Hand memory freed since back to the system (glibc keeps it
+        /// otherwise), on a thread of its own.
+        #[qinvokable]
+        fn trim_memory(self: &Controller);
 
         /// Preferences as JSON (settings::Settings).
         #[qinvokable]
@@ -2065,6 +2069,13 @@ impl ffi::Controller {
 
     fn test_env(&self, name: &ffi::QString) -> ffi::QString {
         ffi::QString::from(&std::env::var(format!("TESSERA_TEST_{name}")).unwrap_or_default())
+    }
+
+    fn trim_memory(&self) {
+        #[cfg(target_env = "gnu")]
+        std::thread::spawn(|| unsafe {
+            libc::malloc_trim(0);
+        });
     }
 
     fn open_doc(&self) -> ffi::QString {

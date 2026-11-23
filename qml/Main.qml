@@ -1958,6 +1958,13 @@ ApplicationWindow {
         const n = flickFrames++, tag = flickTag
         rootLayout.grabToImage(r => r.saveToFile(controller.testEnv("FLICKER") + "/" + tag + "-" + (n < 10 ? "0" : "") + n + ".png"))
     }
+    // Memory freed (a big listing's text, cards gone) handed back to the
+    // system: glibc keeps it otherwise. Once things have settled after
+    // starting, then every minute; on a thread of its own.
+    Timer {
+        interval: 15000; repeat: true; running: true
+        onTriggered: { interval = 60000; controller.trimMemory() }
+    }
     // (Test hook: TESSERA_TEST_CLICKS="x,y;x,y;..." moves to each and left-clicks
     // it, from 12 s, 1.5 s apart.)
     Timer {
