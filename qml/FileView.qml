@@ -110,6 +110,7 @@ Item {
             crlf = !!r.crlf
             dirty = false
             ek.viNormal = editorKeys === "vi"
+            ek.vi.reset()
             editing = true
             editor.cursorPosition = 0
             Qt.callLater(() => editor.forceActiveFocus())
@@ -670,6 +671,7 @@ Item {
             // A block cursor, as the input editor's: the letter under it in
             // the background color (a hollow box when it isn't typing; a little
             // lighter in vi's insert mode).
+            ViBlock { vi: ek.vi; color: editor.selectionColor }
             cursorDelegate: Rectangle {
                 id: cur
                 readonly property string under: { const c = editor.text[editor.cursorPosition]; return c === undefined || c === "\n" || c === "\u2029" ? "" : c }
@@ -678,7 +680,9 @@ Item {
                 color: editor.activeFocus ? Theme.text : "transparent"
                 border.width: editor.activeFocus ? 0 : 1
                 border.color: Theme.text
-                opacity: ek.keys === "vi" && !ek.viNormal && editor.activeFocus ? 0.85 : 1
+                // (vi's v and V: the selection shows where; the cursor would sit past it.)
+                opacity: ek.keys === "vi" && (ek.vi.visual === "v" || ek.vi.visual === "V") ? 0
+                       : ek.keys === "vi" && !ek.viNormal && editor.activeFocus ? 0.85 : 1
                 Text {
                     anchors.fill: parent
                     text: cur.under
@@ -743,7 +747,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 6
-        text: fv.editError !== "" ? fv.editError : ek.viNormal ? "NORMAL" : "INSERT"
+        text: fv.editError !== "" ? fv.editError : ek.vi.modeName
         color: fv.editError !== "" ? fv.ansi(1, "#e06c75") : Theme.textDim
         font.pixelSize: 11
         font.bold: true

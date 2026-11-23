@@ -9,9 +9,17 @@ QtObject {
     id: ek
     property var edit: null             // the TextEdit
     property string keys: "emacs"       // "emacs", "vscode", "vi"
-    property bool viNormal: false
-    property string viPending: ""
-    property var markCols: ({})
+    // vi's normal and visual modes (ViKeys.qml).
+    readonly property ViKeys vi: ViKeys {
+        id: vik
+        edit: ek.edit
+        ex: exc
+        indentUnit: ek.indentUnit
+        onCommandLine: (kind, initial) => ek.commandLine(kind, initial)
+        onMessage: (text, error) => ek.message(text)
+    }
+    property alias viNormal: vik.viNormal
+    property alias viPending: vik.viPending
     // vi's ":" commands (ExCommands.qml), sharing the yanked text.
     readonly property ExCommands ex: ExCommands { id: exc; edit: ek.edit; indentUnit: ek.indentUnit; keyHandler: (e) => ek.handle(e); viKeys: ek }
     property alias killRing: exc.killRing
@@ -231,104 +239,14 @@ QtObject {
     function searchNext(reverse) { return exc.searchNext(reverse) }
     signal message(string text)
 
-    function viKey(e) {
-        if (!viNormal) {
-            if (e.key === Qt.Key_Escape) { viNormal = true; edit.cursorPosition = Math.max(lineStart(edit.cursorPosition), edit.cursorPosition - 1); return true }
-            return emacsKey(e)
-        }
-        const ch = e.text
-        const p = edit.cursorPosition
-        const t = edit.text
-        if (e.key === Qt.Key_Escape) { viPending = ""; return true }
-        if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_R) { exc.redo(); return true }
-        if (viPending === "r") { if (ch && p < t.length) { edit.remove(p, p + 1); edit.insert(p, ch); edit.cursorPosition = p } viPending = ""; return true }
-        if (viPending === "g") { viPending = ""; if (ch === "g") edit.cursorPosition = 0; return true }
-        // (m{a-z} sets a mark; '{a-z} and `{a-z} go to it, its line or its place.)
-        if (viPending === "m") {
-            viPending = ""
-            if (/^[a-zA-Z]$/.test(ch)) { exc.load(); const mm = Object.assign({}, exc.marks); mm[ch] = exc.cursorLine(); exc.marks = mm; markCols[ch] = p - lineStart(p) }
-            return true
-        }
-        if (viPending === "'" || viPending === "`") {
-            const how = viPending
-            viPending = ""
-            exc.load()
-            const n = exc.markLine(ch)
-            if (n < 0) { message("E20: Mark not set"); return true }
-            exc.store(n, how === "`" ? (markCols[ch] || 0) : undefined)
-            return true
-        }
-        function motion(c) {
-            switch (c) {
-            case "h": return Math.max(lineStart(p), p - 1)
-            case "l": return Math.min(lineEnd(p), p + 1)
-            case "w": return wordRight(p)
-            case "b": return wordLeft(p)
-            case "e": return wordEnd(p)
-            case "0": return lineStart(p)
-            case "^": { let i = lineStart(p); while (i < t.length && t[i] === " ") i++; return i }
-            case "$": return lineEnd(p)
-            case "j": { const a = lineStart(p), b = lineEnd(p); if (b >= t.length) return p; const nb = lineEnd(b + 1); return Math.min(b + 1 + (p - a), nb) }
-            case "k": { const a = lineStart(p); if (a === 0) return p; const pa = lineStart(a - 1); return Math.min(pa + (p - a), a - 1) }
-            }
-            return -1
-        }
-        if (viPending === "d" || viPending === "c" || viPending === "y") {
-            const op = viPending
-            viPending = ""
-            let a, b
-            if (ch === op) { a = lineStart(p); b = Math.min(t.length, lineEnd(p) + (op === "c" ? 0 : 1)) }
-            else {
-                const m = motion(ch === "w" && op === "c" ? "e" : ch)
-                if (m < 0) return true
-                a = Math.min(p, m); b = Math.max(p, m) + (ch === "e" || (ch === "w" && op === "c") ? 1 : 0)
-            }
-            if (op === "y") { killRing = t.substring(a, b); return true }
-            kill(a, b)
-            if (op === "c") viNormal = false
-            return true
-        }
-        const m = motion(ch)
-        if (m >= 0) { edit.cursorPosition = m; return true }
-        switch (ch) {
-        case "i": viNormal = false; return true
-        case "a": edit.cursorPosition = Math.min(lineEnd(p), p + 1); viNormal = false; return true
-        case "I": edit.cursorPosition = motion("^"); viNormal = false; return true
-        case "A": edit.cursorPosition = lineEnd(p); viNormal = false; return true
-        case "o": edit.cursorPosition = lineEnd(p); insert("\n" + indentOf(p)); viNormal = false; return true
-        case "O": { const a = lineStart(p); edit.cursorPosition = a; insert(indentOf(p) + "\n"); edit.cursorPosition = a + indentOf(p).length; viNormal = false; return true }
-        case "x": if (p < lineEnd(p)) kill(p, p + 1); return true
-        case "X": if (p > lineStart(p)) kill(p - 1, p); return true
-        case "D": kill(p, lineEnd(p)); return true
-        case "C": kill(p, lineEnd(p)); viNormal = false; return true
-        case "s": if (p < lineEnd(p)) kill(p, p + 1); viNormal = false; return true
-        case "p": edit.insert(Math.min(t.length, p + 1), killRing); return true
-        case "P": insert(killRing); return true
-        case "u": exc.undo(); return true
-        case "~": if (p < t.length) { const c = t[p]; edit.remove(p, p + 1); edit.insert(p, c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()); edit.cursorPosition = p + 1 } return true
-        case "G": edit.cursorPosition = t.length; return true
-        case ":": commandLine(":", edit.selectedText !== "" ? "'<,'>" : ""); return true
-        case "/": commandLine("/", ""); return true
-        case "?": commandLine("?", ""); return true
-        case "n": { const r = searchNext(false); if (r !== "") message(r); return true }
-        case "N": { const r = searchNext(true); if (r !== "") message(r); return true }
-        case "*": case "#": {
-            const a = wordLeft(Math.min(t.length, p + 1)), b = wordRight(p)
-            const w = t.substring(a, b).replace(/[^A-Za-z0-9_]/g, "")
-            if (w !== "") { const r = search("\\<" + w + "\\>", ch === "#"); if (r !== "") message(r) }
-            return true
-        }
-        case "m": case "'": case "`": viPending = ch; return true
-        case "d": case "c": case "y": case "g": case "r": viPending = ch; return true
-        }
-        return ch !== "" && !(e.modifiers & Qt.ControlModifier)
-    }
-
     // A key: its editing meaning in the keys chosen, or false for the field.
     function handle(e) {
         if (!edit) return false
-        if (keys === "vi" && viNormal) return viKey(e)
-        let done = keys === "vi" ? viKey(e) : keys === "vscode" ? vscodeKey(e) : emacsKey(e)
+        if (keys === "vi") {
+            if (vik.handle(e)) return true
+            if (viNormal) return false
+        }
+        let done = keys === "vscode" ? vscodeKey(e) : emacsKey(e)
         if (!done) done = smartKey(e)
         return done
     }

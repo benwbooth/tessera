@@ -666,7 +666,7 @@ Window {
                             }
                             Row2 {
                                 label: "Editor keys"
-                                hint: "Emacs: the shell's own (readline) keys. vi: Esc for normal mode. VS Code: Ctrl+Z, Alt+Up/Down moves lines, Ctrl+/ comments."
+                                hint: "Emacs: the shell's own (readline) keys. vi: Esc for normal mode, with counts, text objects (ciw, da\"), surround (ys, ds, cs), visual modes, registers, marks, . and u. VS Code: Ctrl+Z, Alt+Up/Down moves lines, Ctrl+/ comments."
                                 ChoiceBox {
                                     values: [["emacs", "Emacs (readline)"], ["vi", "vi"], ["vscode", "VS Code"]]
                                     value: prefs.settings.editor_keys || "emacs"

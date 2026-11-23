@@ -172,8 +172,19 @@ Rectangle {
                     saveas: null, edit: null, read: null, file: null, pwd: null })
     }
     property alias killRing: cex.killRing
-    property bool viNormal: false
-    property string viPending: ""      // an operator waiting for its motion (d, c, y, g, r)
+    // vi's normal and visual modes (ViKeys.qml); j and k past the first or
+    // last line go through the history, as Up and Down.
+    readonly property ViKeys vi: ViKeys {
+        id: vik
+        edit: edit
+        ex: cex
+        indentUnit: box.indentUnit
+        edgeLine: (d) => box.historyStep(d)
+        onCommandLine: (kind, initial) => exLine.open(kind, initial)
+        onMessage: (text, error) => exLine.show(text, error)
+    }
+    property alias viNormal: vik.viNormal
+    property alias viPending: vik.viPending
 
     function focusEditor() { edit.forceActiveFocus() }
     function insert(t) { edit.insert(edit.cursorPosition, t) }
@@ -192,6 +203,10 @@ Rectangle {
             ["Finding", [["Ctrl+R", "Search history"],
                          ["Ctrl+Alt+J", "Background jobs"]]]]
         if (box.aiNL && box.chatReady) groups.push(["AI", [["# \u2026", "Say what you want: the AI writes the command, for you to check"]]])
+        if (box.keys === "vi") {
+            const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            for (const g of vik.help) groups.push([esc(g[0]), g[1].map(r => [esc(r[0]), esc(r[1])])])
+        }
         let h = "<table cellspacing='0' cellpadding='2'>"
         for (const g of groups) {
             h += "<tr><td colspan='2' style='padding-top:4px'><span style='color:" + Theme.textDim + "'>" + g[0] + "</span></td></tr>"
@@ -235,6 +250,7 @@ Rectangle {
         useLanguage(runLang)
         edit.text = ""
         viNormal = false
+        vik.reset()
         box.submitted(t)
     }
     // A command from Tessera itself (a prompt widget's choice, a file or
@@ -955,76 +971,8 @@ Rectangle {
     }
 
     function viKey(e) {
-        if (!viNormal) {
-            if (e.key === Qt.Key_Escape) { viNormal = true; edit.cursorPosition = Math.max(lineStart(edit.cursorPosition), edit.cursorPosition - 1); return true }
-            return emacsKey(e)   // insert mode keeps the readline keys
-        }
-        // Normal mode.
-        const ch = e.text
-        const p = edit.cursorPosition
-        const t = edit.text
-        if (e.key === Qt.Key_Escape) { viPending = ""; return true }
-        if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_R) { cex.redo(); return true }
-        if (viPending === "r") { if (ch && p < t.length) { edit.remove(p, p + 1); edit.insert(p, ch); edit.cursorPosition = p } viPending = ""; return true }
-        if (viPending === "g") { viPending = ""; if (ch === "g") edit.cursorPosition = 0; return true }
-        // (: opens the command line, / and ? search, n and N go on.)
-        if (ch === ":" && viPending === "") { exLine.open(":", edit.selectedText !== "" ? "'<,'>" : ""); return true }
-        if ((ch === "/" || ch === "?") && viPending === "") { exLine.open(ch, ""); return true }
-        if ((ch === "n" || ch === "N") && viPending === "") { const r = cex.searchNext(ch === "N"); if (r !== "") exLine.show(r, r.startsWith("E")); return true }
-        // Motions: where `ch` moves from p (or -1 when it isn't one).
-        function motion(c) {
-            switch (c) {
-            case "h": return Math.max(lineStart(p), p - 1)
-            case "l": return Math.min(lineEnd(p), p + 1)
-            case "w": return wordRight(p)
-            case "b": return wordLeft(p)
-            case "e": return wordEnd(p)
-            case "0": return lineStart(p)
-            case "^": { let i = lineStart(p); while (i < t.length && t[i] === " ") i++; return i }
-            case "$": return lineEnd(p)
-            }
-            return -1
-        }
-        if (viPending === "d" || viPending === "c" || viPending === "y") {
-            const op = viPending
-            viPending = ""
-            let a, b
-            if (ch === op) { a = lineStart(p); b = Math.min(t.length, lineEnd(p) + (op === "c" ? 0 : 1)) }
-            else {
-                const m = motion(ch === "w" && op === "c" ? "e" : ch)
-                if (m < 0) return true
-                a = Math.min(p, m); b = Math.max(p, m) + (ch === "e" || (ch === "w" && op === "c") ? 1 : 0)
-            }
-            if (op === "y") { killRing = t.substring(a, b); return true }
-            kill(a, b)
-            if (op === "c") viNormal = false
-            return true
-        }
-        const m = motion(ch)
-        if (m >= 0) { edit.cursorPosition = m; return true }
-        switch (ch) {
-        case "i": viNormal = false; return true
-        case "a": edit.cursorPosition = Math.min(lineEnd(p), p + 1); viNormal = false; return true
-        case "I": edit.cursorPosition = motion("^"); viNormal = false; return true
-        case "A": edit.cursorPosition = lineEnd(p); viNormal = false; return true
-        case "o": edit.cursorPosition = lineEnd(p); insert("\n"); viNormal = false; return true
-        case "O": edit.cursorPosition = lineStart(p); insert("\n"); edit.cursorPosition = lineStart(p); viNormal = false; return true
-        case "x": if (p < lineEnd(p)) kill(p, p + 1); return true
-        case "X": if (p > lineStart(p)) kill(p - 1, p); return true
-        case "D": kill(p, lineEnd(p)); return true
-        case "C": kill(p, lineEnd(p)); viNormal = false; return true
-        case "s": if (p < lineEnd(p)) kill(p, p + 1); viNormal = false; return true
-        case "p": edit.insert(Math.min(t.length, p + 1), killRing); return true
-        case "P": insert(killRing); return true
-        case "u": cex.undo(); return true
-        case "~": if (p < t.length) { const c = t[p]; edit.remove(p, p + 1); edit.insert(p, c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()); edit.cursorPosition = p + 1 } return true
-        case "G": edit.cursorPosition = t.length; return true
-        case "j": historyStep(1); return true
-        case "k": historyStep(-1); return true
-        case "d": case "c": case "y": case "g": case "r": viPending = ch; return true
-        }
-        // Anything else in normal mode is swallowed (no stray typing).
-        return ch !== "" && !(e.modifiers & Qt.ControlModifier)
+        if (vik.handle(e)) return true
+        return viNormal ? false : emacsKey(e)   // insert mode keeps the readline keys
     }
 
     // ---- view -------------------------------------------------------------
@@ -1130,6 +1078,7 @@ Rectangle {
                     opacity: modelData.on ? 0.32 : 0.12
                 }
             }
+            ViBlock { vi: vik; color: Theme.accent }
             cursorDelegate: Rectangle {
                 id: cur
                 readonly property string under: {
@@ -1143,7 +1092,9 @@ Rectangle {
                 color: edit.activeFocus ? box.cursorColor : "transparent"
                 border.width: edit.activeFocus ? 0 : 1
                 border.color: box.cursorColor
-                opacity: box.keys === "vi" && !box.viNormal && edit.activeFocus ? 0.85 : 1
+                // (vi's v and V: the selection shows where; the cursor would sit past it.)
+                opacity: box.keys === "vi" && (vik.visual === "v" || vik.visual === "V") ? 0
+                       : box.keys === "vi" && !box.viNormal && edit.activeFocus ? 0.85 : 1
                 Text {
                     anchors.fill: parent
                     text: cur.under
@@ -1523,7 +1474,7 @@ Rectangle {
         Chip {
             id: keysChip
             base: box.color
-            label: box.keys === "vi" ? "vi \u00b7 " + (box.viNormal ? "normal" : "insert")
+            label: box.keys === "vi" ? "vi \u00b7 " + vik.modeName.toLowerCase() + (vik.viPending !== "" ? " " + vik.viPending : "")
                  : (({ emacs: "Emacs", vscode: "VS Code" })[box.keys] || box.keys)
             tip: "Editor keys: click for the next, Emacs, vi, VS Code (Ctrl+Alt+E)"
             onClicked: {
