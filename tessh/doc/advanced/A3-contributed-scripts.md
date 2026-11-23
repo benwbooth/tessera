@@ -5721,3 +5721,752 @@ The function name is 'DoSomething'
 Number of arguments: [3]
 Option [--] Dash Dash
 ```
+
+## All the background colors
+<!-- help: abs-showallc show-all-colors.sh 256-colors ansi escape background -->
+
+Chetankumar Phulpagare's script shows each of a terminal's 256 background
+colors with ANSI escape sequences: the 16 system colors, the 6x6x6 color
+cube and 24 grays.
+
+### Example A-52. Cycling through all the possible color backgrounds (`show-all-colors.sh`)
+
+```bash no-run
+#!/bin/bash
+
+# show-all-colors.sh
+# Displays all 256 possible background colors, using ANSI escape sequences.
+# Author: Chetankumar Phulpagare
+# Used in ABS Guide with permission.
+
+T1=8
+T2=6
+T3=36
+offset=0
+
+for num1 in {0..7}
+do {
+   for num2 in {0,1}
+       do {
+          shownum=`echo "$offset + $T1 * ${num2} + $num1" | bc`
+          echo -en "\E[0;48;5;${shownum}m color ${shownum} \E[0m"
+          }
+       done
+   echo
+   }
+done
+
+offset=16
+for num1 in {0..5}
+do {
+   for num2 in {0..5}
+       do {
+          for num3 in {0..5}
+              do {
+                 shownum=`echo "$offset + $T2 * ${num3} \
+                 + $num2 + $T3 * ${num1}" | bc`
+                 echo -en "\E[0;48;5;${shownum}m color ${shownum} \E[0m"
+                 }
+               done
+          echo
+          }
+       done
+}
+done
+
+offset=232
+for num1 in {0..23}
+do {
+   shownum=`expr $offset + $num1`
+   echo -en "\E[0;48;5;${shownum}m ${shownum}\E[0m"
+}
+done
+
+echo
+```
+
+The numbers are plain arithmetic in tessh, no `bc` or `expr` per square.
+`"\033[0;48;5;${num}m"` is the same escape sequence (tessh's strings take
+`\033`, not bash's `\E`); it's sent only when the output is a terminal, so
+here, in a file, just the layout shows. The loops name the cube's axes.
+
+```tessh
+import sys
+# show-all-colors.sh
+# Displays all 256 possible background colors, using ANSI escape sequences.
+# Author: Chetankumar Phulpagare
+
+tty = (sys.stdout.isatty)
+def show num text                 # A swatch: in its color on a terminal.
+  if $tty
+    print "\033[0;48;5;${num}m$text\033[0m" end=""
+  else
+    print $text end=""
+
+# The 16 system colors, two rows of 8.
+for row in (range 8)
+  for half in [0 1]
+    n = 8 * $half + $row
+    show $n " color $n "
+  print
+
+# The 6 x 6 x 6 color cube, 16 - 231.
+for red in (range 6)
+  for blue in (range 6)
+    for green in (range 6)
+      n = 16 + 36 * $red + 6 * $green + $blue
+      show $n " color $n "
+    print
+
+# The 24 grays, 232 - 255.
+for n in (range 232 256)
+  show $n " $n"
+print
+```
+
+```output
+ color 0  color 8 
+ color 1  color 9 
+ color 2  color 10 
+ color 3  color 11 
+ color 4  color 12 
+ color 5  color 13 
+ color 6  color 14 
+ color 7  color 15 
+ color 16  color 22  color 28  color 34  color 40  color 46 
+ color 17  color 23  color 29  color 35  color 41  color 47 
+ color 18  color 24  color 30  color 36  color 42  color 48 
+ color 19  color 25  color 31  color 37  color 43  color 49 
+ color 20  color 26  color 32  color 38  color 44  color 50 
+ color 21  color 27  color 33  color 39  color 45  color 51 
+ color 52  color 58  color 64  color 70  color 76  color 82 
+ color 53  color 59  color 65  color 71  color 77  color 83 
+ color 54  color 60  color 66  color 72  color 78  color 84 
+ color 55  color 61  color 67  color 73  color 79  color 85 
+ color 56  color 62  color 68  color 74  color 80  color 86 
+ color 57  color 63  color 69  color 75  color 81  color 87 
+ color 88  color 94  color 100  color 106  color 112  color 118 
+ color 89  color 95  color 101  color 107  color 113  color 119 
+ color 90  color 96  color 102  color 108  color 114  color 120 
+ color 91  color 97  color 103  color 109  color 115  color 121 
+ color 92  color 98  color 104  color 110  color 116  color 122 
+ color 93  color 99  color 105  color 111  color 117  color 123 
+ color 124  color 130  color 136  color 142  color 148  color 154 
+ color 125  color 131  color 137  color 143  color 149  color 155 
+ color 126  color 132  color 138  color 144  color 150  color 156 
+ color 127  color 133  color 139  color 145  color 151  color 157 
+ color 128  color 134  color 140  color 146  color 152  color 158 
+ color 129  color 135  color 141  color 147  color 153  color 159 
+ color 160  color 166  color 172  color 178  color 184  color 190 
+ color 161  color 167  color 173  color 179  color 185  color 191 
+ color 162  color 168  color 174  color 180  color 186  color 192 
+ color 163  color 169  color 175  color 181  color 187  color 193 
+ color 164  color 170  color 176  color 182  color 188  color 194 
+ color 165  color 171  color 177  color 183  color 189  color 195 
+ color 196  color 202  color 208  color 214  color 220  color 226 
+ color 197  color 203  color 209  color 215  color 221  color 227 
+ color 198  color 204  color 210  color 216  color 222  color 228 
+ color 199  color 205  color 211  color 217  color 223  color 229 
+ color 200  color 206  color 212  color 218  color 224  color 230 
+ color 201  color 207  color 213  color 219  color 225  color 231 
+ 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255
+```
+
+## Morse code practice
+<!-- help: abs-samorse sam.sh morse associative-array dict eval aplay -->
+
+Mendel Cooper's "Still Another Morse" trainer plays each word given to it
+as dots and dashes, through `aplay` and two sound files. The code table is
+an associative array whose values are commands: `morse[a]="dot; dash"`,
+run with `eval`.
+
+### Example A-53. Morse Code Practice (`sam.sh`)
+
+```bash no-run
+#!/bin/bash
+# sam.sh, v. .01a
+# Still Another Morse (code training script)
+# With profuse apologies to Sam (F.B.) Morse.
+# Author: Mendel Cooper
+# License: GPL3
+# Reldate: 05/25/11
+
+# Morse code training script.
+# Converts arguments to audible dots and dashes.
+# Note: lowercase input only at this time.
+
+
+
+# Get the wav files from the source tarball:
+# http://bash.deta.in/abs-guide-latest.tar.bz2
+DOT='soundfiles/dot.wav'
+DASH='soundfiles/dash.wav'
+# Maybe move soundfiles to /usr/local/sounds?
+
+LETTERSPACE=300000  # Microseconds.
+WORDSPACE=980000
+# Nice and slow, for beginners. Maybe 5 wpm?
+
+EXIT_MSG="May the Morse be with you!"
+E_NOARGS=75         # No command-line args?
+
+
+
+declare -A morse    # Associative array!
+# ======================================= #
+morse[a]="dot; dash"
+morse[b]="dash; dot; dot; dot"
+morse[c]="dash; dot; dash; dot"
+morse[d]="dash; dot; dot"
+morse[e]="dot"
+morse[f]="dot; dot; dash; dot"
+morse[g]="dash; dash; dot"
+morse[h]="dot; dot; dot; dot"
+morse[i]="dot; dot;"
+morse[j]="dot; dash; dash; dash"
+morse[k]="dash; dot; dash"
+morse[l]="dot; dash; dot; dot"
+morse[m]="dash; dash"
+morse[n]="dash; dot"
+morse[o]="dash; dash; dash"
+morse[p]="dot; dash; dash; dot"
+morse[q]="dash; dash; dot; dash"
+morse[r]="dot; dash; dot"
+morse[s]="dot; dot; dot"
+morse[t]="dash"
+morse[u]="dot; dot; dash"
+morse[v]="dot; dot; dot; dash"
+morse[w]="dot; dash; dash"
+morse[x]="dash; dot; dot; dash"
+morse[y]="dash; dot; dash; dash"
+morse[z]="dash; dash; dot; dot"
+morse[0]="dash; dash; dash; dash; dash"
+morse[1]="dot; dash; dash; dash; dash"
+morse[2]="dot; dot; dash; dash; dash"
+morse[3]="dot; dot; dot; dash; dash"
+morse[4]="dot; dot; dot; dot; dash"
+morse[5]="dot; dot; dot; dot; dot"
+morse[6]="dash; dot; dot; dot; dot"
+morse[7]="dash; dash; dot; dot; dot"
+morse[8]="dash; dash; dash; dot; dot"
+morse[9]="dash; dash; dash; dash; dot"
+# The following must be escaped or quoted.
+morse[?]="dot; dot; dash; dash; dot; dot"
+morse[.]="dot; dash; dot; dash; dot; dash"
+morse[,]="dash; dash; dot; dot; dash; dash"
+morse[/]="dash; dot; dot; dash; dot"
+morse[\@]="dot; dash; dash; dot; dash; dot"
+# ======================================= #
+
+play_letter ()
+{
+  eval ${morse[$1]}   # Play dots, dashes from appropriate sound files.
+  # Why is 'eval' necessary here?
+  usleep $LETTERSPACE # Pause in between letters.
+}
+
+extract_letters ()
+{                     # Slice string apart, letter by letter.
+  local pos=0         # Starting at left end of string.
+  local len=1         # One letter at a time.
+  strlen=${#1}
+
+  while [ $pos -lt $strlen ]
+  do
+    letter=${1:pos:len}
+    #      ^^^^^^^^^^^^    See Chapter 10.1.
+    play_letter $letter
+    echo -n "*"       #    Mark letter just played.
+    ((pos++))
+  done
+}
+
+######### Play the sounds ############
+dot()  { aplay "$DOT" 2&>/dev/null;  }
+dash() { aplay "$DASH" 2&>/dev/null; }
+######################################
+
+no_args ()
+{
+    declare -a usage
+    usage=( $0 word1 word2 ... )
+
+    echo "Usage:"; echo
+    echo ${usage[*]}
+    for index in 0 1 2 3
+    do
+      extract_letters ${usage[index]}     
+      usleep $WORDSPACE
+      echo -n " "     # Print space between words.
+    done
+#   echo "Usage: $0 word1 word2 ... "
+    echo; echo
+}
+
+
+# int main()
+# {
+
+clear                 # Clear the terminal screen.
+echo "            SAM"
+echo "Still Another Morse code trainer"
+echo "    Author: Mendel Cooper"
+echo; echo;
+
+if [ -z "$1" ]
+then
+  no_args
+  echo; echo; echo "$EXIT_MSG"; echo
+  exit $E_NOARGS
+fi
+
+echo; echo "$*"       # Print text that will be played.
+
+until [ -z "$1" ]
+do
+  extract_letters $1
+  shift           # On to next word.
+  usleep $WORDSPACE
+  echo -n " "     # Print space between words.
+done
+
+echo; echo; echo "$EXIT_MSG"; echo
+
+exit 0
+# }
+
+#  Exercises:
+#  ---------
+#  1) Have the script accept either lowercase or uppercase words
+#+    as arguments. Hint: Use 'tr' . . .
+#  2) Have the script optionally accept input from a text file.
+```
+
+The table is a dict here, keys and values as in bash (the `?`, `.`, `,`,
+`/` and `@` keys just quoted). The original asks why `eval` is needed: the
+value is text, and only `eval` makes bash run text as commands. tessh
+looks each name up in a dict of functions and calls it, which can't run
+anything but `dot` and `dash`. Without the sound files, `dot` and `dash`
+print `.` and `-` here (with sounds they'd be `aplay $DOT`), the pauses
+are 0, and the sample words are `sos abs`. A word plays letter by letter,
+as `${1:pos:len}` sliced it, by looping over the string.
+
+```tessh
+import sys time
+# sam.sh, v. .01a: Still Another Morse (code training script)
+# With profuse apologies to Sam (F.B.) Morse.
+# Author: Mendel Cooper. License: GPL3. Reldate: 05/25/11
+# Converts arguments to audible dots and dashes.
+
+DOT = soundfiles/dot.wav
+DASH = soundfiles/dash.wav
+LETTERSPACE = 0       # (0.3 seconds in the original.)
+WORDSPACE = 0         # (0.98 seconds.)
+EXIT_MSG = "May the Morse be with you!"
+E_NOARGS = 75         # No command-line args?
+
+morse = {             # A dict: bash's associative array.
+  a: "dot; dash"                 b: "dash; dot; dot; dot"
+  c: "dash; dot; dash; dot"      d: "dash; dot; dot"
+  e: "dot"                       f: "dot; dot; dash; dot"
+  g: "dash; dash; dot"           h: "dot; dot; dot; dot"
+  i: "dot; dot;"                 j: "dot; dash; dash; dash"
+  k: "dash; dot; dash"           l: "dot; dash; dot; dot"
+  m: "dash; dash"                n: "dash; dot"
+  o: "dash; dash; dash"          p: "dot; dash; dash; dot"
+  q: "dash; dash; dot; dash"     r: "dot; dash; dot"
+  s: "dot; dot; dot"             t: "dash"
+  u: "dot; dot; dash"            v: "dot; dot; dot; dash"
+  w: "dot; dash; dash"           x: "dash; dot; dot; dash"
+  y: "dash; dot; dash; dash"     z: "dash; dash; dot; dot"
+  "0": "dash; dash; dash; dash; dash"   "1": "dot; dash; dash; dash; dash"
+  "2": "dot; dot; dash; dash; dash"     "3": "dot; dot; dot; dash; dash"
+  "4": "dot; dot; dot; dot; dash"       "5": "dot; dot; dot; dot; dot"
+  "6": "dash; dot; dot; dot; dot"       "7": "dash; dash; dot; dot; dot"
+  "8": "dash; dash; dash; dot; dot"     "9": "dash; dash; dash; dash; dot"
+  "?": "dot; dot; dash; dash; dot; dot" ".": "dot; dash; dot; dash; dot; dash"
+  ",": "dash; dash; dot; dot; dash; dash" "/": "dash; dot; dot; dash; dot"
+  "@": "dot; dash; dash; dot; dash; dot"
+}
+
+######### Play the sounds ############
+# (aplay "$DOT" in the original; here, without the sound files,
+#  each sound is shown as a character.)
+def dot = print "." end=""
+def dash = print "-" end=""
+sounds = {dot: $dot dash: $dash}
+######################################
+
+def play_letter letter
+  # bash runs "dot; dash" with eval; here each name is looked up and called.
+  for name in ($morse[$letter].split ";")
+    if (.strip $name)
+      sound = $sounds[(.strip $name)]
+      sound
+  time.sleep $LETTERSPACE         # Pause in between letters.
+
+def extract_letters word          # Slice string apart, letter by letter.
+  for letter in $word
+    play_letter $letter
+    print "*" end=""              # Mark letter just played.
+
+def no_args
+  usage = [$argv[0] word1 word2 ...]
+  print "Usage:" ; print
+  print (" ".join $usage)
+  for word in $usage[1:]          # (The script's path isn't played here.)
+    extract_letters $word
+    time.sleep $WORDSPACE
+    print " " end=""              # Print space between words.
+  print ; print
+
+def clear
+  if (sys.stdout.isatty)
+    \clear
+
+clear
+print "            SAM"
+print "Still Another Morse code trainer"
+print "    Author: Mendel Cooper"
+print ; print
+
+args = $argv[1:] or [sos abs]     # (sample arguments, when none are given)
+if not $args
+  no_args
+  print ; print ; print $EXIT_MSG ; print
+  exit $E_NOARGS
+
+print ; print (" ".join $args)   # Print text that will be played.
+for word in $args
+  extract_letters $word
+  time.sleep $WORDSPACE
+  print " " end=""                # Print space between words.
+print ; print ; print $EXIT_MSG ; print
+exit 0
+```
+
+```output
+            SAM
+Still Another Morse code trainer
+    Author: Mendel Cooper
+
+
+
+sos abs
+...*---*...* .-*-...*...* 
+
+May the Morse be with you!
+
+```
+
+## Base64 encoding and decoding
+<!-- help: abs-base64 base64.sh base64 bitwise bytes encode decode -->
+
+vladz's Base64 encoder and decoder in pure bash: `xxd` makes a hex dump of
+the input, `bc` turns each hex pair into a number, and bitwise operators
+regroup each three bytes into four 6-bit numbers (and back with `-d`).
+
+### Example A-54. Base64 encoding/decoding (`base64.sh`)
+
+```bash no-run
+#!/bin/bash
+# base64.sh: Bash implementation of Base64 encoding and decoding.
+#
+# Copyright (c) 2011 vladz <vladz@devzero.fr>
+# Used in ABSG with permission (thanks!).
+#
+#  Encode or decode original Base64 (and also Base64url)
+#+ from STDIN to STDOUT.
+#
+#    Usage:
+#
+#    Encode
+#    $ ./base64.sh < binary-file > binary-file.base64
+#    Decode
+#    $ ./base64.sh -d < binary-file.base64 > binary-file
+#
+# Reference:
+#
+#    [1]  RFC4648 - "The Base16, Base32, and Base64 Data Encodings"
+#         http://tools.ietf.org/html/rfc4648#section-5
+
+
+# The base64_charset[] array contains entire base64 charset,
+# and additionally the character "=" ...
+base64_charset=( {A..Z} {a..z} {0..9} + / = )
+                # Nice illustration of brace expansion.
+
+#  Uncomment the ### line below to use base64url encoding instead of
+#+ original base64.
+### base64_charset=( {A..Z} {a..z} {0..9} - _ = )
+
+#  Output text width when encoding
+#+ (64 characters, just like openssl output).
+text_width=64
+
+function display_base64_char {
+#  Convert a 6-bit number (between 0 and 63) into its corresponding values
+#+ in Base64, then display the result with the specified text width.
+  printf "${base64_charset[$1]}"; (( width++ ))
+  (( width % text_width == 0 )) && printf "\n"
+}
+
+function encode_base64 {
+# Encode three 8-bit hexadecimal codes into four 6-bit numbers.
+  #    We need two local int array variables:
+  #    c8[]: to store the codes of the 8-bit characters to encode
+  #    c6[]: to store the corresponding encoded values on 6-bit
+  declare -a -i c8 c6
+
+  #  Convert hexadecimal to decimal.
+  c8=( $(printf "ibase=16; ${1:0:2}\n${1:2:2}\n${1:4:2}\n" | bc) )
+
+  #  Let's play with bitwise operators
+  #+ (3x8-bit into 4x6-bits conversion).
+  (( c6[0] = c8[0] >> 2 ))
+  (( c6[1] = ((c8[0] &  3) << 4) | (c8[1] >> 4) ))
+
+  # The following operations depend on the c8 element number.
+  case ${#c8[*]} in 
+    3) (( c6[2] = ((c8[1] & 15) << 2) | (c8[2] >> 6) ))
+       (( c6[3] = c8[2] & 63 )) ;;
+    2) (( c6[2] = (c8[1] & 15) << 2 ))
+       (( c6[3] = 64 )) ;;
+    1) (( c6[2] = c6[3] = 64 )) ;;
+  esac
+
+  for char in ${c6[@]}; do
+    display_base64_char ${char}
+  done
+}
+
+function decode_base64 {
+# Decode four base64 characters into three hexadecimal ASCII characters.
+  #  c8[]: to store the codes of the 8-bit characters
+  #  c6[]: to store the corresponding Base64 values on 6-bit
+  declare -a -i c8 c6
+
+  # Find decimal value corresponding to the current base64 character.
+  for current_char in ${1:0:1} ${1:1:1} ${1:2:1} ${1:3:1}; do
+     [ "${current_char}" = "=" ] && break
+
+     position=0
+     while [ "${current_char}" != "${base64_charset[${position}]}" ]; do
+        (( position++ ))
+     done
+
+     c6=( ${c6[*]} ${position} )
+  done
+
+  #  Let's play with bitwise operators
+  #+ (4x8-bit into 3x6-bits conversion).
+  (( c8[0] = (c6[0] << 2) | (c6[1] >> 4) ))
+
+  # The next operations depends on the c6 elements number.
+  case ${#c6[*]} in
+    3) (( c8[1] = ( (c6[1] & 15) << 4) | (c6[2] >> 2) ))
+       (( c8[2] = (c6[2] & 3) << 6 )); unset c8[2] ;;
+    4) (( c8[1] = ( (c6[1] & 15) << 4) | (c6[2] >> 2) ))
+       (( c8[2] = ( (c6[2] &  3) << 6) |  c6[3] )) ;;
+  esac
+
+  for char in ${c8[*]}; do
+     printf "\x$(printf "%x" ${char})"
+  done
+}
+
+
+# main ()
+
+if [ "$1" = "-d" ]; then   # decode
+
+  # Reformat STDIN in pseudo 4x6-bit groups.
+  content=$(cat - | tr -d "\n" | sed -r "s/(.{4})/\1 /g")
+
+  for chars in ${content}; do decode_base64 ${chars}; done
+
+else
+  # Make a hexdump of stdin and reformat in 3-byte groups.
+  content=$(cat - | xxd -ps -u | sed -r "s/(\w{6})/\1 /g" |
+            tr -d "\n")
+
+  for chars in ${content}; do encode_base64 ${chars}; done
+
+  echo
+
+fi
+```
+
+tessh reads bytes as bytes (`sys.stdin.buffer.read`), so there's no hex
+dump: indexing a `bytes` gives the numbers, and `bytes $list` turns
+numbers back into bytes. The bit operations are the original's. Here
+`main` is given made-up data rather than stdin, and the result is checked
+against Python's own `base64` module, which is what a tessh script would
+use in practice (`base64.b64encode`, `base64.urlsafe_b64encode`).
+
+```tessh
+import sys string
+# base64.sh: Base64 encoding and decoding.
+# Copyright (c) 2011 vladz <vladz@devzero.fr>
+#  Encode or decode original Base64 (and also Base64url)
+#+ from STDIN to STDOUT.
+#    Encode: base64.tsh < binary-file > binary-file.base64
+#    Decode: base64.tsh -d < binary-file.base64 > binary-file
+#  Reference: RFC4648, http://tools.ietf.org/html/rfc4648#section-5
+
+# The whole base64 charset, and additionally the character "=" ...
+base64_charset = $string.ascii_uppercase + $string.ascii_lowercase + $string.digits + "+/="
+### base64_charset = $string.ascii_uppercase + $string.ascii_lowercase + $string.digits + "-_="
+###   (base64url encoding instead of original base64.)
+text_width = 64   # Output text width when encoding (as openssl).
+
+def encode_base64 group
+  # Encode three 8-bit bytes into four 6-bit numbers.
+  c8 = (list $group) + [0 0]      # (Missing bytes are 0, as in bash.)
+  c6 = [($c8[0] >> 2), ((($c8[0] & 3) << 4) | ($c8[1] >> 4)),
+        ((($c8[1] & 15) << 2) | ($c8[2] >> 6)), ($c8[2] & 63)]
+  # The last group may be short: "=" (64) fills it out.
+  match (len $group)
+    case 2
+      $c6[3] = 64
+    case 1
+      $c6[2] = 64 ; $c6[3] = 64
+  "".join [$base64_charset[$c] for c in $c6]
+
+def decode_base64 chars
+  # Decode four base64 characters into up to three bytes.
+  c6 = [($base64_charset.index $c) for c in $chars if $c != "="]
+  c8 = [((($c6[0] << 2) | ($c6[1] >> 4)) & 255)]
+  if (len $c6) >= 3
+    $c8.append (((($c6[1] & 15) << 4) | ($c6[2] >> 2)) & 255)
+  if (len $c6) == 4
+    $c8.append (((($c6[2] & 3) << 6) | $c6[3]) & 255)
+  bytes $c8
+
+def encode data                   # Bytes to base64 text, in 3-byte groups.
+  "".join [(encode_base64 $data[$i : $i + 3]) for i in (range 0 (len $data) 3)]
+
+def decode text                   # Base64 text to bytes, in 4-character groups.
+  text = $text.replace "\n" ""
+  b"".join [(decode_base64 $text[$i : $i + 4]) for i in (range 0 (len $text) 4)]
+
+def main args data
+  if $args[:1] == [-d]            # decode
+    sys.stdout.flush
+    sys.stdout.buffer.write (decode (.decode $data))
+    sys.stdout.buffer.flush
+  else                            # encode, text_width characters a line
+    text = encode $data
+    for i in (range 0 (len $text) $text_width)
+      print $text[$i : $i + $text_width]
+
+# The script proper ends with:   main $argv[1:] (sys.stdin.buffer.read)
+# (Here it's given made-up data in place of stdin.)
+main [] b"Hello, world!\n"
+main [-d] b"SGVsbG8sIHdvcmxkIQo=\n"
+
+# (And every byte value, checked against Python's own base64 module.)
+import base64
+every = bytes (range 256)
+main [] $every[:96]
+print ((encode $every) == (.decode (base64.b64encode $every))) ((decode (encode $every)) == $every)
+```
+
+```output
+SGVsbG8sIHdvcmxkIQo=
+Hello, world!
+AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v
+MDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5f
+True True
+```
+
+## Inserting text with sed
+<!-- help: abs-sedappend sedappend.sh sed-i insert prepend -->
+
+A short one: `sed -i "1i text"` puts a line at the top of each file whose
+name ends in `sample`.
+
+### Example A-55. Inserting text in a file using sed (`sedappend.sh`)
+
+```bash no-run
+#!/bin/bash
+#  Prepends a string at a specified line
+#+ in files with names ending in "sample"
+#+ in the current working directory.
+#  000000000000000000000000000000000000
+#  This script overwrites files!
+#  Be careful running it in a directory
+#+ where you have important files!!!
+#  000000000000000000000000000000000000
+
+#  Create a couple of files to operate on ...
+#  01sample
+#  02sample
+#  ... etc.
+#  These files must not be empty, else the prepend will not work.
+
+lineno=1            # Append at line 1 (prepend).
+filespec="*sample"  # Filename pattern to operate on.
+
+string=$(whoami)    # Will set your username as string to insert.
+                    # It could just as easily be any other string.
+
+for file in $filespec # Specify which files to alter.
+do #        ^^^^^^^^^
+ sed -i ""$lineno"i "$string"" $file
+#    ^^ -i option edits files in-place.
+#                 ^ Insert (i) command.
+ echo ""$file" altered!"
+done
+
+echo "Warning: files possibly clobbered!"
+
+exit 0
+
+# Exercise:
+# Add error checking to this script.
+# It needs it badly.
+```
+
+`sed` is the same program in tessh, and `*sample` written bare is a Glob,
+read again when the loop runs. `"${lineno}i $string"` glues the line
+number to the `i` command, which the original did with its odd quoting.
+Two made-up files to work on, and a fixed string where the original used
+your user name.
+
+```tessh
+#  Prepends a string at a specified line
+#+ in files with names ending in "sample"
+#+ in the current working directory.
+#  This script overwrites files! Be careful where you run it.
+
+# (Made-up files to try it on. They must not be empty.)
+printf "first line\nsecond line\n" >01sample
+printf "only line\n" >02sample
+
+lineno = 1             # Append at line 1 (prepend).
+filespec = *sample     # Filename pattern to operate on: a Glob.
+string = "ABS reader"  # ($(whoami), your user name, in the original.)
+
+for file in $filespec  # Specify which files to alter.
+  sed -i "${lineno}i $string" $file    # -i edits in place; i inserts.
+  print "$file altered!"
+
+print "Warning: files possibly clobbered!"
+head 01sample 02sample # (To see what it did.)
+exit 0
+```
+
+```output
+01sample altered!
+02sample altered!
+Warning: files possibly clobbered!
+==> 01sample <==
+ABS reader
+first line
+second line
+
+==> 02sample <==
+ABS reader
+only line
+```
