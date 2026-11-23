@@ -1121,3 +1121,206 @@ The last 7 characters of "1234zipper5FLIPPER43231" are ER43231.
 Peter Knowles' trim, `LRFDATE=`expr "$LRFDATE" : '[[:space:]]*\(.*\)[[:space:]]*$'``,
 is `LRFDATE = $LRFDATE.strip` in tessh (and `sed` or `awk` are better than
 `expr` for string work in bash too, as the ABS Guide says).
+
+## 16.3 Time / Date Commands
+<!-- help: abs-time-date date zdump time touch at batch cal sleep usleep hwclock datetime -->
+
+`date` prints the date and time, in any format with `+FORMAT` (`%j` day
+of the year, `%s` seconds since 1970, `%N` nanoseconds), in UTC with
+`-u`, and for another time with `-d`/`--date` (`'6 days ago'`,
+`'2007-12-25 12:30'`). `TZ=zone` in front picks a time zone, `zdump`
+shows a zone's time, and `time` times a command. `touch` sets a file's
+times (or makes an empty file), `at` and `batch` run commands later, `cal`
+prints a calendar, `sleep` waits (`usleep` in microseconds), and
+`hwclock` reads or sets the hardware clock.
+
+The programs run the same in tessh. For calculating with dates, Python's
+`datetime` is better than `date` and arithmetic on seconds: a
+`datetime` minus another is a `timedelta` with `.days` and `.seconds`,
+one plus a `timedelta` is a new date, and a format spec in a string
+(`"${d:%d %B}"`) formats it the way `date +…` does.
+
+### Example 16-10. Using `date` (`ex51.sh`)
+
+```bash
+#!/bin/bash
+# Exercising the 'date' command
+
+echo "The number of days since the year's beginning is `date +%j`."
+# Needs a leading '+' to invoke formatting.
+# %j gives day of year.
+
+echo "The number of seconds elapsed since 01/01/1970 is `date +%s`."
+#  %s yields number of seconds since "UNIX epoch" began,
+#+ but how is this useful?
+
+prefix=temp
+suffix=$(date +%s)  # The "+%s" option to 'date' is GNU-specific.
+filename=$prefix.$suffix
+echo "Temporary filename = $filename"
+#  It's great for creating "unique and random" temp filenames,
+#+ even better than using $$.
+
+# Read the 'date' man page for more formatting options.
+
+exit 0
+```
+
+`datetime.datetime.now` is the time as a value; `strftime` takes `date`'s
+formats, and `.timestamp` is the seconds since 1970. For a temporary file
+name, Python's `tempfile` makes one that's really unique (and creates it
+safely), which a time in seconds isn't.
+
+```tessh
+import datetime
+now = (datetime.datetime.now)
+
+print "The number of days since the year's beginning is ${now:%j}."
+# %j gives day of year.
+
+print "The number of seconds elapsed since 01/01/1970 is $(int ($now.timestamp))."
+
+prefix = temp
+suffix = int ($now.timestamp)
+filename = "$prefix.$suffix"
+print "Temporary filename = $filename"
+# (tempfile.mkstemp makes a temporary file with a name no other has.)
+
+exit 0
+```
+
+```text
+(one run)
+The number of days since the year's beginning is 327.
+The number of seconds elapsed since 01/01/1970 is 1795458756.
+Temporary filename = temp.1795458756
+```
+
+The other `date` tricks in the text are `datetime` too:
+
+```bash no-run
+date +%N | sed -e 's/000$//' -e 's/^0//'   # nanoseconds, as a random number
+date +%j                                    # day of the year
+TZ=EST date                                 # the time in another zone
+SixDaysAgo=$(date --date='6 days ago')
+OneYearAgo=$(date --date='1 year ago')
+```
+
+```tessh
+import datetime
+from zoneinfo import ZoneInfo
+now = (datetime.datetime.now)
+print $now.microsecond                      # (random enough: use random)
+print "${now:%j}"                           # day of the year
+print (datetime.datetime.now (ZoneInfo EST)) # the time in another zone
+TZ=EST date                                  # (or as in bash)
+SixDaysAgo = $now - (datetime.timedelta days=6)
+OneYearAgo = $now.replace year=($now.year - 1)
+print $SixDaysAgo $OneYearAgo
+```
+
+```text
+(one run)
+948829
+327
+2026-11-23 13:32:36.952673-05:00
+Mon Nov 23 01:32:36 PM EST 2026
+2026-11-17 10:32:36.948829 2025-11-23 10:32:36.948829
+```
+
+### Example 16-11. Date calculations (`date-calc.sh`)
+
+```bash
+#!/bin/bash
+# date-calc.sh
+# Author: Nathan Coulter
+# Used in ABS Guide with permission (thanks!).
+
+MPHR=60    # Minutes per hour.
+HPD=24     # Hours per day.
+
+diff () {
+        printf '%s' $(( $(date -u -d"$TARGET" +%s) -
+                        $(date -u -d"$CURRENT" +%s)))
+#                       %d = day of month.
+}
+
+
+CURRENT=$(date -u -d '2007-09-01 17:30:24' '+%F %T.%N %Z')
+TARGET=$(date -u -d'2007-12-25 12:30:00' '+%F %T.%N %Z')
+# %F = full date, %T = %H:%M:%S, %N = nanoseconds, %Z = time zone.
+
+printf '\nIn 2007, %s ' \
+       "$(date -d"$CURRENT +
+        $(( $(diff) /$MPHR /$MPHR /$HPD / 2 )) days" '+%d %B')" 
+#       %B = name of month                ^ halfway
+printf 'was halfway between %s ' "$(date -d"$CURRENT" '+%d %B')"
+printf 'and %s\n' "$(date -d"$TARGET" '+%d %B')"
+
+printf '\nOn %s at %s, there were\n' \
+        $(date -u -d"$CURRENT" +%F) $(date -u -d"$CURRENT" +%T)
+DAYS=$(( $(diff) / $MPHR / $MPHR / $HPD ))
+CURRENT=$(date -d"$CURRENT +$DAYS days" '+%F %T.%N %Z')
+HOURS=$(( $(diff) / $MPHR / $MPHR ))
+CURRENT=$(date -d"$CURRENT +$HOURS hours" '+%F %T.%N %Z')
+MINUTES=$(( $(diff) / $MPHR ))
+CURRENT=$(date -d"$CURRENT +$MINUTES minutes" '+%F %T.%N %Z')
+printf '%s days, %s hours, ' "$DAYS" "$HOURS"
+printf '%s minutes, and %s seconds ' "$MINUTES" "$(diff)"
+printf 'until Christmas Dinner!\n\n'
+
+#  Exercise:
+#  --------
+#  Rewrite the diff () function to accept passed parameters,
+#+ rather than using global variables.
+```
+
+Nathan Coulter's script converts each date to seconds with `date +%s`,
+subtracts, and steps the current date forward a day, an hour and a minute
+at a time with `date -d"… +N days"`. With `datetime` the difference is
+one subtraction, a `timedelta`, and halving it is `/ 2`. The exercise
+(`diff` with parameters instead of globals) is done too.
+
+```tessh
+# date-calc.tsh
+# After Nathan Coulter's date-calc.sh.
+from datetime import datetime timedelta
+
+def diff current target = $target - $current     # a timedelta
+
+CURRENT = datetime 2007 9 1 17 30 24
+TARGET = datetime 2007 12 25 12 30 0
+
+# Halfway, in whole days as the original counts them.
+half = $CURRENT + (timedelta days=((diff $CURRENT $TARGET).days // 2))
+print "\nIn 2007, ${half:%d %B} was halfway between ${CURRENT:%d %B} and ${TARGET:%d %B}"
+
+print "\nOn ${CURRENT:%F} at ${CURRENT:%T}, there were"
+left = diff $CURRENT $TARGET
+DAYS = $left.days
+[HOURS rest] = divmod $left.seconds 3600
+[MINUTES SECONDS] = divmod $rest 60
+print "$DAYS days, $HOURS hours, $MINUTES minutes, and $SECONDS seconds until Christmas Dinner!\n"
+```
+
+```output
+
+In 2007, 28 October was halfway between 01 September and 25 December
+
+On 2007-09-01 at 17:30:24, there were
+114 days, 18 hours, 59 minutes, and 36 seconds until Christmas Dinner!
+
+```
+
+`time` is not a bash-style keyword in tessh: `time cmd` runs the `time`
+program, which prints its own report (`0.00user 0.00system 0:00.10elapsed
+…`) on stderr. To time Python code, take `time.perf_counter` before and
+after.
+
+**Gap:** tessh has no `time` keyword: `time` runs `/usr/bin/time` when it's
+installed, so it can't time a pipeline as a whole, a Python call, or a
+block, and its report isn't bash's `real/user/sys`.
+
+`touch`, `at`, `batch`, `cal`, `sleep` and `hwclock` are programs and run
+the same; `sleep` takes fractions (`sleep 0.2`), which makes `usleep`
+unnecessary, and `time.sleep` does it from Python.
