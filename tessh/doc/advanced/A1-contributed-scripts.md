@@ -4776,3 +4776,587 @@ Isolde
 'Tristan' 'Romeo Montague' 
 
 ```
+
+## Mounting USB keychain storage devices
+<!-- help: abs-usb usb.sh usb-storage hotplug mount fstab devlabel -->
+
+Konstantin Riabitsev's hotplug script (with functions from Michael
+Hamilton's `usb-mount`) set up a USB pen drive when it was plugged in:
+it finds the drive's SCSI device, gives it to the console user, names it
+with `devlabel`, and puts a line for it in `/etc/fstab`; on removal it
+unmounts it and takes the line out. Linux has done all this by itself since
+about 2004, but the script still shows how.
+
+### Example A-23. Mounting USB keychain storage devices (`usb.sh`)
+
+```bash no-run
+#!/bin/bash
+# ==> usb.sh
+# ==> Script for mounting and installing pen/keychain USB storage devices.
+# ==> Runs as root at system startup (see below).
+# ==>
+# ==> Newer Linux distros (2004 or later) autodetect
+# ==> and install USB pen drives, and therefore don't need this script.
+# ==> But, it's still instructive.
+ 
+#  This code is free software covered by GNU GPL license version 2 or above.
+#  Please refer to http://www.gnu.org/ for the full license text.
+#
+#  Some code lifted from usb-mount by Michael Hamilton's usb-mount (LGPL)
+#+ see http://users.actrix.co.nz/michael/usbmount.html
+#
+#  INSTALL
+#  -------
+#  Put this in /etc/hotplug/usb/diskonkey.
+#  Then look in /etc/hotplug/usb.distmap, and copy all usb-storage entries
+#+ into /etc/hotplug/usb.usermap, substituting "usb-storage" for "diskonkey".
+#  Otherwise this code is only run during the kernel module invocation/removal
+#+ (at least in my tests), which defeats the purpose.
+#
+#  TODO
+#  ----
+#  Handle more than one diskonkey device at one time (e.g. /dev/diskonkey1
+#+ and /mnt/diskonkey1), etc. The biggest problem here is the handling in
+#+ devlabel, which I haven't yet tried.
+#
+#  AUTHOR and SUPPORT
+#  ------------------
+#  Konstantin Riabitsev, <icon linux duke edu>.
+#  Send any problem reports to my email address at the moment.
+#
+# ==> Comments added by ABS Guide author.
+
+
+
+SYMLINKDEV=/dev/diskonkey
+MOUNTPOINT=/mnt/diskonkey
+DEVLABEL=/sbin/devlabel
+DEVLABELCONFIG=/etc/sysconfig/devlabel
+IAM=$0
+
+##
+# Functions lifted near-verbatim from usb-mount code.
+#
+function allAttachedScsiUsb {
+  find /proc/scsi/ -path '/proc/scsi/usb-storage*' -type f |
+  xargs grep -l 'Attached: Yes'
+}
+function scsiDevFromScsiUsb {
+  echo $1 | awk -F"[-/]" '{ n=$(NF-1);
+  print "/dev/sd" substr("abcdefghijklmnopqrstuvwxyz", n+1, 1) }'
+}
+
+if [ "${ACTION}" = "add" ] && [ -f "${DEVICE}" ]; then
+    ##
+    # lifted from usbcam code.
+    #
+    if [ -f /var/run/console.lock ]; then
+        CONSOLEOWNER=`cat /var/run/console.lock`
+    elif [ -f /var/lock/console.lock ]; then
+        CONSOLEOWNER=`cat /var/lock/console.lock`
+    else
+        CONSOLEOWNER=
+    fi
+    for procEntry in $(allAttachedScsiUsb); do
+        scsiDev=$(scsiDevFromScsiUsb $procEntry)
+        #  Some bug with usb-storage?
+        #  Partitions are not in /proc/partitions until they are accessed
+        #+ somehow.
+        /sbin/fdisk -l $scsiDev >/dev/null
+        ##
+        #  Most devices have partitioning info, so the data would be on
+        #+ /dev/sd?1. However, some stupider ones don't have any partitioning
+        #+ and use the entire device for data storage. This tries to
+        #+ guess semi-intelligently if we have a /dev/sd?1 and if not, then
+        #+ it uses the entire device and hopes for the better.
+        #
+        if grep -q `basename $scsiDev`1 /proc/partitions; then
+            part="$scsiDev""1"
+        else
+            part=$scsiDev
+        fi
+        ##
+        #  Change ownership of the partition to the console user so they can
+        #+ mount it.
+        #
+        if [ ! -z "$CONSOLEOWNER" ]; then
+            chown $CONSOLEOWNER:disk $part
+        fi
+        ##
+        # This checks if we already have this UUID defined with devlabel.
+        # If not, it then adds the device to the list.
+        #
+        prodid=`$DEVLABEL printid -d $part`
+        if ! grep -q $prodid $DEVLABELCONFIG; then
+            # cross our fingers and hope it works
+            $DEVLABEL add -d $part -s $SYMLINKDEV 2>/dev/null
+        fi
+        ##
+        # Check if the mount point exists and create if it doesn't.
+        #
+        if [ ! -e $MOUNTPOINT ]; then
+            mkdir -p $MOUNTPOINT
+        fi
+        ##
+        # Take care of /etc/fstab so mounting is easy.
+        #
+        if ! grep -q "^$SYMLINKDEV" /etc/fstab; then
+            # Add an fstab entry
+            echo -e \
+                "$SYMLINKDEV\t\t$MOUNTPOINT\t\tauto\tnoauto,owner,kudzu 0 0" \
+                >> /etc/fstab
+        fi
+    done
+    if [ ! -z "$REMOVER" ]; then
+        ##
+        # Make sure this script is triggered on device removal.
+        #
+        mkdir -p `dirname $REMOVER`
+        ln -s $IAM $REMOVER
+    fi
+elif [ "${ACTION}" = "remove" ]; then
+    ##
+    # If the device is mounted, unmount it cleanly.
+    #
+    if grep -q "$MOUNTPOINT" /etc/mtab; then
+        # unmount cleanly
+        umount -l $MOUNTPOINT
+    fi
+    ##
+    # Remove it from /etc/fstab if it's there.
+    #
+    if grep -q "^$SYMLINKDEV" /etc/fstab; then
+        grep -v "^$SYMLINKDEV" /etc/fstab > /etc/.fstab.new
+        mv -f /etc/.fstab.new /etc/fstab
+    fi
+fi
+
+exit 0
+```
+
+It runs as root from the hotplug system, with the event in the environment
+(`$ACTION`, `$DEVICE`, `$REMOVER`), so the tessh version doesn't run here.
+The environment variables come from `$env.get`, the lock files are Paths,
+and the `find | xargs grep -l` and `echo | awk` helpers become Python: a
+glob over `/proc/scsi`, and a regex split. A program named in a variable,
+`$DEVLABEL`, runs with `command`. `grep -q` stays: its exit status is the
+test.
+
+```tessh no-run
+import re string
+# usb.tsh
+# Script for mounting and installing pen/keychain USB storage devices.
+# Runs as root at system startup.
+#  This code is free software covered by GNU GPL license version 2 or above.
+#  Some code lifted from usb-mount by Michael Hamilton's usb-mount (LGPL)
+#  AUTHOR and SUPPORT
+#  ------------------
+#  Konstantin Riabitsev, <icon linux duke edu>.
+
+SYMLINKDEV = /dev/diskonkey
+MOUNTPOINT = /mnt/diskonkey
+DEVLABEL = /sbin/devlabel
+DEVLABELCONFIG = /etc/sysconfig/devlabel
+IAM = $argv[0]
+
+##
+# Functions lifted near-verbatim from usb-mount code.
+#
+def allAttachedScsiUsb scsi=/proc/scsi    # The usb-storage entries attached.
+  [$p for p in ($scsi.glob "usb-storage*/*") if ($p.is_file) and "Attached: Yes" in ($p.read_text)]
+
+def scsiDevFromScsiUsb entry # …/usb-storage-N/… -> /dev/sd + the Nth letter
+  n = int (re.split '[-/]' (str $entry))[-2]
+  "/dev/sd" + $string.ascii_lowercase[$n]
+
+ACTION = $env.get ACTION ""
+DEVICE = $env.get DEVICE ""
+REMOVER = $env.get REMOVER ""
+
+if $ACTION == add and $DEVICE and ((Path $DEVICE).is_file)
+  ##
+  # lifted from usbcam code.
+  #
+  CONSOLEOWNER = ""
+  for lock in [/var/run/console.lock /var/lock/console.lock]
+    if ($lock.is_file)
+      CONSOLEOWNER = (($lock.read_text).strip)
+      break
+  for procEntry in (allAttachedScsiUsb)
+    scsiDev = scsiDevFromScsiUsb $procEntry
+    #  Some bug with usb-storage?
+    #  Partitions are not in /proc/partitions until they are accessed somehow.
+    command /sbin/fdisk -l $scsiDev >/dev/null
+    ##
+    #  Most devices have partitioning info, so the data would be on
+    #+ /dev/sd?1. However, some stupider ones don't have any partitioning
+    #+ and use the entire device for data storage.
+    #
+    name = (Path $scsiDev).name
+    part = if (grep -q "${name}1" /proc/partitions) then "${scsiDev}1" else $scsiDev
+    ##
+    #  Change ownership of the partition to the console user so they can
+    #+ mount it.
+    #
+    if $CONSOLEOWNER
+      chown "$CONSOLEOWNER:disk" $part
+    ##
+    # This checks if we already have this UUID defined with devlabel.
+    # If not, it then adds the device to the list.
+    #
+    prodid = command $DEVLABEL printid -d $part
+    if not (grep -q $prodid $DEVLABELCONFIG)
+      # cross our fingers and hope it works
+      command $DEVLABEL add -d $part -s $SYMLINKDEV 2>/dev/null
+    ##
+    # Check if the mount point exists and create if it doesn't.
+    #
+    if not ($MOUNTPOINT.exists)
+      mkdir -p $MOUNTPOINT
+    ##
+    # Take care of /etc/fstab so mounting is easy.
+    #
+    if not (grep -q "^$SYMLINKDEV" /etc/fstab)
+      # Add an fstab entry
+      print "$SYMLINKDEV\t\t$MOUNTPOINT\t\tauto\tnoauto,owner,kudzu 0 0" >>/etc/fstab
+  if $REMOVER
+    ##
+    # Make sure this script is triggered on device removal.
+    #
+    mkdir -p (Path $REMOVER).parent
+    ln -s $IAM $REMOVER
+elif $ACTION == remove
+  ##
+  # If the device is mounted, unmount it cleanly.
+  #
+  if grep -q $MOUNTPOINT /etc/mtab
+    umount -l $MOUNTPOINT
+  ##
+  # Remove it from /etc/fstab if it's there.
+  #
+  if grep -q "^$SYMLINKDEV" /etc/fstab
+    grep -v "^$SYMLINKDEV" /etc/fstab > /etc/.fstab.new
+    mv -f /etc/.fstab.new /etc/fstab
+
+exit 0
+```
+
+The two helper functions can be tried on a made-up `/proc/scsi`: a drive
+attached as SCSI host 1 is `/dev/sdb`.
+
+```tessh
+import re string
+# (A made-up /proc/scsi: two usb-storage hosts, one with a drive attached.)
+mkdir -p scsi/usb-storage-0 scsi/usb-storage-1
+print "Host scsi0: usb-storage\nAttached: No" >scsi/usb-storage-0/0
+print "Host scsi1: usb-storage\nAttached: Yes" >scsi/usb-storage-1/1
+
+def allAttachedScsiUsb scsi=/proc/scsi
+  [$p for p in ($scsi.glob "usb-storage*/*") if ($p.is_file) and "Attached: Yes" in ($p.read_text)]
+
+def scsiDevFromScsiUsb entry
+  n = int (re.split '[-/]' (str $entry))[-2]
+  "/dev/sd" + $string.ascii_lowercase[$n]
+
+for procEntry in (allAttachedScsiUsb ./scsi)
+  print $procEntry "->" (scsiDevFromScsiUsb $procEntry)
+```
+
+```output
+./scsi/usb-storage-1/1 -> /dev/sdb
+```
+
+## Converting to HTML
+<!-- help: abs-tohtml tohtml html text-to-html paragraphs italics sed -->
+
+Mendel Cooper's `tohtml.sh` turns a text file into a web page: headers
+and footers around it, `<br>` tags between paragraphs, an `<img>` for a
+line like `[image01.jpg]`, and italics for `_underscored phrases_`. It
+reads standard input and writes standard output.
+
+### Example A-24. Converting to HTML (`tohtml.sh`)
+
+```bash no-run
+#!/bin/bash
+# tohtml.sh [v. 0.2.01, reldate: 04/13/12, a teeny bit less buggy]
+
+# Convert a text file to HTML format.
+# Author: Mendel Cooper
+# License: GPL3
+# Usage: sh tohtml.sh < textfile > htmlfile
+# Script can easily be modified to accept source and target filenames.
+
+#    Assumptions:
+# 1) Paragraphs in (target) text file are separated by a blank line.
+# 2) Jpeg images (*.jpg) are located in "images" subdirectory.
+#    In the target file, the image names are enclosed in square brackets,
+#    for example, [image01.jpg].
+# 3) Emphasized (italic) phrases begin with a space+underscore
+#+   or the first character on the line is an underscore,
+#+   and end with an underscore+space or underscore+end-of-line.
+
+
+# Settings
+FNTSIZE=2        # Small-medium font size
+IMGDIR="images"  # Image directory
+# Headers
+HDR01='<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">'
+HDR02='<!-- Converted to HTML by ***tohtml.sh*** script -->'
+HDR03='<!-- script author: M. Leo Cooper <thegrendel.abs@gmail.com> -->'
+HDR10='<html>'
+HDR11='<head>'
+HDR11a='</head>'
+HDR12a='<title>'
+HDR12b='</title>'
+HDR121='<META NAME="GENERATOR" CONTENT="tohtml.sh script">'
+HDR13='<body bgcolor="#dddddd">'   # Change background color to suit.
+HDR14a='<font size='
+HDR14b='>'
+# Footers
+FTR10='</body>'
+FTR11='</html>'
+# Tags
+BOLD="<b>"
+CENTER="<center>"
+END_CENTER="</center>"
+LF="<br>"
+
+
+write_headers ()
+  {
+  echo "$HDR01"
+  echo
+  echo "$HDR02"
+  echo "$HDR03"
+  echo
+  echo
+  echo "$HDR10"
+  echo "$HDR11"
+  echo "$HDR121"
+  echo "$HDR11a"
+  echo "$HDR13"
+  echo
+  echo -n "$HDR14a"
+  echo -n "$FNTSIZE"
+  echo "$HDR14b"
+  echo
+  echo "$BOLD"        # Everything in bold (more easily readable).
+  }
+
+
+process_text ()
+  {
+  while read line     # Read one line at a time.
+  do
+    {
+    if [ ! "$line" ]  # Blank line?
+    then              # Then new paragraph must follow.
+      echo
+      echo "$LF"      # Insert two <br> tags.
+      echo "$LF"
+      echo
+      continue        # Skip the underscore test.
+    else              # Otherwise . . .
+
+      if [[ "$line" =~ \[*jpg\] ]]    # Is a graphic?
+      then                            # Strip away brackets.
+        temp=$( echo "$line" | sed -e 's/\[//' -e 's/\]//' )
+        line=""$CENTER" <img src="\"$IMGDIR"/$temp\"> "$END_CENTER" "
+                                      # Add image tag.
+                                      # And, center it.
+      fi
+
+    fi
+
+
+    echo "$line" | grep -q _
+    if [ "$?" -eq 0 ]    # If line contains underscore ...
+    then
+      # ===================================================
+      # Convert underscored phrase to italics.
+      temp=$( echo "$line" |
+              sed -e 's/ _/ <i>/' -e 's/_/<\/i> /' |
+              sed -e 's/^_/<i>/'  -e 's/_/<\/i>/' )
+      #  Process only underscores prefixed by space,
+      #+ or at beginning or end of line.
+      #  Do not convert underscores embedded within a word!
+      line="$temp"
+      # Slows script execution. Can be optimized?
+      # ===================================================
+    fi
+
+
+   
+#   echo
+    echo "$line"
+#   echo
+#   Don't want extra blank lines in generated text!
+    } # End while
+  done
+  }   # End process_text ()
+
+
+write_footers ()  # Termination tags.
+  {
+  echo "$FTR10"
+  echo "$FTR11"
+  }
+
+
+# main () {
+# =========
+write_headers
+process_text
+write_footers
+# =========
+#         }
+
+exit $?
+
+#  Exercises:
+#  ---------
+#  1) Fixup: Check for closing underscore before a comma or period.
+#  2) Add a test for the presence of a closing underscore
+#+    in phrases to be italicized.
+```
+
+The tessh version keeps the structure (headers, text, footers) and the
+redirections: `process_text` reads `sys.stdin`, and `process_text
+<story.txt` gives it the file, a redirection on a Python function. Each
+`sed` becomes a `re'…'.sub` with `count=1`, which also answers the
+comment's "Can be optimized?": no program is started for each line. It
+is faithful to a fault: the sed scripts turn the first `_` of a line into a
+closing tag, so a line that starts with an underscore comes out wrong, as
+the last line shows, in bash too.
+
+```tessh
+import sys
+# (A made-up text to convert.)
+print "Chapter One\n\nIt was a _dark and stormy_ night.\n[image01.jpg]\n   A shot rang out.\n\n_Suddenly_, the snake_case villain fled." >story.txt
+
+# tohtml.tsh [v. 0.2.01, reldate: 04/13/12, a teeny bit less buggy]
+# Convert a text file to HTML format.
+# Author: Mendel Cooper
+# License: GPL3
+# Usage: tessh tohtml.tsh < textfile > htmlfile
+
+#    Assumptions:
+# 1) Paragraphs in (target) text file are separated by a blank line.
+# 2) Jpeg images (*.jpg) are located in "images" subdirectory.
+#    In the target file, the image names are enclosed in square brackets,
+#    for example, [image01.jpg].
+# 3) Emphasized (italic) phrases begin with a space+underscore
+#+   or the first character on the line is an underscore,
+#+   and end with an underscore+space or underscore+end-of-line.
+
+# Settings
+FNTSIZE = 2                  # Small-medium font size
+IMGDIR = images              # Image directory
+# Headers
+HDR01 = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">'
+HDR02 = '<!-- Converted to HTML by ***tohtml.sh*** script -->'
+HDR03 = '<!-- script author: M. Leo Cooper <thegrendel.abs@gmail.com> -->'
+HDR10 = '<html>'
+HDR11 = '<head>'
+HDR11a = '</head>'
+HDR121 = '<META NAME="GENERATOR" CONTENT="tohtml.sh script">'
+HDR13 = '<body bgcolor="#dddddd">'   # Change background color to suit.
+HDR14a = '<font size='
+HDR14b = '>'
+# Footers
+FTR10 = '</body>'
+FTR11 = '</html>'
+# Tags
+BOLD = "<b>"
+CENTER = "<center>"
+END_CENTER = "</center>"
+LF = "<br>"
+
+def write_headers
+  print $HDR01 "" $HDR02 $HDR03 "" "" $HDR10 $HDR11 $HDR121 $HDR11a $HDR13 "" sep="\n"
+  print "$HDR14a$FNTSIZE$HDR14b"
+  print
+  print $BOLD                # Everything in bold (more easily readable).
+
+def process_text
+  for line in $sys.stdin     # Read one line at a time.
+    line = ($line.strip)
+    if not $line             # Blank line?
+      print "\n$LF\n$LF\n"   # Then new paragraph must follow:
+      continue               # insert two <br> tags.
+
+    if $line =~ re'\[*jpg\]' # Is a graphic?
+      temp = re'\]'.sub '' (re'\['.sub '' $line count=1) count=1  # Strip away brackets.
+      line = "$CENTER <img src=\"$IMGDIR/$temp\"> $END_CENTER "  # Add image tag,
+                                                                 # and center it.
+    if "_" in $line          # If line contains underscore ...
+      # Convert underscored phrase to italics.
+      line = re' _'.sub ' <i>' $line count=1
+      line = re'_'.sub '</i> ' $line count=1
+      line = re'^_'.sub '<i>' $line count=1
+      line = re'_'.sub '</i>' $line count=1
+
+    print $line
+
+def write_footers            # Termination tags.
+  print $FTR10
+  print $FTR11
+
+# main
+write_headers
+process_text <story.txt      # (As "tessh tohtml.tsh <story.txt".)
+write_footers
+```
+
+```output
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<!-- Converted to HTML by ***tohtml.sh*** script -->
+<!-- script author: M. Leo Cooper <thegrendel.abs@gmail.com> -->
+
+
+<html>
+<head>
+<META NAME="GENERATOR" CONTENT="tohtml.sh script">
+</head>
+<body bgcolor="#dddddd">
+
+<font size=2>
+
+<b>
+Chapter One
+
+<br>
+<br>
+
+It was a <i>dark and stormy</i>  night.
+<center> <img src="images/image01.jpg"> </center> 
+A shot rang out.
+
+<br>
+<br>
+
+</i> Suddenly</i>, the snake_case villain fled.
+</body>
+</html>
+```
+
+The scripts' exercises ask for underscores before a comma or period, and
+for a check that a phrase is closed. One regex does both: an underscore at
+the start or after a blank, the phrase, and an underscore before a blank,
+punctuation or the end. An underscore inside a word, or one never closed,
+is left alone.
+
+```tessh
+def italics line
+  re'(^|\s)_([^_]+)_(?=[\s,.;:!?]|$)'.sub '\1<i>\2</i>' $line
+
+for line in ["It was a _dark and stormy_ night." "_Suddenly_, the snake_case villain fled." "An _open phrase never closed."]
+  print (italics $line)
+```
+
+```output
+It was a <i>dark and stormy</i> night.
+<i>Suddenly</i>, the snake_case villain fled.
+An _open phrase never closed.
+```
