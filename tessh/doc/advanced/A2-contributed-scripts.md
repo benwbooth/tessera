@@ -4328,3 +4328,1941 @@ $ is_spammer.tsh spammer.test bl.example.test extra
   addresses:
   servers:
 ```
+
+## Spammer hunt with whois
+<!-- help: abs-whx whx whois spammer registry rwhois arin ripe apnic -->
+
+Walter Dnes's `whx.sh` finds who's responsible for an address: it looks
+up a domain name's address with `host`, skips the reserved ranges, asks
+the regional registry that holds the address with `whois` (ARIN, or the
+one ARIN refers to, and the national registries some of them refer to in
+turn), and shows the result. It needs the network and `whois`.
+
+### Example A-29. Spammer Hunt (`whx.sh`)
+
+```bash no-run
+#!/bin/bash
+# whx.sh: "whois" spammer lookup
+# Author: Walter Dnes
+# Slight revisions (first section) by ABS Guide author.
+# Used in ABS Guide with permission.
+
+# Needs version 3.x or greater of Bash to run (because of =~ operator).
+# Commented by script author and ABS Guide author.
+
+
+
+E_BADARGS=85        # Missing command-line arg.
+E_NOHOST=86         # Host not found.
+E_TIMEOUT=87        # Host lookup timed out.
+E_UNDEF=88          # Some other (undefined) error.
+
+HOSTWAIT=10         # Specify up to 10 seconds for host query reply.
+                    # The actual wait may be a bit longer.
+OUTFILE=whois.txt   # Output file.
+PORT=4321
+
+
+if [ -z "$1" ]      # Check for (required) command-line arg.
+then
+  echo "Usage: $0 domain name or IP address"
+  exit $E_BADARGS
+fi
+
+
+if [[ "$1" =~ [a-zA-Z][a-zA-Z]$ ]]  #  Ends in two alpha chars?
+then                                  #  It's a domain name &&
+                                      #+ must do host lookup.
+  IPADDR=$(host -W $HOSTWAIT $1 | awk '{print $4}')
+                                      #  Doing host lookup
+                                      #+ to get IP address.
+				      #  Extract final field.
+else
+  IPADDR="$1"                         #  Command-line arg was IP address.
+fi
+
+echo; echo "IP Address is: "$IPADDR""; echo
+
+if [ -e "$OUTFILE" ]
+then
+  rm -f "$OUTFILE"
+  echo "Stale output file \"$OUTFILE\" removed."; echo
+fi
+
+
+#  Sanity checks.
+#  (This section needs more work.)
+#  ===============================
+if [ -z "$IPADDR" ]
+# No response.
+then
+  echo "Host not found!"
+  exit $E_NOHOST    # Bail out.
+fi
+
+if [[ "$IPADDR" =~ ^[;;] ]]
+#  ;; Connection timed out; no servers could be reached.
+then
+  echo "Host lookup timed out!"
+  exit $E_TIMEOUT   # Bail out.
+fi
+
+if [[ "$IPADDR" =~ [(NXDOMAIN)]$ ]]
+#  Host xxxxxxxxx.xxx not found: 3(NXDOMAIN)
+then
+  echo "Host not found!"
+  exit $E_NOHOST    # Bail out.
+fi
+
+if [[ "$IPADDR" =~ [(SERVFAIL)]$ ]]
+#  Host xxxxxxxxx.xxx not found: 2(SERVFAIL)
+then
+  echo "Host not found!"
+  exit $E_NOHOST    # Bail out.
+fi
+
+
+
+
+# ======================== Main body of script ========================
+
+AFRINICquery() {
+#  Define the function that queries AFRINIC. Echo a notification to the
+#+ screen, and then run the actual query, redirecting output to $OUTFILE.
+
+  echo "Searching for $IPADDR in whois.afrinic.net"
+  whois -h whois.afrinic.net "$IPADDR" > $OUTFILE
+
+#  Check for presence of reference to an rwhois.
+#  Warn about non-functional rwhois.infosat.net server
+#+ and attempt rwhois query.
+  if grep -e "^remarks: .*rwhois\.[^ ]\+" "$OUTFILE"
+  then
+    echo " " >> $OUTFILE
+    echo "***" >> $OUTFILE
+    echo "***" >> $OUTFILE
+    echo "Warning: rwhois.infosat.net was not working \
+      as of 2005/02/02" >> $OUTFILE
+    echo "         when this script was written." >> $OUTFILE
+    echo "***" >> $OUTFILE
+    echo "***" >> $OUTFILE
+    echo " " >> $OUTFILE
+    RWHOIS=`grep "^remarks: .*rwhois\.[^ ]\+" "$OUTFILE" | tail -n 1 |\
+    sed "s/\(^.*\)\(rwhois\..*\)\(:4.*\)/\2/"`
+    whois -h ${RWHOIS}:${PORT} "$IPADDR" >> $OUTFILE
+  fi
+}
+
+APNICquery() {
+  echo "Searching for $IPADDR in whois.apnic.net"
+  whois -h whois.apnic.net "$IPADDR" > $OUTFILE
+
+#  Just  about  every  country has its own internet registrar.
+#  I don't normally bother consulting them, because the regional registry
+#+ usually supplies sufficient information.
+#  There are a few exceptions, where the regional registry simply
+#+ refers to the national registry for direct data.
+#  These are Japan and South Korea in APNIC, and Brasil in LACNIC.
+#  The following if statement checks $OUTFILE (whois.txt) for the presence
+#+ of "KR" (South Korea) or "JP" (Japan) in the country field.
+#  If either is found, the query is re-run against the appropriate
+#+ national registry.
+
+  if grep -E "^country:[ ]+KR$" "$OUTFILE"
+  then
+    echo "Searching for $IPADDR in whois.krnic.net"
+    whois -h whois.krnic.net "$IPADDR" >> $OUTFILE
+  elif grep -E "^country:[ ]+JP$" "$OUTFILE"
+  then
+    echo "Searching for $IPADDR in whois.nic.ad.jp"
+    whois -h whois.nic.ad.jp "$IPADDR"/e >> $OUTFILE
+  fi
+}
+
+ARINquery() {
+  echo "Searching for $IPADDR in whois.arin.net"
+  whois -h whois.arin.net "$IPADDR" > $OUTFILE
+
+#  Several large internet providers listed by ARIN have their own
+#+ internal whois service, referred to as "rwhois".
+#  A large block of IP addresses is listed with the provider
+#+ under the ARIN registry.
+#  To get the IP addresses of 2nd-level ISPs or other large customers,
+#+ one has to refer to the rwhois server on port 4321.
+#  I originally started with a bunch of "if" statements checking for
+#+ the larger providers.
+#  This approach is unwieldy, and there's always another rwhois server
+#+ that I didn't know about.
+#  A more elegant approach is to check $OUTFILE for a reference
+#+ to a whois server, parse that server name out of the comment section,
+#+ and re-run the query against the appropriate rwhois server.
+#  The parsing looks a bit ugly, with a long continued line inside
+#+ backticks.
+#  But it only has to be done once, and will work as new servers are added.
+#@   ABS Guide author comment: it isn't all that ugly, and is, in fact,
+#@+  an instructive use of Regular Expressions.
+
+  if grep -E "^Comment: .*rwhois.[^ ]+" "$OUTFILE"
+  then
+    RWHOIS=`grep -e "^Comment:.*rwhois\.[^ ]\+" "$OUTFILE" | tail -n 1 |\
+    sed "s/^\(.*\)\(rwhois\.[^ ]\+\)\(.*$\)/\2/"`
+    echo "Searching for $IPADDR in ${RWHOIS}"
+    whois -h ${RWHOIS}:${PORT} "$IPADDR" >> $OUTFILE
+  fi
+}
+
+LACNICquery() {
+  echo "Searching for $IPADDR in whois.lacnic.net"
+  whois -h whois.lacnic.net "$IPADDR" > $OUTFILE
+
+#  The  following if statement checks $OUTFILE (whois.txt) for
+#+ the presence of "BR" (Brasil) in the country field.
+#  If it is found, the query is re-run against whois.registro.br.
+
+  if grep -E "^country:[ ]+BR$" "$OUTFILE"
+  then
+    echo "Searching for $IPADDR in whois.registro.br"
+    whois -h whois.registro.br "$IPADDR" >> $OUTFILE
+  fi
+}
+
+RIPEquery() {
+  echo "Searching for $IPADDR in whois.ripe.net"
+  whois -h whois.ripe.net "$IPADDR" > $OUTFILE
+}
+
+#  Initialize a few variables.
+#  * slash8 is the most significant octet
+#  * slash16 consists of the two most significant octets
+#  * octet2 is the second most significant octet
+
+
+
+
+slash8=`echo $IPADDR | cut -d. -f 1`
+  if [ -z "$slash8" ]  # Yet another sanity check.
+  then
+    echo "Undefined error!"
+    exit $E_UNDEF
+  fi
+slash16=`echo $IPADDR | cut -d. -f 1-2`
+#                             ^ Period specified as 'cut" delimiter.
+  if [ -z "$slash16" ]
+  then
+    echo "Undefined error!"
+    exit $E_UNDEF
+  fi
+octet2=`echo $slash16 | cut -d. -f 2`
+  if [ -z "$octet2" ]
+  then
+    echo "Undefined error!"
+    exit $E_UNDEF
+  fi
+
+
+#  Check for various odds and ends of reserved space.
+#  There is no point in querying for those addresses.
+
+if [ $slash8 == 0 ]; then
+  echo $IPADDR is '"This Network"' space\; Not querying
+elif [ $slash8 == 10 ]; then
+  echo $IPADDR is RFC1918 space\; Not querying
+elif [ $slash8 == 14 ]; then
+  echo $IPADDR is '"Public Data Network"' space\; Not querying
+elif [ $slash8 == 127 ]; then
+  echo $IPADDR is loopback space\; Not querying
+elif [ $slash16 == 169.254 ]; then
+  echo $IPADDR is link-local space\; Not querying
+elif [ $slash8 == 172 ] && [ $octet2 -ge 16 ] && [ $octet2 -le 31 ];then
+  echo $IPADDR is RFC1918 space\; Not querying
+elif [ $slash16 == 192.168 ]; then
+  echo $IPADDR is RFC1918 space\; Not querying
+elif [ $slash8 -ge 224 ]; then
+  echo $IPADDR is either Multicast or reserved space\; Not querying
+elif [ $slash8 -ge 200 ] && [ $slash8 -le 201 ]; then LACNICquery "$IPADDR"
+elif [ $slash8 -ge 202 ] && [ $slash8 -le 203 ]; then APNICquery "$IPADDR"
+elif [ $slash8 -ge 210 ] && [ $slash8 -le 211 ]; then APNICquery "$IPADDR"
+elif [ $slash8 -ge 218 ] && [ $slash8 -le 223 ]; then APNICquery "$IPADDR"
+
+#  If we got this far without making a decision, query ARIN.
+#  If a reference is found in $OUTFILE to APNIC, AFRINIC, LACNIC, or RIPE,
+#+ query the appropriate whois server.
+
+else
+  ARINquery "$IPADDR"
+  if grep "whois.afrinic.net" "$OUTFILE"; then
+    AFRINICquery "$IPADDR"
+  elif grep -E "^OrgID:[ ]+RIPE$" "$OUTFILE"; then
+    RIPEquery "$IPADDR"
+  elif grep -E "^OrgID:[ ]+APNIC$" "$OUTFILE"; then
+    APNICquery "$IPADDR"
+  elif grep -E "^OrgID:[ ]+LACNIC$" "$OUTFILE"; then
+    LACNICquery "$IPADDR"
+  fi
+fi
+
+#@  ---------------------------------------------------------------
+#   Try also:
+#   wget http://logi.cc/nw/whois.php3?ACTION=doQuery&DOMAIN=$IPADDR
+#@  ---------------------------------------------------------------
+
+#  We've  now  finished  the querying.
+#  Echo a copy of the final result to the screen.
+
+cat $OUTFILE
+# Or "less $OUTFILE" . . .
+
+
+exit 0
+
+#@  ABS Guide author comments:
+#@  Nothing fancy here, but still a very useful tool for hunting spammers.
+#@  Sure, the script can be cleaned up some, and it's still a bit buggy,
+#@+ (exercise for reader), but all the same, it's a nice piece of coding
+#@+ by Walter Dnes.
+#@  Thank you!
+```
+
+As the ABS Guide says, it's "still a bit buggy". Today's bash doesn't
+run it at all: the unquoted `;;` in `[[ "$IPADDR" =~ ^[;;] ]]` is a
+syntax error that ends the script at line 60. With that quoted, it
+works for addresses, but not well for names: `awk '{print $4}'` takes
+the fourth word of *every* line `host` prints, so `IPADDR` is the address
+plus words like `address` and `handled`; and a name that isn't found
+gives `found:` (from `Host x not found: 3(NXDOMAIN)`), which none of the
+checks catch, since they test `IPADDR` and their brackets make character
+classes. The tessh port takes the last field of the first `has address`
+line, and looks for the timeout and `NXDOMAIN`/`SERVFAIL` in what `host`
+said. The reserved-space `if` chain is a `match` on the first two
+octets, with guards for the ranges; `int` failing is the "undefined
+error"; `grep`, `sed` and `whois` run as they do in bash.
+
+```tessh no-run
+#!/usr/bin/env tessh
+# whx.tsh: "whois" spammer lookup
+# Author: Walter Dnes
+# Slight revisions (first section) by ABS Guide author.
+# Used in ABS Guide with permission.
+# (Ported to tessh from whx.sh.)
+
+E_BADARGS = 85        # Missing command-line arg.
+E_NOHOST = 86         # Host not found.
+E_TIMEOUT = 87        # Host lookup timed out.
+E_UNDEF = 88          # Some other (undefined) error.
+
+HOSTWAIT = 10         # Specify up to 10 seconds for host query reply.
+                      # The actual wait may be a bit longer.
+OUTFILE = Path whois.txt    # Output file.
+PORT = 4321
+
+if (len $argv) < 2 or not $argv[1]    # Check for (required) command-line arg.
+  print "Usage: $argv[0] domain name or IP address"
+  exit $E_BADARGS
+arg = $argv[1]
+
+reply = ""
+if $arg =~ re'[a-zA-Z][a-zA-Z]$'      # Ends in two alpha chars?
+  # It's a domain name && must do host lookup to get IP address:
+  # the last field of host's first "has address" line.
+  reply = host -W $HOSTWAIT $arg
+  addrs = [($l.split)[-1] for l in $reply.lines if ' has address ' in $l]
+  IPADDR = if $addrs then $addrs[0] else ""
+else
+  IPADDR = $arg                       # Command-line arg was IP address.
+
+print ; print "IP Address is: $IPADDR" ; print
+
+if ($OUTFILE.exists)
+  $OUTFILE.unlink
+  print "Stale output file \"$OUTFILE\" removed." ; print
+
+# Sanity checks, on what host said.
+# (This section needs more work.)
+# ===============================
+if $reply =~ re'^;;'m
+  # ;; connection timed out; no servers could be reached
+  print "Host lookup timed out!"
+  exit $E_TIMEOUT                     # Bail out.
+
+if $reply =~ re'\((NXDOMAIN|SERVFAIL)\)$'m
+  # Host xxxxxxxxx.xxx not found: 3(NXDOMAIN)
+  # Host xxxxxxxxx.xxx not found: 2(SERVFAIL)
+  print "Host not found!"
+  exit $E_NOHOST                      # Bail out.
+
+if not $IPADDR                        # No response.
+  print "Host not found!"
+  exit $E_NOHOST                      # Bail out.
+
+# ======================== Main body of script ========================
+
+def AFRINICquery ip
+  # Echo a notification to the screen, and then run the actual query,
+  # redirecting output to $OUTFILE.
+  print "Searching for $ip in whois.afrinic.net"
+  whois -h whois.afrinic.net $ip > $OUTFILE
+
+  # Check for presence of reference to an rwhois.
+  # Warn about non-functional rwhois.infosat.net server
+  # and attempt rwhois query.
+  if grep -e '^remarks: .*rwhois\.[^ ]\+' $OUTFILE
+    with (open $OUTFILE a) as out
+      print " " "***" "***" sep="\n" file=$out
+      print "Warning: rwhois.infosat.net was not working as of 2005/02/02" file=$out
+      print "         when this script was written." file=$out
+      print "***" "***" " " sep="\n" file=$out
+    RWHOIS = grep '^remarks: .*rwhois\.[^ ]\+' $OUTFILE | tail -n 1 | \
+             sed 's/\(^.*\)\(rwhois\..*\)\(:4.*\)/\2/'
+    whois -h "$RWHOIS:$PORT" $ip >> $OUTFILE
+
+def APNICquery ip
+  print "Searching for $ip in whois.apnic.net"
+  whois -h whois.apnic.net $ip > $OUTFILE
+
+  # Just about every country has its own internet registrar.
+  # The regional registry usually supplies sufficient information, with a
+  # few exceptions, where it simply refers to the national registry:
+  # Japan and South Korea in APNIC, and Brasil in LACNIC.
+  # If "KR" or "JP" is in the country field, re-run the query against
+  # the national registry.
+  if grep -E '^country:[ ]+KR$' $OUTFILE
+    print "Searching for $ip in whois.krnic.net"
+    whois -h whois.krnic.net $ip >> $OUTFILE
+  elif grep -E '^country:[ ]+JP$' $OUTFILE
+    print "Searching for $ip in whois.nic.ad.jp"
+    whois -h whois.nic.ad.jp "$ip/e" >> $OUTFILE
+
+def ARINquery ip
+  print "Searching for $ip in whois.arin.net"
+  whois -h whois.arin.net $ip > $OUTFILE
+
+  # Several large internet providers listed by ARIN have their own
+  # internal whois service, referred to as "rwhois", on port 4321.
+  # Rather than a bunch of "if" statements for the larger providers,
+  # check $OUTFILE for a reference to a whois server, parse that server
+  # name out of the comment section, and re-run the query against it.
+  # It will work as new servers are added.
+  if grep -E '^Comment: .*rwhois.[^ ]+' $OUTFILE
+    RWHOIS = grep -e '^Comment:.*rwhois\.[^ ]\+' $OUTFILE | tail -n 1 | \
+             sed 's/^\(.*\)\(rwhois\.[^ ]\+\)\(.*$\)/\2/'
+    print "Searching for $ip in $RWHOIS"
+    whois -h "$RWHOIS:$PORT" $ip >> $OUTFILE
+
+def LACNICquery ip
+  print "Searching for $ip in whois.lacnic.net"
+  whois -h whois.lacnic.net $ip > $OUTFILE
+
+  # If "BR" (Brasil) is in the country field, re-run the query against
+  # whois.registro.br.
+  if grep -E '^country:[ ]+BR$' $OUTFILE
+    print "Searching for $ip in whois.registro.br"
+    whois -h whois.registro.br $ip >> $OUTFILE
+
+def RIPEquery ip
+  print "Searching for $ip in whois.ripe.net"
+  whois -h whois.ripe.net $ip > $OUTFILE
+
+# The two most significant octets, as numbers.
+# (Yet another sanity check: not numbers is an undefined error.)
+octets = $IPADDR.split "."
+try
+  slash8 = int $octets[0]
+  octet2 = int $octets[1]
+except (ValueError, IndexError)
+  print "Undefined error!"
+  exit $E_UNDEF
+
+# Check for various odds and ends of reserved space.
+# There is no point in querying for those addresses.
+match [$slash8 $octet2]
+  case [0 _]
+    print "$IPADDR is \"This Network\" space; Not querying"
+  case [10 _]
+    print "$IPADDR is RFC1918 space; Not querying"
+  case [14 _]
+    print "$IPADDR is \"Public Data Network\" space; Not querying"
+  case [127 _]
+    print "$IPADDR is loopback space; Not querying"
+  case [169 254]
+    print "$IPADDR is link-local space; Not querying"
+  case [172 $o] if 16 <= $o <= 31
+    print "$IPADDR is RFC1918 space; Not querying"
+  case [192 168]
+    print "$IPADDR is RFC1918 space; Not querying"
+  case [$s _] if $s >= 224
+    print "$IPADDR is either Multicast or reserved space; Not querying"
+  case [$s _] if 200 <= $s <= 201
+    LACNICquery $IPADDR
+  case [$s _] if 202 <= $s <= 203 or 210 <= $s <= 211 or 218 <= $s <= 223
+    APNICquery $IPADDR
+  case _
+    # If we got this far without making a decision, query ARIN.
+    # If a reference is found in $OUTFILE to APNIC, AFRINIC, LACNIC,
+    # or RIPE, query the appropriate whois server.
+    ARINquery $IPADDR
+    if grep whois.afrinic.net $OUTFILE
+      AFRINICquery $IPADDR
+    elif grep -E '^OrgID:[ ]+RIPE$' $OUTFILE
+      RIPEquery $IPADDR
+    elif grep -E '^OrgID:[ ]+APNIC$' $OUTFILE
+      APNICquery $IPADDR
+    elif grep -E '^OrgID:[ ]+LACNIC$' $OUTFILE
+      LACNICquery $IPADDR
+
+#   Try also:
+#   wget http://logi.cc/nw/whois.php3?ACTION=doQuery&DOMAIN=$IPADDR
+
+# We've now finished the querying.
+# Echo a copy of the final result to the screen.
+if ($OUTFILE.exists)
+  cat $OUTFILE          # Or "less $OUTFILE" . . .
+
+exit 0
+
+#@  ABS Guide author comments:
+#@  Nothing fancy here, but still a very useful tool for hunting spammers.
+#@  Sure, the script can be cleaned up some, and it's still a bit buggy,
+#@+ (exercise for reader), but all the same, it's a nice piece of coding
+#@+ by Walter Dnes.
+#@  Thank you!
+```
+
+Run against a stand-in `host` and `whois`, it printed what the bash (with
+the `;;` quoted) printed for addresses, and the right address for names.
+Its parts on made-up data: the choice of registry,
+
+```bash
+# (whx.sh's choice of registry, for made-up addresses; the queries only
+#+ say which they'd be.)
+LACNICquery() { echo "$1: ask LACNIC"; }
+APNICquery()  { echo "$1: ask APNIC"; }
+ARINquery()   { echo "$1: ask ARIN, then the registry it refers to"; }
+
+for IPADDR in 0.1.2.3 10.9.8.7 172.20.1.1 172.40.1.1 169.254.3.4 \
+              192.168.0.1 230.1.2.3 200.1.2.3 211.1.2.3 64.1.2.3
+do
+slash8=`echo $IPADDR | cut -d. -f 1`
+slash16=`echo $IPADDR | cut -d. -f 1-2`
+octet2=`echo $slash16 | cut -d. -f 2`
+
+if [ $slash8 == 0 ]; then
+  echo $IPADDR is '"This Network"' space\; Not querying
+elif [ $slash8 == 10 ]; then
+  echo $IPADDR is RFC1918 space\; Not querying
+elif [ $slash8 == 14 ]; then
+  echo $IPADDR is '"Public Data Network"' space\; Not querying
+elif [ $slash8 == 127 ]; then
+  echo $IPADDR is loopback space\; Not querying
+elif [ $slash16 == 169.254 ]; then
+  echo $IPADDR is link-local space\; Not querying
+elif [ $slash8 == 172 ] && [ $octet2 -ge 16 ] && [ $octet2 -le 31 ];then
+  echo $IPADDR is RFC1918 space\; Not querying
+elif [ $slash16 == 192.168 ]; then
+  echo $IPADDR is RFC1918 space\; Not querying
+elif [ $slash8 -ge 224 ]; then
+  echo $IPADDR is either Multicast or reserved space\; Not querying
+elif [ $slash8 -ge 200 ] && [ $slash8 -le 201 ]; then LACNICquery "$IPADDR"
+elif [ $slash8 -ge 202 ] && [ $slash8 -le 203 ]; then APNICquery "$IPADDR"
+elif [ $slash8 -ge 210 ] && [ $slash8 -le 211 ]; then APNICquery "$IPADDR"
+elif [ $slash8 -ge 218 ] && [ $slash8 -le 223 ]; then APNICquery "$IPADDR"
+else
+  ARINquery "$IPADDR"
+fi
+done
+```
+
+```tessh
+# (whx's choice of registry, for made-up addresses; the queries only
+# say which they'd be.)
+def LACNICquery ip = print "$ip: ask LACNIC"
+def APNICquery ip = print "$ip: ask APNIC"
+def ARINquery ip = print "$ip: ask ARIN, then the registry it refers to"
+
+def registry IPADDR
+  octets = $IPADDR.split "."
+  slash8 = int $octets[0]
+  octet2 = int $octets[1]
+  match [$slash8 $octet2]
+    case [0 _]
+      print "$IPADDR is \"This Network\" space; Not querying"
+    case [10 _]
+      print "$IPADDR is RFC1918 space; Not querying"
+    case [14 _]
+      print "$IPADDR is \"Public Data Network\" space; Not querying"
+    case [127 _]
+      print "$IPADDR is loopback space; Not querying"
+    case [169 254]
+      print "$IPADDR is link-local space; Not querying"
+    case [172 $o] if 16 <= $o <= 31
+      print "$IPADDR is RFC1918 space; Not querying"
+    case [192 168]
+      print "$IPADDR is RFC1918 space; Not querying"
+    case [$s _] if $s >= 224
+      print "$IPADDR is either Multicast or reserved space; Not querying"
+    case [$s _] if 200 <= $s <= 201
+      LACNICquery $IPADDR
+    case [$s _] if 202 <= $s <= 203 or 210 <= $s <= 211 or 218 <= $s <= 223
+      APNICquery $IPADDR
+    case _
+      ARINquery $IPADDR
+
+for ip in [0.1.2.3 10.9.8.7 172.20.1.1 172.40.1.1 169.254.3.4
+           192.168.0.1 230.1.2.3 200.1.2.3 211.1.2.3 64.1.2.3]
+  registry $ip
+```
+
+```output
+0.1.2.3 is "This Network" space; Not querying
+10.9.8.7 is RFC1918 space; Not querying
+172.20.1.1 is RFC1918 space; Not querying
+172.40.1.1: ask ARIN, then the registry it refers to
+169.254.3.4 is link-local space; Not querying
+192.168.0.1 is RFC1918 space; Not querying
+230.1.2.3 is either Multicast or reserved space; Not querying
+200.1.2.3: ask LACNIC
+211.1.2.3: ask APNIC
+64.1.2.3: ask ARIN, then the registry it refers to
+```
+
+reading `host`'s reply (the bash first, showing its trouble),
+
+```bash
+# (What `host` says, made up, and whx.sh's way of getting the address
+#+ from it: the fourth field of each line.)
+for reply in \
+'spam.example.co has address 202.1.2.3
+spam.example.co has IPv6 address 2001:db8::1
+spam.example.co mail is handled by 10 mx.example.co.' \
+'Host nothere.example.co not found: 3(NXDOMAIN)'
+do
+  IPADDR=$(echo "$reply" | awk '{print $4}')
+  echo "IP Address is: "$IPADDR""
+  if [[ "$IPADDR" =~ [(NXDOMAIN)]$ ]]
+  then
+    echo "Host not found!"
+  fi
+done
+```
+
+```output bash
+IP Address is: 202.1.2.3 address handled
+IP Address is: found:
+```
+
+```tessh
+# (What `host` says, made up, and the address taken from it: the last
+# field of the first "has address" line. The checks look at the reply.)
+for reply in ['spam.example.co has address 202.1.2.3
+spam.example.co has IPv6 address 2001:db8::1
+spam.example.co mail is handled by 10 mx.example.co.'
+              'Host nothere.example.co not found: 3(NXDOMAIN)'
+              ';; connection timed out; no servers could be reached']
+  addrs = [($l.split)[-1] for l in ($reply.splitlines) if ' has address ' in $l]
+  IPADDR = if $addrs then $addrs[0] else ""
+  print "IP Address is: $IPADDR"
+  if $reply =~ re'^;;'m
+    print "Host lookup timed out!"
+  elif $reply =~ re'\((NXDOMAIN|SERVFAIL)\)$'m
+    print "Host not found!"
+```
+
+```output
+IP Address is: 202.1.2.3
+IP Address is: 
+Host not found!
+IP Address is: 
+Host lookup timed out!
+```
+
+and finding the rwhois server an ARIN reply refers to, the same pipeline
+in both, and then with a regex in tessh. (`grep` without `-q` shows the
+lines it found, as in the script.)
+
+```bash
+# (A made-up ARIN reply that refers to an rwhois server.)
+OUTFILE=whois.txt
+cat >$OUTFILE <<'END'
+OrgName:    Example Hosting
+OrgID:      EXHO
+Comment:    Customer details are in our rwhois server,
+Comment:    rwhois.example.net port 4321.
+END
+
+if grep -E "^Comment: .*rwhois.[^ ]+" "$OUTFILE"
+then
+  RWHOIS=`grep -e "^Comment:.*rwhois\.[^ ]\+" "$OUTFILE" | tail -n 1 |\
+  sed "s/^\(.*\)\(rwhois\.[^ ]\+\)\(.*$\)/\2/"`
+  echo "Searching in ${RWHOIS}"
+fi
+```
+
+```output bash
+Comment:    Customer details are in our rwhois server,
+Comment:    rwhois.example.net port 4321.
+Searching in rwhois.example.net
+```
+
+```tessh
+# (A made-up ARIN reply that refers to an rwhois server.)
+OUTFILE = Path whois.txt
+cat >$OUTFILE <<'END'
+OrgName:    Example Hosting
+OrgID:      EXHO
+Comment:    Customer details are in our rwhois server,
+Comment:    rwhois.example.net port 4321.
+END
+
+if grep -E '^Comment: .*rwhois.[^ ]+' $OUTFILE
+  RWHOIS = grep -e '^Comment:.*rwhois\.[^ ]\+' $OUTFILE | tail -n 1 | \
+           sed 's/^\(.*\)\(rwhois\.[^ ]\+\)\(.*$\)/\2/'
+  print "Searching in $RWHOIS"
+
+# The same in Python: the server named on the last Comment line.
+comments = [$l for l in (($OUTFILE.read_text).splitlines) if $l =~ re'^Comment:.*rwhois\.\S']
+print "Searching in $(($comments[-1] =~ re'rwhois\.\S+').group)"
+```
+
+```output
+Comment:    Customer details are in our rwhois server,
+Comment:    rwhois.example.net port 4321.
+Searching in rwhois.example.net
+Searching in rwhois.example.net
+```
+
+## A friendlier wget
+<!-- help: abs-wgetter2 wgetter2 wget download getopts front-end cookies -->
+
+Little Monster's `wgetter2.bash` is a front end to `wget`: it builds a
+long `wget` command from a few questions (how deep to go, which page
+refers, whether to log to the terminal), and either runs it or saves it
+to a file to run later (`-r file`, or `-i` to be asked for one). It
+remembers which cookie file to use in a configuration file,
+`~/.wgetter2rc`, that it `source`s. It needs the network and a terminal.
+
+### Example A-30. Making *wget* easier to use (`wgetter2.bash`)
+
+```bash no-run
+#!/bin/bash
+# wgetter2.bash
+
+# Author: Little Monster [monster@monstruum.co.uk]
+# ==> Used in ABS Guide with permission of script author.
+# ==> This script still needs debugging and fixups (exercise for reader).
+# ==> It could also use some additional editing in the comments.
+
+
+#  This is wgetter2 --
+#+ a Bash script to make wget a bit more friendly, and save typing.
+
+#  Carefully crafted by Little Monster.
+#  More or less complete on 02/02/2005.
+#  If you think this script can be improved,
+#+ email me at: monster@monstruum.co.uk
+# ==> and cc: to the author of the ABS Guide, please.
+#  This script is licenced under the GPL.
+#  You are free to copy, alter and re-use it,
+#+ but please don't try to claim you wrote it.
+#  Log your changes here instead.
+
+# =======================================================================
+# changelog:
+
+# 07/02/2005.  Fixups by Little Monster.
+# 02/02/2005.  Minor additions by Little Monster.
+#              (See after # +++++++++++ )
+# 29/01/2005.  Minor stylistic edits and cleanups by author of ABS Guide.
+#              Added exit error codes.
+# 22/11/2004.  Finished initial version of second version of wgetter:
+#              wgetter2 is born.
+# 01/12/2004.  Changed 'runn' function so it can be run 2 ways --
+#              either ask for a file name or have one input on the CL.
+# 01/12/2004.  Made sensible handling of no URL's given.
+# 01/12/2004.  Made loop of main options, so you don't
+#              have to keep calling wgetter 2 all the time.
+#              Runs as a session instead.
+# 01/12/2004.  Added looping to 'runn' function.
+#              Simplified and improved.
+# 01/12/2004.  Added state to recursion setting.
+#              Enables re-use of previous value.
+# 05/12/2004.  Modified the file detection routine in the 'runn' function
+#              so it's not fooled by empty values, and is cleaner.
+# 01/02/2004.  Added cookie finding routine from later version (which 
+#              isn't ready yet), so as not to have hard-coded paths.
+# =======================================================================
+
+# Error codes for abnormal exit.
+E_USAGE=67        # Usage message, then quit.
+E_NO_OPTS=68      # No command-line args entered.
+E_NO_URLS=69      # No URLs passed to script.
+E_NO_SAVEFILE=70  # No save filename passed to script.
+E_USER_EXIT=71    # User decides to quit.
+
+
+#  Basic default wget command we want to use.
+#  This is the place to change it, if required.
+#  NB: if using a proxy, set http_proxy = yourproxy in .wgetrc.
+#  Otherwise delete --proxy=on, below.
+# ====================================================================
+CommandA="wget -nc -c -t 5 --progress=bar --random-wait --proxy=on -r"
+# ====================================================================
+
+
+
+# --------------------------------------------------------------------
+# Set some other variables and explain them.
+
+pattern=" -A .jpg,.JPG,.jpeg,.JPEG,.gif,.GIF,.htm,.html,.shtml,.php"
+                    # wget's option to only get certain types of file.
+                    # comment out if not using
+today=`date +%F`    # Used for a filename.
+home=$HOME          # Set HOME to an internal variable.
+                    # In case some other path is used, change it here.
+depthDefault=3      # Set a sensible default recursion.
+Depth=$depthDefault # Otherwise user feedback doesn't tie in properly.
+RefA=""             # Set blank referring page.
+Flag=""             #  Default to not saving anything,
+                    #+ or whatever else might be wanted in future.
+lister=""           # Used for passing a list of urls directly to wget.
+Woptions=""         # Used for passing wget some options for itself.
+inFile=""           # Used for the run function.
+newFile=""          # Used for the run function.
+savePath="$home/w-save"
+Config="$home/.wgetter2rc"
+                    #  This is where some variables can be stored, 
+                    #+ if permanently changed from within the script.
+Cookie_List="$home/.cookielist"
+                    # So we know where the cookies are kept . . .
+cFlag=""            # Part of the cookie file selection routine.
+
+# Define the options available. Easy to change letters here if needed.
+# These are the optional options; you don't just wait to be asked.
+
+save=s   # Save command instead of executing it.
+cook=c   # Change cookie file for this session.
+help=h   # Usage guide.
+list=l   # Pass wget the -i option and URL list.
+runn=r   # Run saved commands as an argument to the option.
+inpu=i   # Run saved commands interactively.
+wopt=w   # Allow to enter options to pass directly to wget.
+# --------------------------------------------------------------------
+
+
+if [ -z "$1" ]; then   # Make sure we get something for wget to eat.
+   echo "You must at least enter a URL or option!"
+   echo "-$help for usage."
+   exit $E_NO_OPTS
+fi
+
+
+
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# added added added added added added added added added added added added
+
+if [ ! -e "$Config" ]; then   # See if configuration file exists.
+   echo "Creating configuration file, $Config"
+   echo "# This is the configuration file for wgetter2" > "$Config"
+   echo "# Your customised settings will be saved in this file" >> "$Config"
+else
+   source $Config             # Import variables we set outside the script.
+fi
+
+if [ ! -e "$Cookie_List" ]; then
+   # Set up a list of cookie files, if there isn't one.
+   echo "Hunting for cookies . . ."
+   find -name cookies.txt >> $Cookie_List # Create the list of cookie files.
+fi #  Isolate this in its own 'if' statement,
+   #+ in case we got interrupted while searching.
+
+if [ -z "$cFlag" ]; then # If we haven't already done this . . .
+   echo                  # Make a nice space after the command prompt.
+   echo "Looks like you haven't set up your source of cookies yet."
+   n=0                   #  Make sure the counter
+                         #+ doesn't contain random values.
+   while read; do
+      Cookies[$n]=$REPLY # Put the cookie files we found into an array.
+      echo "$n) ${Cookies[$n]}"  # Create a menu.
+      n=$(( n + 1 ))     # Increment the counter.
+   done < $Cookie_List   # Feed the read statement.
+   echo "Enter the number of the cookie file you want to use."
+   echo "If you won't be using cookies, just press RETURN."
+   echo
+   echo "I won't be asking this again. Edit $Config"
+   echo "If you decide to change at a later date"
+   echo "or use the -${cook} option for per session changes."
+   read
+   if [ ! -z $REPLY ]; then   # User didn't just press return.
+      Cookie=" --load-cookies ${Cookies[$REPLY]}"
+      # Set the variable here as well as in the config file.
+
+      echo "Cookie=\" --load-cookies ${Cookies[$REPLY]}\"" >> $Config
+   fi
+   echo "cFlag=1" >> $Config  # So we know not to ask again.
+fi
+
+# end added section end added section end added section end added section
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+# Another variable.
+# This one may or may not be subject to variation.
+# A bit like the small print.
+CookiesON=$Cookie
+# echo "cookie file is $CookiesON" # For debugging.
+# echo "home is ${home}"           # For debugging.
+                                   # Got caught with this one!
+
+
+wopts()
+{
+echo "Enter options to pass to wget."
+echo "It is assumed you know what you're doing."
+echo
+echo "You can pass their arguments here too."
+# That is to say, everything passed here is passed to wget.
+
+read Wopts
+# Read in the options to be passed to wget.
+
+Woptions=" $Wopts"
+#         ^  Why the leading space?
+# Assign to another variable.
+# Just for fun, or something . . .
+
+echo "passing options ${Wopts} to wget"
+# Mainly for debugging.
+# Is cute.
+
+return
+}
+
+
+save_func()
+{
+echo "Settings will be saved."
+if [ ! -d $savePath ]; then  #  See if directory exists.
+   mkdir $savePath           #  Create the directory to save things in
+                             #+ if it isn't already there.
+fi
+
+Flag=S
+# Tell the final bit of code what to do.
+# Set a flag since stuff is done in main.
+
+return
+}
+
+
+usage() # Tell them how it works.
+{
+    echo "Welcome to wgetter.  This is a front end to wget."
+    echo "It will always run wget with these options:"
+    echo "$CommandA"
+    echo "and the pattern to match: $pattern \
+(which you can change at the top of this script)."
+    echo "It will also ask you for recursion depth, \
+and if you want to use a referring page."
+    echo "Wgetter accepts the following options:"
+    echo ""
+    echo "-$help : Display this help."
+    echo "-$save : Save the command to a file $savePath/wget-($today) \
+instead of running it."
+    echo "-$runn : Run saved wget commands instead of starting a new one -"
+    echo "Enter filename as argument to this option."
+    echo "-$inpu : Run saved wget commands interactively --"
+    echo "The script will ask you for the filename."
+    echo "-$cook : Change the cookies file for this session."
+    echo "-$list : Tell wget to use URL's from a list instead of \
+from the command-line."
+    echo "-$wopt : Pass any other options direct to wget."
+    echo ""
+    echo "See the wget man page for additional options \
+you can pass to wget."
+    echo ""
+
+    exit $E_USAGE  # End here. Don't process anything else.
+}
+
+
+
+list_func() #  Gives the user the option to use the -i option to wget,
+            #+ and a list of URLs.
+{
+while [ 1 ]; do
+   echo "Enter the name of the file containing URL's (press q to change
+your mind)."
+   read urlfile
+   if [ ! -e "$urlfile" ] && [ "$urlfile" != q ]; then
+       # Look for a file, or the quit option.
+       echo "That file does not exist!"
+   elif [ "$urlfile" = q ]; then # Check quit option.
+       echo "Not using a url list."
+       return
+   else
+      echo "using $urlfile."
+      echo "If you gave url's on the command-line, I'll use those first."
+                            # Report wget standard behaviour to the user.
+      lister=" -i $urlfile" # This is what we want to pass to wget.
+      return
+   fi
+done
+}
+
+
+cookie_func() # Give the user the option to use a different cookie file.
+{
+while [ 1 ]; do
+   echo "Change the cookies file. Press return if you don't want to change 
+it."
+   read Cookies
+   # NB: this is not the same as Cookie, earlier.
+   # There is an 's' on the end.
+   # Bit like chocolate chips.
+   if [ -z "$Cookies" ]; then                 # Escape clause for wusses.
+      return
+   elif [ ! -e "$Cookies" ]; then
+      echo "File does not exist.  Try again." # Keep em going . . .
+   else
+       CookiesON=" --load-cookies $Cookies"   # File is good -- use it!
+       return
+   fi
+done
+}
+
+
+
+run_func()
+{
+if [ -z "$OPTARG" ]; then
+# Test to see if we used the in-line option or the query one.
+   if [ ! -d "$savePath" ]; then      # If directory doesn't exist . . .
+      echo "$savePath does not appear to exist."
+      echo "Please supply path and filename of saved wget commands:"
+      read newFile
+         until [ -f "$newFile" ]; do  # Keep going till we get something.
+            echo "Sorry, that file does not exist.  Please try again."
+            # Try really hard to get something.
+            read newFile
+         done
+
+
+# -----------------------------------------------------------------------
+#       if [ -z ( grep wget ${newfile} ) ]; then
+        # Assume they haven't got the right file and bail out.
+#       echo "Sorry, that file does not contain wget commands.  Aborting."
+#       exit
+#       fi
+#
+# This is bogus code.
+# It doesn't actually work.
+# If anyone wants to fix it, feel free!
+# -----------------------------------------------------------------------
+
+
+      filePath="${newFile}"
+   else
+   echo "Save path is $savePath"
+     echo "Please enter name of the file which you want to use."
+     echo "You have a choice of:"
+     ls $savePath                                    # Give them a choice.
+     read inFile
+       until [ -f "$savePath/$inFile" ]; do         #  Keep going till
+                                                    #+ we get something.
+          if [ ! -f "${savePath}/${inFile}" ]; then # If file doesn't exist.
+             echo "Sorry, that file does not exist.  Please choose from:"
+             ls $savePath                           # If a mistake is made.
+             read inFile
+          fi
+         done
+      filePath="${savePath}/${inFile}"  # Make one variable . . .
+   fi
+else filePath="${savePath}/${OPTARG}"   # Which can be many things . . .
+fi
+
+if [ ! -f "$filePath" ]; then           # If a bogus file got through.
+   echo "You did not specify a suitable file."
+   echo "Run this script with the -${save} option first."
+   echo "Aborting."
+   exit $E_NO_SAVEFILE
+fi
+echo "Using: $filePath"
+while read; do
+    eval $REPLY
+    echo "Completed: $REPLY"
+done < $filePath  # Feed the actual file we are using into a 'while' loop.
+
+exit
+}
+
+
+
+# Fish out any options we are using for the script.
+# This is based on the demo in "Learning The Bash Shell" (O'Reilly).
+while getopts ":$save$cook$help$list$runn:$inpu$wopt" opt
+do
+  case $opt in
+     $save) save_func;;   #  Save some wgetter sessions for later.
+     $cook) cookie_func;; #  Change cookie file.
+     $help) usage;;       #  Get help.
+     $list) list_func;;   #  Allow wget to use a list of URLs.
+     $runn) run_func;;    #  Useful if you are calling wgetter from,
+                          #+ for example, a cron script.
+     $inpu) run_func;;    #  When you don't know what your files are named.
+     $wopt) wopts;;       #  Pass options directly to wget.
+        \?) echo "Not a valid option."
+            echo "Use -${wopt} to pass options directly to wget,"
+            echo "or -${help} for help";;      # Catch anything else.
+  esac
+done
+shift $((OPTIND - 1))     # Do funky magic stuff with $#.
+
+
+if [ -z "$1" ] && [ -z "$lister" ]; then
+                          #  We should be left with at least one URL
+                          #+ on the command-line, unless a list is 
+			  #+ being used -- catch empty CL's.
+   echo "No URL's given! You must enter them on the same line as wgetter2."
+   echo "E.g.,  wgetter2 http://somesite http://anothersite."
+   echo "Use $help option for more information."
+   exit $E_NO_URLS        # Bail out, with appropriate error code.
+fi
+
+URLS=" $@"
+# Use this so that URL list can be changed if we stay in the option loop.
+
+while [ 1 ]; do
+   # This is where we ask for the most used options.
+   # (Mostly unchanged from version 1 of wgetter)
+   if [ -z $curDepth ]; then
+      Current=""
+   else Current=" Current value is $curDepth"
+   fi
+       echo "How deep should I go? \
+(integer: Default is $depthDefault.$Current)"
+       read Depth   # Recursion -- how far should we go?
+       inputB=""    # Reset this to blank on each pass of the loop.
+       echo "Enter the name of the referring page (default is none)."
+       read inputB  # Need this for some sites.
+
+       echo "Do you want to have the output logged to the terminal"
+       echo "(y/n, default is yes)?"
+       read noHide  # Otherwise wget will just log it to a file.
+
+       case $noHide in    # Now you see me, now you don't.
+          y|Y ) hide="";;
+          n|N ) hide=" -b";;
+            * ) hide="";;
+       esac
+
+       if [ -z ${Depth} ]; then
+       #  User accepted either default or current depth,
+       #+ in which case Depth is now empty.
+          if [ -z ${curDepth} ]; then
+          #  See if a depth was set on a previous iteration.
+             Depth="$depthDefault"
+             #  Set the default recursion depth if nothing
+             #+ else to use.
+          else Depth="$curDepth" #  Otherwise, set the one we used before.
+          fi
+       fi
+   Recurse=" -l $Depth"          # Set how deep we want to go.
+   curDepth=$Depth               # Remember setting for next time.
+
+       if [ ! -z $inputB ]; then
+          RefA=" --referer=$inputB"   # Option to use referring page.
+       fi
+
+   WGETTER="${CommandA}${pattern}${hide}${RefA}${Recurse}\
+${CookiesON}${lister}${Woptions}${URLS}"
+   #  Just string the whole lot together . . .
+   #  NB: no embedded spaces.
+   #  They are in the individual elements so that if any are empty,
+   #+ we don't get an extra space.
+
+   if [ -z "${CookiesON}" ] && [ "$cFlag" = "1" ] ; then
+       echo "Warning -- can't find cookie file"
+       #  This should be changed,
+       #+ in case the user has opted to not use cookies.
+   fi
+
+   if [ "$Flag" = "S" ]; then
+      echo "$WGETTER" >> $savePath/wget-${today}
+      #  Create a unique filename for today, or append to it if it exists.
+      echo "$inputB" >> $savePath/site-list-${today}
+      #  Make a list, so it's easy to refer back to,
+      #+ since the whole command is a bit confusing to look at.
+      echo "Command saved to the file $savePath/wget-${today}"
+           # Tell the user.
+      echo "Referring page URL saved to the file$ \
+savePath/site-list-${today}"
+           # Tell the user.
+      Saver=" with save option"
+      # Stick this somewhere, so it appears in the loop if set.
+   else
+       echo "*****************"
+       echo "*****Getting*****"
+       echo "*****************"
+       echo ""
+       echo "$WGETTER"
+       echo ""
+       echo "*****************"
+       eval "$WGETTER"
+   fi
+
+       echo ""
+       echo "Starting over$Saver."
+       echo "If you want to stop, press q."
+       echo "Otherwise, enter some URL's:"
+       # Let them go again. Tell about save option being set.
+
+       read
+       case $REPLY in
+       # Need to change this to a 'trap' clause.
+          q|Q ) exit $E_USER_EXIT;;  # Exercise for the reader?
+            * ) URLS=" $REPLY";;
+       esac
+
+       echo ""
+done
+
+
+exit 0
+```
+
+In tessh the script keeps its shape: the same globals, functions and
+messages. `read` is `input`; the option letters live on one namespace,
+`opt`, so `$opt.save` reads like bash's `$save` without the letters
+taking names such as `list` and `help` from Python, and a `match` case
+`opt.save` compares with it. Python has no `getopts` that goes on past an
+option it doesn't know (`getopt.getopt` stops with an error), so the port
+has a short one of its own that gives what bash's does, `?` and all.
+The configuration file holds lines such as `cFlag=1` and
+`Cookie=" --load-cookies …"`, which are tessh as well as bash, so
+`source` reads it as before. Where the bash `eval`s a saved command line,
+tessh splits it as the shell would with `shlex.split` and runs the words
+with `env`, since a program named by a value can't head a command.
+
+```tessh no-run
+#!/usr/bin/env tessh
+# wgetter2.tsh (ported from wgetter2.bash)
+
+# Author: Little Monster [monster@monstruum.co.uk]
+# ==> Used in ABS Guide with permission of script author.
+# ==> This script still needs debugging and fixups (exercise for reader).
+# ==> It could also use some additional editing in the comments.
+
+#  This is wgetter2 --
+#+ a script to make wget a bit more friendly, and save typing.
+
+#  Carefully crafted by Little Monster.
+#  More or less complete on 02/02/2005.
+#  If you think this script can be improved,
+#+ email me at: monster@monstruum.co.uk
+# ==> and cc: to the author of the ABS Guide, please.
+#  This script is licenced under the GPL.
+#  You are free to copy, alter and re-use it,
+#+ but please don't try to claim you wrote it.
+#  Log your changes here instead.
+
+# =======================================================================
+# changelog:
+
+# 07/02/2005.  Fixups by Little Monster.
+# 02/02/2005.  Minor additions by Little Monster.
+#              (See after # +++++++++++ )
+# 29/01/2005.  Minor stylistic edits and cleanups by author of ABS Guide.
+#              Added exit error codes.
+# 22/11/2004.  Finished initial version of second version of wgetter:
+#              wgetter2 is born.
+# 01/12/2004.  Changed 'runn' function so it can be run 2 ways --
+#              either ask for a file name or have one input on the CL.
+# 01/12/2004.  Made sensible handling of no URL's given.
+# 01/12/2004.  Made loop of main options, so you don't
+#              have to keep calling wgetter 2 all the time.
+#              Runs as a session instead.
+# 01/12/2004.  Added looping to 'runn' function.
+#              Simplified and improved.
+# 01/12/2004.  Added state to recursion setting.
+#              Enables re-use of previous value.
+# 05/12/2004.  Modified the file detection routine in the 'runn' function
+#              so it's not fooled by empty values, and is cleaner.
+# 01/02/2004.  Added cookie finding routine from later version (which
+#              isn't ready yet), so as not to have hard-coded paths.
+# =======================================================================
+
+import os shlex types
+
+# Error codes for abnormal exit.
+E_USAGE = 67        # Usage message, then quit.
+E_NO_OPTS = 68      # No command-line args entered.
+E_NO_URLS = 69      # No URLs passed to script.
+E_NO_SAVEFILE = 70  # No save filename passed to script.
+E_USER_EXIT = 71    # User decides to quit.
+
+#  Basic default wget command we want to use.
+#  This is the place to change it, if required.
+#  NB: if using a proxy, set http_proxy = yourproxy in .wgetrc.
+#  Otherwise delete --proxy=on, below.
+# ====================================================================
+CommandA = "wget -nc -c -t 5 --progress=bar --random-wait --proxy=on -r"
+# ====================================================================
+
+# --------------------------------------------------------------------
+# Set some other variables and explain them.
+
+pattern = " -A .jpg,.JPG,.jpeg,.JPEG,.gif,.GIF,.htm,.html,.shtml,.php"
+                    # wget's option to only get certain types of file.
+                    # comment out if not using
+today = date +%F    # Used for a filename.
+home = $env.HOME    # Set HOME to an internal variable.
+                    # In case some other path is used, change it here.
+depthDefault = 3    # Set a sensible default recursion.
+Depth = $depthDefault # Otherwise user feedback doesn't tie in properly.
+RefA = ""           # Set blank referring page.
+Flag = ""           #  Default to not saving anything,
+                    #+ or whatever else might be wanted in future.
+lister = ""         # Used for passing a list of urls directly to wget.
+Woptions = ""       # Used for passing wget some options for itself.
+savePath = "$home/w-save"
+Config = "$home/.wgetter2rc"
+                    #  This is where some variables can be stored,
+                    #+ if permanently changed from within the script.
+Cookie_List = "$home/.cookielist"
+                    # So we know where the cookies are kept . . .
+cFlag = ""          # Part of the cookie file selection routine.
+Cookie = ""         # The configuration file may set it.
+
+# Define the options available. Easy to change letters here if needed.
+# These are the optional options; you don't just wait to be asked.
+opt = types.SimpleNamespace
+  save=s   # Save command instead of executing it.
+  cook=c   # Change cookie file for this session.
+  help=h   # Usage guide.
+  list=l   # Pass wget the -i option and URL list.
+  runn=r   # Run saved commands as an argument to the option.
+  inpu=i   # Run saved commands interactively.
+  wopt=w   # Allow to enter options to pass directly to wget.
+# --------------------------------------------------------------------
+
+if (len $argv) < 2 or not $argv[1]   # Make sure we get something for wget to eat.
+  print "You must at least enter a URL or option!"
+  print "-$opt.help for usage."
+  exit $E_NO_OPTS
+
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# added added added added added added added added added added added added
+
+if not (os.path.exists $Config)      # See if configuration file exists.
+  print "Creating configuration file, $Config"
+  print "# This is the configuration file for wgetter2" >$Config
+  print "# Your customised settings will be saved in this file" >>$Config
+else
+  source $Config                     # Import variables we set outside the script.
+                                     # (Its lines, Cookie="…" and cFlag=1, are tessh.)
+
+if not (os.path.exists $Cookie_List)
+  # Set up a list of cookie files, if there isn't one.
+  print "Hunting for cookies . . ."
+  find -name cookies.txt >>$Cookie_List  # Create the list of cookie files.
+# Isolate this in its own 'if' statement,
+# in case we got interrupted while searching.
+
+if not $cFlag                        # If we haven't already done this . . .
+  print                              # Make a nice space after the command prompt.
+  print "Looks like you haven't set up your source of cookies yet."
+  Cookies = (((Path $Cookie_List).read_text).splitlines)
+  for [n c] in (enumerate $Cookies)  # Put the cookie files we found in a list,
+    print "$n) $c"                   # and make a menu of them.
+  print "Enter the number of the cookie file you want to use."
+  print "If you won't be using cookies, just press RETURN."
+  print
+  print "I won't be asking this again. Edit $Config"
+  print "If you decide to change at a later date"
+  print "or use the -$opt.cook option for per session changes."
+  REPLY = (input)
+  if $REPLY                          # User didn't just press return.
+    Cookie = " --load-cookies " + $Cookies[(int $REPLY)]
+    # Set the variable here as well as in the config file.
+    print "Cookie=\"$Cookie\"" >>$Config
+  print "cFlag=1" >>$Config          # So we know not to ask again.
+
+# end added section end added section end added section end added section
+# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# Another variable.
+# This one may or may not be subject to variation.
+# A bit like the small print.
+CookiesON = $Cookie
+# print "cookie file is $CookiesON" # For debugging.
+# print "home is $home"             # For debugging.
+                                    # Got caught with this one!
+
+def wopts
+  global Woptions
+  print "Enter options to pass to wget."
+  print "It is assumed you know what you're doing."
+  print
+  print "You can pass their arguments here too."
+  # That is to say, everything passed here is passed to wget.
+
+  Wopts = (input)       # Read in the options to be passed to wget.
+
+  Woptions = " $Wopts"
+  #           ^  Why the leading space?
+  # (So that the pieces of the command join with spaces between them.)
+
+  print "passing options $Wopts to wget"
+  # Mainly for debugging.
+  # Is cute.
+
+def save_func
+  global Flag
+  print "Settings will be saved."
+  mkdir -p $savePath    # Create the directory to save things in
+                        # if it isn't already there.
+  Flag = S
+  # Tell the final bit of code what to do.
+  # Set a flag since stuff is done in main.
+
+def usage               # Tell them how it works.
+  print "Welcome to wgetter.  This is a front end to wget."
+  print "It will always run wget with these options:"
+  print $CommandA
+  print "and the pattern to match: $pattern (which you can change at the top of this script)."
+  print "It will also ask you for recursion depth, and if you want to use a referring page."
+  print "Wgetter accepts the following options:"
+  print ""
+  print "-$opt.help : Display this help."
+  print "-$opt.save : Save the command to a file $savePath/wget-($today) instead of running it."
+  print "-$opt.runn : Run saved wget commands instead of starting a new one -"
+  print "Enter filename as argument to this option."
+  print "-$opt.inpu : Run saved wget commands interactively --"
+  print "The script will ask you for the filename."
+  print "-$opt.cook : Change the cookies file for this session."
+  print "-$opt.list : Tell wget to use URL's from a list instead of from the command-line."
+  print "-$opt.wopt : Pass any other options direct to wget."
+  print ""
+  print "See the wget man page for additional options you can pass to wget."
+  print ""
+
+  exit $E_USAGE         # End here. Don't process anything else.
+
+def list_func           # Gives the user the option to use the -i option to wget,
+                        # and a list of URLs.
+  global lister
+  while True
+    print "Enter the name of the file containing URL's (press q to change\nyour mind)."
+    urlfile = (input)
+    if $urlfile == q    # Check quit option.
+      print "Not using a url list."
+      return
+    elif not (os.path.exists $urlfile)
+      print "That file does not exist!"
+    else
+      print "using $urlfile."
+      print "If you gave url's on the command-line, I'll use those first."
+                        # Report wget standard behaviour to the user.
+      lister = " -i $urlfile"   # This is what we want to pass to wget.
+      return
+
+def cookie_func         # Give the user the option to use a different cookie file.
+  global CookiesON
+  while True
+    print "Change the cookies file. Press return if you don't want to change \nit."
+    Cookies = (input)
+    # NB: this is not the same as Cookie, earlier.
+    # There is an 's' on the end.
+    # Bit like chocolate chips.
+    if not $Cookies                       # Escape clause for wusses.
+      return
+    elif not (os.path.exists $Cookies)
+      print "File does not exist.  Try again."   # Keep em going . . .
+    else
+      CookiesON = " --load-cookies $Cookies"     # File is good -- use it!
+      return
+
+# run_func [file name]
+def run_func OPTARG=""
+  if not $OPTARG
+    # Test to see if we used the in-line option or the query one.
+    if not (os.path.isdir $savePath)       # If directory doesn't exist . . .
+      print "$savePath does not appear to exist."
+      print "Please supply path and filename of saved wget commands:"
+      newFile = (input)
+      while not (os.path.isfile $newFile)  # Keep going till we get something.
+        print "Sorry, that file does not exist.  Please try again."
+        # Try really hard to get something.
+        newFile = (input)
+      # (The bash version has some bogus code here, commented out, to bail
+      # out when the file holds no wget commands. If anyone wants to fix
+      # it, feel free!)
+      filePath = $newFile
+    else
+      print "Save path is $savePath"
+      print "Please enter name of the file which you want to use."
+      print "You have a choice of:"
+      ls $savePath                         # Give them a choice.
+      inFile = (input)
+      while not (os.path.isfile "$savePath/$inFile")   # Keep going till
+                                                       # we get something.
+        print "Sorry, that file does not exist.  Please choose from:"
+        ls $savePath                       # If a mistake is made.
+        inFile = (input)
+      filePath = "$savePath/$inFile"       # Make one variable . . .
+  else
+    filePath = "$savePath/$OPTARG"         # Which can be many things . . .
+
+  if not (os.path.isfile $filePath)        # If a bogus file got through.
+    print "You did not specify a suitable file."
+    print "Run this script with the -$opt.save option first."
+    print "Aborting."
+    exit $E_NO_SAVEFILE
+  print "Using: $filePath"
+  for line in (((Path $filePath).read_text).splitlines)
+    env (shlex.split $line)                # (bash: eval $REPLY)
+    print "Completed: $line"
+  exit
+
+# getopts, as bash's runs with a leading ":" in its spec: [letter OPTARG]
+# for each option, ["?" letter] for one it doesn't know and [":" letter]
+# for one missing its argument; then the arguments after the options.
+def getopts spec args
+  opts = []
+  while $args and ($args[0].startswith "-") and $args[0] != "-"
+    [word *args] = $args
+    if $word == "--"
+      break
+    letters = $word[1:]
+    while $letters
+      [c letters] = [$letters[0] $letters[1:]]
+      if $c == ":" or $c not in $spec
+        $opts.append ["?" $c]
+      elif ($c + ":") not in $spec
+        $opts.append [$c ""]
+      elif $letters or $args               # Its argument: the rest of the
+        optarg = if $letters then $letters else ($args.pop 0)   # word, or the next.
+        $opts.append [$c $optarg]
+        letters = ""
+      else
+        $opts.append [":" $c]
+  [$opts $args]
+
+# Fish out any options we are using for the script.
+# This is based on the demo in "Learning The Bash Shell" (O'Reilly).
+[opts args] = getopts ":$opt.save$opt.cook$opt.help$opt.list$opt.runn:$opt.inpu$opt.wopt" $argv[1:]
+for [o OPTARG] in $opts
+  match $o
+    case opt.save
+      save_func         #  Save some wgetter sessions for later.
+    case opt.cook
+      cookie_func       #  Change cookie file.
+    case opt.help
+      usage             #  Get help.
+    case opt.list
+      list_func         #  Allow wget to use a list of URLs.
+    case opt.runn
+      run_func $OPTARG  #  Useful if you are calling wgetter from,
+                        #+ for example, a cron script.
+    case opt.inpu
+      run_func          #  When you don't know what your files are named.
+    case opt.wopt
+      wopts             #  Pass options directly to wget.
+    case "?"
+      print "Not a valid option."
+      print "Use -$opt.wopt to pass options directly to wget,"
+      print "or -$opt.help for help"      # Catch anything else.
+
+if not $args and not $lister
+  # We should be left with at least one URL on the command-line,
+  # unless a list is being used -- catch empty CL's.
+  print "No URL's given! You must enter them on the same line as wgetter2."
+  print "E.g.,  wgetter2 http://somesite http://anothersite."
+  print "Use $opt.help option for more information."
+  exit $E_NO_URLS       # Bail out, with appropriate error code.
+
+URLS = " " + (" ".join $args)
+# Use this so that URL list can be changed if we stay in the option loop.
+
+curDepth = ""
+Saver = ""
+while True
+  # This is where we ask for the most used options.
+  # (Mostly unchanged from version 1 of wgetter)
+  Current = if $curDepth then " Current value is $curDepth" else ""
+  print "How deep should I go? (integer: Default is $depthDefault.$Current)"
+  Depth = (input)       # Recursion -- how far should we go?
+  inputB = ""           # Reset this to blank on each pass of the loop.
+  print "Enter the name of the referring page (default is none)."
+  inputB = (input)      # Need this for some sites.
+
+  print "Do you want to have the output logged to the terminal"
+  print "(y/n, default is yes)?"
+  noHide = (input)      # Otherwise wget will just log it to a file.
+
+  match $noHide         # Now you see me, now you don't.
+    case y | Y
+      hide = ""
+    case n | N
+      hide = " -b"
+    case _
+      hide = ""
+
+  if not $Depth
+    # User accepted either default or current depth,
+    # in which case Depth is now empty.
+    # Use the one from a previous pass if there is one, else the default.
+    Depth = $curDepth or $depthDefault
+  Recurse = " -l $Depth"          # Set how deep we want to go.
+  curDepth = $Depth               # Remember setting for next time.
+
+  if $inputB
+    RefA = " --referer=$inputB"   # Option to use referring page.
+
+  WGETTER = "$CommandA$pattern$hide$RefA$Recurse$CookiesON$lister$Woptions$URLS"
+  # Just string the whole lot together . . .
+  # NB: no embedded spaces.
+  # They are in the individual elements so that if any are empty,
+  # we don't get an extra space.
+
+  if not $CookiesON and $cFlag
+    print "Warning -- can't find cookie file"
+    # This should be changed,
+    # in case the user has opted to not use cookies.
+
+  if $Flag == S
+    commandFile = "$savePath/wget-$today"
+    siteFile = "$savePath/site-list-$today"
+    print $WGETTER >>$commandFile
+    # Create a unique filename for today, or append to it if it exists.
+    print $inputB >>$siteFile
+    # Make a list, so it's easy to refer back to,
+    # since the whole command is a bit confusing to look at.
+    print "Command saved to the file $commandFile"     # Tell the user.
+    print "Referring page URL saved to the file $siteFile"
+    Saver = " with save option"
+    # Stick this somewhere, so it appears in the loop if set.
+  else
+    print "*****************"
+    print "*****Getting*****"
+    print "*****************"
+    print ""
+    print $WGETTER
+    print ""
+    print "*****************"
+    env (shlex.split $WGETTER)    # (bash: eval "$WGETTER")
+
+  print ""
+  print "Starting over$Saver."
+  print "If you want to stop, press q."
+  print "Otherwise, enter some URL's:"
+  # Let them go again. Tell about save option being set.
+
+  REPLY = (input)
+  match $REPLY
+    # Need to change this to a 'trap' clause.
+    case q | Q
+      exit $E_USER_EXIT           # Exercise for the reader?
+    case _
+      URLS = " $REPLY"
+
+  print ""
+
+exit 0
+```
+
+Run with a stand-in `wget`, answers on its input and the same command
+lines, the two printed the same, except where the bash prints
+`saved to the file$ savePath/…` (a stray `$` and space before a line
+break) and where `eval` squeezes the spaces in a saved command's quoted
+argument. Its parts, on sample command lines and canned answers. The
+options (the functions only say they were called):
+
+```bash
+# (wgetter2.bash's option loop, on sample command lines; the functions
+#+ only say they were called.)
+save=s; cook=c; help=h; list=l; runn=r; inpu=i; wopt=w
+save_func()   { echo "  save_func"; }
+cookie_func() { echo "  cookie_func"; }
+usage()       { echo "  usage"; }
+list_func()   { echo "  list_func"; }
+run_func()    { echo "  run_func ${OPTARG:-(asks)}"; }
+wopts()       { echo "  wopts"; }
+
+for cl in "-s http://a" "-sc -w http://b http://c" "-r saved-cmds" \
+          "-x -l" "-rsaved -- -notanoption"
+do
+  echo "wgetter2 $cl"
+  set -- $cl
+  OPTIND=1
+  while getopts ":$save$cook$help$list$runn:$inpu$wopt" opt
+  do
+    case $opt in
+       $save) save_func;;   #  Save some wgetter sessions for later.
+       $cook) cookie_func;; #  Change cookie file.
+       $help) usage;;       #  Get help.
+       $list) list_func;;   #  Allow wget to use a list of URLs.
+       $runn) run_func;;    #  Useful if you are calling wgetter from,
+                            #+ for example, a cron script.
+       $inpu) run_func;;    #  When you don't know what your files are named.
+       $wopt) wopts;;       #  Pass options directly to wget.
+          \?) echo "Not a valid option."
+              echo "Use -${wopt} to pass options directly to wget,"
+              echo "or -${help} for help";;      # Catch anything else.
+    esac
+  done
+  shift $((OPTIND - 1))     # Do funky magic stuff with $#.
+  echo "  URLs:" "$@"
+done
+```
+
+```tessh
+# (wgetter2's option loop, on sample command lines; the functions only
+# say they were called.)
+import types
+opt = types.SimpleNamespace save=s cook=c help=h list=l runn=r inpu=i wopt=w
+def save_func = print "  save_func"
+def cookie_func = print "  cookie_func"
+def usage = print "  usage"
+def list_func = print "  list_func"
+def run_func OPTARG="" = print "  run_func" ($OPTARG or "(asks)")
+def wopts = print "  wopts"
+
+# getopts, as bash's runs with a leading ":" in its spec: [letter OPTARG]
+# for each option, ["?" letter] for one it doesn't know and [":" letter]
+# for one missing its argument; then the arguments after the options.
+def getopts spec args
+  opts = []
+  while $args and ($args[0].startswith "-") and $args[0] != "-"
+    [word *args] = $args
+    if $word == "--"
+      break
+    letters = $word[1:]
+    while $letters
+      [c letters] = [$letters[0] $letters[1:]]
+      if $c == ":" or $c not in $spec
+        $opts.append ["?" $c]
+      elif ($c + ":") not in $spec
+        $opts.append [$c ""]
+      elif $letters or $args               # Its argument: the rest of the
+        optarg = if $letters then $letters else ($args.pop 0)   # word, or the next.
+        $opts.append [$c $optarg]
+        letters = ""
+      else
+        $opts.append [":" $c]
+  [$opts $args]
+
+for cl in ["-s http://a" "-sc -w http://b http://c" "-r saved-cmds"
+           "-x -l" "-rsaved -- -notanoption"]
+  print "wgetter2 $cl"
+  [opts args] = getopts ":$opt.save$opt.cook$opt.help$opt.list$opt.runn:$opt.inpu$opt.wopt" ($cl.split)
+  for [o OPTARG] in $opts
+    match $o
+      case opt.save
+        save_func         #  Save some wgetter sessions for later.
+      case opt.cook
+        cookie_func       #  Change cookie file.
+      case opt.help
+        usage             #  Get help.
+      case opt.list
+        list_func         #  Allow wget to use a list of URLs.
+      case opt.runn
+        run_func $OPTARG  #  Useful if you are calling wgetter from,
+                          #+ for example, a cron script.
+      case opt.inpu
+        run_func          #  When you don't know what your files are named.
+      case opt.wopt
+        wopts             #  Pass options directly to wget.
+      case "?"
+        print "Not a valid option."
+        print "Use -$opt.wopt to pass options directly to wget,"
+        print "or -$opt.help for help"      # Catch anything else.
+  print "  URLs:" *$args
+```
+
+```output
+wgetter2 -s http://a
+  save_func
+  URLs: http://a
+wgetter2 -sc -w http://b http://c
+  save_func
+  cookie_func
+  wopts
+  URLs: http://b http://c
+wgetter2 -r saved-cmds
+  run_func saved-cmds
+  URLs:
+wgetter2 -x -l
+Not a valid option.
+Use -w to pass options directly to wget,
+or -h for help
+  list_func
+  URLs:
+wgetter2 -rsaved -- -notanoption
+  run_func saved
+  URLs: -notanoption
+```
+
+Building the `wget` command, two passes of the main loop: the depth
+asked for the first time is remembered as the second's default. The
+bash feeds `read` from a heredoc; tessh puts its own `input` in front of
+the real one.
+
+```bash
+# (Two passes of wgetter2.bash's main loop, with canned answers, a shorter
+#+ wget command, and the command shown instead of run.)
+CommandA="wget -nc -r"
+pattern=" -A .jpg,.html"
+depthDefault=3
+URLS=" http://example.test/"
+CookiesON=" --load-cookies cookies.txt"
+
+for pass in 1 2
+do
+   if [ -z $curDepth ]; then
+      Current=""
+   else Current=" Current value is $curDepth"
+   fi
+       echo "How deep should I go? \
+(integer: Default is $depthDefault.$Current)"
+       read Depth   # Recursion -- how far should we go?
+       inputB=""    # Reset this to blank on each pass of the loop.
+       echo "Enter the name of the referring page (default is none)."
+       read inputB  # Need this for some sites.
+
+       echo "Do you want to have the output logged to the terminal"
+       echo "(y/n, default is yes)?"
+       read noHide  # Otherwise wget will just log it to a file.
+
+       case $noHide in    # Now you see me, now you don't.
+          y|Y ) hide="";;
+          n|N ) hide=" -b";;
+            * ) hide="";;
+       esac
+
+       if [ -z ${Depth} ]; then
+          if [ -z ${curDepth} ]; then
+             Depth="$depthDefault"
+          else Depth="$curDepth"
+          fi
+       fi
+   Recurse=" -l $Depth"          # Set how deep we want to go.
+   curDepth=$Depth               # Remember setting for next time.
+
+       if [ ! -z $inputB ]; then
+          RefA=" --referer=$inputB"   # Option to use referring page.
+       fi
+
+   WGETTER="${CommandA}${pattern}${hide}${RefA}${Recurse}\
+${CookiesON}${lister}${Woptions}${URLS}"
+   echo "> $WGETTER"
+   URLS=" http://example.test/more"
+done <<'ANSWERS'
+2
+http://example.test/start
+n
+
+
+y
+ANSWERS
+```
+
+```tessh
+# (Two passes of wgetter2's main loop, with canned answers, a shorter
+# wget command, and the command shown instead of run.)
+answers = iter ["2" "http://example.test/start" "n"
+                "" "" "y"]
+def input = next $answers        # (Instead of reading the terminal.)
+
+CommandA = "wget -nc -r"
+pattern = " -A .jpg,.html"
+depthDefault = 3
+URLS = " http://example.test/"
+CookiesON = " --load-cookies cookies.txt"
+RefA = "" ; lister = "" ; Woptions = ""
+
+curDepth = ""
+for pass in [1 2]
+  Current = if $curDepth then " Current value is $curDepth" else ""
+  print "How deep should I go? (integer: Default is $depthDefault.$Current)"
+  Depth = (input)       # Recursion -- how far should we go?
+  inputB = ""           # Reset this to blank on each pass of the loop.
+  print "Enter the name of the referring page (default is none)."
+  inputB = (input)      # Need this for some sites.
+
+  print "Do you want to have the output logged to the terminal"
+  print "(y/n, default is yes)?"
+  noHide = (input)      # Otherwise wget will just log it to a file.
+
+  match $noHide         # Now you see me, now you don't.
+    case y | Y
+      hide = ""
+    case n | N
+      hide = " -b"
+    case _
+      hide = ""
+
+  if not $Depth
+    Depth = $curDepth or $depthDefault
+  Recurse = " -l $Depth"          # Set how deep we want to go.
+  curDepth = $Depth               # Remember setting for next time.
+
+  if $inputB
+    RefA = " --referer=$inputB"   # Option to use referring page.
+
+  WGETTER = "$CommandA$pattern$hide$RefA$Recurse$CookiesON$lister$Woptions$URLS"
+  print "> $WGETTER"
+  URLS = " http://example.test/more"
+```
+
+```output
+How deep should I go? (integer: Default is 3.)
+Enter the name of the referring page (default is none).
+Do you want to have the output logged to the terminal
+(y/n, default is yes)?
+> wget -nc -r -A .jpg,.html -b --referer=http://example.test/start -l 2 --load-cookies cookies.txt http://example.test/
+How deep should I go? (integer: Default is 3. Current value is 2)
+Enter the name of the referring page (default is none).
+Do you want to have the output logged to the terminal
+(y/n, default is yes)?
+> wget -nc -r -A .jpg,.html --referer=http://example.test/start -l 2 --load-cookies cookies.txt http://example.test/more
+```
+
+And `run_func`'s last part, running the saved commands:
+
+```bash
+# (A made-up file of saved commands: echo instead of wget.)
+filePath=wget-saved
+cat >$filePath <<'END'
+echo getting http://example.test/ -l 2
+echo getting 'http://example.test/a page' -l 3
+END
+
+echo "Using: $filePath"
+while read; do
+    eval $REPLY
+    echo "Completed: $REPLY"
+done < $filePath  # Feed the actual file we are using into a 'while' loop.
+```
+
+```tessh
+import shlex
+# (A made-up file of saved commands: echo instead of wget.)
+filePath = Path wget-saved
+cat >$filePath <<'END'
+echo getting http://example.test/ -l 2
+echo getting 'http://example.test/a page' -l 3
+END
+
+print "Using: $filePath"
+for line in (($filePath.read_text).splitlines)
+  env (shlex.split $line)        # The words of the line, as the shell splits them.
+  print "Completed: $line"
+```
+
+```output
+Using: wget-saved
+getting http://example.test/ -l 2
+Completed: echo getting http://example.test/ -l 2
+getting http://example.test/a page -l 3
+Completed: echo getting 'http://example.test/a page' -l 3
+```
