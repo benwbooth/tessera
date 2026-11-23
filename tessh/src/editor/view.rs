@@ -140,13 +140,13 @@ pub fn chips(ed: &Ed, v: &ViewIn) -> Vec<Span> {
 pub fn tooltip(ed: &Ed, hit: &Hit) -> String {
     match hit {
         Hit::Chip(n) => match *n {
-            "fix" => "Ask the AI to correct the command that just failed".into(),
+            "fix" => "Ask the AI to correct the command that just failed (Ctrl+Alt+X)".into(),
             "folders" => "cd history: this session's folders, then recent and frequent ones (Ctrl+Alt+D)".into(),
             "history" => "Command history (Ctrl+R)".into(),
             "lang" => "Input language: tessh (highlighting, checks, completion)".into(),
             "guide" => "The tessh guide: every feature, with examples. Opens at the selected word, or the word at the cursor (Shift+F1)".into(),
             "indent" => format!(
-                "{}Indentation for tessh: spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language.",
+                "{}Indentation for tessh: spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language. (Ctrl+Alt+S)",
                 if ed.detected().is_some() { "Detected from the text. " } else { "" }
             ),
             "jobs" => format!("{} background job{} running ({} in all): click to show them (Ctrl+Alt+J)", ed.jobs.0, if ed.jobs.0 == 1 { "" } else { "s" }, ed.jobs.1),
@@ -155,7 +155,7 @@ pub fn tooltip(ed: &Ed, hit: &Hit) -> String {
             "note" => if !ed.problem.is_empty() { ed.problem.clone() } else { ed.ai_note.clone() },
             _ => String::new(),
         },
-        Hit::Widget(w) => super::promptbar::widget_title(w),
+        Hit::Widget(w) => format!("{} (the prompt bar's choices: Ctrl+Alt+P)", super::promptbar::widget_title(w)),
         Hit::Path(p) => super::promptbar::path_title(p),
         _ => String::new(),
     }
@@ -174,7 +174,8 @@ pub fn keys_table(ed: &Ed) -> String {
                 ("Shift+Tab", "Outdent"),
             ],
         ),
-        ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+D", "Folders: cd history"), ("Ctrl+Alt+J", "Background jobs")]),
+        ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+D", "Folders: cd history"), ("Ctrl+Alt+J", "Background jobs"), ("Ctrl+Alt+P", "The prompt bar's choices (branches, contexts…)")]),
+        ("More", vec![("F1", "Help for the word at the cursor (on an empty line: these keys)"), ("Shift+F1", "The guide, at the word"), ("Shift+F10", "The text's menu (Copy, Paste, …); or the Menu key"), ("Ctrl+Alt+S", "Indentation: spaces or tabs, and its size"), ("Ctrl+Alt+E", "Editor keys: Emacs, vi, VS Code"), ("Ctrl+Alt+X", "Ask the AI to fix the command that failed")]),
     ];
     if ed.ai.lock().unwrap().command_ready {
         groups.push(("AI", vec![("# …", "Say what you want: the AI writes the command, for you to check")]));

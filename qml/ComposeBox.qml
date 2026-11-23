@@ -213,7 +213,15 @@ Rectangle {
                          ["Shift+Tab", "Outdent"]]],
             ["Finding", [["Ctrl+R", "Search history"],
                          ["Ctrl+Alt+D", "Folders: cd history"],
-                         ["Ctrl+Alt+J", "Background jobs"]]]]
+                         ["Ctrl+Alt+J", "Background jobs"],
+                         ["Ctrl+Alt+P", "The prompt bar's choices (branches, contexts…)"]]],
+            ["More", [["F1", "Help for the word at the cursor"],
+                      ["Shift+F1", "The guide, at the word"],
+                      ["Shift+F10", "The text's menu (Copy, Paste, …); or the Menu key"],
+                      ["Ctrl+Alt+S", "Indentation: spaces or tabs, and its size"],
+                      ["Ctrl+Alt+I", "Input language"],
+                      ["Ctrl+Alt+E", "Editor keys: Emacs, vi, VS Code"],
+                      ["Ctrl+Alt+X", "Ask the AI to fix the command that failed"]]]]]
         if (box.aiNL && box.chatReady) groups.push(["AI", [["# \u2026", "Say what you want: the AI writes the command, for you to check"]]])
         if (box.keys === "vi") {
             const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -858,6 +866,25 @@ Rectangle {
     Shortcut { sequence: "Ctrl+Alt+D"; enabled: box.keysHere && box.showPrompt; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); promptBar.toggleCdHistory(cdChip) } }
     Shortcut { sequence: "Ctrl+Alt+I"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); box.openLanguages() } }
     Shortcut { sequence: "Ctrl+Alt+E"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { const order = ["emacs", "vi", "vscode"]; box.keysPicked(order[(order.indexOf(box.keys) + 1) % order.length]) } }
+    // (The rest of the buttons, the prompt bar and the text's menu, without the mouse.)
+    Shortcut { sequence: "Ctrl+Alt+S"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); indentMenu.popup(indentChip, 0, -indentMenu.implicitHeight - 4) } }
+    Shortcut { sequence: "Ctrl+Alt+X"; enabled: box.keysHere && box.view !== null && box.view.lastStatus !== 0 && box.chatReady && box.aiBusy === ""; context: Qt.WindowShortcut; onActivated: box.askFix() }
+    Shortcut { sequence: "Ctrl+Alt+P"; enabled: box.keysHere && box.showPrompt; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); widgetMenu.popup(promptBar, 8, promptBar.height) } }
+    Shortcut { sequences: ["Shift+F10", "Menu"]; enabled: box.keysHere && edit.activeFocus; context: Qt.WindowShortcut; onActivated: editMenu.popup(edit, edit.cursorRectangle.x, edit.cursorRectangle.y + edit.cursorRectangle.height) }
+    // The prompt bar's widgets that offer choices (Ctrl+Alt+P): one picked opens its list.
+    SlimMenu {
+        id: widgetMenu
+        readonly property var names: {
+            const l = promptBar.layout || []
+            const out = l.filter(n => n !== "|" && !n.startsWith("starship") && ["time", "user", "host", "duration"].indexOf(n) < 0)
+            if (l.some(n => n.startsWith("starship"))) for (const n of ["dir", "git", "kube", "aws", "gcloud", "venv", "nix"]) if (out.indexOf(n) < 0) out.push(n)
+            return out
+        }
+        Repeater {
+            model: widgetMenu.names
+            SlimMenuItem { required property string modelData; text: promptBar.title(modelData); onTriggered: promptBar.openChoices(modelData, promptBar) }
+        }
+    }
     function compKey(e) {
         if (!compOpen || comp.items.length === 0) return false
         const n = comp.items.length
@@ -1451,7 +1478,7 @@ Rectangle {
             base: box.color
             visible: box.view !== null && box.view.lastStatus !== 0 && edit.text === "" && box.chatReady && box.aiBusy === ""
             label: "\u2726 Fix"
-            tip: "Ask the AI to correct the command that just failed"
+            tip: "Ask the AI to correct the command that just failed (Ctrl+Alt+X)"
             onClicked: box.askFix()
         }
         Chip {
@@ -1505,7 +1532,7 @@ Rectangle {
             id: indentChip
             base: box.color
             label: ({ spaces: "Spaces: ", tabs: "Tabs: ", mixed: "Mixed: " })[box.indentMode] + box.tabSize + (box.detectedIndent ? " \u00b7 detected" : "")
-            tip: (box.detectedIndent ? "Detected from the text. " : "") + "Indentation for " + box.lang + ": spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language."
+            tip: (box.detectedIndent ? "Detected from the text. " : "") + "Indentation for " + box.lang + ": spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language. (Ctrl+Alt+S)"
             onClicked: indentMenu.popup(indentChip, 0, -indentMenu.implicitHeight - 4)
         }
         SlimMenu {

@@ -111,6 +111,8 @@ pub enum MenuKind {
     Indent,
     /// The text's right-click menu.
     Context,
+    /// The prompt bar's widgets with choices (Ctrl+Alt+P).
+    Widgets,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -806,6 +808,24 @@ impl Ed {
                     return true;
                 }
                 KeyCode::Char('i') | KeyCode::Char('I') => return true,
+                // (The buttons and the prompt bar, without the mouse.)
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    self.click(Hit::Chip("indent"), h);
+                    return true;
+                }
+                KeyCode::Char('x') | KeyCode::Char('X') => {
+                    self.click(Hit::Chip("fix"), h);
+                    return true;
+                }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    let open = matches!(&self.menu, Some(m) if m.kind == MenuKind::Widgets);
+                    self.menu = None;
+                    self.close_comp();
+                    if !open {
+                        self.done = Some(Outcome::Host("widgets".into()));
+                    }
+                    return true;
+                }
                 // (The cd history, as the Folders button: again closes it.)
                 KeyCode::Char('d') | KeyCode::Char('D') => {
                     let open = matches!(&self.menu, Some(m) if m.kind == MenuKind::Choices("dir".into()));
@@ -837,6 +857,12 @@ impl Ed {
                 self.hover = None;
                 return true;
             }
+        }
+        // (The right-click menu: Shift+F10 or the Menu key, at the cursor.)
+        if k.code == KeyCode::Menu || (k.code == KeyCode::F(10) && shift) {
+            self.menu_x = None;
+            self.open_context();
+            return true;
         }
         if k.code == KeyCode::F(1) {
             if shift {
@@ -1508,6 +1534,7 @@ impl Ed {
                 }
             }
             MenuKind::Indent => self.done = Some(Outcome::Host(format!("indent:{}", it.cmd))),
+            MenuKind::Widgets => self.done = Some(Outcome::Host(format!("widget:{}", it.cmd))),
             MenuKind::Context => {
                 let sel = self.t.selection();
                 match it.cmd.as_str() {

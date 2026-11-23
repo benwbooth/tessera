@@ -823,7 +823,7 @@ pub fn keys_help() -> String {
          - **↑ ↓** go line by line, then through history; **PgUp PgDn** a whole entry at a time. **Ctrl+R** searches history.\n\
          - **→** or **End** at the end takes the grey suggestion (history first, then the AI); **Alt+F** one word of it.\n\
          - **# what you want**, then Enter: the AI writes the command for you to check.\n\
-         - **F1** or **Alt+H**: help for the word at the cursor. **Ctrl+Alt+J**: background jobs. **Ctrl+Alt+D**: folders (cd history).\n\
+         - **F1** or **Alt+H**: help for the word at the cursor. **Ctrl+Alt+J**: background jobs. **Ctrl+Alt+D**: folders (cd history). **Ctrl+Alt+P**: the prompt bar's choices. **Ctrl+Alt+S**: indentation. **Ctrl+Alt+X**: ask the AI to fix the command that failed. **Shift+F10** or the Menu key: the text's menu (Copy, Paste, …).\n\
          - Emacs keys (Ctrl+A, Ctrl+E, Ctrl+K, Ctrl+W, Ctrl+Y, Alt+B, Alt+F, …); `TESSH_KEYS=vi` for vi's.\n",
     );
     s
@@ -1129,6 +1129,7 @@ fn print_md(md: &str) {
 
 pub fn run() -> i32 {
     unsafe {
+        #[cfg(target_os = "linux")]
         libc::prctl(libc::PR_SET_NAME, c"tessh".as_ptr() as libc::c_ulong, 0, 0, 0);
         for s in [libc::SIGTSTP, libc::SIGTTOU, libc::SIGTTIN] {
             libc::signal(s, libc::SIG_IGN);

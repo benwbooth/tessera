@@ -381,7 +381,7 @@ impl Guide {
         let pct = ((self.top + body).min(total) * 100) / total;
         let more = if self.guides.len() > 1 { "   Tab other guide" } else { "" };
         let tabs = if self.tab_lines.is_empty() { "" } else { "   t bash/tessh" };
-        let hint = format!(" {pct}%   / search   Enter n N next   [ ] parts{more}{tabs}   ↑↓ PgUp PgDn   drag to pick, right click to copy   q back");
+        let hint = format!(" {pct}%   / search   Enter n N next   [ ] parts{more}{tabs}   ↑↓ PgUp PgDn   y copies the part (or drag, right click)   q back");
         let _ = write!(o, "\x1b[{};1H\x1b[0m\x1b[2K\x1b[2m{}\x1b[0m", rows, cut(&hint, cols));
         // The right-click menu, over the guide.
         if let Some((mx, my, at)) = self.menu {
@@ -470,6 +470,25 @@ fn run(mut g: Guide, at: &str) {
                 // (Ctrl+C with text picked copies it; with none, goes back.)
                 if ctrl && matches!(k.code, KeyCode::Char('c')) && g.sel_range().is_some() {
                     g.copy();
+                    continue;
+                }
+                // (Without the mouse: y copies the part being read, Ctrl+A
+                // picks it all, Shift+F10 or the Menu key opens the menu.)
+                if !g.searching && k.code == KeyCode::Char('y') && !ctrl {
+                    if let Some(i) = g.current_part() {
+                        let a = g.parts[i].line;
+                        let b = g.parts.get(i + 1).map(|p| p.line).unwrap_or(g.plain.len()).max(a + 1) - 1;
+                        g.sel = Some(((a, 0), (b, g.plain.get(b).map(|l| l.chars().count()).unwrap_or(0))));
+                        g.copy();
+                    }
+                    continue;
+                }
+                if ctrl && matches!(k.code, KeyCode::Char('a')) && !g.searching {
+                    run_item(&mut g, 1);
+                    continue;
+                }
+                if k.code == KeyCode::Menu || (k.code == KeyCode::F(10) && k.modifiers.contains(KeyModifiers::SHIFT)) {
+                    g.menu = Some((2, 2, 0));
                     continue;
                 }
                 if k.code == KeyCode::Esc && !g.searching && g.sel.is_some() {

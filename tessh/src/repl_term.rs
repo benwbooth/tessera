@@ -305,6 +305,31 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                         }
                         _ => {}
                     },
+                    "widgets" => {
+                        // (The prompt bar's widgets that offer choices: Ctrl+Alt+P.)
+                        let set = crate::editor::promptbar::settings();
+                        let mut names: Vec<String> = crate::editor::promptbar::layout(&set).into_iter().filter(|n| n != "|" && !n.starts_with("starship")).collect();
+                        if crate::editor::promptbar::layout(&set).iter().any(|n| n.starts_with("starship")) {
+                            for n in ["dir", "git", "kube", "aws", "gcloud", "venv", "nix"] {
+                                if !names.iter().any(|x| x == n) {
+                                    names.push(n.into());
+                                }
+                            }
+                        }
+                        let ctx = bar_ctx(&editor.ed);
+                        let mut items = vec![];
+                        if editor.ed.status != 0 {
+                            items.push(MenuItem { label: "Exit status: ask the AI to fix the command".into(), cmd: "status".into(), enabled: true, ..Default::default() });
+                        }
+                        for n in names {
+                            if n != "status" && !crate::editor::promptbar::choices(&n, &ctx).is_empty() {
+                                items.push(MenuItem { label: crate::editor::promptbar::widget_name(&n), cmd: n, enabled: true, ..Default::default() });
+                            }
+                        }
+                        if !items.is_empty() {
+                            editor.ed.open_menu(MenuKind::Widgets, items);
+                        }
+                    }
                     "widget" if arg == "status" => {
                         let what = format!("{last_cmd} (exit status {})", editor.ed.status);
                         editor.ed.ask_command(what, "fix");
