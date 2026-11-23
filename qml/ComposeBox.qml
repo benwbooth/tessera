@@ -1030,6 +1030,8 @@ Rectangle {
     // ---- view -------------------------------------------------------------
     PromptBar {
         id: promptBar
+        // (Its drop-ups open over the toolbar too, not on it.)
+        popupLift: y
         visible: box.showPrompt
         anchors.left: parent.left
         anchors.right: parent.right
@@ -1444,6 +1446,17 @@ Rectangle {
             tip: "Commands waiting for the running one to finish, run in turn. Click to drop them. (Ctrl+Enter or a tap of right Ctrl runs a command in the background instead.)"
             onClicked: box.clearQueue()
         }
+        // (The cd history: this tab's folders, then recent and frequent ones.)
+        Chip {
+            id: cdChip
+            visible: box.showPrompt
+            base: box.color
+            label: "\u25b4 Folders"
+            tip: "cd history: this tab's folders, then recent and frequent ones"
+            onClicked: promptBar.toggleCdHistory(cdChip)
+        }
+        // (Test hook: TESSERA_TEST_CDHIST opens it.)
+        Timer { interval: 7000; running: box.controller !== null && box.controller.testEnv("CDHIST") !== ""; onTriggered: promptBar.toggleCdHistory(cdChip) }
         Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
         Chip {
             id: langChip
@@ -1452,6 +1465,17 @@ Rectangle {
             label: (box.runShell !== "" ? box.shellNames[box.runShell] : box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
             tip: "Input language: highlighting, checks, completion (Ctrl+Alt+I)"
             onClicked: box.openLanguages()
+        }
+        Chip {
+            base: box.color
+            id: guideChip
+            readonly property string guide: Window.window && Window.window.guideFor ? Window.window.guideFor(box.lang, box.runShell || box.shellName) : ""
+            visible: guide !== ""
+            label: "Guide"
+            tip: (guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
+                : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept")
+                + ". Opens at the selected word, or the word at the cursor (Shift+F1)"
+            onClicked: box.openGuideAtWord()
         }
         // Indentation, as VS Code's status bar has it: spaces, tabs or mixed,
         // and how wide a level is; kept per language.
@@ -1488,17 +1512,6 @@ Rectangle {
                 enabled: indentMenu.p.own
                 onTriggered: { box.setIndentPref("mode", null); box.setIndentPref("size", null) }
             }
-        }
-        Chip {
-            base: box.color
-            id: guideChip
-            readonly property string guide: Window.window && Window.window.guideFor ? Window.window.guideFor(box.lang, box.runShell || box.shellName) : ""
-            visible: guide !== ""
-            label: "Guide"
-            tip: (guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
-                : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept")
-                + ". Opens at the selected word, or the word at the cursor (Shift+F1)"
-            onClicked: box.openGuideAtWord()
         }
         Chip {
             visible: box.jobsAll > 0

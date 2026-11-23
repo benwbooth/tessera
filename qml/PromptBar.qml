@@ -421,6 +421,9 @@ Item {
     TextMetrics { id: choiceMetrics; font.family: bar.fontFamily; font.pixelSize: 12 }
     readonly property real choiceWidth: { let w = 0; for (const c of choices) { choiceMetrics.text = c.label; w = Math.max(w, choiceMetrics.advanceWidth) } return w }
     property double cdTapAt: 0          // the drop-up was the click
+    // (How far above the bar its drop-ups open: over the rows above it too,
+    // the input editor's toolbar.)
+    property real popupLift: 0
     property double choicesClosedAt: 0  // when the choices list last closed, and whose it was
     property string choicesClosedFor: ""
     property string choicesFor: ""      // whose choices are open
@@ -687,10 +690,7 @@ Item {
         required property var modelData
         readonly property var wd: modelData
         readonly property int wi: wd.i
-        // (A folder widget, or Starship's prompt with the folder in it: a
-        // drop-up for the cd history after it.)
-        readonly property bool hasFolder: ["dir", "star:directory", "starship"].indexOf(wd.name) >= 0
-        implicitWidth: body.implicitWidth + (hasFolder ? cdHistory.width + 2 : 0)
+        implicitWidth: body.implicitWidth
         implicitHeight: body.implicitHeight
         width: implicitWidth
         height: implicitHeight
@@ -698,43 +698,9 @@ Item {
         opacity: bar.dragFrom === wi ? 0.35 : 1
         // (Hovered, and not on a folder of its path: underlined, it's clickable.)
         readonly property bool hot: hover.hovered && bar.hoverPath === "" && bar.dragFrom < 0
-        Rectangle {
-            id: cdHistory
-            visible: w.hasFolder
-            // (Before the folder: a whole Starship prompt fills the row, so its end is far off.)
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            width: 16
-            height: 16
-            radius: 4
-            color: cdh.hovered || (choicesPop.opened && bar.choicesFor === "dir") ? Theme.mix(Theme.bg, Theme.fg, 0.15) : "transparent"
-            Text {
-                anchors.centerIn: parent
-                anchors.verticalCenterOffset: 0.001
-                text: "\u25b4"
-                color: cdh.hovered ? Theme.text : Theme.textDim
-                font.pixelSize: 12
-                font.underline: cdh.hovered
-                renderType: Text.NativeRendering
-            }
-            HoverHandler { id: cdh; cursorShape: Qt.PointingHandCursor }
-            // (Opened once the click is done: opened during it, the release closed it again.)
-            // (A click while it's open closes it: the press outside the list
-            // already did, so the click doesn't open it again.)
-            TapHandler { onTapped: {
-                if (choicesPop.opened && bar.choicesFor === "dir") { choicesPop.close(); return }
-                if (bar.choicesClosedFor === "dir" && Date.now() - bar.choicesClosedAt < 500) return
-                bar.cdTapAt = Date.now(); Qt.callLater(() => bar.openChoices("dir", w)) } }
-            ToolTip {
-                visible: cdh.hovered && !choicesPop.opened
-                delay: 300
-                topPadding: 4.001
-                text: "cd history: this tab's folders, then recent and frequent ones"
-            }
-        }
         Loader {
             id: body
-            x: w.hasFolder ? cdHistory.width + 2 : 0
+            x: 0
             sourceComponent: w.wd.kind === "seg" ? segBody : w.wd.kind === "lines" ? linesBody : runsBody
             property var wd: w.wd
             property bool hot: w.hot
@@ -757,7 +723,7 @@ Item {
             // (On a parent folder of its path: cd there.)
             onTapped: {
                 const p = bar.hoverPath
-                if (Date.now() - bar.cdTapAt < 300 || cdh.hovered) return
+                if (Date.now() - bar.cdTapAt < 300) return
                 if (p === "@here") Qt.callLater(() => bar.openChoices("dir", w))
                 else if (p !== "") bar.runRequested("cd " + (/^[A-Za-z0-9_\/.~+:@-]+$/.test(p) ? p : "'" + p.replace(/'/g, "'\\''") + "'"))
                 else Qt.callLater(() => bar.openChoices(w.wd.name, w))
@@ -783,7 +749,7 @@ Item {
                 bar.dropAt = bar.dropTarget()
             }
         }
-        ToolTip.visible: hover.hovered && !cdh.hovered && bar.hoverPath === "" && bar.dragFrom < 0 && !choicesPop.opened && !widgetMenu.opened
+        ToolTip.visible: hover.hovered && bar.hoverPath === "" && bar.dragFrom < 0 && !choicesPop.opened && !widgetMenu.opened
         ToolTip.delay: 900
         ToolTip.text: bar.title(w.wd.name) + " — click for choices, drag to move, right-click to style"
     }
@@ -909,7 +875,7 @@ Item {
     }
     Popup {
         id: addPop
-        y: -height - 4
+        y: -height - 4 - bar.popupLift
         width: 300
         height: Math.min(420, addList.contentHeight + addFilter.height + 22)
         padding: 6
@@ -985,6 +951,14 @@ Item {
 
     // ---- a click: what the widget offers ---------------------------------------
     property var choices: []
+    // The cd history (the toolbar's Folders button, at `item`): this tab's
+    // folders, then recent and frequent ones; again, it closes.
+    function toggleCdHistory(item) {
+        if (choicesPop.opened && choicesFor === "dir") { choicesPop.close(); return }
+        if (choicesClosedFor === "dir" && Date.now() - choicesClosedAt < 500) return
+        cdTapAt = Date.now()
+        Qt.callLater(() => openChoices("dir", item))
+    }
     function openChoices(name, item) {
         if (name === "status") { bar.fixRequested(); return }
         // (The menu opens when the choices come; a newer click's win.)
@@ -1026,7 +1000,7 @@ Item {
     }
     Popup {
         id: choicesPop
-        y: -height - 4
+        y: -height - 4 - bar.popupLift
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onClosed: { bar.choicesClosedAt = Date.now(); bar.choicesClosedFor = bar.choicesFor }
         onOpened: if (bar.choices.length > 8) choiceFilter.forceActiveFocus()
@@ -1097,7 +1071,7 @@ Item {
     }
     SlimMenu {
         id: widgetMenu
-        y: -height - 4
+        y: -height - 4 - bar.popupLift
         SlimMenuItem { text: "Style…"; onTriggered: bar.openStyle(bar.menuName) }
         SlimMenuItem {
             text: bar.layout.indexOf("|") >= 0 && bar.menuFor > bar.layout.indexOf("|") ? "Move to the left" : "Move to the right"
@@ -1123,7 +1097,7 @@ Item {
     }
     Popup {
         id: stylePop
-        y: -height - 4
+        y: -height - 4 - bar.popupLift
         property string name: ""
         width: 300
         padding: 10
