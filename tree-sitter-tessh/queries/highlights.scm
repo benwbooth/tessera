@@ -21,6 +21,11 @@
 ((bareword) @constant.builtin
   (#match? @constant.builtin "^(True|False|None)$"))
 
+; name=value first on a line: an assignment, as name = value (before a
+; program, its environment). Ahead of the next: the first match wins.
+((line . (bareword) @variable)
+  (#match? @variable "^[A-Za-z_][A-Za-z0-9_]*=([^=]|$)"))
+
 ; A line's first word: the command or function it runs.
 (line . (bareword) @function)
 

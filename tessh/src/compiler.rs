@@ -818,6 +818,11 @@ impl<'py, 's> Compiler<'py, 's> {
         if let Some(i) = self.assign_index(items) {
             return self.compile_assign(&items[..i], &items[i], &items[i + 1..], children, conts);
         }
+        // (name=value first on a line, as bash has it: alone (or several),
+        // assignments, as name = value; before a program, its environment.)
+        if matches!(items[0].kind, Kind::KwArg { .. }) {
+            return self.compile_bare_assign(items, children, ctx, conts);
+        }
         if let Some(n) = items[0].op_name().filter(|o| *o == "->" || *o == "->>") {
             return self.special(n, items, children, ctx, conts, decos);
         }
@@ -2481,6 +2486,47 @@ impl<'py, 's> Compiler<'py, 's> {
         let node = self.n("AnnAssign", vec![("target", self.name(&py, true)?), ("annotation", annotation), ("value", value.unwrap_or_else(|| self.none())), ("simple", PyInt::new(self.py, 1).into_any())])?;
         stmts.push(self.at(node, target));
         Ok(Res::s(stmts, if has { self.name(&py, false)? } else { self.cnone()? }))
+    }
+
+    /// `a=1`, `a=1 b=2`: each as `a = 1`. `NAME=value … program …`: the
+    /// program run with those environment variables (words, as in a
+    /// command), only while it runs, as bash does.
+    fn compile_bare_assign(&mut self, items: &[Form], children: &[Form], ctx: Ctx, conts: &[Form]) -> R<Res<'py>> {
+        let k = items.iter().take_while(|x| matches!(x.kind, Kind::KwArg { .. })).count();
+        if k == items.len() {
+            let mut stmts = vec![];
+            for (j, x) in items.iter().enumerate() {
+                let Kind::KwArg { name, value } = &x.kind else { unreachable!() };
+                let target = Form::sym_at(name, &[], x.pos);
+                let eq = Form::new(Kind::Op { name: "=".into(), tick: false }, x.pos);
+                let last = j + 1 == items.len();
+                let r = self.compile_assign(&[target], &eq, &[(**value).clone()], if last { children } else { &[] }, if last { conts } else { &[] })?;
+                stmts.extend(self.as_stmts(r)?);
+            }
+            return Ok(Res::s(stmts, self.cnone()?));
+        }
+        let mut stmts = vec![];
+        let mut kws = vec![];
+        for x in &items[..k] {
+            let Kind::KwArg { name, value } = &x.kind else { unreachable!() };
+            let v = self.cmd_word(value)?;
+            stmts.extend(v.stmts);
+            kws.push(self.keyword(Some(name), self.val(v.expr)?)?);
+        }
+        let ctx_expr = self.call(self.rt("env_with")?, vec![], kws)?;
+        let item = self.n("withitem", vec![("context_expr", ctx_expr)])?;
+        let t = if ctx == Ctx::Stmt { None } else { Some(self.tmp("w")) };
+        let line = Form::line(items[k..].to_vec(), children.to_vec(), items[k].pos);
+        let body = self.branch(&[line], ctx, &t)?;
+        if let Some(t) = &t {
+            stmts.push(self.assign(t, self.cnone()?)?);
+        }
+        let node = self.n("With", vec![("items", self.list(vec![item])?), ("body", self.list(body)?)])?;
+        stmts.push(self.at(node, &items[0]));
+        Ok(Res::s(stmts, match t {
+            Some(t) => self.name(&t, false)?,
+            None => self.cnone()?,
+        }))
     }
 
     fn compile_assign(&mut self, lhs: &[Form], op: &Form, rhs: &[Form], children: &[Form], conts: &[Form]) -> R<Res<'py>> {

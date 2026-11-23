@@ -520,6 +520,25 @@ def matches(s, pattern):
         return pattern.search(s)
     return os.fspath(pattern) in s if isinstance(pattern, os.PathLike) else str(pattern) in s
 
+class env_with:
+    """NAME=value … program: the program run with those environment
+    variables, put back as they were after it, as bash does."""
+    def __init__(self, **vs):
+        import os
+        self.vs = {k: os.fspath(v) if isinstance(v, os.PathLike) else str(v) for k, v in vs.items()}
+    def __enter__(self):
+        import os
+        self.old = {k: os.environ.get(k) for k in self.vs}
+        for k, v in self.vs.items():
+            os.environ[k] = v
+    def __exit__(self, *exc):
+        import os
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
 def _words_as_program(f):
     """f, called with a glob's names where it's given a Glob (as a program
     would be: the pattern itself when nothing matches)."""
@@ -2291,6 +2310,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     m.add("Glob", prelude(py)?.getattr("Glob")?)?;
     m.add("regex", prelude(py)?.getattr("regex")?)?;
     m.add("matches", prelude(py)?.getattr("matches")?)?;
+    m.add("env_with", prelude(py)?.getattr("env_with")?)?;
     m.add("path_word", prelude(py)?.getattr("_path_word")?)?;
     m.add("pretty", prelude(py)?.getattr("pretty")?)?;
     m.add("env", Py::new(py, Env)?)?;

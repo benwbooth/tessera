@@ -592,6 +592,12 @@ fn backslash_escapes_in_words() {
 }
 
 #[test]
+fn bare_assignment_and_env_prefix() {
+    let (_, out) = run("a=1\nb=x c=$a\nprint $a $b $c (dict k=2)\nTESSH_T1=v sh -c 'echo $TESSH_T1'\nprint (\"TESSH_T1\" in $env)");
+    assert_eq!(out, "1 x 1 {k: 2}\nv\nFalse\n");
+}
+
+#[test]
 fn regexes_and_matching() {
     let (_, out) = run("s = \"Build 42\"\nm = $s =~ re'(\\d+)'\nprint ($m.group 1) (($s =~ re'^build'i) != None) ($s =~ re'^build') ($s !~ re'x')\nf = ./a.py\nprint ($f =~ *.py) ($f =~ *.rs) ($s =~ '42') ($s =~ '42$')\nprint re'a\\d'ms (\"a\\nb\" =~ re'^b'm != None)");
     assert_eq!(out, "42 True None True\nTrue False True False\nre'a\\d'ms True\n");

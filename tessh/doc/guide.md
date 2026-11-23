@@ -773,6 +773,19 @@ blue 10
 False
 ```
 
+`NAME=value` before a program, as in bash, gives it that variable for just
+that run; the shell's own environment is as it was after.
+
+```tessh
+GREETING=hi sh -c 'echo $GREETING'
+print ("GREETING" in $env)
+```
+
+```output
+hi
+False
+```
+
 `cd` changes folder (`cd` alone goes home, `cd -` goes back), and `pushd`,
 `popd` and `dirs` keep a stack. A line that's only a folder (`~`, `/tmp`,
 `../src`) goes there, as `cd` would. They take bash's options: `cd -P` goes by the
@@ -821,7 +834,7 @@ print $x_from_file
 # Python, written as tessh
 
 ## Assignment
-<!-- help: assignment assign = += destructuring unpacking del -->
+<!-- help: assignment assign = += name=value destructuring unpacking del -->
 
 ```tessh
 x = 5
@@ -855,6 +868,20 @@ print $d $o.name
 ```
 
 The augmented forms are `+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`.
+
+`name=value` glued, as bash writes it, is the same as `name = value` when it
+starts a line; several on one line are each assigned. Inside a call
+(`f a=1`) it's still a keyword argument, and `==` never assigns.
+
+```tessh
+n=5 label=total
+n += 1
+print $label $n
+```
+
+```output
+total 6
+```
 
 ## Functions
 <!-- help: functions function def return lambda fn parameters defaults args kwargs implicit async await -->
