@@ -1214,11 +1214,11 @@ has the command as a list, and takes it from there.
 print (Path $argv[0]).name   # (The script, where bash's first $_ is the shell.)
 
 cmd = [du]
-command $cmd >/dev/null      #  So no output from command.
+env $cmd >/dev/null          #  So no output from command.
 print $cmd[-1]               #  du
 
 cmd = [ls -al]
-command $cmd >/dev/null
+env $cmd >/dev/null          #  (env runs the program a list names.)
 print $cmd[-1]               #  -al  (last argument)
 ```
 
