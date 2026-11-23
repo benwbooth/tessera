@@ -532,3 +532,509 @@ match $answer
 print
 exit 0
 ```
+
+## Collatz series
+<!-- help: abs-collatz collatz hailstone series iterate 3n+1 -->
+
+The "hailstone" series: halve an even number, triple an odd one and add 1,
+and go on. Every seed anyone has tried ends up cycling through 4, 2, 1.
+
+### Example A-6. Collatz series (`collatz.sh`)
+
+```bash no-run
+#!/bin/bash
+# collatz.sh
+
+#  The notorious "hailstone" or Collatz series.
+#  -------------------------------------------
+#  1) Get the integer "seed" from the command-line.
+#  2) NUMBER <-- seed
+#  3) Print NUMBER.
+#  4)  If NUMBER is even, divide by 2, or
+#  5)+ if odd, multiply by 3 and add 1.
+#  6) NUMBER <-- result 
+#  7) Loop back to step 3 (for specified number of iterations).
+#
+#  The theory is that every such sequence,
+#+ no matter how large the initial value,
+#+ eventually settles down to repeating "4,2,1..." cycles,
+#+ even after fluctuating through a wide range of values.
+#
+#  This is an instance of an "iterate,"
+#+ an operation that feeds its output back into its input.
+#  Sometimes the result is a "chaotic" series.
+
+
+MAX_ITERATIONS=200
+# For large seed numbers (>32000), try increasing MAX_ITERATIONS.
+
+h=${1:-$$}                      #  Seed.
+                                #  Use $PID as seed,
+                                #+ if not specified as command-line arg.
+
+echo
+echo "C($h) -*- $MAX_ITERATIONS Iterations"
+echo
+
+for ((i=1; i<=MAX_ITERATIONS; i++))
+do
+
+# echo -n "$h	"
+#            ^^^ 
+#            tab
+# printf does it better ...
+COLWIDTH=%7d
+printf $COLWIDTH $h
+
+  let "remainder = h % 2"
+  if [ "$remainder" -eq 0 ]   # Even?
+  then
+    let "h /= 2"              # Divide by 2.
+  else
+    let "h = h*3 + 1"         # Multiply by 3 and add 1.
+  fi
+
+
+COLUMNS=10                    # Output 10 values per line.
+let "line_break = i % $COLUMNS"
+if [ "$line_break" -eq 0 ]
+then
+  echo
+fi  
+
+done
+
+echo
+
+#  For more information on this strange mathematical function,
+#+ see _Computers, Pattern, Chaos, and Beauty_, by Pickover, p. 185 ff.,
+#+ as listed in the bibliography.
+
+exit 0
+```
+
+In tessh the series is a generator, an endless one, as the mathematics
+says; `take` stops it after `MAX_ITERATIONS` values, and `partition_all`
+cuts those into rows of ten. `"${n:7d}"` is the `printf %7d`. The seed is
+the first argument or, here, 27 (the bash takes its own PID, which would
+make the output different every run).
+
+```tessh
+# collatz.tsh
+
+#  The notorious "hailstone" or Collatz series.
+#  1) Get the integer "seed" from the command-line.
+#  2) NUMBER <-- seed
+#  3) Print NUMBER.
+#  4)  If NUMBER is even, divide by 2, or
+#  5)+ if odd, multiply by 3 and add 1.
+#  6) NUMBER <-- result
+#  7) Loop back to step 3 (for specified number of iterations).
+
+MAX_ITERATIONS = 200
+COLUMNS = 10                 # Output 10 values per line.
+
+h = int (if (len $argv) > 1 then $argv[1] else 27)   # Seed.
+                             # (The original falls back on its PID.)
+
+def hailstone n
+  while True
+    yield $n
+    n = if $n % 2 == 0 then $n // 2 else $n * 3 + 1
+
+print
+print "C($h) -*- $MAX_ITERATIONS Iterations"
+print
+
+for row in (partition_all $COLUMNS (take $MAX_ITERATIONS (hailstone $h)))
+  print (''.join ["${n:7d}" for n in $row])
+
+print
+
+#  For more information on this strange mathematical function,
+#+ see _Computers, Pattern, Chaos, and Beauty_, by Pickover, p. 185 ff.
+```
+
+```output
+
+C(27) -*- 200 Iterations
+
+     27     82     41    124     62     31     94     47    142     71
+    214    107    322    161    484    242    121    364    182     91
+    274    137    412    206    103    310    155    466    233    700
+    350    175    526    263    790    395   1186    593   1780    890
+    445   1336    668    334    167    502    251    754    377   1132
+    566    283    850    425   1276    638    319    958    479   1438
+    719   2158   1079   3238   1619   4858   2429   7288   3644   1822
+    911   2734   1367   4102   2051   6154   3077   9232   4616   2308
+   1154    577   1732    866    433   1300    650    325    976    488
+    244    122     61    184     92     46     23     70     35    106
+     53    160     80     40     20     10      5     16      8      4
+      2      1      4      2      1      4      2      1      4      2
+      1      4      2      1      4      2      1      4      2      1
+      4      2      1      4      2      1      4      2      1      4
+      2      1      4      2      1      4      2      1      4      2
+      1      4      2      1      4      2      1      4      2      1
+      4      2      1      4      2      1      4      2      1      4
+      2      1      4      2      1      4      2      1      4      2
+      1      4      2      1      4      2      1      4      2      1
+      4      2      1      4      2      1      4      2      1      4
+
+```
+
+## days-between: Days between two dates
+<!-- help: abs-days-between days-between dates gauss date-difference datetime -->
+
+The number of days between two dates, by Gauss' formula for the days since
+March 1, 1600.
+
+### Example A-7. days-between: Days between two dates (`days-between.sh`)
+
+```bash no-run
+#!/bin/bash
+# days-between.sh:    Number of days between two dates.
+# Usage: ./days-between.sh [M]M/[D]D/YYYY [M]M/[D]D/YYYY
+#
+# Note: Script modified to account for changes in Bash, v. 2.05b +,
+#+      that closed the loophole permitting large negative
+#+      integer return values.
+
+ARGS=2                # Two command-line parameters expected.
+E_PARAM_ERR=85        # Param error.
+
+REFYR=1600            # Reference year.
+CENTURY=100
+DIY=365
+ADJ_DIY=367           # Adjusted for leap year + fraction.
+MIY=12
+DIM=31
+LEAPCYCLE=4
+
+MAXRETVAL=255         #  Largest permissible
+                      #+ positive return value from a function.
+
+diff=                 # Declare global variable for date difference.
+value=                # Declare global variable for absolute value.
+day=                  # Declare globals for day, month, year.
+month=
+year=
+
+
+Param_Error ()        # Command-line parameters wrong.
+{
+  echo "Usage: `basename $0` [M]M/[D]D/YYYY [M]M/[D]D/YYYY"
+  echo "       (date must be after 1/3/1600)"
+  exit $E_PARAM_ERR
+}  
+
+
+Parse_Date ()                 # Parse date from command-line params.
+{
+  month=${1%%/**}
+  dm=${1%/**}                 # Day and month.
+  day=${dm#*/}
+  let "year = `basename $1`"  # Not a filename, but works just the same.
+}  
+
+
+check_date ()                 # Checks for invalid date(s) passed.
+{
+  [ "$day" -gt "$DIM" ] || [ "$month" -gt "$MIY" ] ||
+  [ "$year" -lt "$REFYR" ] && Param_Error
+  # Exit script on bad value(s).
+  # Uses or-list / and-list.
+  #
+  # Exercise: Implement more rigorous date checking.
+}
+
+
+strip_leading_zero () #  Better to strip possible leading zero(s)
+{                     #+ from day and/or month
+  return ${1#0}       #+ since otherwise Bash will interpret them
+}                     #+ as octal values (POSIX.2, sect 2.9.2.1).
+
+
+day_index ()          # Gauss' Formula:
+{                     # Days from March 1, 1600 to date passed as param.
+                      #           ^^^^^^^^^^^^^
+  day=$1
+  month=$2
+  year=$3
+
+  let "month = $month - 2"
+  if [ "$month" -le 0 ]
+  then
+    let "month += 12"
+    let "year -= 1"
+  fi  
+
+  let "year -= $REFYR"
+  let "indexyr = $year / $CENTURY"
+
+
+  let "Days = $DIY*$year + $year/$LEAPCYCLE - $indexyr \
+              + $indexyr/$LEAPCYCLE + $ADJ_DIY*$month/$MIY + $day - $DIM"
+  #  For an in-depth explanation of this algorithm, see
+  #+   http://weblogs.asp.net/pgreborio/archive/2005/01/06/347968.aspx
+
+
+  echo $Days
+
+}  
+
+
+calculate_difference ()            # Difference between two day indices.
+{
+  let "diff = $1 - $2"             # Global variable.
+}  
+
+
+abs ()                             #  Absolute value
+{                                  #  Uses global "value" variable.
+  if [ "$1" -lt 0 ]                #  If negative
+  then                             #+ then
+    let "value = 0 - $1"           #+ change sign,
+  else                             #+ else
+    let "value = $1"               #+ leave it alone.
+  fi
+}
+
+
+
+if [ $# -ne "$ARGS" ]              # Require two command-line params.
+then
+  Param_Error
+fi  
+
+Parse_Date $1
+check_date $day $month $year       #  See if valid date.
+
+strip_leading_zero $day            #  Remove any leading zeroes
+day=$?                             #+ on day and/or month.
+strip_leading_zero $month
+month=$?
+
+let "date1 = `day_index $day $month $year`"
+
+
+Parse_Date $2
+check_date $day $month $year
+
+strip_leading_zero $day
+day=$?
+strip_leading_zero $month
+month=$?
+
+date2=$(day_index $day $month $year) # Command substitution.
+
+
+calculate_difference $date1 $date2
+
+abs $diff                            # Make sure it's positive.
+diff=$value
+
+echo $diff
+
+exit 0
+
+#  Exercise:
+#  --------
+#  If given only one command-line parameter, have the script
+#+ use today's date as the second.
+
+
+#  Compare this script with
+#+ the implementation of Gauss' Formula in a C program at
+#+    http://buschencrew.hypermart.net/software/datedif
+```
+
+A bash function can only give back a number from 0 to 255 as its status,
+so the bash hands results back in global variables, in `$?` (to strip a
+leading zero) and by echoing them. Python functions return any value, so in
+tessh each function returns what it computes. `int "08"` is 8: there's no
+octal trap to strip zeros for. Python's `datetime` knows the calendar, so
+the last line checks Gauss' answer against it.
+
+```tessh
+import datetime
+# days-between.tsh:    Number of days between two dates.
+# Usage: days-between.tsh [M]M/[D]D/YYYY [M]M/[D]D/YYYY
+
+ARGS = 2                     # Two command-line parameters expected.
+E_PARAM_ERR = 85             # Param error.
+
+REFYR = 1600                 # Reference year.
+CENTURY = 100
+DIY = 365
+ADJ_DIY = 367                # Adjusted for leap year + fraction.
+MIY = 12
+DIM = 31
+LEAPCYCLE = 4
+
+def Param_Error              # Command-line parameters wrong.
+  print "Usage: $((Path $argv[0]).name) [M]M/[D]D/YYYY [M]M/[D]D/YYYY"
+  print "       (date must be after 1/3/1600)"
+  exit $E_PARAM_ERR
+
+def Parse_Date text          # Parse date from command-line params.
+  [month day year] = [int $part for part in ($text.split "/")]
+  [$day $month $year]
+
+def check_date day month year     # Checks for invalid date(s) passed.
+  if $day > $DIM or $month > $MIY or $year < $REFYR
+    Param_Error              # Exit script on bad value(s).
+
+def day_index day month year # Gauss' Formula:
+                             # Days from March 1, 1600 to date passed.
+  month -= 2
+  if $month <= 0
+    month += 12
+    year -= 1
+  year -= $REFYR
+  indexyr = $year // $CENTURY
+  ($DIY * $year + $year // $LEAPCYCLE - $indexyr + $indexyr // $LEAPCYCLE
+   + $ADJ_DIY * $month // $MIY + $day - $DIM)
+
+args = $argv[1:] or ["7/4/1776" "11/23/2026"]   # (sample arguments, when none are given)
+
+if (len $args) != $ARGS      # Require two command-line params.
+  Param_Error
+
+[day month year] = Parse_Date $args[0]
+check_date $day $month $year # See if valid date.
+first_index = day_index $day $month $year
+
+[day month year] = Parse_Date $args[1]
+check_date $day $month $year
+second_index = day_index $day $month $year
+
+diff = abs ($first_index - $second_index)   # Make sure it's positive.
+print $diff
+
+# (Python's datetime agrees.)
+[a b] = [(datetime.date $y $m $d) for [d m y] in [(Parse_Date $s) for s in $args]]
+print (abs ($b - $a).days)
+
+exit 0
+```
+
+```output
+91452
+91452
+```
+
+## Making a dictionary
+<!-- help: abs-makedict makedict dictionary words tr sort uniq word-list -->
+
+A filter after Alec Muffett's `mkdict` from the Crack package: every word
+of the files given, lowercased, sorted, once each.
+
+### Example A-8. Making a dictionary (`makedict.sh`)
+
+```bash no-run
+#!/bin/bash
+# makedict.sh  [make dictionary]
+
+# Modification of /usr/sbin/mkdict (/usr/sbin/cracklib-forman) script.
+# Original script copyright 1993, by Alec Muffett.
+#
+#  This modified script included in this document in a manner
+#+ consistent with the "LICENSE" document of the "Crack" package
+#+ that the original script is a part of.
+
+#  This script processes text files to produce a sorted list
+#+ of words found in the files.
+#  This may be useful for compiling dictionaries
+#+ and for other lexicographic purposes.
+
+
+E_BADARGS=85
+
+if [ ! -r "$1" ]                    #  Need at least one
+then                                #+ valid file argument.
+  echo "Usage: $0 files-to-process"
+  exit $E_BADARGS
+fi  
+
+
+# SORT="sort"                       #  No longer necessary to define
+                                    #+ options to sort. Changed from
+                                    #+ original script.
+
+cat $* |                            #  Dump specified files to stdout.
+        tr A-Z a-z |                #  Convert to lowercase.
+        tr ' ' '\012' |             #  New: change spaces to newlines.
+#       tr -cd '\012[a-z][0-9]' |   #  Get rid of everything
+                                    #+ non-alphanumeric (in orig. script).
+        tr -c '\012a-z'  '\012' |   #  Rather than deleting non-alpha
+                                    #+ chars, change them to newlines.
+        sort |                      #  $SORT options unnecessary now.
+        uniq |                      #  Remove duplicates.
+        grep -v '^#' |              #  Delete lines starting with #.
+        grep -v '^$'                #  Delete blank lines.
+
+exit $?
+```
+
+The pipeline is the same in tessh, programs and all. A line can't end in
+`|` in tessh, so each stage after the first starts a line continued with
+`\`, and the comments go above. `*$files` puts each file in as its own
+argument, as bash's `$*` did.
+
+```tessh
+# (A made-up text to try it on.)
+print "The Cat sat on the mat.\nThe cat's hat, 2 times; the end!" >text.txt
+
+import os
+# makedict.tsh  [make dictionary]
+# Modification of /usr/sbin/mkdict (/usr/sbin/cracklib-forman) script.
+# Original script copyright 1993, by Alec Muffett.
+
+E_BADARGS = 85
+
+files = $argv[1:] or [text.txt]       # (sample arguments, when none are given)
+
+if not $files or not (os.access $files[0] $os.R_OK)   # Need at least one
+  print "Usage: $((Path $argv[0]).name) files-to-process"  # valid file argument.
+  exit $E_BADARGS
+
+# Dump the files, lowercase them, put each word on a line of its own,
+# change every other character to a newline, then sort out the words.
+cat *$files \
+  | tr A-Z a-z \
+  | tr ' ' '\012' \
+  | tr -c '\012a-z' '\012' \
+  | sort \
+  | uniq \
+  | grep -v '^#' \
+  | grep -v '^$'
+
+exit $?
+```
+
+```output
+cat
+end
+hat
+mat
+on
+s
+sat
+the
+times
+```
+
+The same in Python, for comparison: `re.findall` picks out the runs of
+letters, and a set takes the duplicates out.
+
+```tessh
+import re
+print "The Cat sat on the mat.\nThe cat's hat, 2 times; the end!" >text.txt
+
+text = ((Path text.txt).read_text)
+print (' '.join (sorted (set (re.findall '[a-z]+' ($text.lower)))))
+```
+
+```output
+cat end hat mat on s sat the times
+```
