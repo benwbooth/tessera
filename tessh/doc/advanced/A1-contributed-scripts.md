@@ -2860,3 +2860,447 @@ Building inventory list, please wait ...
           3   +-todo.txt
 
 ```
+
+## string functions: C-style string functions
+<!-- help: abs-string string-functions strcat strlen strcmp strspn strstr strtok c-library -->
+
+Noah Friedman's `string.bash` (converted to bash 2 by Chet Ramey) gives bash
+the C library's string functions: `strcat`, `strncat`, `strcmp`,
+`strncmp`, `strlen`, `strspn`, `strcspn`, `strstr`, `strtok` (an empty
+stub) and `strtrunc`, with Mendel Cooper's test of two of them at the end.
+
+### Example A-18. string functions: C-style string functions (`string.sh`)
+
+```bash
+#!/bin/bash
+
+# string.bash --- bash emulation of string(3) library routines
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# ==>     Used with his kind permission in this document.
+# Created: 1992-07-01
+# Last modified: 1993-09-29
+# Public domain
+
+# Conversion to bash v2 syntax done by Chet Ramey
+
+# Commentary:
+# Code:
+
+#:docstring strcat:
+# Usage: strcat s1 s2
+#
+# Strcat appends the value of variable s2 to variable s1. 
+#
+# Example:
+#    a="foo"
+#    b="bar"
+#    strcat a b
+#    echo $a
+#    => foobar
+#
+#:end docstring:
+
+###;;;autoload   ==> Autoloading of function commented out.
+function strcat ()
+{
+    local s1_val s2_val
+
+    s1_val=${!1}                        # indirect variable expansion
+    s2_val=${!2}
+    eval "$1"=\'"${s1_val}${s2_val}"\'
+    # ==> eval $1='${s1_val}${s2_val}' avoids problems,
+    # ==> if one of the variables contains a single quote.
+}
+
+#:docstring strncat:
+# Usage: strncat s1 s2 $n
+# 
+# Line strcat, but strncat appends a maximum of n characters from the value
+# of variable s2.  It copies fewer if the value of variabl s2 is shorter
+# than n characters.  Echoes result on stdout.
+#
+# Example:
+#    a=foo
+#    b=barbaz
+#    strncat a b 3
+#    echo $a
+#    => foobar
+#
+#:end docstring:
+
+###;;;autoload
+function strncat ()
+{
+    local s1="$1"
+    local s2="$2"
+    local -i n="$3"
+    local s1_val s2_val
+
+    s1_val=${!s1}                       # ==> indirect variable expansion
+    s2_val=${!s2}
+
+    if [ ${#s2_val} -gt ${n} ]; then
+       s2_val=${s2_val:0:$n}            # ==> substring extraction
+    fi
+
+    eval "$s1"=\'"${s1_val}${s2_val}"\'
+    # ==> eval $1='${s1_val}${s2_val}' avoids problems,
+    # ==> if one of the variables contains a single quote.
+}
+
+#:docstring strcmp:
+# Usage: strcmp $s1 $s2
+#
+# Strcmp compares its arguments and returns an integer less than, equal to,
+# or greater than zero, depending on whether string s1 is lexicographically
+# less than, equal to, or greater than string s2.
+#:end docstring:
+
+###;;;autoload
+function strcmp ()
+{
+    [ "$1" = "$2" ] && return 0
+
+    [ "${1}" '<' "${2}" ] > /dev/null && return -1
+
+    return 1
+}
+
+#:docstring strncmp:
+# Usage: strncmp $s1 $s2 $n
+# 
+# Like strcmp, but makes the comparison by examining a maximum of n
+# characters (n less than or equal to zero yields equality).
+#:end docstring:
+
+###;;;autoload
+function strncmp ()
+{
+    if [ -z "${3}" -o "${3}" -le "0" ]; then
+       return 0
+    fi
+   
+    if [ ${3} -ge ${#1} -a ${3} -ge ${#2} ]; then
+       strcmp "$1" "$2"
+       return $?
+    else
+       s1=${1:0:$3}
+       s2=${2:0:$3}
+       strcmp $s1 $s2
+       return $?
+    fi
+}
+
+#:docstring strlen:
+# Usage: strlen s
+#
+# Strlen returns the number of characters in string literal s.
+#:end docstring:
+
+###;;;autoload
+function strlen ()
+{
+    eval echo "\${#${1}}"
+    # ==> Returns the length of the value of the variable
+    # ==> whose name is passed as an argument.
+}
+
+#:docstring strspn:
+# Usage: strspn $s1 $s2
+# 
+# Strspn returns the length of the maximum initial segment of string s1,
+# which consists entirely of characters from string s2.
+#:end docstring:
+
+###;;;autoload
+function strspn ()
+{
+    # Unsetting IFS allows whitespace to be handled as normal chars. 
+    local IFS=
+    local result="${1%%[!${2}]*}"
+ 
+    echo ${#result}
+}
+
+#:docstring strcspn:
+# Usage: strcspn $s1 $s2
+#
+# Strcspn returns the length of the maximum initial segment of string s1,
+# which consists entirely of characters not from string s2.
+#:end docstring:
+
+###;;;autoload
+function strcspn ()
+{
+    # Unsetting IFS allows whitspace to be handled as normal chars. 
+    local IFS=
+    local result="${1%%[${2}]*}"
+ 
+    echo ${#result}
+}
+
+#:docstring strstr:
+# Usage: strstr s1 s2
+# 
+# Strstr echoes a substring starting at the first occurrence of string s2 in
+# string s1, or nothing if s2 does not occur in the string.  If s2 points to
+# a string of zero length, strstr echoes s1.
+#:end docstring:
+
+###;;;autoload
+function strstr ()
+{
+    # if s2 points to a string of zero length, strstr echoes s1
+    [ ${#2} -eq 0 ] && { echo "$1" ; return 0; }
+
+    # strstr echoes nothing if s2 does not occur in s1
+    case "$1" in
+    *$2*) ;;
+    *) return 1;;
+    esac
+
+    # use the pattern matching code to strip off the match and everything
+    # following it
+    first=${1/$2*/}
+
+    # then strip off the first unmatched portion of the string
+    echo "${1##$first}"
+}
+
+#:docstring strtok:
+# Usage: strtok s1 s2
+#
+# Strtok considers the string s1 to consist of a sequence of zero or more
+# text tokens separated by spans of one or more characters from the
+# separator string s2.  The first call (with a non-empty string s1
+# specified) echoes a string consisting of the first token on stdout. The
+# function keeps track of its position in the string s1 between separate
+# calls, so that subsequent calls made with the first argument an empty
+# string will work through the string immediately following that token.  In
+# this way subsequent calls will work through the string s1 until no tokens
+# remain.  The separator string s2 may be different from call to call.
+# When no token remains in s1, an empty value is echoed on stdout.
+#:end docstring:
+
+###;;;autoload
+function strtok ()
+{
+ :
+}
+
+#:docstring strtrunc:
+# Usage: strtrunc $n $s1 {$s2} {$...}
+#
+# Used by many functions like strncmp to truncate arguments for comparison.
+# Echoes the first n characters of each string s1 s2 ... on stdout. 
+#:end docstring:
+
+###;;;autoload
+function strtrunc ()
+{
+    n=$1 ; shift
+    for z; do
+        echo "${z:0:$n}"
+    done
+}
+
+# provide string
+
+# string.bash ends here
+
+
+# ========================================================================== #
+# ==> Everything below here added by the document author.
+
+# ==> Suggested use of this script is to delete everything below here,
+# ==> and "source" this file into your own scripts.
+
+# strcat
+string0=one
+string1=two
+echo
+echo "Testing \"strcat\" function:"
+echo "Original \"string0\" = $string0"
+echo "\"string1\" = $string1"
+strcat string0 string1
+echo "New \"string0\" = $string0"
+echo
+
+# strlen
+echo
+echo "Testing \"strlen\" function:"
+str=123456789
+echo "\"str\" = $str"
+echo -n "Length of \"str\" = "
+strlen str
+echo
+
+
+
+# Exercise:
+# --------
+# Add code to test all the other string functions above.
+
+
+exit 0
+```
+
+The bash functions that change a variable take its *name* and reach it
+with `${!1}` and `eval`; those that compute something echo it or return it
+as an exit status. In tessh a bareword is the string it spells, so
+`strcat string0 string1` passes the two names just as bash does, and
+`globals` is the table they're looked up in and set in. The others return
+their results. Python has most of them built in (`+`, `<`, `len`,
+`str.find`), so each is a line or two; `strtok`, a stub in the original,
+is written out here.
+
+```tessh
+import re
+# string.tsh --- tessh emulation of string(3) library routines
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# ==>     Used with his kind permission in this document.
+# Created: 1992-07-01
+# Last modified: 1993-09-29
+# Public domain
+# Conversion to bash v2 syntax done by Chet Ramey
+
+def strcat s1 s2             # Appends the value of variable s2 to variable s1.
+  (globals)[$s1] += (globals)[$s2]
+
+def strncat s1 s2 n          # Like strcat, but appends at most n characters.
+  (globals)[$s1] += (globals)[$s2][0:(int $n)]
+
+def strcmp s1 s2             # Less than, equal to or greater than zero, as s1
+  ($s1 > $s2) - ($s1 < $s2)  # is less than, equal to or greater than s2.
+
+def strncmp s1 s2 n          # Like strcmp, comparing at most n characters
+  n = int $n                 # (n less than or equal to zero yields equality).
+  if $n <= 0 then 0 else strcmp $s1[:$n] $s2[:$n]
+
+def strlen s                 # The length of the value of the variable named s.
+  len (globals)[$s]
+
+def strspn s1 s2             # The length of the longest start of s1 that
+  len (take_while (fn ($% in $s2)) $s1)       # is all characters from s2,
+def strcspn s1 s2            # and of the one that's all characters not from s2.
+  len (take_while (fn ($% not in $s2)) $s1)
+
+def strstr s1 s2             # s1 from the first s2 in it, or None
+  i = $s1.find $s2           # if s2 does not occur in it.
+  if $i < 0 then None else $s1[$i:]
+
+strtok_rest = ""             # What's left of strtok's string.
+def strtok s1 s2             # The next token of s1, separated by spans of the
+  global strtok_rest         # characters in s2. With s1 empty it goes on
+  if $s1                     # through the string from the last call.
+    strtok_rest = $s1
+  chars = re.escape $s2
+  m = re.match "[${chars}]*([^${chars}]*)" $strtok_rest
+  strtok_rest = $strtok_rest[($m.end):]
+  $m.group 1
+
+def strtrunc n *strings      # The first n characters of each string.
+  for z in $strings
+    print $z[0:(int $n)]
+
+# ==> Everything below here added by the document author.
+
+# strcat
+string0 = one
+string1 = two
+print
+print "Testing \"strcat\" function:"
+print "Original \"string0\" = $string0"
+print "\"string1\" = $string1"
+strcat string0 string1
+print "New \"string0\" = $string0"
+print
+
+# strlen
+print
+print "Testing \"strlen\" function:"
+str = "123456789"
+print "\"str\" = $str"
+print "Length of \"str\" = $(strlen str)"
+print
+
+# Exercise:
+# --------
+# Add code to test all the other string functions above.
+# (Below.)
+```
+
+```output
+
+Testing "strcat" function:
+Original "string0" = one
+"string1" = two
+New "string0" = onetwo
+
+
+Testing "strlen" function:
+"str" = 123456789
+Length of "str" = 9
+
+```
+
+The exercise, testing the rest (with the functions above saved as
+`string.tsh` and `source`d, as the ABS Guide suggests doing with the bash
+file):
+
+```tessh
+print '''
+import re
+def strcat s1 s2
+  (globals)[$s1] += (globals)[$s2]
+def strncat s1 s2 n
+  (globals)[$s1] += (globals)[$s2][0:(int $n)]
+def strcmp s1 s2
+  ($s1 > $s2) - ($s1 < $s2)
+def strncmp s1 s2 n
+  n = int $n
+  if $n <= 0 then 0 else strcmp $s1[:$n] $s2[:$n]
+def strspn s1 s2
+  len (take_while (fn ($% in $s2)) $s1)
+def strcspn s1 s2
+  len (take_while (fn ($% not in $s2)) $s1)
+def strstr s1 s2
+  i = $s1.find $s2
+  if $i < 0 then None else $s1[$i:]
+strtok_rest = ""
+def strtok s1 s2
+  global strtok_rest
+  if $s1
+    strtok_rest = $s1
+  chars = re.escape $s2
+  m = re.match "[${chars}]*([^${chars}]*)" $strtok_rest
+  strtok_rest = $strtok_rest[($m.end):]
+  $m.group 1
+def strtrunc n *strings
+  for z in $strings
+    print $z[0:(int $n)]
+''' >string.tsh
+source string.tsh
+
+a = foo ; b = barbaz
+strncat a b 3
+print strncat: $a
+print strcmp: (strcmp abc abd) (strcmp abc abc) (strcmp b a)
+print strncmp: (strncmp abc abd 2) (strncmp abc abd 3) (strncmp x y 0)
+print strspn: (strspn 2024-11-23 "0123456789") strcspn: (strcspn "hello, world" " ,")
+print strstr: (strstr "hello, world" "wor") (strstr hello xyz)
+print strtok: (strtok "  one, two;three " " ,;") (strtok "" " ,;") (strtok "" " ,;") (repr (strtok "" " ,;"))
+strtrunc 3 January February March
+```
+
+```output
+strncat: foobar
+strcmp: -1 0 1
+strncmp: 0 -1 0
+strspn: 4 strcspn: 5
+strstr: world None
+strtok: one two three ''
+Jan
+Feb
+Mar
+```
