@@ -163,6 +163,20 @@ fn builtins_succeed_and_null_command() {
     assert_eq!(get::<String>(&ns, "e"), "");
 }
 
+/// $PWD names the folder tessh is in, even when whoever started it left
+/// another (bash sets it at start too).
+#[test]
+fn pwd_is_where_tessh_is() {
+    let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let here = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    Python::attach(|py| {
+        crate::runner::init(py).unwrap();
+        crate::runtime::setenv(py, "PWD", Some("/nonexistent-place")).unwrap();
+        crate::runtime::sync_pwd(py).unwrap();
+    });
+    assert_eq!(std::env::var("PWD").unwrap(), here);
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");

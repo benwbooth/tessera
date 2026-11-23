@@ -2037,6 +2037,17 @@ fn chdir(py: Python<'_>, d: &str) -> PyResult<()> {
     go(py, d, false).map(|_| ())
 }
 
+/// $PWD as bash sets it at start: kept while it names the folder tessh is
+/// in, else that folder's path (a program that started tessh somewhere else
+/// may have left its own).
+pub fn sync_pwd(py: Python<'_>) -> PyResult<()> {
+    let p = logical_pwd();
+    if !p.is_empty() && std::env::var("PWD").ok().as_deref() != Some(p.as_str()) {
+        setenv(py, "PWD", Some(&p))?;
+    }
+    Ok(())
+}
+
 /// The folder as the shell names it: $PWD while it's still where we are
 /// (it keeps the symlinks you went through), else the real path.
 fn logical_pwd() -> String {

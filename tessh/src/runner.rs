@@ -71,6 +71,7 @@ pub fn init(py: Python<'_>) -> PyResult<()> {
     }
     let m = crate::runtime::module(py)?;
     m.add_function(wrap_pyfunction!(run_module, &m)?)?;
+    crate::runtime::sync_pwd(py)?;
     crate::runtime::install_import_hint(py)?;
     // (`import name` finds name.tsh too, from tessh and from Python it runs;
     // the folder you're in is on the path, as for `python -c`.)
