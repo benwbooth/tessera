@@ -126,12 +126,12 @@ Item {
             listed = true
         })
     }
-    onRefreshChanged: list()
+    onRefreshChanged: { kids = ({}); list() }   // (and the folders open in it read again)
     onDirChanged: list()
-    onShowHiddenChanged: list()
+    onShowHiddenChanged: { kids = ({}); list() }
     onControllerChanged: list()
-    readonly property var entries: {
-        const a = raw.filter(x => shown(x) && !(hideDirs && x.dir))
+    readonly property var entries: arrange(raw.filter(x => shown(x) && !(hideDirs && x.dir)))
+    function arrange(a) {
         const name = (x) => x.name.toLowerCase().replace(/^\./, "")
         const cmp = {
             name: (x, y) => name(x).localeCompare(name(y), undefined, { numeric: true }),
@@ -148,6 +148,39 @@ Item {
         return a
     }
     function ext(e) { return e.dir ? "" : (e.name.indexOf(".") > 0 ? e.name.replace(/^.*\./, "").toLowerCase() : "") }
+
+    // ---- folders opened in place (▸/▾): their entries under them, indented ----
+    property var openDirs: ({})         // path -> true
+    property var kids: ({})             // path -> its listing
+    function toggleOpen(e) {
+        const o = Object.assign({}, openDirs)
+        if (o[e.path]) { delete o[e.path]; openDirs = o; return }
+        o[e.path] = true
+        openDirs = o
+        if (kids[e.path] || !controller) return
+        Async.call(controller, k => controller.listDir(k, e.path, showHidden), r => {
+            let l = []
+            try { l = JSON.parse(r) } catch (x) {}
+            const m = Object.assign({}, kids); m[e.path] = l; kids = m
+        })
+    }
+    // What's drawn: the entries, an open folder's after it a level in.
+    readonly property var rows: {
+        const out = []
+        const add = (list, depth) => {
+            for (const e of list) {
+                out.push({ e: e, depth: depth })
+                if (e.dir && openDirs[e.path] && kids[e.path] && out.length < 5000)
+                    add(arrange(kids[e.path].filter(x => !ignorePatterns.some(p => new RegExp(p).test(x.name)))), depth + 1)
+            }
+        }
+        add(entries, 0)
+        return out
+    }
+    // (A folder open in the columns: one a line, as a tree, from then on.)
+    readonly property bool tree: view === "list" && Object.keys(openDirs).length > 0
+    readonly property bool lined: view === "details" || tree
+    readonly property real arrowW: cw * 2
 
     // ---- how an entry looks (lsd's way) ---------------------------------
     function ansi(n, d) { const a = themeData.ansi || []; return a[n] || d }
@@ -208,7 +241,7 @@ Item {
     // ---- ls's column layout: as many columns as fit, filled going down ----
     readonly property var grid: {
         const n = entries.length
-        const w = entries.map(e => (plainName(e).length + prefix(e).length + 3) * cw)
+        const w = entries.map(e => (plainName(e).length + prefix(e).length + 5) * cw)
         const avail = Math.max(cw * 10, width - 8)
         let best = { cols: 1, rows: n, widths: [Math.max(0, ...w)] }
         const most = Math.min(n, Math.floor(avail / Math.max(1, Math.min(...w) + 2 * cw)))
@@ -253,7 +286,7 @@ Item {
     readonly property real headerH: (back.length > 0 || dir !== startDir) ? row + 6 : 0
     readonly property real bodyH: entries.length === 0 ? row
                                 : view === "commas" ? commasText.implicitHeight
-                                : view === "details" ? entries.length * row
+                                : lined ? rows.length * row
                                 : view === "tiles" ? Math.ceil(entries.length / tileCols) * (tileW + 24)
                                 : grid.rows * row
     implicitHeight: collapseEmpty && listed && entries.length === 0 ? 0 : headerH + bodyH + 8
@@ -410,18 +443,41 @@ Item {
             font.pointSize: fb.pointSize
         }
         Repeater {
-            model: fb.view === "commas" ? [] : fb.entries
+            model: fb.view === "commas" ? [] : fb.lined ? fb.rows : fb.entries
             delegate: Rectangle {
                 id: ent
                 required property var modelData
                 required property int index
-                readonly property var e: modelData
+                readonly property var e: fb.lined ? modelData.e : modelData
+                readonly property int depth: fb.lined ? modelData.depth : 0
+                readonly property real indent: depth * fb.arrowW + (fb.view === "tiles" ? 0 : fb.arrowW)
                 readonly property bool sel: fb.selected === e.path
                 readonly property int c: Math.floor(index / Math.max(1, fb.grid.rows))
                 readonly property int r: index % Math.max(1, fb.grid.rows)
-                x: fb.view === "details" ? 0 : fb.view === "tiles" ? (index % fb.tileCols) * (fb.tileW + 8) : (fb.colX[c] || 0)
-                y: fb.view === "details" ? index * fb.row : fb.view === "tiles" ? Math.floor(index / fb.tileCols) * (fb.tileW + 24) : r * fb.row
-                width: fb.view === "details" ? body.width : fb.view === "tiles" ? fb.tileW : Math.max(0, (fb.grid.widths[c] || 0) - fb.cw)
+                x: fb.lined ? 0 : fb.view === "tiles" ? (index % fb.tileCols) * (fb.tileW + 8) : (fb.colX[c] || 0)
+                y: fb.lined ? index * fb.row : fb.view === "tiles" ? Math.floor(index / fb.tileCols) * (fb.tileW + 24) : r * fb.row
+                width: fb.lined ? body.width : fb.view === "tiles" ? fb.tileW : Math.max(0, (fb.grid.widths[c] || 0) - fb.cw)
+                // ▸/▾: a folder opened in place (its entries under it).
+                Text {
+                    visible: ent.e.dir && fb.view !== "tiles"
+                    x: ent.indent - fb.arrowW
+                    width: fb.arrowW
+                    height: parent.height
+                    verticalAlignment: Text.AlignVCenter
+                    topPadding: 0.001
+                    text: fb.openDirs[ent.e.path] ? "▾" : "▸"
+                    color: arrowHover.hovered ? Theme.accent : Theme.textDim
+                    font.family: fb.fontFamily
+                    font.pointSize: fb.pointSize
+                    renderType: Text.NativeRendering
+                    z: 2
+                    HoverHandler { id: arrowHover; cursorShape: Qt.PointingHandCursor }
+                    // (Its own click: the folder isn't gone into as well.)
+                    TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: { fb.entryTapAt = Date.now(); fb.toggleOpen(ent.e) } }
+                    ToolTip.visible: arrowHover.hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: fb.openDirs[ent.e.path] ? "Fold it" : "Show what's in it, here"
+                }
                 height: fb.view === "tiles" ? fb.tileW + 20 : fb.row
                 radius: 3
                 color: sel ? Theme.mix(Theme.bg, Theme.accent, 0.3) : eh.hovered ? Theme.mix(Theme.bg, Theme.fg, 0.07) : "transparent"
@@ -456,6 +512,7 @@ Item {
                 // list: icon and name
                 Text {
                     visible: fb.view === "list"
+                    x: ent.indent
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 0.001
                     textFormat: Text.StyledText
@@ -469,6 +526,7 @@ Item {
                 // details: ls -l
                 Text {
                     visible: fb.view === "details"
+                    x: ent.indent
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 0.001
                     textFormat: Text.StyledText
