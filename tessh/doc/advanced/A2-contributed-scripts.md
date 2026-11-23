@@ -9172,3 +9172,404 @@ file_read $file
 8::   indented, and split too.
 11::   and this one is.
 ```
+
+## Insertion sort
+<!-- help: abs-insertion-sort insertion-sort sort sorting array-slicing -->
+
+JuanJo Ciarlante's `insertion-sort.bash` sorts a line of numbers read
+from its input (or random ones, with `-t`) by insertion: each element in
+turn is moved left past the larger ones before it. It shows off bash's
+array slicing: the move is one assignment that puts slices of the array
+back together. With `DEBUG` set it shows each step, the pivot in `[ ]`
+and where it went in `< >`.
+
+### Example A-36. Insertion sort (`insertion-sort.bash`)
+
+```bash no-run
+#!/bin/bash
+# insertion-sort.bash: Insertion sort implementation in Bash
+#                      Heavy use of Bash array features:
+#+                     (string) slicing, merging, etc
+# URL: http://www.lugmen.org.ar/~jjo/jjotip/insertion-sort.bash.d
+#+          /insertion-sort.bash.sh
+#
+# Author: JuanJo Ciarlante <jjo@irrigacion.gov.ar>
+# Lightly reformatted by ABS Guide author.
+# License: GPLv2
+# Used in ABS Guide with author's permission (thanks!).
+#
+# Test with:   ./insertion-sort.bash -t
+# Or:          bash insertion-sort.bash -t
+# The following *doesn't* work:
+#              sh insertion-sort.bash -t
+#  Why not? Hint: which Bash-specific features are disabled
+#+ when running a script by 'sh script.sh'?
+#
+: ${DEBUG:=0}  # Debug, override with:  DEBUG=1 ./scriptname . . .
+# Parameter substitution -- set DEBUG to 0 if not previously set.
+
+# Global array: "list"
+typeset -a list
+# Load whitespace-separated numbers from stdin.
+if [ "$1" = "-t" ]; then
+DEBUG=1
+        read -a list < <( od -Ad -w24 -t u2 /dev/urandom ) # Random list.
+#                    ^ ^  process substition
+else
+        read -a list
+fi
+numelem=${#list[*]}
+
+#  Shows the list, marking the element whose index is $1
+#+ by surrounding it with the two chars passed as $2.
+#  Whole line prefixed with $3.
+showlist()
+  {
+  echo "$3"${list[@]:0:$1} ${2:0:1}${list[$1]}${2:1:1} ${list[@]:$1+1};
+  }
+
+# Loop _pivot_ -- from second element to end of list.
+for(( i=1; i<numelem; i++ )) do
+        ((DEBUG))&&showlist i "[]" " "
+        # From current _pivot_, back to first element.
+        for(( j=i; j; j-- )) do
+                # Search for the 1st elem. less than current "pivot" . . .
+                [[ "${list[j-1]}" -le "${list[i]}" ]] && break
+        done
+	(( i==j )) && continue ## No insertion was needed for this element.
+	# . . . Move list[i] (pivot) to the left of list[j]:
+        list=(${list[@]:0:j} ${list[i]} ${list[j]}\
+	#         {0,j-1}        {i}       {j}
+              ${list[@]:j+1:i-(j+1)} ${list[@]:i+1})
+	#         {j+1,i-1}              {i+1,last}
+	((DEBUG))&&showlist j "<>" "*"
+done
+
+
+echo
+echo  "------"
+echo $'Result:\n'${list[@]}
+
+exit $?
+```
+
+The tessh list slices are bash's array slices with Python's bounds
+(`$list[$j:$i]` is the elements j to i-1, where bash's
+`${list[@]:j:i-j}` counts them), and `+` joins them, with no word
+splitting to worry about. The inner `for (( j=i; j; j-- ))` loop is a
+`while`, since `j` is needed after it. The numbers come from a line in
+the script rather than from the input, and `DEBUG` is on. The bash,
+given the same line on its input with `DEBUG=1`, printed the same.
+
+```tessh
+import os random
+# insertion-sort.tsh: Insertion sort implementation in tessh
+#                     (ported from insertion-sort.bash: list slicing
+#                     and joining instead of bash's array features)
+#
+# Author: JuanJo Ciarlante <jjo@irrigacion.gov.ar>
+# Lightly reformatted by ABS Guide author.
+# License: GPLv2
+# Used in ABS Guide with author's permission (thanks!).
+#
+# Test with:   ./insertion-sort.tsh -t
+#
+DEBUG = int ($env.get DEBUG 1)   # Debug, override with: DEBUG=0 ./scriptname
+                                 # (1 here, to see the steps; 0 in the bash.)
+
+# Global list: "list"
+if $argv[1:2] == ["-t"]
+  DEBUG = 1
+  list = [(random.randrange 65536) for _ in (range 12)]   # Random list.
+else
+  # Load whitespace-separated numbers from stdin.
+  # (Here a line given in the script.)
+  list = [(int $n) for n in ("73 31 52 9 31 88 4".split)]
+numelem = len $list
+
+# Shows the list, marking the element whose index is i
+# by surrounding it with the two chars passed as marks.
+# Whole line prefixed with prefix.
+def showlist i marks prefix
+  words = [(str $n) for n in $list]
+  $words[$i] = $marks[0] + $words[$i] + $marks[1]
+  if $i > 0
+    $words[0] = $prefix + $words[0]
+  else
+    words = [$prefix] + $words
+  print *$words
+
+# Loop _pivot_ -- from second element to end of list.
+for i in (range 1 $numelem)
+  if $DEBUG
+    showlist $i "[]" " "
+  # From current _pivot_, back to first element.
+  j = $i
+  while $j
+    # Search for the 1st elem. less than current "pivot" . . .
+    if $list[$j - 1] <= $list[$i]
+      break
+    j -= 1
+  if $i == $j
+    continue           ## No insertion was needed for this element.
+  # . . . Move list[i] (pivot) to the left of list[j]:
+  list = $list[:$j] + [$list[$i]] + $list[$j:$i] + $list[$i + 1:]
+  #        {0,j-1}       {i}          {j,i-1}       {i+1,last}
+  if $DEBUG
+    showlist $j "<>" "*"
+
+print
+print "------"
+print "Result:"
+print *$list
+```
+
+```output
+ 73 [31] 52 9 31 88 4
+* <31> 73 52 9 31 88 4
+ 31 73 [52] 9 31 88 4
+*31 <52> 73 9 31 88 4
+ 31 52 73 [9] 31 88 4
+* <9> 31 52 73 31 88 4
+ 9 31 52 73 [31] 88 4
+*9 31 <31> 52 73 88 4
+ 9 31 31 52 73 [88] 4
+ 9 31 31 52 73 88 [4]
+* <4> 9 31 31 52 73 88
+
+------
+Result:
+4 9 31 31 52 73 88
+```
+
+## Standard deviation
+<!-- help: abs-stddev sd standard-deviation mean variance statistics bc decimal -->
+
+`sd.sh` (the ABS Guide gives no author) works out the arithmetic mean and
+the standard deviation of the numbers in a data file, one per line, with
+`bc` doing each sum to nine decimal places. Its `arith_mean` "returns"
+two values, the mean on its output and the count as its exit status,
+which breaks past 255 points.
+
+### Example A-37. Standard Deviation (`sd.sh`)
+
+```bash no-run
+#!/bin/bash
+# sd.sh: Standard Deviation
+
+#  The Standard Deviation indicates how consistent a set of data is.
+#  It shows to what extent the individual data points deviate from the
+#+ arithmetic mean, i.e., how much they "bounce around" (or cluster).
+#  It is essentially the average deviation-distance of the
+#+ data points from the mean.
+
+# =========================================================== #
+#    To calculate the Standard Deviation:
+#
+# 1  Find the arithmetic mean (average) of all the data points.
+# 2  Subtract each data point from the arithmetic mean,
+#    and square that difference.
+# 3  Add all of the individual difference-squares in # 2.
+# 4  Divide the sum in # 3 by the number of data points.
+#    This is known as the "variance."
+# 5  The square root of # 4 gives the Standard Deviation.
+# =========================================================== #
+
+count=0         # Number of data points; global.
+SC=9            # Scale to be used by bc. Nine decimal places.
+E_DATAFILE=90   # Data file error.
+
+# ----------------- Set data file ---------------------
+if [ ! -z "$1" ]  # Specify filename as cmd-line arg?
+then
+  datafile="$1" #  ASCII text file,
+else            #+ one (numerical) data point per line!
+  datafile=sample.dat
+fi              #  See example data file, below.
+
+if [ ! -e "$datafile" ]
+then
+  echo "\""$datafile"\" does not exist!"
+  exit $E_DATAFILE
+fi
+# -----------------------------------------------------
+
+
+arith_mean ()
+{
+  local rt=0         # Running total.
+  local am=0         # Arithmetic mean.
+  local ct=0         # Number of data points.
+
+  while read value   # Read one data point at a time.
+  do
+    rt=$(echo "scale=$SC; $rt + $value" | bc)
+    (( ct++ ))
+  done
+
+  am=$(echo "scale=$SC; $rt / $ct" | bc)
+
+  echo $am; return $ct   # This function "returns" TWO values!
+  #  Caution: This little trick will not work if $ct > 255!
+  #  To handle a larger number of data points,
+  #+ simply comment out the "return $ct" above.
+} <"$datafile"   # Feed in data file.
+
+sd ()
+{
+  mean1=$1  # Arithmetic mean (passed to function).
+  n=$2      # How many data points.
+  sum2=0    # Sum of squared differences ("variance").
+  avg2=0    # Average of $sum2.
+  sdev=0    # Standard Deviation.
+
+  while read value   # Read one line at a time.
+  do
+    diff=$(echo "scale=$SC; $mean1 - $value" | bc)
+    # Difference between arith. mean and data point.
+    dif2=$(echo "scale=$SC; $diff * $diff" | bc) # Squared.
+    sum2=$(echo "scale=$SC; $sum2 + $dif2" | bc) # Sum of squares.
+  done
+
+    avg2=$(echo "scale=$SC; $sum2 / $n" | bc)  # Avg. of sum of squares.
+    sdev=$(echo "scale=$SC; sqrt($avg2)" | bc) # Square root =
+    echo $sdev                                 # Standard Deviation.
+
+} <"$datafile"   # Rewinds data file.
+
+
+# ======================================================= #
+mean=$(arith_mean); count=$?   # Two returns from function!
+std_dev=$(sd $mean $count)
+
+echo
+echo "Number of data points in \""$datafile"\" = $count"
+echo "Arithmetic mean (average) = $mean"
+echo "Standard Deviation = $std_dev"
+echo
+# ======================================================= #
+
+exit
+
+#  This script could stand some drastic streamlining,
+#+ but not at the cost of reduced legibility, please.
+
+
+# ++++++++++++++++++++++++++++++++++++++++ #
+# A sample data file (sample1.dat):
+
+# 18.35
+# 19.0
+# 18.88
+# 18.91
+# 18.64
+
+
+# $ sh sd.sh sample1.dat
+
+# Number of data points in "sample1.dat" = 5
+# Arithmetic mean (average) = 18.756000000
+# Standard Deviation = .235338054
+# ++++++++++++++++++++++++++++++++++++++++ #
+```
+
+tessh doesn't need `bc` for decimals: Python's `Decimal` is exact, and
+`scale` cuts each result to nine places as `bc`'s `scale=9` does, so the
+numbers are the same as the ones in the script's comment (`bc` writes
+`.235338054`, Python `0.235338054`). The data file is read once, into a
+list, and `arith_mean` gives back the mean and the count together. It
+runs on the script's own sample data.
+
+```tessh
+# sd.tsh: Standard Deviation
+
+#  The Standard Deviation indicates how consistent a set of data is.
+#  It shows to what extent the individual data points deviate from the
+#+ arithmetic mean, i.e., how much they "bounce around" (or cluster).
+#  It is essentially the average deviation-distance of the
+#+ data points from the mean.
+
+# =========================================================== #
+#    To calculate the Standard Deviation:
+#
+# 1  Find the arithmetic mean (average) of all the data points.
+# 2  Subtract each data point from the arithmetic mean,
+#    and square that difference.
+# 3  Add all of the individual difference-squares in # 2.
+# 4  Divide the sum in # 3 by the number of data points.
+#    This is known as the "variance."
+# 5  The square root of # 4 gives the Standard Deviation.
+# =========================================================== #
+
+from decimal import Decimal ROUND_DOWN
+
+# (A made-up data file to try it on: the script's own sample.)
+print 18.35 19.0 18.88 18.91 18.64 sep="\n" >sample.dat
+
+SC = 9          # Scale, as bc's: nine decimal places.
+E_DATAFILE = 90 # Data file error.
+
+# ----------------- Set data file ---------------------
+args = $argv[1:]
+datafile = Path (if $args and $args[0] then $args[0] else sample.dat)
+                # ASCII text file, one (numerical) data point per line!
+if not ($datafile.exists)
+  print "\"$datafile\" does not exist!"
+  exit $E_DATAFILE
+# -----------------------------------------------------
+
+# A number cut to SC decimal places, as bc's scale cuts its results.
+def scale x = $x.quantize (Decimal "1e-$SC") rounding=$ROUND_DOWN
+
+# The data points, read once, as exact decimals.
+values = [(Decimal $line) for line in (($datafile.read_text).split)]
+
+def arith_mean values
+  rt = Decimal 0                 # Running total.
+  for value in $values           # One data point at a time.
+    rt = scale ($rt + $value)
+  am = scale ($rt / (len $values))
+  [$am (len $values)]            # This function returns TWO values!
+                                 # (No limit of 255, as a return status has.)
+
+def sd mean1 values
+  sum2 = Decimal 0               # Sum of squared differences ("variance").
+  for value in $values
+    diff = scale ($mean1 - $value)    # Difference between arith. mean and data point.
+    dif2 = scale ($diff * $diff)      # Squared.
+    sum2 = scale ($sum2 + $dif2)      # Sum of squares.
+  avg2 = scale ($sum2 / (len $values))  # Avg. of sum of squares.
+  scale ($avg2.sqrt)                    # Square root = Standard Deviation.
+
+# ======================================================= #
+[mean count] = arith_mean $values    # Two returns from function!
+std_dev = sd $mean $values
+
+print
+print "Number of data points in \"$datafile\" = $count"
+print "Arithmetic mean (average) = $mean"
+print "Standard Deviation = $std_dev"
+print
+# ======================================================= #
+```
+
+```output
+
+Number of data points in "sample.dat" = 5
+Arithmetic mean (average) = 18.756000000
+Standard Deviation = 0.235338054
+
+```
+
+For everyday use Python has it all in `statistics` (`pstdev` is the
+population standard deviation, the one computed here), in floating point:
+
+```tessh
+import statistics
+data = [18.35 19.0 18.88 18.91 18.64]
+print (statistics.mean $data) (statistics.pstdev $data)
+```
+
+```output
+18.756 0.2353380547212875
+```
