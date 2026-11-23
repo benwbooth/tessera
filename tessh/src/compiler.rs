@@ -875,9 +875,10 @@ impl<'py, 's> Compiler<'py, 's> {
             }
         }
         if items[0].is_op("!") && items.len() > 1 {
+            // (Its status negated, $? too: `! true` then $? is 1.)
             let r = self.compile_shell(&items[1..], children, sub)?;
             let e = self.val(r.expr)?;
-            return Ok(Res::s(r.stmts, self.unary("not", e)?));
+            return Ok(Res::s(r.stmts, self.rcall("negate", vec![e])?));
         }
         let segs = self.pipe_split(items);
         if segs.len() > 1 {
@@ -1507,7 +1508,22 @@ impl<'py, 's> Compiler<'py, 's> {
                     return Ok(Res::s(v.stmts, e));
                 }
                 let a = self.compile_tree(*l, Ctx::Value, &[])?;
-                let b = self.compile_tree(*r, Ctx::Value, &[])?;
+                // ($x =~ [0-9], [abc]: a one-character glob, not a list.)
+                let set = match &*r {
+                    Tree::Chunk(v) if (op == "=~" || op == "!~") && v.len() == 1 => match &v[0].kind {
+                        Kind::Group { open: '[', items } if items.len() == 1 => match &items[0].kind {
+                            Kind::Sym { name, .. } => Some(format!("[{name}]")),
+                            Kind::Num(n) => Some(format!("[{n}]")),
+                            _ => None,
+                        },
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let b = match set {
+                    Some(t) => Res::e(self.rcall("g", vec![self.c(t.as_str())?])?),
+                    None => self.compile_tree(*r, Ctx::Value, &[])?,
+                };
                 let (stmts, exprs) = self.gather_e(vec![a, b])?;
                 let e = self.binop_node(&op, exprs[0].clone(), exprs[1].clone(), &f)?;
                 Ok(Res::s(stmts, self.at(e, &f)))
@@ -2950,6 +2966,10 @@ impl<'py, 's> Compiler<'py, 's> {
     fn cond(&mut self, items: &[Form], f: &Form) -> R<Res<'py>> {
         if items.is_empty() {
             return err("a condition is missing", Some(f));
+        }
+        // (`if ! cmd …`: the command's status, negated, as bash's.)
+        if items.len() > 1 && items[0].is_op("!") && matches!(&items[1].kind, Kind::Sym { .. } | Kind::Caret(_)) {
+            return self.compile_shell(items, &[], Ctx::Cond);
         }
         // (A lone word, `if false`, `while true`, `until done`, is a command as
         // a line of its own is, not the text, which would always be true.)

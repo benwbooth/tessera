@@ -944,6 +944,21 @@ fn status() -> i32 {
     STATUS.load(Ordering::SeqCst)
 }
 
+/// `! cmd`: its status the other way round, 1 for success and 0 for
+/// failure, $? too, as bash's !. (Not a command: Python's not.)
+#[pyfunction]
+fn negate(py: Python<'_>, v: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    if v.hasattr("code")? && v.hasattr("attached")? {
+        let code: i32 = v.getattr("code")?.extract()?;
+        let new = if code == 0 { 1 } else { 0 };
+        STATUS.store(new, Ordering::SeqCst);
+        let text: String = v.str()?.extract()?;
+        let attached: bool = v.getattr("attached")?.extract()?;
+        return output(py, &text, new, attached);
+    }
+    Ok(pyo3::types::PyBool::new(py, !v.is_truthy()?).to_owned().into_any().unbind())
+}
+
 // ---- words ----------------------------------------------------------------------
 
 #[pyfunction]
@@ -2686,6 +2701,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         wrap_pyfunction!(auto, &m)?,
         wrap_pyfunction!(show, &m)?,
         wrap_pyfunction!(status, &m)?,
+        wrap_pyfunction!(negate, &m)?,
         wrap_pyfunction!(g, &m)?,
         wrap_pyfunction!(t, &m)?,
         wrap_pyfunction!(cmd, &m)?,

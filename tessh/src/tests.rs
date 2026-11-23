@@ -278,6 +278,17 @@ fn not_found_redirect_and_list_globs() {
     assert_eq!(out.lines().filter(|l| !l.starts_with('/')).collect::<Vec<_>>(), ["a.1 b.1", "a", "b"]);
 }
 
+/// `if ! cmd`, `! cmd` setting $? as bash's, and `=~ [0-9]` a glob.
+#[test]
+fn negation_and_set_matches() {
+    let (ns, out) = run("if ! false\n  echo negated\n! true\na = $?\n! false\nb = $?\nc = (\"5\" =~ [0-9])\nd = (\"x\" =~ [0-9])");
+    assert_eq!(out, "negated\n");
+    assert_eq!(get::<i64>(&ns, "a"), 1);
+    assert_eq!(get::<i64>(&ns, "b"), 0);
+    assert!(get::<bool>(&ns, "c"));
+    assert!(!get::<bool>(&ns, "d"));
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");
