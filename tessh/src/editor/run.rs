@@ -34,6 +34,19 @@ pub struct Editor {
     tty_at: Option<Instant>,
 }
 
+/// TESSH_KEYLOG=<file>: what the keyboard and the terminal sent, and what
+/// was made of it (for working out a tap that didn't happen).
+pub fn keylog(msg: &str) {
+    use std::io::Write;
+    static FILE: std::sync::OnceLock<Option<Mutex<std::fs::File>>> = std::sync::OnceLock::new();
+    let f = FILE.get_or_init(|| std::env::var("TESSH_KEYLOG").ok().and_then(|p| std::fs::OpenOptions::new().create(true).append(true).open(p).ok()).map(Mutex::new));
+    if let Some(f) = f {
+        static T0: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        let t = T0.get_or_init(Instant::now).elapsed().as_millis();
+        let _ = writeln!(f.lock().unwrap(), "{t:>7} {msg}");
+    }
+}
+
 fn pause_of(task: &str) -> u64 {
     match task {
         "inline" => 220,
@@ -226,8 +239,12 @@ impl Editor {
             if ev.down && ev.types() && self.typed_at.is_none() && !came {
                 self.typed_at = Some(ev.at);
             }
+            keylog(&format!("evdev {} {} focused={} elsewhere={} typed_at={}", ev.code, if ev.down { "down" } else { "up" }, self.focused, self.elsewhere, self.typed_at.is_some()));
             if self.focused && !self.elsewhere {
                 self.ed.evdev(ev.code, ev.down, h);
+                if self.ed.pending_tap.is_some() {
+                    keylog(&format!("  tap pending {:?}", self.ed.pending_tap.map(|p| p.0)));
+                }
             }
         }
         // (Typed, and nothing came here: another window has the keyboard.)
@@ -239,6 +256,7 @@ impl Editor {
         if self.typed_at.is_some_and(|t| t.elapsed() > Duration::from_millis(150)) {
             self.typed_at = None;
             self.elsewhere = true;
+            keylog("  -> elsewhere (a key typed didn't come here)");
             self.ed.pending_tap = None;
             self.ed.shift_side = 0;
             self.ed.ctrl_side = 0;
@@ -265,6 +283,9 @@ impl Editor {
         self.typed_at = None;
         loop {
             self.keyboard(h);
+            if self.ed.pending_tap.is_some_and(|p| p.1.elapsed() >= Duration::from_millis(60)) {
+                keylog(&format!("  tap fires {:?}", self.ed.pending_tap.map(|p| p.0)));
+            }
             self.ed.fire_tap();
             {
                 let b = self.bar.lock().unwrap().2;
@@ -282,6 +303,7 @@ impl Editor {
             if ready {
                 match event::read() {
                     Ok(Event::Key(k)) => {
+                        keylog(&format!("tty {:?} {:?} {:?}", k.code, k.modifiers, k.kind));
                         self.elsewhere = false;
                         self.typed_at = None;
                         self.tty_at = Some(Instant::now());
@@ -316,11 +338,13 @@ impl Editor {
                         self.ed.dirty = true;
                     }
                     Ok(Event::FocusGained) => {
+                        keylog("focus in");
                         self.focused = true;
                         self.elsewhere = false;
                         self.term.set_mouse(true);
                     }
                     Ok(Event::FocusLost) => {
+                        keylog("focus out");
                         self.focused = false;
                         self.ed.pending_tap = None;
                         self.ed.shift_side = 0;
