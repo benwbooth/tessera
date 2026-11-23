@@ -806,11 +806,11 @@ impl Session {
                     }
                     None => {
                         self.cells.output(rest);
-                        if buf.len() + rest.len() <= 4 << 20 {
-                            buf.extend_from_slice(rest);
-                        } else {
-                            self.cmd_out = None;
-                        }
+                        // (Past 4 MB only its start is kept, but it's still
+                        // followed to its end: dropped, it never ended, and a
+                        // notebook card ran on forever after an ls -lR.)
+                        let room = (4usize << 20).saturating_sub(buf.len());
+                        buf.extend_from_slice(&rest[..rest.len().min(room)]);
                         return;
                     }
                 }

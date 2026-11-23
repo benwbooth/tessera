@@ -2500,6 +2500,13 @@ FocusScope {
             onTriggered: { for (let i = cells.count - 1; i >= 0; --i) if (cells.get(i).job > 0 && cells.get(i).jobTty) { console.log("nb fg test: card " + i); nb.foregroundJob(i); break } } }
     Timer { interval: nb.controller ? parseInt((nb.controller.testEnv("NB_CELL2") || "0").split(":")[0]) : 0; running: interval > 0
             onTriggered: { nb.testFrames = 0; nb.submit(nb.controller.testEnv("NB_CELL2").replace(/^[0-9]+:/, "")) } }
+    // (Test hook: TESSERA_TEST_STALLS logs each time the UI thread was held over 60 ms.)
+    readonly property bool stallLog: controller !== null && controller.testEnv("STALLS") !== ""
+    property real stallLast: 0
+    Timer {
+        interval: 16; repeat: true; running: nb.stallLog
+        onTriggered: { const t = Date.now(); if (nb.stallLast > 0 && t - nb.stallLast > 60) console.log("stall " + (t - nb.stallLast) + "ms ending " + t % 1000000); nb.stallLast = t }
+    }
     // (TESSERA_TEST_NB_FRAMES=<dir>: the 40 frames after NB_CELL2 is sent, grabbed there.)
     property int testFrames: -1
     // (For the frame log: each card in view, its kind and what its body shows.)
