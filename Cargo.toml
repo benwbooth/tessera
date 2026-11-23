@@ -18,6 +18,10 @@ default-members = [".", "tesserad", "tessh"]
 [dependencies]
 # (Language detection, Google's model, run in Rust by tract: src/detect.rs.)
 magika = "=2.0.0-rc.0"
+# (GitHub Linguist's detector in Rust: ~500 languages by file name, extension,
+# #! line, heuristics and a naive-Bayes classifier; before Magika for a file
+# whose name the file card's own table doesn't know: src/detect.rs.)
+hyperpolyglot = "0.1.7"
 anyhow = "1.0.104"
 base64 = "0.23.1"
 cxx = "1.0"

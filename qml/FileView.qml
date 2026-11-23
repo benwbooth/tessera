@@ -51,7 +51,7 @@ Item {
         rs: "rust", py: "python", js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript", ts: "typescript", tsx: "tsx",
         c: "c", h: "c", cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp", go: "go", java: "java", kt: "kotlin", rb: "ruby", lua: "lua",
         sh: "bash", bash: "bash", zsh: "bash", fish: "fish", json: "json", yaml: "yaml", yml: "yaml", toml: "toml", html: "html", css: "css",
-        md: "markdown", sql: "sql", nix: "nix", hs: "haskell", ml: "ocaml", scala: "scala", swift: "swift", zig: "zig", php: "php", pl: "perl",
+        md: "markdown", sql: "sql", nix: "nix", hs: "haskell", ml: "ocaml", scala: "scala", swift: "swift", zig: "zig", php: "php",
         r: "r", jl: "julia", ex: "elixir", exs: "elixir", erl: "erlang", cs: "c-sharp", fs: "fsharp", dart: "dart", qml: "qmljs", xml: "xml",
         ini: "ini", cfg: "ini", conf: "ini", dockerfile: "dockerfile", make: "make", mk: "make", cmake: "cmake", tex: "latex", vim: "vim",
         nu: "nu", xsh: "python", tsh: "tessh", tessh: "tessh", ps1: "powershell", csv: "csv", diff: "diff", patch: "diff",
@@ -431,9 +431,10 @@ Item {
                     if (t.indexOf("\u0000") >= 0) problem = "It's a binary file."
                     else {
                         sniffedLang = sniff(t)
-                        // (Still nothing: Magika's model, in the background.)
+                        // (Still nothing: Linguist's rules by its name, then
+                        // Magika's model by its content, in the background.)
                         if (detectedLang === "")
-                            Async.call(controller, k => controller.detectFile(k, p), l => { if (n === pollSeq && p === path && l !== "") sniffedLang = l })
+                            Async.call(controller, k => controller.detectFile(k, p, t), l => { if (n === pollSeq && p === path && l !== "") sniffedLang = l })
                     }
                 })
         })

@@ -359,9 +359,10 @@ pub mod ffi {
         /// (<span class="t-KIND">; manual::doc_html).
         #[qinvokable]
         fn doc_html(self: &Controller, text: &QString, lang: &QString) -> QString;
-        /// The same for a file on this computer (its start and end).
+        /// The same for a file (by its name, Linguist's rules; then by its
+        /// start and end on this computer, `head`, its first lines, on another).
         #[qinvokable]
-        fn detect_file(self: &Controller, reply: &QString, path: &QString);
+        fn detect_file(self: &Controller, reply: &QString, path: &QString, head: &QString);
         /// Typed text that doesn't look like a shell command (src/snippets.rs).
         #[qinvokable]
         fn shell_doubt(self: &Controller, text: &QString, aliases: &QString) -> bool;
@@ -1883,9 +1884,10 @@ impl ffi::Controller {
         qs(&crate::manual::doc_html(&text.to_string(), &lang.to_string()))
     }
 
-    fn detect_file(&self, reply: &ffi::QString, path: &ffi::QString) {
+    fn detect_file(&self, reply: &ffi::QString, path: &ffi::QString, head: &ffi::QString) {
         let (host, p) = host_path(&path.to_string());
-        self.answer_on(reply, Some("detect"), move || if host.is_empty() { crate::detect::language_of_file(&p) } else { String::new() })
+        let head = head.to_string();
+        self.answer_on(reply, Some("detect"), move || crate::detect::language_of_file(&p, host.is_empty(), &head))
     }
 
     fn shell_doubt(&self, text: &ffi::QString, aliases: &ffi::QString) -> bool {
