@@ -5360,3 +5360,632 @@ It was a <i>dark and stormy</i> night.
 <i>Suddenly</i>, the snake_case villain fled.
 An _open phrase never closed.
 ```
+
+## Preserving weblogs
+<!-- help: abs-archiveweblogs archiveweblogs weblogs apache logrotate bzip2 cron backup -->
+
+Troy Engel's nightly cron job saves the Apache logs that log rotation
+would otherwise throw away: each `access_log.N` and `error_log.N` is moved
+to a backup folder, renamed with its date, and compressed with `bzip2`.
+
+### Example A-25. Preserving weblogs (`archiveweblogs.sh`)
+
+```bash no-run
+#!/bin/bash
+# archiveweblogs.sh v1.0
+
+# Troy Engel <tengel@fluid.com>
+# Slightly modified by document author.
+# Used with permission.
+#
+#  This script will preserve the normally rotated and
+#+ thrown away weblogs from a default RedHat/Apache installation.
+#  It will save the files with a date/time stamp in the filename,
+#+ bzipped, to a given directory.
+#
+#  Run this from crontab nightly at an off hour,
+#+ as bzip2 can suck up some serious CPU on huge logs:
+#  0 2 * * * /opt/sbin/archiveweblogs.sh
+
+
+PROBLEM=66
+
+# Set this to your backup dir.
+BKP_DIR=/opt/backups/weblogs
+
+# Default Apache/RedHat stuff
+LOG_DAYS="4 3 2 1"
+LOG_DIR=/var/log/httpd
+LOG_FILES="access_log error_log"
+
+# Default RedHat program locations
+LS=/bin/ls
+MV=/bin/mv
+ID=/usr/bin/id
+CUT=/bin/cut
+COL=/usr/bin/column
+BZ2=/usr/bin/bzip2
+
+# Are we root?
+USER=`$ID -u`
+if [ "X$USER" != "X0" ]; then
+  echo "PANIC: Only root can run this script!"
+  exit $PROBLEM
+fi
+
+# Backup dir exists/writable?
+if [ ! -x $BKP_DIR ]; then
+  echo "PANIC: $BKP_DIR doesn't exist or isn't writable!"
+  exit $PROBLEM
+fi
+
+# Move, rename and bzip2 the logs
+for logday in $LOG_DAYS; do
+  for logfile in $LOG_FILES; do
+    MYFILE="$LOG_DIR/$logfile.$logday"
+    if [ -w $MYFILE ]; then
+      DTS=`$LS -lgo --time-style=+%Y%m%d $MYFILE | $COL -t | $CUT -d ' ' -f7`
+      $MV $MYFILE $BKP_DIR/$logfile.$DTS
+      $BZ2 $BKP_DIR/$logfile.$DTS
+    else
+      # Only spew an error if the file exits (ergo non-writable).
+      if [ -f $MYFILE ]; then
+        echo "ERROR: $MYFILE not writable. Skipping."
+      fi
+    fi
+  done
+done
+
+exit 0
+```
+
+The bash names every program by its full path and gets the file's date by
+cutting it out of `ls -lgo --time-style=+%Y%m%d | column -t`. In tessh the
+date comes from the file's `st_mtime` with `time.strftime`, the tests are
+`os.access` and `Path.is_file`, and only `mv` and `bzip2` are left to run.
+It works here on a made-up log folder with the dates set by `touch`, and,
+as chapter 2's cleanup script does, takes "root" to be whoever runs it.
+
+```tessh
+import os time
+# (A made-up /var/log/httpd and backup folder to try it on. One log is
+#  missing, and one can't be written.)
+mkdir -p log/httpd backups/weblogs
+for day in [1 2 3 4]
+  for f in [access_log error_log]
+    print "log of day $day" >log/httpd/$f.$day
+    touch -d "2026-11-$(20 - $day) 12:00" log/httpd/$f.$day
+rm log/httpd/error_log.4
+chmod 444 log/httpd/access_log.4
+
+# archiveweblogs.tsh v1.0
+# Troy Engel <tengel@fluid.com>
+# Slightly modified by document author.
+# Used with permission.
+#
+#  This script will preserve the normally rotated and
+#+ thrown away weblogs from a default RedHat/Apache installation.
+#  It will save the files with a date/time stamp in the filename,
+#+ bzipped, to a given directory.
+#
+#  Run this from crontab nightly at an off hour,
+#+ as bzip2 can suck up some serious CPU on huge logs:
+#  0 2 * * * /opt/sbin/archiveweblogs.tsh
+
+PROBLEM = 66
+
+# Set this to your backup dir.
+BKP_DIR = ./backups/weblogs  # (/opt/backups/weblogs in the original)
+
+# Default Apache/RedHat stuff
+LOG_DAYS = [4 3 2 1]
+LOG_DIR = ./log/httpd        # (/var/log/httpd in the original)
+LOG_FILES = [access_log error_log]
+
+ROOT_UID = (os.getuid)       # (0, root, in the original: here, you)
+
+# Are we root?
+if (os.getuid) != $ROOT_UID
+  print "PANIC: Only root can run this script!"
+  exit $PROBLEM
+
+# Backup dir exists/writable?
+if not (os.access $BKP_DIR $os.X_OK)
+  print "PANIC: $BKP_DIR doesn't exist or isn't writable!"
+  exit $PROBLEM
+
+# Move, rename and bzip2 the logs
+for logday in $LOG_DAYS
+  for logfile in $LOG_FILES
+    MYFILE = $LOG_DIR / "$logfile.$logday"
+    if (os.access $MYFILE $os.W_OK)
+      DTS = time.strftime "%Y%m%d" (time.localtime ($MYFILE.stat).st_mtime)
+      mv $MYFILE $BKP_DIR/$logfile.$DTS
+      bzip2 $BKP_DIR/$logfile.$DTS
+    elif ($MYFILE.is_file)
+      # Only spew an error if the file exists (ergo non-writable).
+      print "ERROR: $MYFILE not writable. Skipping."
+
+ls $BKP_DIR $LOG_DIR         # (To see what it did.)
+exit 0
+```
+
+```output
+ERROR: log/httpd/access_log.4 not writable. Skipping.
+./backups/weblogs:
+access_log.20261117.bz2
+access_log.20261118.bz2
+access_log.20261119.bz2
+error_log.20261117.bz2
+error_log.20261118.bz2
+error_log.20261119.bz2
+
+./log/httpd:
+access_log.4
+```
+
+## Protecting literal strings
+<!-- help: abs-protect-literal protect_literal literal-strings hard-quotes quoting word-splitting -->
+
+Michael Zick's two scripts are about keeping the shell from expanding a
+string, and then making it expand it later: a template such as
+`'Hello ${Me}'` stored now and filled in when `Me` is known. The first
+wraps a string in hard quotes that become part of its value, and shows what
+assignments do to it. Its documentation is a here-document fed to `:`.
+
+### Example A-26. Protecting literal strings (`protect_literal.sh`)
+
+```bash
+#! /bin/bash
+# protect_literal.sh
+
+# set -vx
+
+:<<-'_Protect_Literal_String_Doc'
+
+    Copyright (c) Michael S. Zick, 2003; All Rights Reserved
+    License: Unrestricted reuse in any form, for any purpose.
+    Warranty: None
+    Revision: $ID$
+
+    Documentation redirected to the Bash no-operation.
+    Bash will '/dev/null' this block when the script is first read.
+    (Uncomment the above set command to see this action.)
+
+    Remove the first (Sha-Bang) line when sourcing this as a library
+    procedure.  Also comment out the example use code in the two
+    places where shown.
+
+
+    Usage:
+        _protect_literal_str 'Whatever string meets your ${fancy}'
+        Just echos the argument to standard out, hard quotes
+        restored.
+
+        $(_protect_literal_str 'Whatever string meets your ${fancy}')
+        as the right-hand-side of an assignment statement.
+
+    Does:
+        As the right-hand-side of an assignment, preserves the
+        hard quotes protecting the contents of the literal during
+        assignment.
+
+    Notes:
+        The strange names (_*) are used to avoid trampling on
+        the user's chosen names when this is sourced as a
+        library.
+
+_Protect_Literal_String_Doc
+
+# The 'for illustration' function form
+
+_protect_literal_str() {
+
+# Pick an un-used, non-printing character as local IFS.
+# Not required, but shows that we are ignoring it.
+    local IFS=$'\x1B'               # \ESC character
+
+# Enclose the All-Elements-Of in hard quotes during assignment.
+    local tmp=$'\x27'$@$'\x27'
+#    local tmp=$'\''$@$'\''         # Even uglier.
+
+    local len=${#tmp}               # Info only.
+    echo $tmp is $len long.         # Output AND information.
+}
+
+# This is the short-named version.
+_pls() {
+    local IFS=$'x1B'                # \ESC character (not required)
+    echo $'\x27'$@$'\x27'           # Hard quoted parameter glob
+}
+
+# :<<-'_Protect_Literal_String_Test'
+# # # Remove the above "# " to disable this code. # # #
+
+# See how that looks when printed.
+echo
+echo "- - Test One - -"
+_protect_literal_str 'Hello $user'
+_protect_literal_str 'Hello "${username}"'
+echo
+
+# Which yields:
+# - - Test One - -
+# 'Hello $user' is 13 long.
+# 'Hello "${username}"' is 21 long.
+
+#  Looks as expected, but why all of the trouble?
+#  The difference is hidden inside the Bash internal order
+#+ of operations.
+#  Which shows when you use it on the RHS of an assignment.
+
+# Declare an array for test values.
+declare -a arrayZ
+
+# Assign elements with various types of quotes and escapes.
+arrayZ=( zero "$(_pls 'Hello ${Me}')" 'Hello ${You}' "\'Pass: ${pw}\'" )
+
+# Now list that array and see what is there.
+echo "- - Test Two - -"
+for (( i=0 ; i<${#arrayZ[*]} ; i++ ))
+do
+    echo  Element $i: ${arrayZ[$i]} is: ${#arrayZ[$i]} long.
+done
+echo
+
+# Which yields:
+# - - Test Two - -
+# Element 0: zero is: 4 long.           # Our marker element
+# Element 1: 'Hello ${Me}' is: 13 long. # Our "$(_pls '...' )"
+# Element 2: Hello ${You} is: 12 long.  # Quotes are missing
+# Element 3: \'Pass: \' is: 10 long.    # ${pw} expanded to nothing
+
+# Now make an assignment with that result.
+declare -a array2=( ${arrayZ[@]} )
+
+# And print what happened.
+echo "- - Test Three - -"
+for (( i=0 ; i<${#array2[*]} ; i++ ))
+do
+    echo  Element $i: ${array2[$i]} is: ${#array2[$i]} long.
+done
+echo
+
+# Which yields:
+# - - Test Three - -
+# Element 0: zero is: 4 long.           # Our marker element.
+# Element 1: Hello ${Me} is: 11 long.   # Intended result.
+# Element 2: Hello is: 5 long.          # ${You} expanded to nothing.
+# Element 3: 'Pass: is: 6 long.         # Split on the whitespace.
+# Element 4: ' is: 1 long.              # The end quote is here now.
+
+#  Our Element 1 has had its leading and trailing hard quotes stripped.
+#  Although not shown, leading and trailing whitespace is also stripped.
+#  Now that the string contents are set, Bash will always, internally,
+#+ hard quote the contents as required during its operations.
+
+#  Why?
+#  Considering our "$(_pls 'Hello ${Me}')" construction:
+#  " ... " -> Expansion required, strip the quotes.
+#  $( ... ) -> Replace with the result of..., strip this.
+#  _pls ' ... ' -> called with literal arguments, strip the quotes.
+#  The result returned includes hard quotes; BUT the above processing
+#+ has already been done, so they become part of the value assigned.
+#
+#  Similarly, during further usage of the string variable, the ${Me}
+#+ is part of the contents (result) and survives any operations
+#  (Until explicitly told to evaluate the string).
+
+#  Hint: See what happens when the hard quotes ($'\x27') are replaced
+#+ with soft quotes ($'\x22') in the above procedures.
+#  Interesting also is to remove the addition of any quoting.
+
+# _Protect_Literal_String_Test
+# # # Remove the above "# " to disable this code. # # #
+
+exit 0
+```
+
+```output bash
+
+- - Test One - -
+'Hello $user' is 13 long.
+'Hello "${username}"' is 21 long.
+
+- - Test Two - -
+Element 0: zero is: 4 long.
+Element 1: 'Hello ${Me}' is: 13 long.
+Element 2: Hello ${You} is: 12 long.
+Element 3: \'Pass: \' is: 10 long.
+
+- - Test Three - -
+Element 0: zero is: 4 long.
+Element 1: 'Hello is: 6 long.
+Element 2: ${Me}' is: 6 long.
+Element 3: Hello is: 5 long.
+Element 4: ${You} is: 6 long.
+Element 5: \'Pass: is: 7 long.
+Element 6: \' is: 2 long.
+
+```
+
+Today's bash doesn't do what the comments say for Test Three: the
+unquoted `${arrayZ[@]}` splits every element at its blanks, protected or
+not (the comments' `x1B` was meant to be the escape character, `$'\x1B'`).
+
+tessh has nothing to protect against. A single-quoted string is never
+expanded, then or later, and a list's items are never split again, so
+Test Three's copy is the same as Test Two's list. The quotes `_pls` adds
+are kept, as part of the value. The one difference in the test data: an
+unset `${pw}` is empty in bash and an error in tessh, so `pw` is set to
+the empty string.
+
+```tessh
+# protect_literal.tsh
+
+'''
+    Copyright (c) Michael S. Zick, 2003; All Rights Reserved
+    License: Unrestricted reuse in any form, for any purpose.
+    Warranty: None
+
+    Usage:
+        _protect_literal_str 'Whatever string meets your ${fancy}'
+        Just echos the argument to standard out, hard quotes
+        restored.
+'''
+
+def _protect_literal_str *args   # The 'for illustration' function form
+  tmp = "'" + (' '.join $args) + "'"   # Enclose in hard quotes.
+  print "$tmp is $(len $tmp) long."    # Output AND information.
+
+def _pls *args                   # This is the short-named version.
+  "'" + (' '.join $args) + "'"
+
+# See how that looks when printed.
+print
+print "- - Test One - -"
+_protect_literal_str 'Hello $user'
+_protect_literal_str 'Hello "${username}"'
+print
+
+# A list of test values, with various types of quotes and escapes.
+pw = ""                          # (Unset in the bash, so empty there.)
+arrayZ = [zero (_pls 'Hello ${Me}') 'Hello ${You}' "\\'Pass: ${pw}\\'"]
+
+print "- - Test Two - -"
+for [i element] in (enumerate $arrayZ)
+  print "Element $i: $element is: $(len $element) long."
+print
+
+# Now make an assignment with that result.
+array2 = list $arrayZ
+
+print "- - Test Three - -"
+for [i element] in (enumerate $array2)
+  print "Element $i: $element is: $(len $element) long."
+print
+```
+
+```output
+
+- - Test One - -
+'Hello $user' is 13 long.
+'Hello "${username}"' is 21 long.
+
+- - Test Two - -
+Element 0: zero is: 4 long.
+Element 1: 'Hello ${Me}' is: 13 long.
+Element 2: Hello ${You} is: 12 long.
+Element 3: \'Pass: \' is: 10 long.
+
+- - Test Three - -
+Element 0: zero is: 4 long.
+Element 1: 'Hello ${Me}' is: 13 long.
+Element 2: Hello ${You} is: 12 long.
+Element 3: \'Pass: \' is: 10 long.
+
+```
+
+## Unprotecting literal strings
+<!-- help: abs-unprotect-literal unprotect_literal eval template string.Template substitution -->
+
+The second script fills in the protected string with `eval echo`, once
+`Me` has a value, and shows that a variable still unset at that point
+just vanishes: "no hints, no runs, no errors".
+
+### Example A-27. Unprotecting literal strings (`unprotect_literal.sh`)
+
+```bash
+#! /bin/bash
+# unprotect_literal.sh
+
+# set -vx
+
+:<<-'_UnProtect_Literal_String_Doc'
+
+    Copyright (c) Michael S. Zick, 2003; All Rights Reserved
+    License: Unrestricted reuse in any form, for any purpose.
+    Warranty: None
+    Revision: $ID$
+
+    Documentation redirected to the Bash no-operation. Bash will
+    '/dev/null' this block when the script is first read.
+    (Uncomment the above set command to see this action.)
+
+    Remove the first (Sha-Bang) line when sourcing this as a library
+    procedure.  Also comment out the example use code in the two
+    places where shown.
+
+
+    Usage:
+        Complement of the "$(_pls 'Literal String')" function.
+        (See the protect_literal.sh example.)
+
+        StringVar=$(_upls ProtectedSringVariable)
+
+    Does:
+        When used on the right-hand-side of an assignment statement;
+        makes the substitions embedded in the protected string.
+
+    Notes:
+        The strange names (_*) are used to avoid trampling on
+        the user's chosen names when this is sourced as a
+        library.
+
+
+_UnProtect_Literal_String_Doc
+
+_upls() {
+    local IFS=$'x1B'                # \ESC character (not required)
+    eval echo $@                    # Substitution on the glob.
+}
+
+# :<<-'_UnProtect_Literal_String_Test'
+# # # Remove the above "# " to disable this code. # # #
+
+
+_pls() {
+    local IFS=$'x1B'                # \ESC character (not required)
+    echo $'\x27'$@$'\x27'           # Hard quoted parameter glob
+}
+
+# Declare an array for test values.
+declare -a arrayZ
+
+# Assign elements with various types of quotes and escapes.
+arrayZ=( zero "$(_pls 'Hello ${Me}')" 'Hello ${You}' "\'Pass: ${pw}\'" )
+
+# Now make an assignment with that result.
+declare -a array2=( ${arrayZ[@]} )
+
+# Which yielded:
+# - - Test Three - -
+# Element 0: zero is: 4 long            # Our marker element.
+# Element 1: Hello ${Me} is: 11 long    # Intended result.
+# Element 2: Hello is: 5 long           # ${You} expanded to nothing.
+# Element 3: 'Pass: is: 6 long          # Split on the whitespace.
+# Element 4: ' is: 1 long               # The end quote is here now.
+
+# set -vx
+
+#  Initialize 'Me' to something for the embedded ${Me} substitution.
+#  This needs to be done ONLY just prior to evaluating the
+#+ protected string.
+#  (This is why it was protected to begin with.)
+
+Me="to the array guy."
+
+# Set a string variable destination to the result.
+newVar=$(_upls ${array2[1]})
+
+# Show what the contents are.
+echo $newVar
+
+# Do we really need a function to do this?
+newerVar=$(eval echo ${array2[1]})
+echo $newerVar
+
+#  I guess not, but the _upls function gives us a place to hang
+#+ the documentation on.
+#  This helps when we forget what a # construction like:
+#+ $(eval echo ... ) means.
+
+# What if Me isn't set when the protected string is evaluated?
+unset Me
+newestVar=$(_upls ${array2[1]})
+echo $newestVar
+
+# Just gone, no hints, no runs, no errors.
+
+#  Why in the world?
+#  Setting the contents of a string variable containing character
+#+ sequences that have a meaning in Bash is a general problem in
+#+ script programming.
+#
+#  This problem is now solved in eight lines of code
+#+ (and four pages of description).
+
+#  Where is all this going?
+#  Dynamic content Web pages as an array of Bash strings.
+#  Content set per request by a Bash 'eval' command
+#+ on the stored page template.
+#  Not intended to replace PHP, just an interesting thing to do.
+###
+#  Don't have a webserver application?
+#  No problem, check the example directory of the Bash source;
+#+ there is a Bash script for that also.
+
+# _UnProtect_Literal_String_Test
+# # # Remove the above "# " to disable this code. # # #
+
+exit 0
+```
+
+```output bash
+
+
+
+```
+
+With today's bash this fails: the protected string has been split in
+two, `'Hello` and `${Me}'`, so `eval` finds an unclosed quote, and each
+line prints empty (with an error on standard error).
+
+In tessh the `${Me}` template is Python's `string.Template`, whose syntax
+it happens to share, and `_upls` fills it in from the script's variables.
+`substitute` raises a `KeyError` for a name that isn't set, which gives the
+hint bash doesn't; `safe_substitute` leaves it as it was.
+
+```tessh
+import string
+# unprotect_literal.tsh
+
+'''
+    Copyright (c) Michael S. Zick, 2003; All Rights Reserved
+    License: Unrestricted reuse in any form, for any purpose.
+    Warranty: None
+
+    Usage:
+        Complement of the (_pls 'Literal String') function.
+        StringVar = _upls ProtectedStringVariable
+    Does:
+        Makes the substitutions embedded in the protected string.
+'''
+
+def _upls protected          # Substitution on the template.
+  (string.Template $protected).substitute (globals)
+
+# The protected string (no quotes needed to keep it from expanding).
+protected = 'Hello ${Me}'
+
+#  Initialize 'Me' to something for the embedded ${Me} substitution.
+#  This needs to be done ONLY just prior to evaluating the
+#+ protected string.
+Me = "to the array guy."
+
+# Set a string variable destination to the result.
+newVar = _upls $protected
+
+# Show what the contents are.
+print $newVar
+
+# Do we really need a function to do this?
+newerVar = (string.Template $protected).substitute Me=$Me
+print $newerVar
+
+# What if Me isn't set when the protected string is evaluated?
+del Me
+newestVar = try
+  _upls $protected
+except KeyError as e
+  "(no value for $e)"
+print $newestVar
+print ((string.Template $protected).safe_substitute (globals))
+```
+
+```output
+Hello to the array guy.
+Hello to the array guy.
+(no value for 'Me')
+Hello ${Me}
+```
