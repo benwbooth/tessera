@@ -2219,6 +2219,7 @@ FocusScope {
         return outs
     }
     // kept: the pane's own copy (terminal cells by reference, not their output).
+    readonly property int savedStreamMax: 1000000   // characters of a stream kept on save
     function serialize(kept) {
         const out = []
         let n = 0
@@ -2254,6 +2255,14 @@ FocusScope {
                 if (c.hideOutput) meta.jupyter = Object.assign({}, meta.jupyter || {}, { outputs_hidden: true })
                 cell.outputs = outs.map(o => {
                     const r = Object.assign({}, o)
+                    // (A huge stream keeps its last megabyte: a notebook that
+                    // comes back with every start shouldn't bring a giant
+                    // command's whole output each time.)
+                    if (r.output_type === "stream" && typeof r.text === "string" && r.text.length > nb.savedStreamMax) {
+                        const cut = r.text.indexOf("\n", r.text.length - nb.savedStreamMax)
+                        const kept = r.text.substring(cut >= 0 ? cut + 1 : r.text.length - nb.savedStreamMax)
+                        r.text = "\u22ef (" + Math.round((r.text.length - kept.length) / 1024).toLocaleString() + " KB before this not kept)\n" + kept
+                    }
                     if (typeof r.text === "string") r.text = lines(r.text)
                     if (r.data) {
                         const d = {}

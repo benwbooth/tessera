@@ -19,6 +19,10 @@
 #include <QtWidgets/QApplication>
 #include <QtWebEngineQuick/qtwebenginequickglobal.h>
 
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+#include <QtCore/QTimer>
 #include "terminal_item.h"
 #include "syntax_highlighter.h"
 #include "file_clip.h"
@@ -170,6 +174,17 @@ inline void tessera_create_app(const QString& session)
     }
     qApp->installEventFilter(new TesseraCtrlTap(qApp));
     qApp->installEventFilter(new TesseraExposeWatch(qApp));
+#if defined(__GLIBC__)
+    // Memory freed (a big card deleted, a long output gone) goes back to the
+    // system: glibc keeps a freed heap for reuse, so the window stayed at its
+    // peak. Every 30 s; a trim with nothing to give back costs next to nothing.
+    {
+        auto* trim = new QTimer(qApp);
+        trim->setInterval(30000);
+        QObject::connect(trim, &QTimer::timeout, [] { malloc_trim(0); });
+        trim->start();
+    }
+#endif
     QApplication::setApplicationName(QStringLiteral("tessera"));
     QApplication::setApplicationDisplayName(QStringLiteral("Tessera"));
     QApplication::setOrganizationName(QStringLiteral("tessera"));
