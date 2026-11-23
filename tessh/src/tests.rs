@@ -741,6 +741,20 @@ fn advanced_guide_examples() {
     assert!(failed.is_empty(), "{} of {} examples:\n\n{}", failed.len(), count, failed.join("\n\n"));
 }
 
+/// The full-screen guide's tabs: an example's bash and tessh versions are
+/// one tab bar and the version picked, prose before.
+#[test]
+fn guide_example_tabs() {
+    let md = "### Example\n\n```bash\necho hi\n```\n\nIn tessh:\n\n```tessh\nprint hi\n```\n\n```output\nhi\n```\n\n```bash\nalone\n```\n";
+    let (t, n) = crate::help::tab_examples(md, &|_| false);
+    assert_eq!(n, 1);
+    assert!(t.contains("In tessh:") && t.contains(crate::help::TAB_MARK) && t.contains("print hi") && !t.contains("echo hi") && t.contains("alone"), "{t}");
+    let (b, _) = crate::help::tab_examples(md, &|_| true);
+    assert!(b.contains("echo hi") && !b.contains("print hi"), "{b}");
+    let (_, all) = crate::help::tab_examples(&crate::help::advanced_guide(), &|_| false);
+    assert!(all > 300, "{all} examples");
+}
+
 #[test]
 fn help_topics() {
     let ts = crate::help::topics();

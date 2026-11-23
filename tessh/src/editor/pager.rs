@@ -63,6 +63,17 @@ struct Part {
 
 struct Guide {
     md: String,
+    /// The guides there are (title, Markdown), the one shown, and where
+    /// each was left (the bundled guide: tessh's and the Advanced one).
+    guides: Vec<(&'static str, String)>,
+    which: usize,
+    tops: Vec<usize>,
+    /// The examples showing their bash version (by number, per guide); the
+    /// others show tessh's. And the laid-out lines that are tab bars.
+    bash: Vec<std::collections::HashSet<usize>>,
+    tab_lines: Vec<(usize, usize)>,
+    /// The guide chips on the top line (start and end column, guide).
+    chips: Vec<(usize, usize, usize)>,
     width: usize,
     lines: Vec<String>,
     plain: Vec<String>,
@@ -84,11 +95,59 @@ struct Guide {
 
 const MENU: [&str; 2] = ["Copy", "Select All"];
 
+/// An example's tab bar as text: "tessh" at columns 2–8, "bash (original)"
+/// at 11–27.
+const TAB_BAR: &str = "   tessh    bash (original) ";
+
 impl Guide {
     fn new(md: &str) -> Guide {
-        let mut g = Guide { md: md.to_string(), width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None, sel: None, dragging: false, menu: None };
+        Guide::of(vec![("", md.to_string())], 0)
+    }
+
+    fn of(guides: Vec<(&'static str, String)>, which: usize) -> Guide {
+        let n = guides.len();
+        let md = guides[which].1.clone();
+        let mut g = Guide { md, guides, which, tops: vec![0; n], bash: vec![Default::default(); n], tab_lines: vec![], chips: vec![], width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None, sel: None, dragging: false, menu: None };
         g.layout(80);
         g
+    }
+
+    /// Show guide `w`, where it was left.
+    fn switch(&mut self, w: usize) {
+        if w == self.which || w >= self.guides.len() {
+            return;
+        }
+        self.tops[self.which] = self.top;
+        self.which = w;
+        self.md = self.guides[w].1.clone();
+        self.top = self.tops[w];
+        self.toc_top = 0;
+        self.relayout(false);
+    }
+
+    /// Example `n`'s tab: its bash version or tessh's, the guide where it was.
+    fn show_tab(&mut self, n: usize, bash: bool) {
+        let set = &mut self.bash[self.which];
+        if bash == set.contains(&n) {
+            return;
+        }
+        if bash {
+            set.insert(n);
+        } else {
+            set.remove(&n);
+        }
+        self.relayout(true);
+    }
+
+    /// Laid out again at the same width; `stay`: at the same line, not the
+    /// part's start.
+    fn relayout(&mut self, stay: bool) {
+        let (w, top) = (self.width, self.top);
+        self.width = 0;
+        self.layout(w);
+        if stay {
+            self.top = top;
+        }
     }
 
     /// Laid out for `width` columns: the lines, and where each part starts.
@@ -100,15 +159,27 @@ impl Guide {
         self.width = width;
         // (Laid out again, the lines move: a pick no longer means the same text.)
         self.sel = None;
-        let text = crate::help::terminal_at(&self.md, true, width.clamp(20, 100));
+        // (Each example's two versions as tabs, the one picked shown.)
+        let set = &self.bash[self.which];
+        let md = if self.md.contains("```bash") { crate::help::tab_examples(&self.md, &|n| set.contains(&n)).0 } else { self.md.clone() };
+        let text = crate::help::terminal_at(&md, true, width.clamp(20, 100));
         self.lines = text.lines().map(String::from).collect();
         self.plain = self.lines.iter().map(|l| strip(l)).collect();
+        self.tab_lines.clear();
+        for i in 0..self.plain.len() {
+            let Some(k) = self.plain[i].find(crate::help::TAB_MARK) else { continue };
+            let Ok(n) = self.plain[i][k + crate::help::TAB_MARK.len()..].trim().parse::<usize>() else { continue };
+            let (t, b) = if set.contains(&n) { ("\x1b[2m", "\x1b[7;1m") } else { ("\x1b[7;1m", "\x1b[2m") };
+            self.lines[i] = format!("  {t} tessh \x1b[0m  {b} bash (original) \x1b[0m");
+            self.plain[i] = TAB_BAR.to_string();
+            self.tab_lines.push((i, n));
+        }
         self.lower = self.plain.iter().map(|l| l.to_lowercase()).collect();
         // The parts: the Markdown's headings, found in the laid-out lines in order.
         self.parts.clear();
         let mut from = 0;
         let mut fence = false;
-        for l in self.md.lines() {
+        for l in md.lines() {
             if l.trim_start().starts_with("```") {
                 fence = !fence;
             }
@@ -230,8 +301,19 @@ impl Guide {
             }
         };
         let field = if self.query.is_empty() && !self.searching { "\x1b[2mSearch the guide (/)\x1b[22m".to_string() } else { self.query.clone() };
-        let fw = cols.saturating_sub(6 + count.width());
+        // (More than one guide: a chip for each at the right, the one shown lit; Tab goes round.)
+        let chips: Vec<String> = if self.guides.len() > 1 { self.guides.iter().map(|(t, _)| format!(" {t} ")).collect() } else { vec![] };
+        let chips_w: usize = chips.iter().map(|c| c.width() + 1).sum();
+        let fw = cols.saturating_sub(6 + count.width() + chips_w);
         let _ = write!(o, "\x1b[1;1H\x1b[0m\x1b[2K \x1b[7m ⌕ {}{}\x1b[27m {}", cut(&field, fw), " ".repeat(fw.saturating_sub(strip(&field).width())), count);
+        self.chips.clear();
+        let mut x = cols.saturating_sub(chips_w);
+        for (k, c) in chips.iter().enumerate() {
+            let sty = if k == self.which { "\x1b[7;1m" } else { "\x1b[2m" };
+            let _ = write!(o, "\x1b[1;{}H{sty}{c}\x1b[0m", x + 1);
+            self.chips.push((x, x + c.width(), k));
+            x += c.width() + 1;
+        }
         // The contents, and the guide beside them.
         let cur = self.current_part();
         if let Some(c) = cur {
@@ -297,7 +379,9 @@ impl Guide {
         }
         let total = self.lines.len().max(1);
         let pct = ((self.top + body).min(total) * 100) / total;
-        let hint = format!(" {pct}%   / search   Enter n N next   [ ] parts   ↑↓ PgUp PgDn   drag to pick, right click to copy   q back");
+        let more = if self.guides.len() > 1 { "   Tab other guide" } else { "" };
+        let tabs = if self.tab_lines.is_empty() { "" } else { "   t bash/tessh" };
+        let hint = format!(" {pct}%   / search   Enter n N next   [ ] parts{more}{tabs}   ↑↓ PgUp PgDn   drag to pick, right click to copy   q back");
         let _ = write!(o, "\x1b[{};1H\x1b[0m\x1b[2K\x1b[2m{}\x1b[0m", rows, cut(&hint, cols));
         // The right-click menu, over the guide.
         if let Some((mx, my, at)) = self.menu {
@@ -331,14 +415,23 @@ fn run_item(g: &mut Guide, i: usize) {
     }
 }
 
+/// The bundled guides full screen, tessh's and the Advanced tessh
+/// Scripting Guide (`which`: 0 or 1), at the part about `at`, until q.
+pub fn show_guides(at: &str, which: usize) {
+    run(Guide::of(vec![("tessh guide", crate::help::guide()), ("Advanced guide", crate::help::advanced_guide())], which), at);
+}
+
 /// Show the guide (or any Markdown) full screen, at the part about `at`
 /// when there is one, until q.
 pub fn show(md: &str, at: &str) {
+    run(Guide::new(md), at);
+}
+
+fn run(mut g: Guide, at: &str) {
     let mut o = std::io::stdout();
     let _ = crossterm::terminal::enable_raw_mode();
     let _ = write!(o, "\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[H\x1b[2J");
     let _ = o.flush();
-    let mut g = Guide::new(md);
     let (c0, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let sw = Guide::sidebar_w(c0 as usize);
     g.layout((c0 as usize).saturating_sub(sw + if sw > 0 { 3 } else { 1 }));
@@ -386,8 +479,13 @@ pub fn show(md: &str, at: &str) {
                 if g.searching {
                     match k.code {
                         KeyCode::Enter => {
-                            let first = g.at.is_none();
-                            g.step(k.modifiers.contains(KeyModifiers::SHIFT), first);
+                            // (Enter ends the typing, as in less: then n and N
+                            // go to the next and previous match.)
+                            // (Typing found the first already; Enter stays on it.)
+                            if g.at.is_none() {
+                                g.step(k.modifiers.contains(KeyModifiers::SHIFT), true);
+                            }
+                            g.searching = false;
                         }
                         KeyCode::Esc => g.searching = false,
                         KeyCode::Down => g.step(false, false),
@@ -415,6 +513,22 @@ pub fn show(md: &str, at: &str) {
                 match k.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Char('c') if ctrl => break,
+                    KeyCode::Tab | KeyCode::BackTab if g.guides.len() > 1 => {
+                        let n = g.guides.len();
+                        let w = if k.code == KeyCode::BackTab { (g.which + n - 1) % n } else { (g.which + 1) % n };
+                        g.switch(w);
+                    }
+                    // (Every example to its bash version, or all back to tessh's.)
+                    KeyCode::Char('t') if !g.tab_lines.is_empty() => {
+                        let w = g.which;
+                        if g.bash[w].is_empty() {
+                            let all: Vec<usize> = g.tab_lines.iter().map(|&(_, n)| n).collect();
+                            g.bash[w].extend(all);
+                        } else {
+                            g.bash[w].clear();
+                        }
+                        g.relayout(true);
+                    }
                     KeyCode::Down | KeyCode::Char('j') => g.top += 1,
                     KeyCode::Up | KeyCode::Char('k') => g.top = g.top.saturating_sub(1),
                     KeyCode::PageDown | KeyCode::Char(' ') | KeyCode::Char('f') => g.top += page,
@@ -472,6 +586,26 @@ pub fn show(md: &str, at: &str) {
                         _ => {}
                     }
                     continue;
+                }
+                // (A click on an example's tab bar shows that version.)
+                if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && in_text {
+                    let line = g.top + m.row as usize - 1;
+                    if let Some(&(_, n)) = g.tab_lines.iter().find(|&&(l, _)| l == line) {
+                        let c = (m.column as usize).saturating_sub(x0);
+                        if (2..9).contains(&c) {
+                            g.show_tab(n, false);
+                        } else if (11..28).contains(&c) {
+                            g.show_tab(n, true);
+                        }
+                        continue;
+                    }
+                }
+                // (A guide chip on the top line.)
+                if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && m.row == 0 {
+                    if let Some(&(_, _, w)) = g.chips.iter().find(|&&(a, b, _)| (a..b).contains(&(m.column as usize))) {
+                        g.switch(w);
+                        continue;
+                    }
                 }
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) if in_text => {

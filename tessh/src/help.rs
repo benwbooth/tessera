@@ -465,6 +465,76 @@ fn inline(s: &str, base: &str) -> String {
     out
 }
 
+/// The mark that stands for an example's tab bar in [`tab_examples`]'s
+/// Markdown (an invisible separator, then its number).
+pub const TAB_MARK: &str = "\u{2063}tabs ";
+
+/// The Advanced guide's Markdown with each example's two versions (a bash
+/// block, maybe its `output bash`, then the tessh block and its output) as
+/// one tab bar, `TAB_MARK` and the example's number on a line of their
+/// own, and the version `bash(n)` picks: the prose between them goes
+/// before. The number of examples is the second value.
+pub fn tab_examples(md: &str, bash: &dyn Fn(usize) -> bool) -> (String, usize) {
+    let lines: Vec<&str> = md.lines().collect();
+    // (The fenced blocks: info, first line, last line.)
+    let mut blocks: Vec<(String, usize, usize)> = vec![];
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(info) = lines[i].strip_prefix("```") {
+            let start = i;
+            i += 1;
+            while i < lines.len() && !lines[i].starts_with("```") {
+                i += 1;
+            }
+            blocks.push((info.trim().to_string(), start, i.min(lines.len() - 1)));
+        }
+        i += 1;
+    }
+    let lang = |k: usize| blocks[k].0.split_whitespace().next().unwrap_or("").to_string();
+    let blank_between = |a: usize, b: usize| lines[a + 1..b].iter().all(|l| l.trim().is_empty());
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 64);
+    let mut at = 0;
+    let mut n = 0;
+    let mut k = 0;
+    while k < blocks.len() {
+        if lang(k) != "bash" {
+            k += 1;
+            continue;
+        }
+        let mut j = k + 1;
+        let bout = (j < blocks.len() && blocks[j].0 == "output bash" && blank_between(blocks[k].2, blocks[j].1)).then_some(j);
+        if bout.is_some() {
+            j += 1;
+        }
+        let be = bout.map(|b| blocks[b].2).unwrap_or(blocks[k].2);
+        if j >= blocks.len() || lang(j) != "tessh" || lines[be + 1..blocks[j].1].iter().any(|l| l.starts_with('#')) {
+            k += 1;
+            continue;
+        }
+        let tout = (j + 1 < blocks.len() && blocks[j + 1].0 == "output" && blank_between(blocks[j].2, blocks[j + 1].1)).then_some(j + 1);
+        let (bs, ts) = (blocks[k].1, blocks[j].1);
+        let te = tout.map(|o| blocks[o].2).unwrap_or(blocks[j].2);
+        out.extend(lines[at..bs].iter().map(|l| l.to_string()));
+        out.extend(lines[be + 1..ts].iter().map(|l| l.to_string()));
+        out.push(String::new());
+        out.push(format!("{TAB_MARK}{n}"));
+        out.push(String::new());
+        let (a, b) = if bash(n) { (bs, be) } else { (ts, te) };
+        out.extend(lines[a..=b].iter().map(|l| l.to_string()));
+        out.push(String::new());
+        at = te + 1;
+        n += 1;
+        k = tout.unwrap_or(j) + 1;
+    }
+    out.extend(lines[at..].iter().map(|l| l.to_string()));
+    (out.join("\n"), n)
+}
+
+/// The whole Advanced guide, as the full-screen guide shows it.
+pub fn advanced_guide() -> String {
+    clean(&advanced())
+}
+
 /// The whole guide, for `tessh --guide` and `help guide`.
 pub fn guide() -> String {
     clean(GUIDE)
@@ -514,9 +584,16 @@ pub fn help(py: Python<'_>, args: Vec<Bound<'_, PyAny>>) -> PyResult<()> {
         return Ok(());
     }
     let tty = unsafe { libc::isatty(0) == 1 && libc::isatty(1) == 1 };
-    // (The whole guide at a terminal: full screen, searchable.)
-    if tty && md.len() > 20000 {
-        py.detach(|| crate::editor::pager::show(&md, ""));
+    // (The whole guide, or the Advanced one, at a terminal: full screen,
+    // searchable, both guides there and each example's two versions tabs.)
+    let word = args.first().and_then(|a| a.extract::<String>().ok()).unwrap_or_default().to_lowercase();
+    if tty && (md.len() > 20000 || word == "advanced") {
+        let which = if word == "advanced" { 1 } else { 0 };
+        if md.len() > 20000 && word != "guide" && word != "all" && which == 0 {
+            py.detach(|| crate::editor::pager::show(&md, ""));
+        } else {
+            py.detach(|| crate::editor::pager::show_guides("", which));
+        }
         return Ok(());
     }
     let color = unsafe { libc::isatty(1) } == 1 && std::env::var_os("NO_COLOR").is_none();

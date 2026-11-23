@@ -254,7 +254,7 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
             Outcome::Host(c) => {
                 let (what, arg) = c.split_once(':').unwrap_or((c.as_str(), ""));
                 match what {
-                    "guide" => crate::editor::pager::show(&crate::help::guide(), arg),
+                    "guide" => crate::editor::pager::show_guides(arg, 0),
                     "help" => match crate::help::lookup(arg) {
                         Some(md) => print_md(&md),
                         None => println!("tessh: no help for {arg}"),
@@ -292,7 +292,7 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                         }
                         "guide" => {
                             let w = editor.ed.guide_word();
-                            crate::editor::pager::show(&crate::help::guide(), &w);
+                            crate::editor::pager::show_guides(&w, 0);
                         }
                         "jobs" => run = Some(("jobs".into(), false, false)),
                         "fix" => {
