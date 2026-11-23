@@ -10,6 +10,7 @@
 mod ai;
 mod compiler;
 mod deps;
+mod editor;
 mod forms;
 mod help;
 mod kernel;

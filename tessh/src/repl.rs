@@ -14,6 +14,9 @@
 //! and in `help keys`). Under the kitty keyboard protocol (kitty, foot,
 //! WezTerm, Ghostty, Alacritty, iTerm2) the real keys work too.
 
+#[path = "repl_term.rs"]
+mod term;
+
 use crate::compiler::BLOCK_SPECIALS;
 use crate::reader::incomplete;
 use crate::runner::{self, TesshError};
@@ -1207,6 +1210,10 @@ pub fn run() -> i32 {
                 runner::report(py, e, &rc.to_string_lossy());
             }
         });
+    }
+    // (tessh's own editor; TESSH_EDITOR=reedline: the old one, for now.)
+    if tty && std::env::var("TESSH_EDITOR").as_deref() != Ok("reedline") {
+        return term::run_term(ns, hist, None);
     }
     let host = hostname();
     let mut code = 0;
