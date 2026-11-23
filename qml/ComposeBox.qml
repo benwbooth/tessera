@@ -206,7 +206,7 @@ Rectangle {
         const groups = [
             ["Running", [["Enter", "Run the command \u2014 while one runs, it waits its turn"],
                          ["Right Ctrl", "Run it in the background, alongside (tap; or Ctrl+Enter)"],
-                         ["Left Ctrl", "Switch between this editor and the terminal (tap; or click the terminal's cursor line, and anywhere else in it to come back)"]]],
+                         ["Left Ctrl", "Switch between this editor and the terminal (tap; or click in the terminal to type there)"]]],
             ["Editing", [["Right Shift", "New line (tap; or Shift+Enter, Alt+Enter)"],
                          ["Left Shift", "Take the grey suggestion (tap; or \u2192 / End at the end of the line)"],
                          ["Tab", "Complete; in the indentation, indent"],

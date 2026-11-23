@@ -308,11 +308,10 @@ Item {
             // (A notebook over it takes the keys, when the editor doesn't.)
             else if (activeFocus && notebook.visible && pane.termSlot === null && !pane.runningLong) Qt.callLater(() => notebook.forceActiveFocus())
         }
-        // (At a prompt a click keeps the keys in the editor, unless it's on
-        // the cursor's line: then the terminal takes them, as it's typed in.)
-        focusOnCursorLineOnly: pane.editorOn
-        onCursorLineClicked: pane.preferEditor = false
-        onOffCursorLineClicked: { pane.preferEditor = true; compose.focusEditor() }
+        // (A click anywhere in the terminal gives it the keys; a tap of Ctrl
+        // gives them back to the editor.)
+        editorBeside: pane.editorOn
+        onTerminalClicked: pane.preferEditor = false
     }
 
     ComposeBox {

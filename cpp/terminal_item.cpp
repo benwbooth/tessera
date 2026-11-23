@@ -1149,13 +1149,10 @@ void TerminalItem::mouse(int action, int button, QPointF pos, Qt::KeyboardModifi
 
 void TerminalItem::mousePressEvent(QMouseEvent* e)
 {
-    const int pressRow = int(std::floor((e->position().y() * m_dpr - m_pad) / m_ch));
-    if (!m_focusOnCursorLineOnly || pressRow == m_cursorY) {
-        if (m_focusOnCursorLineOnly) emit cursorLineClicked();
-        forceActiveFocus(Qt::MouseFocusReason);
-    } else {
-        emit offCursorLineClicked();
-    }
+    // Any press takes the keys for the terminal (with the input editor on,
+    // the pane hears so: a tap of Ctrl gives them back to the editor).
+    if (m_editorBeside) emit terminalClicked();
+    forceActiveFocus(Qt::MouseFocusReason);
     const bool appWantsMouse = m_session && m_session->wants_mouse(uint32_t(e->modifiers()));
     if (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier) && m_ctrlClickOpens && m_session) {
         const QString link = qs(m_session->link_at(float(e->position().x() * m_dpr), float(e->position().y() * m_dpr),
@@ -1353,7 +1350,7 @@ void TerminalItem::publishSelection()
 
 void TerminalItem::hoverEnterEvent(QHoverEvent* e)
 {
-    if (m_focusFollowsMouse && !m_focusOnCursorLineOnly && !hasActiveFocus()) forceActiveFocus(Qt::MouseFocusReason);
+    if (m_focusFollowsMouse && !m_editorBeside && !hasActiveFocus()) forceActiveFocus(Qt::MouseFocusReason);
     QQuickItem::hoverEnterEvent(e);
 }
 

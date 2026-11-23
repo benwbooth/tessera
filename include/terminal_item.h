@@ -84,9 +84,9 @@ class TerminalItem : public QQuickItem {
     // Other views that receive this one's typing (Broadcast Input).
     Q_PROPERTY(QVariantList broadcastTo MEMBER m_broadcastTo NOTIFY optionsChanged)
     Q_PROPERTY(bool logging READ logging NOTIFY loggingChanged)
-    // At a prompt with the editor under it: a click takes the keys only on
-    // the cursor's line (elsewhere they stay in the editor).
-    Q_PROPERTY(bool focusOnCursorLineOnly MEMBER m_focusOnCursorLineOnly NOTIFY optionsChanged)
+    // The pane's input editor is on: a click in the terminal says so
+    // (terminalClicked) as it takes the keys.
+    Q_PROPERTY(bool editorBeside MEMBER m_editorBeside NOTIFY optionsChanged)
     // A recording (asciicast) of the output is being made.
     Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
     // Shell integration mark indicators in the left margin.
@@ -224,11 +224,8 @@ signals:
     void optionsChanged();
     void loggingChanged();
     void recordingChanged();
-    // A press on the cursor's line while focusOnCursorLineOnly (just before
-    // the terminal takes the keys).
-    void cursorLineClicked();
-    // A press anywhere else while focusOnCursorLineOnly (the editor's turn).
-    void offCursorLineClicked();
+    // A press while editorBeside (just before the terminal takes the keys).
+    void terminalClicked();
     void activity();
     // The session was attached by another window (a tab dragged there).
     void takenOver();
@@ -343,7 +340,7 @@ private:
     // Cursor (from the last frame).
     bool m_cursorVisible = false;
     int m_cursorX = -1, m_cursorY = -1, m_cursorStyle = 0;
-    bool m_focusOnCursorLineOnly = false;
+    bool m_editorBeside = false;
     QRgb m_cursorColor = 0;
     QString m_cursorText;
     bool m_cursorWide = false;
