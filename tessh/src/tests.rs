@@ -593,8 +593,8 @@ fn backslash_escapes_in_words() {
 
 #[test]
 fn bare_assignment_and_env_prefix() {
-    let (_, out) = run("a=1\nb=x c=$a\nprint $a $b $c (dict k=2)\nTESSH_T1=v sh -c 'echo $TESSH_T1'\nprint (\"TESSH_T1\" in $env)");
-    assert_eq!(out, "1 x 1 {k: 2}\nv\nFalse\n");
+    let (_, out) = run("a=1\nb=x c=$a\nprint $a $b $c (dict k=2)\nTESSH_T1=v sh -c 'echo $TESSH_T1'\nprint (\"TESSH_T1\" in $env)\ne=\nprint [$e]");
+    assert_eq!(out, "1 x 1 {k: 2}\nv\nFalse\n['']\n");
 }
 
 #[test]

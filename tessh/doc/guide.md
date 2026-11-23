@@ -871,16 +871,22 @@ The augmented forms are `+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`.
 
 `name=value` glued, as bash writes it, is the same as `name = value` when it
 starts a line; several on one line are each assigned. Inside a call
-(`f a=1`) it's still a keyword argument, and `==` never assigns.
+(`f a=1`) it's still a keyword argument, and `==` never assigns. `a=` with
+nothing after is the empty string, as in bash (a program given `$a` gets an
+empty argument, as bash's `"$a"` would); `a = None` is no value, and `del a` removes the name (`unset` is for
+environment variables).
 
 ```tessh
 n=5 label=total
 n += 1
 print $label $n
+note=
+print [$note] (len $note)
 ```
 
 ```output
 total 6
+[''] 0
 ```
 
 ## Functions

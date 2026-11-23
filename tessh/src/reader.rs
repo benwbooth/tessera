@@ -531,6 +531,10 @@ fn classify(mut ps: Vec<Piece>, pos: Option<Pos>) -> Form {
             if is_ident(n) && !v.is_empty() && !v.starts_with('=') {
                 return Form::new(Kind::KwArg { name: n.to_string(), value: Box::new(classify_text(v, shift(pos, eq + 1))) }, pos);
             }
+            // (name= with nothing after: the empty string, as bash's a= is.)
+            if is_ident(n) && v.is_empty() {
+                return Form::new(Kind::KwArg { name: n.to_string(), value: Box::new(Form::new(Kind::Str { value: String::new(), kind: '\'' }, shift(pos, eq + 1))) }, pos);
+            }
         }
         return Form::new(Kind::Sym { name: t.to_string(), marks: vec![] }, pos);
     }
