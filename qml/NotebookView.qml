@@ -364,6 +364,22 @@ FocusScope {
         const last = outs[outs.length - 1]
         if (out.output_type === "stream" && last && last.output_type === "stream" && last.name === out.name) last.text += out.text
         else outs.push(out)
+        // (A folder card (ls, cd) shows the folder, not what the program
+        // printed: only the end of that is kept — an ls -lR's megabytes, read
+        // and written again with each batch, held the whole window up.)
+        if (out.output_type === "stream" && isFolderCard(c)) {
+            const cap = 65536
+            let total = 0
+            for (const o of outs) if (o.output_type === "stream") total += o.text.length
+            for (const o of outs) {
+                if (total <= cap) break
+                if (o.output_type !== "stream") continue
+                const cut = Math.min(o.text.length, total - cap)
+                o.text = o.text.slice(cut)
+                total -= cut
+            }
+            outs = outs.filter(o => o.output_type !== "stream" || o.text !== "")
+        }
         if (c.jobTty && c.job > 0) cells.setProperty(i, "jobAt", outs.length)
         cells.setProperty(i, "outputs", JSON.stringify(outs.concat(tail)))
         touch()
@@ -1486,10 +1502,17 @@ FocusScope {
         Qt.callLater(followLive)
     }
     // (Its output so far, after what the card had before it.)
-    function ttyText(t) {
+    // A folder card (ls, cd shown as the folder): what its program prints
+    // isn't shown, so only its end is kept, and none of it read while it runs.
+    function isFolderCard(c) { return !!c && (c.lang === "" || c.lang === "tessh") && builtinKind(c.source) === "files" }
+    function ttyText(t, final) {
         const r = ttyRun
         const i = indexOf(r.cid)
         if (i < 0) return
+        // (An ls -lR's megabytes, read out of the terminal every 300 ms, held
+        // the window up and its end back: read once, when it's done.)
+        const folder = isFolderCard(cells.get(i))
+        if (folder && !final) return
         let outs = []
         try { outs = JSON.parse(cells.get(i).outputs) } catch (x) {}
         // (It goes on the text before it, as a stream's next text would.)
@@ -1497,10 +1520,11 @@ FocusScope {
             const last = outs[outs.length - 1]
             const joins = last && last.output_type === "stream" && last.name === "stdout"
             ttyRun = Object.assign({}, r, { base: joins ? outs.length - 1 : outs.length, before: joins ? last.text : "" })
-            return ttyText(t)
+            return ttyText(t, final)
         }
         outs = outs.slice(0, r.base)
         let text = t.screen ? "" : view.cellOutput(t.id, "text")
+        if (folder && text.length > 65536) text = text.slice(-65536)
         text = text.trim() === "" ? "" : text.replace(/\n*$/, "\n")
         if (r.before + text !== "") outs.push({ output_type: "stream", name: "stdout", text: r.before + text })
         // (Only when it changed: a card set again redraws, and can take the
@@ -1537,7 +1561,7 @@ FocusScope {
         })
     }
     function finishTty(t) {
-        ttyText(t)
+        ttyText(t, true)
         const r = ttyRun
         ttyRun = null
         updateOwnRun()
