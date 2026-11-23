@@ -3162,9 +3162,8 @@ isotheral
 The `anagram` program from the yawl package is rarely installed, so here
 it's a tessh function over a small made-up word list: a word fits when
 `Counter` says it needs no letter more often than the set has it. Its
-output starts the same pipe of `grep`s, which ends a line with `| \`, as
-tessh needs. The letter set comes from the command line, as the first
-exercise asks.
+output starts the same pipe of `grep`s. The letter set comes from the
+command line, as the first exercise asks.
 
 ```tessh
 # agram: playing games with anagrams.
@@ -3182,10 +3181,10 @@ def anagram letterset          # The words made of the set's letters.
 LETTERSET = if (len $argv) > 1 then $argv[1] else etaoinshrdlu
 FILTER = '.......'             # How many letters minimum?
 
-anagram $LETTERSET | \
-  grep $FILTER | \
-  grep '^is' | \
-  grep -v 's$' | \
+anagram $LETTERSET |
+  grep $FILTER |
+  grep '^is' |
+  grep -v 's$' |
   grep -v 'ed$'
 # Find all anagrams of the letterset, with at least 7 letters,
 # starting with 'is', no plurals, no past tense verbs.

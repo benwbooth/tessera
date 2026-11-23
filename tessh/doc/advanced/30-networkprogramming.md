@@ -220,8 +220,7 @@ lsof "$lsof_args" | grep $connection_type | grep -v "$no_match" |
 
 The pipeline is the same in tessh. It's fed made-up `lsof -ni` output here,
 since the real list is different on every machine (and nobody's business).
-A pipe at the end of a line doesn't carry on to the next in tessh, as it
-does in bash: end the line with `| \`.
+As in bash, a line ending in `|` goes on to the next.
 
 ```tessh
 #  ip-addresses: list the IP addresses your computer is connected to.
@@ -246,8 +245,8 @@ thunderbi 2410 ann    44u  IPv4  80777      0t0  TCP 192.168.1.5:41022->192.0.2.
 avahi-dae  640 avahi  12u  IPv4  18843      0t0  UDP *:5353
 """
 
-$lsof_output | grep $connection_type | grep -v $no_match | \
-      awk '{print $9}' | cut -d : -f $field | sort | uniq | \
+$lsof_output | grep $connection_type | grep -v $no_match |
+      awk '{print $9}' | cut -d : -f $field | sort | uniq |
       sed "s/^$router//"
 ```
 
