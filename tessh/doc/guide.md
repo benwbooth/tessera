@@ -586,9 +586,14 @@ compiled once. Perl's flags go after it: `i` ignores case, `m` makes `^` and
 comments, `a` keeps `\w` to ASCII. It's Python's `re.Pattern`, so `.sub`,
 `.findall`, `.split` and the `re` module all work with it.
 
-`=~` matches and `!~` doesn't. On the right, a regex gives the match (with
-its groups) or `None`; a glob (`*.py`) tests a name or path against it; text
-counts as a regex, as in bash.
+`=~` matches and `!~` doesn't. What it does depends on what's on the right:
+
+- a regex (`re'…'`): searched for anywhere in the text; the match (with its
+  groups) or `None`.
+- a glob (an unquoted word with wildcards, `*.py`): whether the whole name
+  or path fits it; `True` or `False`.
+- anything else, such as quoted text: whether the text has it in it, as is
+  (`$`, `.`, `*` mean themselves); `True` or `False`.
 
 ```tessh
 line = "Build 42 ok"
@@ -597,8 +602,9 @@ print ($m.group 1) ($m.start 1) ($line !~ re'^\d+$')
 print (bool ($line =~ re'^build'i)) (bool ($line =~ re'^build'))
 f = ./main.py
 print ($f =~ *.py) ($f !~ *.rs)
-if $line =~ 'ok$'
+if $line =~ re'ok$'
   print done
+print ($line =~ 'ok') ($line =~ 'ok$')
 print (re'o'.sub '0' $line) re'\w+'i
 ```
 
@@ -607,6 +613,7 @@ print (re'o'.sub '0' $line) re'\w+'i
 True False
 True True
 done
+True False
 Build 42 0k re'\w+'i
 ```
 

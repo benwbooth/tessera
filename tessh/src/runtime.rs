@@ -508,16 +508,17 @@ def regex(text):
     return re.compile(text)
 
 def matches(s, pattern):
-    """s =~ pattern: a regex (re'…', or text taken as one) searched in s —
-    the match, or None; a Glob (*.py) — whether s, a name or path, fits it."""
+    """s =~ pattern: a regex (re'…') searched in s — the match, or None; a
+    Glob (*.py) — whether s, a name or path, fits it; anything else, text —
+    whether s has it in it, as is (bash's quoted right side)."""
     import re, os
     if type(pattern) is Glob:
         return os.fspath(s) in pattern if isinstance(s, (str, os.PathLike)) else False
-    if isinstance(s, os.PathLike):
-        s = os.fspath(s)
+    # (A path, a number: as text.)
+    s = os.fspath(s) if isinstance(s, os.PathLike) else s if isinstance(s, (str, bytes)) else str(s)
     if isinstance(pattern, re.Pattern):
         return pattern.search(s)
-    return re.search(str(pattern), s)
+    return os.fspath(pattern) in s if isinstance(pattern, os.PathLike) else str(pattern) in s
 
 def _words_as_program(f):
     """f, called with a glob's names where it's given a Glob (as a program

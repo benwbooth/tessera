@@ -1447,7 +1447,7 @@ impl<'py, 's> Compiler<'py, 's> {
             let func = func.clone();
             return self.call(self.name_load(&func)?, vec![a, b], vec![]);
         }
-        // (=~: a match — regex, glob or text as a regex; !~: none.)
+        // (=~: a match — a regex, a glob, or text as it is; !~: none.)
         if op == "=~" {
             return self.rcall("matches", vec![a, b]);
         }
