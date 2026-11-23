@@ -2067,7 +2067,7 @@ _..___..__
 ## behead: Removing mail and news message headers
 <!-- help: abs-behead behead mail news headers sed body -->
 
-The scripts from here on carry their own authors. This one is by Mark
+This one is by Mark
 Moraes of the University of Toronto (see the copyright notice at its end):
 it strips the header off a mail or news message, everything up to the first
 empty line, and the blank lines after it.
@@ -5715,7 +5715,8 @@ Element 6: \' is: 2 long.
 
 Today's bash doesn't do what the comments say for Test Three: the
 unquoted `${arrayZ[@]}` splits every element at its blanks, protected or
-not (the comments' `x1B` was meant to be the escape character, `$'\x1B'`).
+not. (The `$'x1B'` in `_pls` was meant to be the escape character,
+`$'\x1B'`, as in the first function.)
 
 tessh has nothing to protect against. A single-quoted string is never
 expanded, then or later, and a list's items are never split again, so
