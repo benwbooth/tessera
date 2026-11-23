@@ -8583,3 +8583,413 @@ for v in ($sparseZ.values)
 ''
 '123123'
 ```
+
+## Timing commands
+<!-- help: abs-testexectime test-execution-time.sh time timing benchmark perf_counter -->
+
+Erik Brandsberg's timings of bash's ways of doing arithmetic (`$(( ))`,
+`expr`, `let`) and of testing (`case`, `[ ]` with and without quotes,
+`-eq`), each 50000 times under bash's `time`. (The Miscellany chapter's
+section on optimizations refers to it.)
+
+### Example A-59. Testing execution times of various commands (`test-execution-time.sh`)
+
+```bash no-run
+#!/bin/bash
+#  test-execution-time.sh
+#  Example by Erik Brandsberg, for testing execution time
+#+ of certain operations.
+#  Referenced in the "Optimizations" section of "Miscellany" chapter.
+
+count=50000
+echo "Math tests"
+echo "Math via \$(( ))"
+time for (( i=0; i< $count; i++))
+do
+  result=$(( $i%2 ))
+done
+
+echo "Math via *expr*:"
+time for (( i=0; i< $count; i++))
+do
+  result=`expr "$i%2"`
+done
+
+echo "Math via *let*:"
+time for (( i=0; i< $count; i++))
+do
+  let result=$i%2
+done
+
+echo
+echo "Conditional testing tests"
+
+echo "Test via case:"
+time for (( i=0; i< $count; i++))
+do
+  case $(( $i%2 )) in
+    0) : ;;
+    1) : ;;
+  esac
+done
+
+echo "Test with if [], no quotes:"
+time for (( i=0; i< $count; i++))
+do
+  if [ $(( $i%2 )) = 0 ]; then
+     :
+  else
+     :
+  fi
+done
+
+echo "Test with if [], quotes:"
+time for (( i=0; i< $count; i++))
+do
+  if [ "$(( $i%2 ))" = "0" ]; then
+     :
+  else
+     :
+  fi
+done
+
+echo "Test with if [], using -eq:"
+time for (( i=0; i< $count; i++))
+do
+  if [ $(( $i%2 )) -eq 0 ]; then
+     :
+  else
+     :
+  fi
+done
+
+exit $?
+```
+
+tessh has no `time` keyword; a `with` block around a few lines times them
+as well, with `time.perf_counter` and a small context manager. In tessh
+`%`, `match` and `if` are Python, so the three ways of doing arithmetic
+and four ways of testing become one or two, and they cost about the same.
+What costs is running a program, as `expr` and `[` are when bash isn't
+using its builtins: those run 1/500 as many times here, and still take
+the longest. (Note that `if [ … ]` isn't a test in tessh: the brackets make
+a list, which is always true. The `test` program is spelled out.) The
+times differ from run to run; this is one:
+
+```tessh
+import time
+from contextlib import contextmanager
+#  test-execution-time.sh
+#  Example by Erik Brandsberg, for testing execution time
+#+ of certain operations.
+
+# bash's `time` keyword, as a with-block: how long the block took.
+@contextmanager
+def timed
+  start = (time.perf_counter)
+  yield
+  took = (time.perf_counter) - $start
+  print "real ${took:.3f}s"
+
+count = 50000
+print "Math tests"
+print "Math via %:"
+with (timed)
+  for i in (range $count)
+    result = $i % 2
+
+print "Math via *expr*, a program run each time (1/500 as many):"
+with (timed)
+  for i in (range ($count // 500))
+    result = expr $i "%" 2
+
+print
+print "Conditional testing tests"
+
+print "Test via match:"
+with (timed)
+  for i in (range $count)
+    match $i % 2
+      case 0
+        pass
+      case 1
+        pass
+
+print "Test with if:"
+with (timed)
+  for i in (range $count)
+    if $i % 2 == 0
+      pass
+    else
+      pass
+
+# (Not `if [ … ]`: in tessh that's a list, and always true.)
+print "Test with the test program (1/500 as many):"
+with (timed)
+  for i in (range ($count // 500))
+    if test (str ($i % 2)) = 0
+      pass
+    else
+      pass
+```
+
+```text
+Math tests
+Math via %:
+real 0.007s
+Math via *expr*, a program run each time (1/500 as many):
+real 2.243s
+
+Conditional testing tests
+Test via match:
+real 0.011s
+Test with if:
+real 0.008s
+Test with the test program (1/500 as many):
+real 2.240s
+```
+
+## Lists and dicts against the clock
+<!-- help: abs-assocarrtest assoc-arr-test.sh associative-array dict list benchmark -->
+
+Erik Brandsberg's other benchmark compares bash's numeric-indexed arrays
+with its associative arrays (`declare -A`): assigning, overwriting and
+reading 100000 entries, in order and at random.
+
+### Example A-60. Associative arrays vs. conventional arrays (execution times) (`assoc-arr-test.sh`)
+
+```bash no-run
+#!/bin/bash
+#  assoc-arr-test.sh
+#  Benchmark test script to compare execution times of
+#  numeric-indexed array vs. associative array.
+#     Thank you, Erik Brandsberg.
+
+count=100000       # May take a while for some of the tests below.
+declare simple     # Can change to 20000, if desired.
+declare -a array1
+declare -A array2
+declare -a array3
+declare -A array4
+
+echo "===Assignment tests==="
+echo
+
+echo "Assigning a simple variable:"
+# References $i twice to equalize lookup times.
+time for (( i=0; i< $count; i++)); do
+        simple=$i$i
+done
+
+echo "---"
+
+echo "Assigning a numeric index array entry:"
+time for (( i=0; i< $count; i++)); do
+        array1[$i]=$i
+done
+
+echo "---"
+
+echo "Overwriting a numeric index array entry:"
+time for (( i=0; i< $count; i++)); do
+        array1[$i]=$i
+done
+
+echo "---"
+
+echo "Linear reading of numeric index array:"
+time for (( i=0; i< $count; i++)); do
+        simple=array1[$i]
+done
+
+echo "---"
+
+echo "Assigning an associative array entry:"
+time for (( i=0; i< $count; i++)); do
+        array2[$i]=$i
+done
+
+echo "---"
+
+echo "Overwriting an associative array entry:"
+time for (( i=0; i< $count; i++)); do
+        array2[$i]=$i
+done
+
+echo "---"
+
+echo "Linear reading an associative array entry:"
+time for (( i=0; i< $count; i++)); do
+        simple=array2[$i]
+done
+
+echo "---"
+
+echo "Assigning a random number to a simple variable:"
+time for (( i=0; i< $count; i++)); do
+        simple=$RANDOM
+done
+
+echo "---"
+
+echo "Assign a sparse numeric index array entry randomly into 64k cells:"
+time for (( i=0; i< $count; i++)); do
+        array3[$RANDOM]=$i
+done
+
+echo "---"
+
+echo "Reading sparse numeric index array entry:"
+time for value in "${array3[@]}"i; do
+        simple=$value
+done
+
+echo "---"
+
+echo "Assigning a sparse associative array entry randomly into 64k cells:"
+time for (( i=0; i< $count; i++)); do
+        array4[$RANDOM]=$i
+done
+
+echo "---"
+
+echo "Reading sparse associative index array entry:"
+time for value in "${array4[@]}"; do
+        simple=$value
+done
+
+exit $?
+```
+
+In tessh the numeric-indexed array is a list and the associative one a
+dict (keyed by strings here, as bash's are), and both are far faster than
+bash's. The difference bash shows most is the sparse numeric array filled
+at random, which takes seconds there (one run: 7.8 s, against 0.2-0.3 s
+for the others) because bash keeps an array as a linked list; a sparse
+array is a dict in tessh, as quick as the rest. Two slips in the original
+aren't copied: `simple=array1[$i]` assigns the text `array1[0]`… rather
+than reading the array (it needs `${array1[$i]}`), and
+`"${array3[@]}"i` glues an `i` to the last value. One run:
+
+```tessh
+import time random
+from contextlib import contextmanager
+#  assoc-arr-test.sh
+#  Benchmark test script to compare execution times of
+#  numeric-indexed array vs. associative array.
+#     Thank you, Erik Brandsberg.
+
+@contextmanager
+def timed                         # bash's `time`, as a with-block.
+  start = (time.perf_counter)
+  yield
+  took = (time.perf_counter) - $start
+  print "real ${took:.3f}s"
+
+count = 100000
+array1 = [None] * $count          # A list: numeric indexes, packed.
+array2 = {}                       # A dict: bash's associative array.
+array3 = {}                       # Sparse numeric indexes: a dict too.
+array4 = {}
+
+print "===Assignment tests===" ; print
+print "Assigning a simple variable:"
+with (timed)
+  for i in (range $count)
+    simple = "$i$i"               # References $i twice to equalize lookup times.
+print ---
+print "Assigning a numeric index array entry:"
+with (timed)
+  for i in (range $count)
+    $array1[$i] = $i
+print ---
+print "Overwriting a numeric index array entry:"
+with (timed)
+  for i in (range $count)
+    $array1[$i] = $i
+print ---
+print "Linear reading of numeric index array:"
+with (timed)
+  for i in (range $count)
+    simple = $array1[$i]
+print ---
+print "Assigning an associative array entry:"
+with (timed)
+  for i in (range $count)
+    $array2[(str $i)] = $i
+print ---
+print "Overwriting an associative array entry:"
+with (timed)
+  for i in (range $count)
+    $array2[(str $i)] = $i
+print ---
+print "Linear reading an associative array entry:"
+with (timed)
+  for i in (range $count)
+    simple = $array2[(str $i)]
+print ---
+print "Assigning a random number to a simple variable:"
+with (timed)
+  for i in (range $count)
+    simple = random.randrange 32768   # ($RANDOM)
+print ---
+print "Assign a sparse numeric index array entry randomly into 64k cells:"
+with (timed)
+  for i in (range $count)
+    $array3[(random.randrange 32768)] = $i
+print ---
+print "Reading sparse numeric index array entry:"
+with (timed)
+  for value in ($array3.values)
+    simple = $value
+print ---
+print "Assigning a sparse associative array entry randomly into 64k cells:"
+with (timed)
+  for i in (range $count)
+    $array4[(str (random.randrange 32768))] = $i
+print ---
+print "Reading sparse associative index array entry:"
+with (timed)
+  for value in ($array4.values)
+    simple = $value
+```
+
+```text
+===Assignment tests===
+
+Assigning a simple variable:
+real 0.093s
+---
+Assigning a numeric index array entry:
+real 0.036s
+---
+Overwriting a numeric index array entry:
+real 0.020s
+---
+Linear reading of numeric index array:
+real 0.032s
+---
+Assigning an associative array entry:
+real 0.076s
+---
+Overwriting an associative array entry:
+real 0.065s
+---
+Linear reading an associative array entry:
+real 0.082s
+---
+Assigning a random number to a simple variable:
+real 0.099s
+---
+Assign a sparse numeric index array entry randomly into 64k cells:
+real 0.144s
+---
+Reading sparse numeric index array entry:
+real 0.006s
+---
+Assigning a sparse associative array entry randomly into 64k cells:
+real 0.128s
+---
+Reading sparse associative index array entry:
+real 0.008s
+```
