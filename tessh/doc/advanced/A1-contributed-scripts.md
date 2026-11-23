@@ -2488,3 +2488,375 @@ print (len $primes) $primes[-5:]
 ```output
 168 [971 977 983 991 997]
 ```
+
+## tree: Displaying a directory tree
+<!-- help: abs-tree tree directory-tree folders recursion symlinks -->
+
+Rick Boivie's revision of Jordi Sanfeliu's `tree` script (patched by Ian
+Kjos) draws the folders under the current one, or under the one named, as
+a tree, by `cd`-ing into each and calling itself.
+
+### Example A-16. tree: Displaying a directory tree (`tree.sh`)
+
+```bash no-run
+#!/bin/bash
+# tree.sh
+
+#  Written by Rick Boivie.
+#  Used with permission.
+#  This is a revised and simplified version of a script
+#+ by Jordi Sanfeliu (the original author), and patched by Ian Kjos.
+#  This script replaces the earlier version used in
+#+ previous releases of the Advanced Bash Scripting Guide.
+#  Copyright (c) 2002, by Jordi Sanfeliu, Rick Boivie, and Ian Kjos.
+
+# ==> Comments added by the author of this document.
+
+
+search () {
+for dir in `echo *`
+#  ==> `echo *` lists all the files in current working directory,
+#+ ==> without line breaks.
+#  ==> Similar effect to for dir in *
+#  ==> but "dir in `echo *`" will not handle filenames with blanks.
+do
+  if [ -d "$dir" ] ; then # ==> If it is a directory (-d)...
+  zz=0                    # ==> Temp variable, keeping track of
+                          #     directory level.
+  while [ $zz != $1 ]     # Keep track of inner nested loop.
+    do
+      echo -n "| "        # ==> Display vertical connector symbol,
+                          # ==> with 2 spaces & no line feed
+                          #     in order to indent.
+      zz=`expr $zz + 1`   # ==> Increment zz.
+    done
+
+    if [ -L "$dir" ] ; then # ==> If directory is a symbolic link...
+      echo "+---$dir" `ls -l $dir | sed 's/^.*'$dir' //'`
+      # ==> Display horiz. connector and list directory name, but...
+      # ==> delete date/time part of long listing.
+    else
+      echo "+---$dir"       # ==> Display horizontal connector symbol...
+      # ==> and print directory name.
+      numdirs=`expr $numdirs + 1` # ==> Increment directory count.
+      if cd "$dir" ; then         # ==> If can move to subdirectory...
+        search `expr $1 + 1`      # with recursion ;-)
+        # ==> Function calls itself.
+        cd ..
+      fi
+    fi
+  fi
+done
+}
+
+if [ $# != 0 ] ; then
+  cd $1   # Move to indicated directory.
+  #else   # stay in current directory
+fi
+
+echo "Initial directory = `pwd`"
+numdirs=0
+
+search 0
+echo "Total directories = $numdirs"
+
+exit 0
+```
+
+The tessh version walks the folders the same way, `cd` in and `cd ..` out,
+but its loop is over the glob `*`, whose items are Paths: `$dir.is_dir`
+and `$dir.is_symlink` are the tests, and `os.readlink` gives a link's
+target, where the bash cuts it out of `ls -l`. Since a Path is one value,
+the folder `old stuff` is in the tree; bash's `` `echo *` `` splits it in
+two and leaves it out (its count says 6). The script prints the folder
+it starts in; here that's only its name, as the full path changes on every
+run.
+
+```tessh
+import os
+# (A made-up folder tree to try it on.)
+mkdir -p project/src/lib project/src/util project/docs "project/old stuff" project/tests/empty
+ln -s src project/link
+touch project/README project/src/main.c
+
+# tree.tsh
+#  Written by Rick Boivie.
+#  Used with permission.
+#  This is a revised and simplified version of a script
+#+ by Jordi Sanfeliu (the original author), and patched by Ian Kjos.
+#  Copyright (c) 2002, by Jordi Sanfeliu, Rick Boivie, and Ian Kjos.
+
+def search level             # level: how deep we are.
+  global numdirs
+  for dir in *
+    if ($dir.is_dir)         # If it is a folder...
+      print ("| " * $level) end=""   # Vertical connectors, to indent.
+      if ($dir.is_symlink)   # If folder is a symbolic link...
+        print "+---$dir -> $(os.readlink $dir)"
+      else
+        print "+---$dir"     # Horizontal connector and folder name.
+        numdirs += 1         # Increment folder count.
+        cd $dir              # Move to subfolder...
+        search ($level + 1)  # with recursion ;-)
+        cd ..
+
+args = $argv[1:] or [project]         # (sample arguments, when none are given)
+if $args
+  cd $args[0]                # Move to indicated folder.
+  # else stay in current folder
+
+print "Initial directory = $((Path (pwd)).name)"   # (Only its name, here.)
+numdirs = 0
+
+search 0
+print "Total directories = $numdirs"
+
+exit 0
+```
+
+```output
+Initial directory = project
++---docs
++---link -> src
++---old stuff
++---src
+| +---lib
+| +---util
++---tests
+| +---empty
+Total directories = 7
+```
+
+## tree2: Alternate directory tree script
+<!-- help: abs-tree2 tree2 du disk-usage sizes biggest-folders -->
+
+Patsie's tree shows sizes: it runs `du -akx` once, saves its list of every
+file and folder with its size in a temporary file, and then draws the five
+biggest entries of each folder, going down into the folders, five levels at
+most. Each level only shows what's bigger than a tenth of its parent.
+
+### Example A-17. tree2: Alternate directory tree script (`tree2.sh`)
+
+```bash no-run
+#!/bin/bash
+# tree2.sh
+
+# Lightly modified/reformatted by ABS Guide author.
+# Included in ABS Guide with permission of script author (thanks!).
+
+## Recursive file/dirsize checking script, by Patsie
+##
+## This script builds a list of files/directories and their size (du -akx)
+## and processes this list to a human readable tree shape
+## The 'du -akx' is only as good as the permissions the owner has.
+## So preferably run as root* to get the best results, or use only on
+## directories for which you have read permissions. Anything you can't
+## read is not in the list.
+
+#* ABS Guide author advises caution when running scripts as root!
+
+
+##########  THIS IS CONFIGURABLE  ##########
+
+TOP=5                   # Top 5 biggest (sub)directories.
+MAXRECURS=5             # Max 5 subdirectories/recursions deep.
+E_BL=80                 # Blank line already returned.
+E_DIR=81                # Directory not specified.
+
+
+##########  DON'T CHANGE ANYTHING BELOW THIS LINE  ##########
+
+PID=$$                            # Our own process ID.
+SELF=`basename $0`                # Our own program name.
+TMP="/tmp/${SELF}.${PID}.tmp"     # Temporary 'du' result.
+
+# Convert number to dotted thousand.
+function dot { echo "            $*" |
+               sed -e :a -e 's/\(.*[0-9]\)\([0-9]\{3\}\)/\1,\2/;ta' |
+               tail -c 12; }
+
+# Usage: tree <recursion> <indent prefix> <min size> <directory>
+function tree {
+  recurs="$1"           # How deep nested are we?
+  prefix="$2"           # What do we display before file/dirname?
+  minsize="$3"          # What is the minumum file/dirsize?
+  dirname="$4"          # Which directory are we checking?
+
+# Get ($TOP) biggest subdirs/subfiles from TMP file.
+  LIST=`egrep "[[:space:]]${dirname}/[^/]*$" "$TMP" |
+        awk '{if($1>'$minsize') print;}' | sort -nr | head -$TOP`
+  [ -z "$LIST" ] && return        # Empty list, then go back.
+
+  cnt=0
+  num=`echo "$LIST" | wc -l`      # How many entries in the list.
+
+  ## Main loop
+  echo "$LIST" | while read size name; do
+    ((cnt+=1))		          # Count entry number.
+    bname=`basename "$name"`      # We only need a basename of the entry.
+    [ -d "$name" ] && bname="$bname/"
+                                  # If it's a directory, append a slash.
+    echo "`dot $size`$prefix +-$bname"
+                                  # Display the result.
+    #  Call ourself recursively if it's a directory
+    #+ and we're not nested too deep ($MAXRECURS).
+    #  The recursion goes up: $((recurs+1))
+    #  The prefix gets a space if it's the last entry,
+    #+ or a pipe if there are more entries.
+    #  The minimum file/dirsize becomes
+    #+ a tenth of his parent: $((size/10)).
+    # Last argument is the full directory name to check.
+    if [ -d "$name" -a $recurs -lt $MAXRECURS ]; then
+      [ $cnt -lt $num ] \
+        || (tree $((recurs+1)) "$prefix  " $((size/10)) "$name") \
+        && (tree $((recurs+1)) "$prefix |" $((size/10)) "$name")
+    fi
+  done
+
+  [ $? -eq 0 ] && echo "           $prefix"
+  # Every time we jump back add a 'blank' line.
+  return $E_BL
+  # We return 80 to tell we added a blank line already.
+}
+
+###                ###
+###  main program  ###
+###                ###
+
+rootdir="$@"
+[ -d "$rootdir" ] ||
+  { echo "$SELF: Usage: $SELF <directory>" >&2; exit $E_DIR; }
+  # We should be called with a directory name.
+
+echo "Building inventory list, please wait ..."
+     # Show "please wait" message.
+du -akx "$rootdir" 1>"$TMP" 2>/dev/null
+     # Build a temporary list of all files/dirs and their size.
+size=`tail -1 "$TMP" | awk '{print $1}'`
+     # What is our rootdirectory's size?
+echo "`dot $size` $rootdir"
+     # Display rootdirectory's entry.
+tree 0 "" 0 "$rootdir"
+     # Display the tree below our rootdirectory.
+
+rm "$TMP" 2>/dev/null
+     # Clean up TMP file.
+
+exit $?
+```
+
+In tessh the sizes go into a dict, from a Path to its size, so there's no
+temporary file to make and clean up, nor `egrep` to find a folder's
+entries in it: `$dirname.iterdir` lists them, and `sorted … reverse=True`
+does `sort -nr | head`. Python's format spec `>11,` is the `dot` function's
+`sed` loop that puts in the commas. The sizes come from Python too (`du`'s
+count blocks, which differ from one file system to another, so the output
+wouldn't be the same everywhere): a file's size rounded up to a K, and a
+folder's the sum of what's in it. `tree` returns whether it ended with a
+blank line, where the bash returns 80 and tests `$?` in a subshell. The
+blank lines are printed without their trailing blanks.
+
+```tessh
+import sys math
+# (A made-up folder of files to try it on; truncate makes them, empty.)
+mkdir -p archive/photos/2023 archive/photos/2024/summer archive/music archive/docs
+truncate -s 1500K archive/photos/2023/a.jpg ; truncate -s 900K archive/photos/2023/b.jpg
+truncate -s 3M archive/photos/2024/summer/beach.jpg ; truncate -s 700K archive/photos/2024/c.jpg
+truncate -s 5M archive/music/song.mp3 ; truncate -s 2M archive/music/other.mp3
+truncate -s 12K archive/docs/notes.txt ; truncate -s 3K archive/docs/todo.txt
+truncate -s 40K archive/readme.txt
+
+# tree2.tsh
+## Recursive file/dirsize checking script, by Patsie
+##
+## This script builds a list of files/directories and their size
+## and processes this list to a human readable tree shape.
+## Anything you can't read is not in the list.
+
+##########  THIS IS CONFIGURABLE  ##########
+
+TOP = 5                      # Top 5 biggest (sub)directories.
+MAXRECURS = 5                # Max 5 subdirectories/recursions deep.
+E_DIR = 81                   # Directory not specified.
+
+##########  DON'T CHANGE ANYTHING BELOW THIS LINE  ##########
+
+SELF = (Path $argv[0]).name  # Our own program name.
+sizes = {}                   # Every file and folder's size, in K.
+
+def dot n = "${n:>11,}"      # Convert number to dotted thousand.
+
+def du path                  # Put the sizes under path in sizes, as "du -ak".
+  if ($path.is_dir)
+    size = sum [(du $p) for p in ($path.iterdir)]
+  else
+    size = math.ceil (($path.stat).st_size / 1024)
+  $sizes[$path] = $size
+  $size
+
+# Usage: tree <recursion> <indent prefix> <min size> <directory>
+def tree recurs prefix minsize dirname
+  # Get ($TOP) biggest subdirs/subfiles.
+  entries = [[$sizes[$p] $p] for p in ($dirname.iterdir) if $sizes[$p] > $minsize]
+  LIST = (sorted $entries reverse=True)[:$TOP]
+  if not $LIST
+    return False             # Empty list, then go back.
+
+  blank_done = False
+  for [cnt [size name]] in (enumerate $LIST 1)    # Main loop
+    bname = $name.name       # We only need a basename of the entry.
+    if ($name.is_dir)
+      bname += "/"           # If it's a directory, append a slash.
+    print "$(dot $size)$prefix +-$bname"          # Display the result.
+    #  Call ourself recursively if it's a directory
+    #+ and we're not nested too deep ($MAXRECURS).
+    #  The prefix gets a space if it's the last entry,
+    #+ or a pipe if there are more entries.
+    #  The minimum file/dirsize becomes a tenth of its parent.
+    blank_done = False
+    if ($name.is_dir) and $recurs < $MAXRECURS
+      more = if $cnt < (len $LIST) then " |" else "  "
+      blank_done = tree ($recurs + 1) ($prefix + $more) ($size // 10) $name
+
+  if not $blank_done         # Every time we jump back add a 'blank' line,
+    print ("           $prefix".rstrip)
+  True                       # and tell we added one.
+
+###  main program  ###
+
+args = $argv[1:] or [archive]         # (sample arguments, when none are given)
+rootdir = Path (' '.join $args)
+if not ($rootdir.is_dir)     # We should be called with a directory name.
+  print "$SELF: Usage: $SELF <directory>" file=$sys.stderr
+  exit $E_DIR
+
+print "Building inventory list, please wait ..."
+size = du $rootdir           # Build the list of all files/dirs and their size.
+print "$(dot $size) $rootdir"     # Display rootdirectory's entry.
+tree 0 "" 0 $rootdir         # Display the tree below our rootdirectory.
+```
+
+```output
+Building inventory list, please wait ...
+     13,395 archive
+      7,168 +-music/
+      5,120 | +-song.mp3
+      2,048 | +-other.mp3
+            |
+      6,172 +-photos/
+      3,772 | +-2024/
+      3,072 | | +-summer/
+      3,072 | | | +-beach.jpg
+            | | |
+        700 | | +-c.jpg
+            | |
+      2,400 | +-2023/
+      1,500 |   +-a.jpg
+        900 |   +-b.jpg
+            |
+         40 +-readme.txt
+         15 +-docs/
+         12   +-notes.txt
+          3   +-todo.txt
+
+```
