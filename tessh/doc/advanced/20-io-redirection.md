@@ -57,8 +57,8 @@ This statement is echoed to stdout, and will not appear in "script.log".
 ```
 
 The tessh version shows the two files at the end. For the bad commands it
-runs `ls` on files that aren't there: tessh's own "command not found"
-message doesn't follow a `2>` (a bug, logged).
+runs `ls` on files that aren't there. (tessh's own "command not found"
+follows a `2>` too, as bash's does.)
 
 ```tessh
 # Redirecting stdout, one line at a time.

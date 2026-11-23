@@ -2694,7 +2694,7 @@ fi
 ```
 
 ```tessh
-if (false)           # (The program, in parentheses: see below.)
+if false             # (The program, as in bash.)
   print "false evaluates \"true\""
 else
   print "false evaluates \"false\""
@@ -2706,9 +2706,8 @@ while False          # (the value)
 false evaluates "false"
 ```
 
-A word alone on the line after `if` or `while` is text, not a command: `if
-false` tests the string `"false"`, which is true. Put the command in
-parentheses, `if (false)`, or use the values.
+A word alone after `if` or `while` is a command, as in bash: `if false`
+runs `false`. `False` and `True` are Python's values.
 
 **type** says what a name is: keyword, builtin, function, alias or program,
 and with `-a` all of them. tessh's `which` finds programs, `help name`
