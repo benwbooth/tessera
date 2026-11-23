@@ -47,4 +47,7 @@
     ("G-command-line-options.md", include_str!("advanced/G-command-line-options.md")),
     ("H-files.md", include_str!("advanced/H-files.md")),
     ("I-systemdirs.md", include_str!("advanced/I-systemdirs.md")),
+    ("J-tabexpansion.md", include_str!("advanced/J-tabexpansion.md")),
+    ("K-localization.md", include_str!("advanced/K-localization.md")),
+    ("L-histcommands.md", include_str!("advanced/L-histcommands.md")),
 ]
