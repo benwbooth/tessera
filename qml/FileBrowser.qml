@@ -112,7 +112,12 @@ Item {
     property var raw: []
     property int listSeq: 0
     property bool listed: false         // (an answer came: "(empty)" means it)
+    // (Off: not read until it's wanted — an ls card's pane far below the
+    // screen, read as it's scrolled to.)
+    property bool wanted: true
+    onWantedChanged: if (wanted && !listed) list()
     function list() {
+        if (!wanted) return
         const n = ++listSeq
         if (!controller || dir === "") { raw = []; return }
         Async.call(controller, k => controller.listDir(k, dir, showHidden), r => {
@@ -206,12 +211,14 @@ Item {
         const w = entries.map(e => (plainName(e).length + prefix(e).length + 3) * cw)
         const avail = Math.max(cw * 10, width - 8)
         let best = { cols: 1, rows: n, widths: [Math.max(0, ...w)] }
-        for (let cols = 2; cols <= n; cols++) {
+        const most = Math.min(n, Math.floor(avail / Math.max(1, Math.min(...w) + 2 * cw)))
+        for (let cols = 2; cols <= most; cols++) {
             const rows = Math.ceil(n / cols)
             if (Math.ceil(n / rows) < cols) continue
             const widths = []
             for (let c = 0; c < cols; c++) widths.push(Math.max(0, ...w.slice(c * rows, (c + 1) * rows)) + 2 * cw)
-            if (widths.reduce((a, b) => a + b, 0) > avail) break
+            // (As ls: the most columns that fit, trying them all.)
+            if (widths.reduce((a, b) => a + b, 0) > avail) continue
             best = { cols: cols, rows: rows, widths: widths }
         }
         return best

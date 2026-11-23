@@ -3950,7 +3950,7 @@ FocusScope {
         onInsertRequested: (t) => nb.insertRequested(t)
         onViewRequested: (p) => nb.viewRequested(p)
         onFileCardRequested: (p) => nb.addFileCard(p)
-        onListedChanged: if (listed && card) card.listed = true
+        onListedChanged: if (listed && card) { card.listed = true; if (card.debug) console.log("ls card: read " + dir) }
     }
     Component {
         id: filesView
@@ -3958,10 +3958,36 @@ FocusScope {
         // ls *.txt, ls -d x), then a pane for each folder (ls a b, ls *),
         // headed "name:" when there's more than one, and with -R every
         // folder under them too.
+        // (In a scroller: the card's room is capped, and -R's panes go on
+        // well below it.)
+        Flickable {
+            id: lsf
+            readonly property var src: parent
+            property alias listed: lsc.listed
+            width: parent ? parent.width : 0
+            implicitHeight: lsc.implicitHeight
+            contentWidth: width
+            contentHeight: lsc.implicitHeight
+            clip: contentHeight > height
+            interactive: false   // (a drag selects; the wheel and bar scroll)
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: lsf.contentHeight > lsf.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
+            MomentumWheel { flick: lsf }
+            onContentYChanged: lsc.viewTick++
+            onHeightChanged: lsc.viewTick++
+            // (Test hook: TESSERA_TEST_LS_SCROLL scrolls an ls card to its end at 8 s; LS_DEBUG logs its size.)
+            Timer {
+                interval: 8000
+                running: nb.controller !== null && (nb.controller.testEnv("LS_SCROLL") !== "" || lsc.debug)
+                onTriggered: {
+                    if (lsc.debug) console.log("ls card: view " + lsf.height + " of " + lsf.contentHeight + " (column " + lsc.implicitHeight + ")")
+                    if (nb.controller.testEnv("LS_SCROLL") !== "") lsf.contentY = Math.max(0, lsf.contentHeight - lsf.height)
+                }
+            }
         Column {
             id: lsc
-            readonly property var src: parent
-            width: parent ? parent.width : 0
+            readonly property var src: lsf.src
+            width: lsf.width
             readonly property var sw: nb.shellWords((src.command || "").trim())
             readonly property bool isCd: sw.length > 0 && ["cd", "pushd", "popd", "z", "zi"].indexOf(sw[0].text) >= 0
             readonly property string home: nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
@@ -3986,9 +4012,17 @@ FocusScope {
                 sections.clear(); have = {}
                 if (plan.single !== "") { sections.append({ path: plan.single }); have[plan.single] = true }
             }
-            onPlanChanged: reset()
-            Component.onCompleted: reset()
+            // (Again only when the ls itself is different: the card's folder
+            // being set as it runs, and the like, keep what's been found.)
+            property string planKey: ""
+            onPlanChanged: { const k = JSON.stringify(plan); if (k !== planKey) { planKey = k; reset() } }
+            Component.onCompleted: { planKey = JSON.stringify(plan); reset() }
+            // (Test hook: TESSERA_TEST_LS_DEBUG logs the plan and each pane added.)
+            readonly property bool debug: nb.controller !== null && nb.controller.testEnv("LS_DEBUG") !== ""
+            onSectionsCountChanged: if (debug) console.log("ls card: " + sections.count + " panes; plan " + JSON.stringify(plan))
+            readonly property int sectionsCount: sections.count
             function addAfter(after, dirs) {
+                if (debug) console.log("ls card: after " + after + " +" + dirs.length + " " + JSON.stringify(dirs.slice(0, 3)))
                 let at = sections.count
                 if (after !== "") for (let i = 0; i < sections.count; ++i) if (sections.get(i).path === after) { at = i + 1; break }
                 for (const d of dirs.slice().sort()) {
@@ -3996,6 +4030,21 @@ FocusScope {
                     have[d] = true
                     sections.insert(at++, { path: d })
                 }
+            }
+            // (Streaming: a pane is read when it comes within a screen of
+            // the notebook's view, not before.)
+            property int viewTick: 0
+            Connections {
+                target: list
+                function onContentYChanged() { lsc.viewTick++ }
+                function onHeightChanged() { lsc.viewTick++ }
+            }
+            function nearView(item) {
+                if (!item || !item.visible) return false
+                // (Within a screen of what shows: the notebook's view, and the card's.)
+                const p = item.mapToItem(list, 0, 0), q = item.mapToItem(lsf, 0, 0)
+                return p.y < list.height * 2 && p.y + item.height > -list.height
+                    && q.y < lsf.height * 2 && q.y + item.height > -lsf.height
             }
             function label(d) {
                 const b = base.replace(/\/$/, "")
@@ -4019,9 +4068,17 @@ FocusScope {
             Repeater {
                 model: sections
                 delegate: Column {
+                    id: sec
                     required property string path
+                    required property int index
                     readonly property string modelData: path
                     width: lsc.width
+                    // (Read once it's come near the view, and kept.)
+                    property bool reached: index === 0
+                    function check() { try { if (!reached && lsc.nearView(sec)) reached = true } catch (e) {} }   // (gone since: nothing)
+                    Connections { target: lsc; function onViewTickChanged() { sec.check() } }
+                    onYChanged: Qt.callLater(check)
+                    Component.onCompleted: Qt.callLater(check)
                     Text {
                         visible: lsc.plan.headers
                         topPadding: 6.001
@@ -4034,11 +4091,13 @@ FocusScope {
                     LsPane {
                         card: lsc
                         width: lsc.width
+                        wanted: sec.reached
                         startDir: nb.onHost(modelData)
                         onSubDirsChanged: if (lsc.plan.recursive) lsc.addAfter(modelData, subDirs.map(nb.localPath))
                     }
                 }
             }
+        }
         }
     }
 
