@@ -6266,3 +6266,1157 @@ Completed: echo getting http://example.test/ -l 2
 getting http://example.test/a page -l 3
 Completed: echo getting 'http://example.test/a page' -l 3
 ```
+
+## A podcast fetcher
+<!-- help: abs-bashpodder bashpodder podcast rss feed wget m3u playlist -->
+
+Linc Fessenden's `bashpodder.sh` (with "many contributors") reads the
+feed addresses in `bp.conf`, pulls the enclosure URLs out of each feed
+with `tr` and `sed`, downloads the episodes it hasn't fetched before into
+a folder named for the day, keeps the list of fetched URLs in
+`podcast.log`, and writes an `m3u` playlist. It needs the network.
+
+### Example A-31. A *podcasting* script (`bashpodder.sh`)
+
+```bash no-run
+#!/bin/bash
+
+#  bashpodder.sh:
+#  By Linc 10/1/2004
+#  Find the latest script at
+#+ http://linc.homeunix.org:8080/scripts/bashpodder
+#  Last revision 12/14/2004 - Many Contributors!
+#  If you use this and have made improvements or have comments
+#+ drop me an email at linc dot fessenden at gmail dot com
+#  I'd appreciate it!
+
+# ==>  ABS Guide extra comments.
+
+# ==>  Author of this script has kindly granted permission
+# ==>+ for inclusion in ABS Guide.
+
+
+# ==> ################################################################
+# 
+# ==> What is "podcasting"?
+
+# ==> It's broadcasting "radio shows" over the Internet.
+# ==> These shows can be played on iPods and other music file players.
+
+# ==> This script makes it possible.
+# ==> See documentation at the script author's site, above.
+
+# ==> ################################################################
+
+
+# Make script crontab friendly:
+cd $(dirname $0)
+# ==> Change to directory where this script lives.
+
+# datadir is the directory you want podcasts saved to:
+datadir=$(date +%Y-%m-%d)
+# ==> Will create a date-labeled directory, named: YYYY-MM-DD
+
+# Check for and create datadir if necessary:
+if test ! -d $datadir
+        then
+        mkdir $datadir
+fi
+
+# Delete any temp file:
+rm -f temp.log
+
+#  Read the bp.conf file and wget any url not already
+#+ in the podcast.log file:
+while read podcast
+  do # ==> Main action follows.
+  file=$(wget -q $podcast -O - | tr '\r' '\n' | tr \' \" | \
+sed -n 's/.*url="\([^"]*\)".*/\1/p')
+  for url in $file
+                do
+                echo $url >> temp.log
+                if ! grep "$url" podcast.log > /dev/null
+                        then
+                        wget -q -P $datadir "$url"
+                fi
+                done
+    done < bp.conf
+
+# Move dynamically created log file to permanent log file:
+cat podcast.log >> temp.log
+sort temp.log | uniq > podcast.log
+rm temp.log
+# Create an m3u playlist:
+ls $datadir | grep -v m3u > $datadir/podcast.m3u
+
+
+exit 0
+
+#################################################
+For a different scripting approach to Podcasting,
+see Phil Salkie's article, 
+"Internet Radio to Podcast with Shell Tools"
+in the September, 2005 issue of LINUX JOURNAL,
+http://www.linuxjournal.com/article/8171
+#################################################
+```
+
+The pipelines are the same in tessh. `while read podcast … done <
+bp.conf` is a `for` over the file's words, `$(dirname $0)` is
+`(Path $argv[0]).parent`, and `if ! grep …` is `if not (grep …)`: a
+command in parentheses is its `Output`, true when it succeeded. bash's
+`tr \' \"` is `tr "'" '"'`.
+
+```tessh no-run
+#!/usr/bin/env tessh
+
+#  bashpodder.tsh: (ported from bashpodder.sh)
+#  By Linc 10/1/2004
+#  Find the latest script at
+#+ http://linc.homeunix.org:8080/scripts/bashpodder
+#  Last revision 12/14/2004 - Many Contributors!
+#  If you use this and have made improvements or have comments
+#+ drop me an email at linc dot fessenden at gmail dot com
+#  I'd appreciate it!
+
+# ==>  ABS Guide extra comments.
+
+# ==>  Author of this script has kindly granted permission
+# ==>+ for inclusion in ABS Guide.
+
+# ==> What is "podcasting"?
+# ==> It's broadcasting "radio shows" over the Internet.
+# ==> These shows can be played on iPods and other music file players.
+# ==> This script makes it possible.
+
+import os
+
+# Make script crontab friendly:
+cd (Path $argv[0]).parent
+# ==> Change to directory where this script lives.
+
+# datadir is the directory you want podcasts saved to:
+datadir = date +%Y-%m-%d
+# ==> Will create a date-labeled directory, named: YYYY-MM-DD
+
+# Check for and create datadir if necessary:
+if not (os.path.isdir $datadir)
+  mkdir $datadir
+
+# Delete any temp file:
+rm -f temp.log
+
+# Read the bp.conf file and wget any url not already
+# in the podcast.log file:
+for podcast in (((Path bp.conf).read_text).split)
+  # ==> Main action follows.
+  file = wget -q $podcast -O - | tr '\r' '\n' | tr "'" '"' | \
+         sed -n 's/.*url="\([^"]*\)".*/\1/p'
+  for url in ($file.split)
+    print $url >>temp.log
+    if not (grep $url podcast.log >/dev/null)
+      wget -q -P $datadir $url
+
+# Move dynamically created log file to permanent log file:
+cat podcast.log >>temp.log
+sort temp.log | uniq >podcast.log
+rm temp.log
+# Create an m3u playlist:
+ls $datadir | grep -v m3u >$datadir/podcast.m3u
+
+exit 0
+
+#################################################
+# For a different scripting approach to Podcasting,
+# see Phil Salkie's article,
+# "Internet Radio to Podcast with Shell Tools"
+# in the September, 2005 issue of LINUX JOURNAL,
+# http://www.linuxjournal.com/article/8171
+#################################################
+```
+
+Here it is on two made-up feeds, one with its items on one line split by
+carriage returns (which the first `tr` is for), and a stand-in `wget` in
+the current folder that reads the feeds from files and only touches the
+episodes it "fetches". One episode is in the log already, so it isn't
+fetched again.
+
+```bash
+# (Made up: two feeds, a log of one episode already fetched, and a
+#+ stand-in wget that "downloads" from these files instead of the net.)
+cat >show1.xml <<'END'
+<rss><channel><title>Show One</title>
+<item><enclosure url="http://example.test/one/ep1.mp3" type="audio/mpeg"/></item>
+<item><enclosure url='http://example.test/one/ep2.mp3' type='audio/mpeg'/></item>
+</channel></rss>
+END
+printf '<rss><item><enclosure url="http://example.test/two/a.ogg"/></item>\r<item><enclosure url="http://example.test/two/b.ogg"/></item></rss>\r' >show2.xml
+printf '%s\n' show1.xml show2.xml >bp.conf
+echo http://example.test/one/ep1.mp3 >podcast.log
+cat >wget <<'END'
+#!/bin/sh
+# wget -q FEED -O -   or   wget -q -P DIR URL
+if [ "$3" = -O ]; then cat "$2"; else echo "  fetching $4"; touch "$3/${4##*/}"; fi
+END
+chmod +x wget; PATH=$PWD:$PATH
+
+# cd $(dirname $0)        (Not here: the made-up files are in this folder.)
+
+# datadir is the directory you want podcasts saved to:
+datadir=$(date +%Y-%m-%d)
+# ==> Will create a date-labeled directory, named: YYYY-MM-DD
+
+# Check for and create datadir if necessary:
+if test ! -d $datadir
+        then
+        mkdir $datadir
+fi
+
+# Delete any temp file:
+rm -f temp.log
+
+#  Read the bp.conf file and wget any url not already
+#+ in the podcast.log file:
+while read podcast
+  do # ==> Main action follows.
+  file=$(wget -q $podcast -O - | tr '\r' '\n' | tr \' \" | \
+sed -n 's/.*url="\([^"]*\)".*/\1/p')
+  for url in $file
+                do
+                echo $url >> temp.log
+                if ! grep "$url" podcast.log > /dev/null
+                        then
+                        wget -q -P $datadir "$url"
+                fi
+                done
+    done < bp.conf
+
+# Move dynamically created log file to permanent log file:
+cat podcast.log >> temp.log
+sort temp.log | uniq > podcast.log
+rm temp.log
+# Create an m3u playlist:
+ls $datadir | grep -v m3u > $datadir/podcast.m3u
+
+echo "podcast.log:"; cat podcast.log           # (To see what it did.)
+echo "podcast.m3u:"; cat $datadir/podcast.m3u
+```
+
+```tessh
+import os
+# (Made up: two feeds, a log of one episode already fetched, and a
+# stand-in wget that "downloads" from these files instead of the net.)
+cat >show1.xml <<'END'
+<rss><channel><title>Show One</title>
+<item><enclosure url="http://example.test/one/ep1.mp3" type="audio/mpeg"/></item>
+<item><enclosure url='http://example.test/one/ep2.mp3' type='audio/mpeg'/></item>
+</channel></rss>
+END
+printf '<rss><item><enclosure url="http://example.test/two/a.ogg"/></item>\r<item><enclosure url="http://example.test/two/b.ogg"/></item></rss>\r' >show2.xml
+print show1.xml show2.xml sep="\n" >bp.conf
+print http://example.test/one/ep1.mp3 >podcast.log
+cat >wget <<'END'
+#!/bin/sh
+# wget -q FEED -O -   or   wget -q -P DIR URL
+if [ "$3" = -O ]; then cat "$2"; else echo "  fetching $4"; touch "$3/${4##*/}"; fi
+END
+chmod +x wget ; $env.PATH = "$(pwd):$env.PATH"
+
+# cd (Path $argv[0]).parent  (Not here: the made-up files are in this folder.)
+
+# datadir is the directory you want podcasts saved to:
+datadir = date +%Y-%m-%d
+# ==> Will create a date-labeled directory, named: YYYY-MM-DD
+
+# Check for and create datadir if necessary:
+if not (os.path.isdir $datadir)
+  mkdir $datadir
+
+# Delete any temp file:
+rm -f temp.log
+
+# Read the bp.conf file and wget any url not already
+# in the podcast.log file:
+for podcast in (((Path bp.conf).read_text).split)
+  # ==> Main action follows.
+  file = wget -q $podcast -O - | tr '\r' '\n' | tr "'" '"' | \
+         sed -n 's/.*url="\([^"]*\)".*/\1/p'
+  for url in ($file.split)
+    print $url >>temp.log
+    if not (grep $url podcast.log >/dev/null)
+      wget -q -P $datadir $url
+
+# Move dynamically created log file to permanent log file:
+cat podcast.log >>temp.log
+sort temp.log | uniq >podcast.log
+rm temp.log
+# Create an m3u playlist:
+ls $datadir | grep -v m3u >$datadir/podcast.m3u
+
+print "podcast.log:" ; cat podcast.log           # (To see what it did.)
+print "podcast.m3u:" ; cat $datadir/podcast.m3u
+```
+
+```output
+  fetching http://example.test/one/ep2.mp3
+  fetching http://example.test/two/a.ogg
+  fetching http://example.test/two/b.ogg
+podcast.log:
+http://example.test/one/ep1.mp3
+http://example.test/one/ep2.mp3
+http://example.test/two/a.ogg
+http://example.test/two/b.ogg
+podcast.m3u:
+a.ogg
+b.ogg
+ep2.mp3
+```
+
+The `sed` takes one URL per line, the last one on it. In tessh a regex
+can take them all from the feed's text at once:
+`re"url=[\"']([^\"']*)".findall $text`.
+
+## Nightly backup with rsync
+<!-- help: abs-nightly-backup nightly-backup backup rsync rotate snapshots cron -->
+
+Richard Neill's `nightly-backup.sh` backs up a home folder to a backup
+disk with `rsync`, run from cron: it mounts the disk if need be, makes
+the new backup with hard links to the last one (`--link-dest`), and then
+rotates the old ones, keeping one a day for a week, one a week for a
+month and one a month for three months. It needs root and the disk, and
+it deletes old backups.
+
+### Example A-32. Nightly backup to a firewire HD (`nightly-backup.sh`)
+
+```bash no-run
+#!/bin/bash
+# nightly-backup.sh
+# http://www.richardneill.org/source.php#nightly-backup-rsync
+# Copyright (c) 2005 Richard Neill <backup@richardneill.org>.
+# This is Free Software licensed under the GNU GPL.
+# ==> Included in ABS Guide with script author's kind permission.
+# ==> (Thanks!)
+
+#  This does a backup from the host computer to a locally connected
+#+ firewire HDD using rsync and ssh.
+#  (Script should work with USB-connected device (see lines 40-43).
+#  It then rotates the backups.
+#  Run it via cron every night at 5am.
+#  This only backs up the home directory.
+#  If ownerships (other than the user's) should be preserved,
+#+ then run the rsync process as root (and re-instate the -o).
+#  We save every day for 7 days, then every week for 4 weeks,
+#+ then every month for 3 months.
+
+#  See: http://www.mikerubel.org/computers/rsync_snapshots/
+#+ for more explanation of the theory.
+#  Save as: $HOME/bin/nightly-backup_firewire-hdd.sh
+
+#  Known bugs:
+#  ----------
+#  i)  Ideally, we want to exclude ~/.tmp and the browser caches.
+
+#  ii) If the user is sitting at the computer at 5am,
+#+     and files are modified while the rsync is occurring,
+#+     then the BACKUP_JUSTINCASE branch gets triggered.
+#      To some extent, this is a 
+#+     feature, but it also causes a "disk-space leak".
+
+
+
+
+
+##### BEGIN CONFIGURATION SECTION ############################################
+LOCAL_USER=rjn                # User whose home directory should be backed up.
+MOUNT_POINT=/backup           # Mountpoint of backup drive.
+                              # NO trailing slash!
+                              # This must be unique (eg using a udev symlink)
+# MOUNT_POINT=/media/disk     # For USB-connected device.
+SOURCE_DIR=/home/$LOCAL_USER  # NO trailing slash - it DOES matter to rsync.
+BACKUP_DEST_DIR=$MOUNT_POINT/backup/`hostname -s`.${LOCAL_USER}.nightly_backup
+DRY_RUN=false                 #If true, invoke rsync with -n, to do a dry run.
+                              # Comment out or set to false for normal use.
+VERBOSE=false                 # If true, make rsync verbose.
+                              # Comment out or set to false otherwise.
+COMPRESS=false                # If true, compress.
+                              # Good for internet, bad on LAN.
+                              # Comment out or set to false otherwise.
+
+### Exit Codes ###
+E_VARS_NOT_SET=64
+E_COMMANDLINE=65
+E_MOUNT_FAIL=70
+E_NOSOURCEDIR=71
+E_UNMOUNTED=72
+E_BACKUP=73
+##### END CONFIGURATION SECTION ##############################################
+
+
+# Check that all the important variables have been set:
+if [ -z "$LOCAL_USER" ] ||
+   [ -z "$SOURCE_DIR" ] ||
+   [ -z "$MOUNT_POINT" ]  ||
+   [ -z "$BACKUP_DEST_DIR" ]
+then
+   echo 'One of the variables is not set! Edit the file: $0. BACKUP FAILED.'
+   exit $E_VARS_NOT_SET
+fi
+
+if [ "$#" != 0 ]  # If command-line param(s) . . .
+then              # Here document(ation).
+  cat <<-ENDOFTEXT
+    Automatic Nightly backup run from cron.
+    Read the source for more details: $0
+    The backup directory is $BACKUP_DEST_DIR .
+    It will be created if necessary; initialisation is no longer required.
+
+    WARNING: Contents of $BACKUP_DEST_DIR are rotated.
+    Directories named 'backup.\$i' will eventually be DELETED.
+    We keep backups from every day for 7 days (1-8),
+    then every week for 4 weeks (9-12),
+    then every month for 3 months (13-15).
+
+    You may wish to add this to your crontab using 'crontab -e'
+    #  Back up files: $SOURCE_DIR to $BACKUP_DEST_DIR
+    #+ every night at 3:15 am
+         15 03 * * * /home/$LOCAL_USER/bin/nightly-backup_firewire-hdd.sh
+
+    Don't forget to verify the backups are working,
+    especially if you don't read cron's mail!"
+	ENDOFTEXT
+   exit $E_COMMANDLINE
+fi
+
+
+# Parse the options.
+# ==================
+
+if [ "$DRY_RUN" == "true" ]; then
+  DRY_RUN="-n"
+  echo "WARNING:"
+  echo "THIS IS A 'DRY RUN'!"
+  echo "No data will actually be transferred!"
+else
+  DRY_RUN=""
+fi
+
+if [ "$VERBOSE" == "true" ]; then
+  VERBOSE="-v"
+else
+  VERBOSE=""
+fi
+
+if [ "$COMPRESS" == "true" ]; then
+  COMPRESS="-z"
+else
+  COMPRESS=""
+fi
+
+
+#  Every week (actually of 8 days) and every month,
+#+ extra backups are preserved.
+DAY_OF_MONTH=`date +%d`            # Day of month (01..31).
+if [ $DAY_OF_MONTH = 01 ]; then    # First of month.
+  MONTHSTART=true
+elif [ $DAY_OF_MONTH = 08 \
+    -o $DAY_OF_MONTH = 16 \
+    -o $DAY_OF_MONTH = 24 ]; then
+    # Day 8,16,24  (use 8, not 7 to better handle 31-day months)
+      WEEKSTART=true
+fi
+
+
+
+#  Check that the HDD is mounted.
+#  At least, check that *something* is mounted here!
+#  We can use something unique to the device, rather than just guessing
+#+ the scsi-id by having an appropriate udev rule in
+#+ /etc/udev/rules.d/10-rules.local
+#+ and by putting a relevant entry in /etc/fstab.
+#  Eg: this udev rule:
+# BUS="scsi", KERNEL="sd*", SYSFS{vendor}="WDC WD16",
+# SYSFS{model}="00JB-00GVA0     ", NAME="%k", SYMLINK="lacie_1394d%n"
+
+if mount | grep $MOUNT_POINT >/dev/null; then
+  echo "Mount point $MOUNT_POINT is indeed mounted. OK"
+else
+  echo -n "Attempting to mount $MOUNT_POINT..."	
+           # If it isn't mounted, try to mount it.
+  sudo mount $MOUNT_POINT 2>/dev/null
+
+  if mount | grep $MOUNT_POINT >/dev/null; then
+    UNMOUNT_LATER=TRUE
+    echo "OK"
+    #  Note: Ensure that this is also unmounted
+    #+ if we exit prematurely with failure.
+  else
+    echo "FAILED"
+    echo -e "Nothing is mounted at $MOUNT_POINT. BACKUP FAILED!"
+    exit $E_MOUNT_FAIL
+  fi
+fi
+
+
+# Check that source dir exists and is readable.
+if [ ! -r  $SOURCE_DIR ] ; then
+  echo "$SOURCE_DIR does not exist, or cannot be read. BACKUP FAILED."
+  exit $E_NOSOURCEDIR
+fi
+
+
+# Check that the backup directory structure is as it should be.
+# If not, create it.
+# Create the subdirectories.
+# Note that backup.0 will be created as needed by rsync.
+
+for ((i=1;i<=15;i++)); do
+  if [ ! -d $BACKUP_DEST_DIR/backup.$i ]; then
+    if /bin/mkdir -p $BACKUP_DEST_DIR/backup.$i ; then
+    #  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  No [ ] test brackets. Why?
+      echo "Warning: directory $BACKUP_DEST_DIR/backup.$i is missing,"
+      echo "or was not initialised. (Re-)creating it."
+    else
+      echo "ERROR: directory $BACKUP_DEST_DIR/backup.$i"
+      echo "is missing and could not be created."
+    if  [ "$UNMOUNT_LATER" == "TRUE" ]; then
+        # Before we exit, unmount the mount point if necessary.
+        cd
+	sudo umount $MOUNT_POINT &&
+	echo "Unmounted $MOUNT_POINT again. Giving up."
+    fi
+      exit $E_UNMOUNTED
+  fi
+fi
+done
+
+
+#  Set the permission to 700 for security
+#+ on an otherwise permissive multi-user system.
+if ! /bin/chmod 700 $BACKUP_DEST_DIR ; then
+  echo "ERROR: Could not set permissions on $BACKUP_DEST_DIR to 700."
+
+  if  [ "$UNMOUNT_LATER" == "TRUE" ]; then
+  # Before we exit, unmount the mount point if necessary.
+     cd ; sudo umount $MOUNT_POINT \
+     && echo "Unmounted $MOUNT_POINT again. Giving up."
+  fi
+
+  exit $E_UNMOUNTED
+fi
+
+# Create the symlink: current -> backup.1 if required.
+# A failure here is not critical.
+cd $BACKUP_DEST_DIR
+if [ ! -h current ] ; then
+  if ! /bin/ln -s backup.1 current ; then
+    echo "WARNING: could not create symlink current -> backup.1"
+  fi
+fi
+
+
+# Now, do the rsync.
+echo "Now doing backup with rsync..."
+echo "Source dir: $SOURCE_DIR"
+echo -e "Backup destination dir: $BACKUP_DEST_DIR\n"
+
+
+/usr/bin/rsync $DRY_RUN $VERBOSE -a -S --delete --modify-window=60 \
+--link-dest=../backup.1 $SOURCE_DIR $BACKUP_DEST_DIR/backup.0/
+
+#  Only warn, rather than exit if the rsync failed,
+#+ since it may only be a minor problem.
+#  E.g., if one file is not readable, rsync will fail.
+#  This shouldn't prevent the rotation.
+#  Not using, e.g., `date +%a`  since these directories
+#+ are just full of links and don't consume *that much* space.
+
+if [ $? != 0 ]; then
+  BACKUP_JUSTINCASE=backup.`date +%F_%T`.justincase
+  echo "WARNING: the rsync process did not entirely succeed."
+  echo "Something might be wrong."
+  echo "Saving an extra copy at: $BACKUP_JUSTINCASE"
+  echo "WARNING: if this occurs regularly, a LOT of space will be consumed,"
+  echo "even though these are just hard-links!"
+fi
+
+# Save a readme in the backup parent directory.
+# Save another one in the recent subdirectory.
+echo "Backup of $SOURCE_DIR on `hostname` was last run on \
+`date`" > $BACKUP_DEST_DIR/README.txt
+echo "This backup of $SOURCE_DIR on `hostname` was created on \
+`date`" > $BACKUP_DEST_DIR/backup.0/README.txt
+
+# If we are not in a dry run, rotate the backups.
+[ -z "$DRY_RUN" ] &&
+
+  #  Check how full the backup disk is.
+  #  Warn if 90%. if 98% or more, we'll probably fail, so give up.
+  #  (Note: df can output to more than one line.)
+  #  We test this here, rather than before
+  #+ so that rsync may possibly have a chance.
+  DISK_FULL_PERCENT=`/bin/df $BACKUP_DEST_DIR |
+  tr "\n" ' ' | awk '{print $12}' | grep -oE [0-9]+ `
+  echo "Disk space check on backup partition \
+  $MOUNT_POINT $DISK_FULL_PERCENT% full."
+  if [ $DISK_FULL_PERCENT -gt 90 ]; then
+    echo "Warning: Disk is greater than 90% full."
+  fi
+  if [ $DISK_FULL_PERCENT -gt 98 ]; then
+    echo "Error: Disk is full! Giving up."
+      if  [ "$UNMOUNT_LATER" == "TRUE" ]; then
+        # Before we exit, unmount the mount point if necessary.
+        cd; sudo umount $MOUNT_POINT &&
+        echo "Unmounted $MOUNT_POINT again. Giving up."
+      fi
+    exit $E_UNMOUNTED
+  fi
+
+
+ # Create an extra backup.
+ # If this copy fails, give up.
+ if [ -n "$BACKUP_JUSTINCASE" ]; then
+   if ! /bin/cp -al $BACKUP_DEST_DIR/backup.0 \
+      $BACKUP_DEST_DIR/$BACKUP_JUSTINCASE
+   then
+     echo "ERROR: Failed to create extra copy \
+     $BACKUP_DEST_DIR/$BACKUP_JUSTINCASE"
+     if  [ "$UNMOUNT_LATER" == "TRUE" ]; then
+       # Before we exit, unmount the mount point if necessary.
+       cd ;sudo umount $MOUNT_POINT &&
+       echo "Unmounted $MOUNT_POINT again. Giving up."
+     fi
+     exit $E_UNMOUNTED
+   fi
+ fi
+
+
+ # At start of month, rotate the oldest 8.
+ if [ "$MONTHSTART" == "true" ]; then
+   echo -e "\nStart of month. \
+   Removing oldest backup: $BACKUP_DEST_DIR/backup.15"  &&
+   /bin/rm -rf  $BACKUP_DEST_DIR/backup.15  &&
+   echo "Rotating monthly,weekly backups: \
+   $BACKUP_DEST_DIR/backup.[8-14] -> $BACKUP_DEST_DIR/backup.[9-15]"  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.14 $BACKUP_DEST_DIR/backup.15  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.13 $BACKUP_DEST_DIR/backup.14  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.12 $BACKUP_DEST_DIR/backup.13  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.11 $BACKUP_DEST_DIR/backup.12  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.10 $BACKUP_DEST_DIR/backup.11  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.9 $BACKUP_DEST_DIR/backup.10  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.8 $BACKUP_DEST_DIR/backup.9
+
+ # At start of week, rotate the second-oldest 4.
+ elif [ "$WEEKSTART" == "true" ]; then
+   echo -e "\nStart of week. \
+   Removing oldest weekly backup: $BACKUP_DEST_DIR/backup.12"  &&
+   /bin/rm -rf  $BACKUP_DEST_DIR/backup.12  &&
+
+   echo "Rotating weekly backups: \
+   $BACKUP_DEST_DIR/backup.[8-11] -> $BACKUP_DEST_DIR/backup.[9-12]"  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.11 $BACKUP_DEST_DIR/backup.12  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.10 $BACKUP_DEST_DIR/backup.11  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.9 $BACKUP_DEST_DIR/backup.10  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.8 $BACKUP_DEST_DIR/backup.9
+
+ else
+   echo -e "\nRemoving oldest daily backup: $BACKUP_DEST_DIR/backup.8"  &&
+     /bin/rm -rf  $BACKUP_DEST_DIR/backup.8
+
+ fi  &&
+
+ # Every day, rotate the newest 8.
+ echo "Rotating daily backups: \
+ $BACKUP_DEST_DIR/backup.[1-7] -> $BACKUP_DEST_DIR/backup.[2-8]"  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.7 $BACKUP_DEST_DIR/backup.8  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.6 $BACKUP_DEST_DIR/backup.7  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.5 $BACKUP_DEST_DIR/backup.6  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.4 $BACKUP_DEST_DIR/backup.5  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.3 $BACKUP_DEST_DIR/backup.4  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.2 $BACKUP_DEST_DIR/backup.3  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.1 $BACKUP_DEST_DIR/backup.2  &&
+     /bin/mv $BACKUP_DEST_DIR/backup.0 $BACKUP_DEST_DIR/backup.1  &&
+
+ SUCCESS=true
+
+
+if  [ "$UNMOUNT_LATER" == "TRUE" ]; then
+  # Unmount the mount point if it wasn't mounted to begin with.
+  cd ; sudo umount $MOUNT_POINT && echo "Unmounted $MOUNT_POINT again."
+fi
+
+
+if [ "$SUCCESS" == "true" ]; then
+  echo 'SUCCESS!'
+  exit 0
+fi
+
+# Should have already exited if backup worked.
+echo 'BACKUP FAILED! Is this just a dry run? Is the disk full?) '
+exit $E_BACKUP
+```
+
+In tessh the switches are Python booleans that make a list of `rsync`
+options (the bash works out `COMPRESS` but never passes it on; here it's
+passed), the day of the month is a number, and the folders are Paths:
+`mkdir`, `chmod`, the symlink and the rotation are Path methods in `try`
+blocks, so a failure is an `OSError` to catch rather than a status to
+test after each `&&`. The four copies of "unmount if we mounted, then
+exit" are one function, `give_up`. The disk check uses
+`shutil.disk_usage` instead of picking a field out of `df`'s output.
+One fix: in the bash, `[ -z "$DRY_RUN" ] &&` guards only the line after
+it (the `df`), so a dry run goes on to delete and rotate the old backups
+until a `mv` of the missing `backup.0` fails; here a dry run rotates
+nothing.
+
+```tessh no-run
+#!/usr/bin/env tessh
+# nightly-backup.tsh (ported from nightly-backup.sh)
+# http://www.richardneill.org/source.php#nightly-backup-rsync
+# Copyright (c) 2005 Richard Neill <backup@richardneill.org>.
+# This is Free Software licensed under the GNU GPL.
+# ==> Included in ABS Guide with script author's kind permission.
+# ==> (Thanks!)
+
+#  This does a backup from the host computer to a locally connected
+#+ firewire HDD using rsync and ssh.
+#  (Script should work with USB-connected device (see MOUNT_POINT).
+#  It then rotates the backups.
+#  Run it via cron every night at 5am.
+#  This only backs up the home directory.
+#  If ownerships (other than the user's) should be preserved,
+#+ then run the rsync process as root (and re-instate the -o).
+#  We save every day for 7 days, then every week for 4 weeks,
+#+ then every month for 3 months.
+
+#  See: http://www.mikerubel.org/computers/rsync_snapshots/
+#+ for more explanation of the theory.
+#  Save as: $HOME/bin/nightly-backup_firewire-hdd.tsh
+
+#  Known bugs:
+#  ----------
+#  i)  Ideally, we want to exclude ~/.tmp and the browser caches.
+
+#  ii) If the user is sitting at the computer at 5am,
+#+     and files are modified while the rsync is occurring,
+#+     then the BACKUP_JUSTINCASE branch gets triggered.
+#      To some extent, this is a
+#+     feature, but it also causes a "disk-space leak".
+
+import os shutil math datetime
+
+##### BEGIN CONFIGURATION SECTION ############################################
+LOCAL_USER = rjn              # User whose home directory should be backed up.
+MOUNT_POINT = /backup         # Mountpoint of backup drive.
+                              # NO trailing slash!
+                              # This must be unique (eg using a udev symlink)
+# MOUNT_POINT = /media/disk   # For USB-connected device.
+SOURCE_DIR = Path "/home/$LOCAL_USER"   # NO trailing slash - it DOES matter to rsync.
+BACKUP_DEST_DIR = $MOUNT_POINT / backup / "$(hostname -s).${LOCAL_USER}.nightly_backup"
+DRY_RUN = False               # If True, invoke rsync with -n, to do a dry run.
+VERBOSE = False               # If True, make rsync verbose.
+COMPRESS = False              # If True, compress.
+                              # Good for internet, bad on LAN.
+
+### Exit Codes ###
+E_VARS_NOT_SET = 64
+E_COMMANDLINE = 65
+E_MOUNT_FAIL = 70
+E_NOSOURCEDIR = 71
+E_UNMOUNTED = 72
+E_BACKUP = 73
+##### END CONFIGURATION SECTION ##############################################
+
+# Check that all the important variables have been set:
+if not (all ((str $v) for v in [$LOCAL_USER $SOURCE_DIR $MOUNT_POINT $BACKUP_DEST_DIR]))
+  print "One of the variables is not set! Edit the file: $argv[0]. BACKUP FAILED."
+  exit $E_VARS_NOT_SET
+
+if (len $argv) > 1            # If command-line param(s) . . .
+  me = $argv[0]               # Here document(ation).
+  print """
+    Automatic Nightly backup run from cron.
+    Read the source for more details: $me
+    The backup directory is $BACKUP_DEST_DIR .
+    It will be created if necessary; initialisation is no longer required.
+
+    WARNING: Contents of $BACKUP_DEST_DIR are rotated.
+    Directories named 'backup.\$i' will eventually be DELETED.
+    We keep backups from every day for 7 days (1-8),
+    then every week for 4 weeks (9-12),
+    then every month for 3 months (13-15).
+
+    You may wish to add this to your crontab using 'crontab -e'
+    #  Back up files: $SOURCE_DIR to $BACKUP_DEST_DIR
+    #+ every night at 3:15 am
+         15 03 * * * /home/$LOCAL_USER/bin/nightly-backup_firewire-hdd.tsh
+
+    Don't forget to verify the backups are working,
+    especially if you don't read cron's mail!"""
+  exit $E_COMMANDLINE
+
+# Parse the options.
+# ==================
+
+if $DRY_RUN
+  print "WARNING:"
+  print "THIS IS A 'DRY RUN'!"
+  print "No data will actually be transferred!"
+# rsync's options: -n, -v and -z as set above.
+rsync_options = [$o for [on o] in [[$DRY_RUN -n] [$VERBOSE -v] [$COMPRESS -z]] if $on]
+
+#  Every week (actually of 8 days) and every month,
+#+ extra backups are preserved.
+DAY_OF_MONTH = (datetime.date.today).day
+MONTHSTART = $DAY_OF_MONTH == 1                  # First of month.
+WEEKSTART = $DAY_OF_MONTH in [8 16 24]
+# Day 8,16,24  (use 8, not 7 to better handle 31-day months)
+
+#  Check that the HDD is mounted.
+#  At least, check that *something* is mounted here!
+#  We can use something unique to the device, rather than just guessing
+#+ the scsi-id by having an appropriate udev rule in
+#+ /etc/udev/rules.d/10-rules.local
+#+ and by putting a relevant entry in /etc/fstab.
+#  Eg: this udev rule:
+# BUS="scsi", KERNEL="sd*", SYSFS{vendor}="WDC WD16",
+# SYSFS{model}="00JB-00GVA0     ", NAME="%k", SYMLINK="lacie_1394d%n"
+
+def mounted = (str $MOUNT_POINT) in (mount)
+
+UNMOUNT_LATER = False
+if (mounted)
+  print "Mount point $MOUNT_POINT is indeed mounted. OK"
+else
+  print "Attempting to mount $MOUNT_POINT..." end="" flush=True
+  # If it isn't mounted, try to mount it.
+  sudo mount $MOUNT_POINT 2>/dev/null
+
+  if (mounted)
+    UNMOUNT_LATER = True
+    print "OK"
+    # Note: Ensure that this is also unmounted
+    # if we exit prematurely with failure (give_up, below).
+  else
+    print "FAILED"
+    print "Nothing is mounted at $MOUNT_POINT. BACKUP FAILED!"
+    exit $E_MOUNT_FAIL
+
+# Before we exit, unmount the mount point if necessary.
+def give_up status
+  if $UNMOUNT_LATER
+    cd
+    sudo umount $MOUNT_POINT && echo "Unmounted $MOUNT_POINT again. Giving up."
+  exit $status
+
+# Check that source dir exists and is readable.
+if not (os.access $SOURCE_DIR $os.R_OK)
+  print "$SOURCE_DIR does not exist, or cannot be read. BACKUP FAILED."
+  exit $E_NOSOURCEDIR
+
+# Check that the backup directory structure is as it should be.
+# If not, create it.
+# Create the subdirectories.
+# Note that backup.0 will be created as needed by rsync.
+for i in (range 1 16)
+  d = $BACKUP_DEST_DIR / "backup.$i"
+  if not ($d.is_dir)
+    try
+      $d.mkdir parents=True
+      print "Warning: directory $d is missing,"
+      print "or was not initialised. (Re-)creating it."
+    except OSError
+      print "ERROR: directory $d"
+      print "is missing and could not be created."
+      give_up $E_UNMOUNTED
+
+# Set the permission to 700 for security
+# on an otherwise permissive multi-user system.
+try
+  $BACKUP_DEST_DIR.chmod 0o700
+except OSError
+  print "ERROR: Could not set permissions on $BACKUP_DEST_DIR to 700."
+  give_up $E_UNMOUNTED
+
+# Create the symlink: current -> backup.1 if required.
+# A failure here is not critical.
+cd $BACKUP_DEST_DIR
+current = Path current
+if not ($current.is_symlink)
+  try
+    $current.symlink_to backup.1
+  except OSError
+    print "WARNING: could not create symlink current -> backup.1"
+
+# Now, do the rsync.
+print "Now doing backup with rsync..."
+print "Source dir: $SOURCE_DIR"
+print "Backup destination dir: $BACKUP_DEST_DIR\n"
+
+rsync $rsync_options -a -S --delete --modify-window=60 \
+  --link-dest=../backup.1 $SOURCE_DIR "$BACKUP_DEST_DIR/backup.0/"
+
+#  Only warn, rather than exit if the rsync failed,
+#+ since it may only be a minor problem.
+#  E.g., if one file is not readable, rsync will fail.
+#  This shouldn't prevent the rotation.
+#  Not using, e.g., `date +%a`  since these directories
+#+ are just full of links and don't consume *that much* space.
+BACKUP_JUSTINCASE = ""
+if $? != 0
+  BACKUP_JUSTINCASE = "backup.$(date +%F_%T).justincase"
+  print "WARNING: the rsync process did not entirely succeed."
+  print "Something might be wrong."
+  print "Saving an extra copy at: $BACKUP_JUSTINCASE"
+  print "WARNING: if this occurs regularly, a LOT of space will be consumed,"
+  print "even though these are just hard-links!"
+
+# Save a readme in the backup parent directory.
+# Save another one in the recent subdirectory.
+# (There's no backup.0 after a dry run: bash complains and goes on.)
+try
+  ($BACKUP_DEST_DIR / README.txt).write_text "Backup of $SOURCE_DIR on $(hostname) was last run on $(date)\n"
+  ($BACKUP_DEST_DIR / backup.0 / README.txt).write_text "This backup of $SOURCE_DIR on $(hostname) was created on $(date)\n"
+except OSError as e
+  print "WARNING: $e"
+
+# remove <n> : throw away backup.n
+def remove n
+  shutil.rmtree ($BACKUP_DEST_DIR / "backup.$n") ignore_errors=True
+
+# move_up <low> <high> : backup.high … backup.low, each one up
+# (an OSError if one can't be moved)
+def move_up low high
+  for i in (range $high ($low - 1) -1)
+    ($BACKUP_DEST_DIR / "backup.$i").rename ($BACKUP_DEST_DIR / "backup.${$i + 1}")
+
+SUCCESS = False
+d = $BACKUP_DEST_DIR
+# If we are not in a dry run, rotate the backups.
+# (In the bash version the test guards only the next line, the df.)
+if not $DRY_RUN
+  # Check how full the backup disk is.
+  # Warn if 90%. if 98% or more, we'll probably fail, so give up.
+  # We test this here, rather than before
+  # so that rsync may possibly have a chance.
+  disk = shutil.disk_usage $BACKUP_DEST_DIR
+  DISK_FULL_PERCENT = math.ceil (100 * $disk.used / ($disk.used + $disk.free))   # As df counts it.
+  print "Disk space check on backup partition $MOUNT_POINT $DISK_FULL_PERCENT% full."
+  if $DISK_FULL_PERCENT > 90
+    print "Warning: Disk is greater than 90% full."
+  if $DISK_FULL_PERCENT > 98
+    print "Error: Disk is full! Giving up."
+    give_up $E_UNMOUNTED
+
+  # Create an extra backup.
+  # If this copy fails, give up.
+  if $BACKUP_JUSTINCASE
+    if not (cp -al "$d/backup.0" "$d/$BACKUP_JUSTINCASE")
+      print "ERROR: Failed to create extra copy $d/$BACKUP_JUSTINCASE"
+      give_up $E_UNMOUNTED
+
+  try
+    if $MONTHSTART                 # At start of month, rotate the oldest 8.
+      print "\nStart of month. Removing oldest backup: $d/backup.15"
+      remove 15
+      print "Rotating monthly,weekly backups: $d/backup.[8-14] -> $d/backup.[9-15]"
+      move_up 8 14
+    elif $WEEKSTART                # At start of week, rotate the second-oldest 4.
+      print "\nStart of week. Removing oldest weekly backup: $d/backup.12"
+      remove 12
+      print "Rotating weekly backups: $d/backup.[8-11] -> $d/backup.[9-12]"
+      move_up 8 11
+    else
+      print "\nRemoving oldest daily backup: $d/backup.8"
+      remove 8
+    # Every day, rotate the newest 8.
+    print "Rotating daily backups: $d/backup.[1-7] -> $d/backup.[2-8]"
+    move_up 0 7
+    SUCCESS = True
+  except OSError as e
+    print "Rotation stopped: $e"
+
+if $UNMOUNT_LATER
+  # Unmount the mount point if it wasn't mounted to begin with.
+  cd
+  sudo umount $MOUNT_POINT && echo "Unmounted $MOUNT_POINT again."
+
+if $SUCCESS
+  print 'SUCCESS!'
+  exit 0
+
+# Should have already exited if backup worked.
+print 'BACKUP FAILED! Is this just a dry run? Is the disk full?) '
+exit $E_BACKUP
+```
+
+With its mount point and source folder in a temporary folder, and
+`mounted` always true, it made the folders, the backup and the
+rotations as described. The rotation itself, on a made-up backup folder
+for three days of the month (each `backup.N` holds a file saying which
+it was before):
+
+```bash
+# (nightly-backup.sh's rotation, on a made-up backup folder for three
+#+ days of the month; mv and rm from PATH rather than /bin.)
+show() {           # Which day's backup each backup.N now holds.
+  for ((i=0;i<=15;i++)); do
+    [ -d $BACKUP_DEST_DIR/backup.$i ] && echo -n " $i:$(ls $BACKUP_DEST_DIR/backup.$i)"
+  done
+  echo
+}
+
+for DAY_OF_MONTH in 05 08 01
+do
+BACKUP_DEST_DIR=dest-$DAY_OF_MONTH
+for ((i=0;i<=15;i++)); do mkdir -p $BACKUP_DEST_DIR/backup.$i; touch $BACKUP_DEST_DIR/backup.$i/was$i; done
+MONTHSTART= ; WEEKSTART=
+if [ $DAY_OF_MONTH = 01 ]; then    # First of month.
+  MONTHSTART=true
+elif [ $DAY_OF_MONTH = 08 \
+    -o $DAY_OF_MONTH = 16 \
+    -o $DAY_OF_MONTH = 24 ]; then
+    # Day 8,16,24  (use 8, not 7 to better handle 31-day months)
+      WEEKSTART=true
+fi
+echo "Day $DAY_OF_MONTH:"
+
+ # At start of month, rotate the oldest 8.
+ if [ "$MONTHSTART" == "true" ]; then
+   echo -e "Start of month. \
+   Removing oldest backup: $BACKUP_DEST_DIR/backup.15"  &&
+   rm -rf  $BACKUP_DEST_DIR/backup.15  &&
+   echo "Rotating monthly,weekly backups: \
+   $BACKUP_DEST_DIR/backup.[8-14] -> $BACKUP_DEST_DIR/backup.[9-15]"  &&
+     mv $BACKUP_DEST_DIR/backup.14 $BACKUP_DEST_DIR/backup.15  &&
+     mv $BACKUP_DEST_DIR/backup.13 $BACKUP_DEST_DIR/backup.14  &&
+     mv $BACKUP_DEST_DIR/backup.12 $BACKUP_DEST_DIR/backup.13  &&
+     mv $BACKUP_DEST_DIR/backup.11 $BACKUP_DEST_DIR/backup.12  &&
+     mv $BACKUP_DEST_DIR/backup.10 $BACKUP_DEST_DIR/backup.11  &&
+     mv $BACKUP_DEST_DIR/backup.9 $BACKUP_DEST_DIR/backup.10  &&
+     mv $BACKUP_DEST_DIR/backup.8 $BACKUP_DEST_DIR/backup.9
+
+ # At start of week, rotate the second-oldest 4.
+ elif [ "$WEEKSTART" == "true" ]; then
+   echo -e "Start of week. \
+   Removing oldest weekly backup: $BACKUP_DEST_DIR/backup.12"  &&
+   rm -rf  $BACKUP_DEST_DIR/backup.12  &&
+
+   echo "Rotating weekly backups: \
+   $BACKUP_DEST_DIR/backup.[8-11] -> $BACKUP_DEST_DIR/backup.[9-12]"  &&
+     mv $BACKUP_DEST_DIR/backup.11 $BACKUP_DEST_DIR/backup.12  &&
+     mv $BACKUP_DEST_DIR/backup.10 $BACKUP_DEST_DIR/backup.11  &&
+     mv $BACKUP_DEST_DIR/backup.9 $BACKUP_DEST_DIR/backup.10  &&
+     mv $BACKUP_DEST_DIR/backup.8 $BACKUP_DEST_DIR/backup.9
+
+ else
+   echo -e "Removing oldest daily backup: $BACKUP_DEST_DIR/backup.8"  &&
+     rm -rf  $BACKUP_DEST_DIR/backup.8
+
+ fi  &&
+
+ # Every day, rotate the newest 8.
+ echo "Rotating daily backups: \
+ $BACKUP_DEST_DIR/backup.[1-7] -> $BACKUP_DEST_DIR/backup.[2-8]"  &&
+     mv $BACKUP_DEST_DIR/backup.7 $BACKUP_DEST_DIR/backup.8  &&
+     mv $BACKUP_DEST_DIR/backup.6 $BACKUP_DEST_DIR/backup.7  &&
+     mv $BACKUP_DEST_DIR/backup.5 $BACKUP_DEST_DIR/backup.6  &&
+     mv $BACKUP_DEST_DIR/backup.4 $BACKUP_DEST_DIR/backup.5  &&
+     mv $BACKUP_DEST_DIR/backup.3 $BACKUP_DEST_DIR/backup.4  &&
+     mv $BACKUP_DEST_DIR/backup.2 $BACKUP_DEST_DIR/backup.3  &&
+     mv $BACKUP_DEST_DIR/backup.1 $BACKUP_DEST_DIR/backup.2  &&
+     mv $BACKUP_DEST_DIR/backup.0 $BACKUP_DEST_DIR/backup.1  &&
+
+ SUCCESS=true
+ show
+done
+```
+
+```output bash
+Day 05:
+Removing oldest daily backup: dest-05/backup.8
+Rotating daily backups:  dest-05/backup.[1-7] -> dest-05/backup.[2-8]
+ 1:was0 2:was1 3:was2 4:was3 5:was4 6:was5 7:was6 8:was7 9:was9 10:was10 11:was11 12:was12 13:was13 14:was14 15:was15
+Day 08:
+Start of week.    Removing oldest weekly backup: dest-08/backup.12
+Rotating weekly backups:    dest-08/backup.[8-11] -> dest-08/backup.[9-12]
+Rotating daily backups:  dest-08/backup.[1-7] -> dest-08/backup.[2-8]
+ 1:was0 2:was1 3:was2 4:was3 5:was4 6:was5 7:was6 8:was7 9:was8 10:was9 11:was10 12:was11 13:was13 14:was14 15:was15
+Day 01:
+Start of month.    Removing oldest backup: dest-01/backup.15
+Rotating monthly,weekly backups:    dest-01/backup.[8-14] -> dest-01/backup.[9-15]
+Rotating daily backups:  dest-01/backup.[1-7] -> dest-01/backup.[2-8]
+ 1:was0 2:was1 3:was2 4:was3 5:was4 6:was5 7:was6 8:was7 9:was8 10:was9 11:was10 12:was11 13:was12 14:was13 15:was14
+```
+
+(The extra spaces in bash's messages are the indentation after its `\`
+line breaks inside the quotes.)
+
+```tessh
+import os shutil
+# (nightly-backup's rotation, on a made-up backup folder for three days
+# of the month.)
+def show dest           # Which day's backup each backup.N now holds.
+  held = []
+  for i in (range 16)
+    b = $dest / "backup.$i"
+    if ($b.is_dir)
+      $held.append "$i:$(' '.join (os.listdir $b))"
+  print "" *$held
+
+# remove <dest> <n> : throw away backup.n
+def remove dest n
+  shutil.rmtree ($dest / "backup.$n") ignore_errors=True
+
+# move_up <dest> <low> <high> : backup.high … backup.low each one up
+def move_up dest low high
+  for i in (range $high ($low - 1) -1)
+    ($dest / "backup.$i").rename ($dest / "backup.${$i + 1}")
+
+for DAY_OF_MONTH in [5 8 1]
+  BACKUP_DEST_DIR = Path "dest-$DAY_OF_MONTH"
+  for i in (range 16)
+    mkdir -p "$BACKUP_DEST_DIR/backup.$i" ; touch "$BACKUP_DEST_DIR/backup.$i/was$i"
+  MONTHSTART = $DAY_OF_MONTH == 1                # First of month.
+  WEEKSTART = $DAY_OF_MONTH in [8 16 24]         # (8, not 7, to better handle 31-day months)
+  print "Day $DAY_OF_MONTH:"
+  d = $BACKUP_DEST_DIR
+  SUCCESS = try
+    if $MONTHSTART                 # At start of month, rotate the oldest 8.
+      print "Start of month. Removing oldest backup: $d/backup.15"
+      remove $d 15
+      print "Rotating monthly,weekly backups: $d/backup.[8-14] -> $d/backup.[9-15]"
+      move_up $d 8 14
+    elif $WEEKSTART                # At start of week, rotate the second-oldest 4.
+      print "Start of week. Removing oldest weekly backup: $d/backup.12"
+      remove $d 12
+      print "Rotating weekly backups: $d/backup.[8-11] -> $d/backup.[9-12]"
+      move_up $d 8 11
+    else
+      print "Removing oldest daily backup: $d/backup.8"
+      remove $d 8
+    # Every day, rotate the newest 8.
+    print "Rotating daily backups: $d/backup.[1-7] -> $d/backup.[2-8]"
+    move_up $d 0 7
+    True
+  except OSError as e
+    print "Rotation failed: $e"
+    False
+  show $d
+```
+
+```output
+Day 5:
+Removing oldest daily backup: dest-5/backup.8
+Rotating daily backups: dest-5/backup.[1-7] -> dest-5/backup.[2-8]
+ 1:was0 2:was1 3:was2 4:was3 5:was4 6:was5 7:was6 8:was7 9:was9 10:was10 11:was11 12:was12 13:was13 14:was14 15:was15
+Day 8:
+Start of week. Removing oldest weekly backup: dest-8/backup.12
+Rotating weekly backups: dest-8/backup.[8-11] -> dest-8/backup.[9-12]
+Rotating daily backups: dest-8/backup.[1-7] -> dest-8/backup.[2-8]
+ 1:was0 2:was1 3:was2 4:was3 5:was4 6:was5 7:was6 8:was7 9:was8 10:was9 11:was10 12:was11 13:was13 14:was14 15:was15
+Day 1:
+Start of month. Removing oldest backup: dest-1/backup.15
+Rotating monthly,weekly backups: dest-1/backup.[8-14] -> dest-1/backup.[9-15]
+Rotating daily backups: dest-1/backup.[1-7] -> dest-1/backup.[2-8]
+ 1:was0 2:was1 3:was2 4:was3 5:was4 6:was5 7:was6 8:was7 9:was8 10:was9 11:was10 12:was11 13:was12 14:was13 15:was14
+```
