@@ -109,6 +109,8 @@ pub struct Menu {
 pub enum MenuKind {
     Choices(String),
     Indent,
+    /// The text's right-click menu.
+    Context,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1404,6 +1406,22 @@ impl Ed {
         }
     }
 
+    /// The text's right-click menu, as a text field has it.
+    pub fn open_context(&mut self) {
+        let sel = self.t.selection().is_some();
+        let it = |label: &str, cmd: &str, enabled: bool| MenuItem { label: label.into(), cmd: cmd.into(), section: false, checked: false, enabled };
+        let items = vec![
+            it("Undo", "undo", true),
+            it("Redo", "redo", true),
+            it("Cut", "cut", sel),
+            it("Copy", "copy", sel),
+            it("Paste", "paste", true),
+            it("Delete", "delete", sel),
+            it("Select All", "all", !self.t.is_empty()),
+        ];
+        self.open_menu(MenuKind::Context, items);
+    }
+
     pub fn open_menu(&mut self, kind: MenuKind, items: Vec<MenuItem>) {
         let sel = items.iter().position(|i| !i.section && i.enabled).unwrap_or(0);
         self.close_comp();
@@ -1476,6 +1494,31 @@ impl Ed {
                 }
             }
             MenuKind::Indent => self.done = Some(Outcome::Host(format!("indent:{}", it.cmd))),
+            MenuKind::Context => {
+                let sel = self.t.selection();
+                match it.cmd.as_str() {
+                    "undo" => self.t.undo(),
+                    "redo" => self.t.redo(),
+                    "cut" | "copy" | "delete" => {
+                        if let Some((a, b)) = sel {
+                            if it.cmd != "delete" {
+                                super::term::Term::copy(&self.t.text[a..b]);
+                            }
+                            if it.cmd != "copy" {
+                                self.t.replace(a, b, "");
+                            }
+                        }
+                    }
+                    "paste" => {
+                        if let Some(c) = clipboard() {
+                            self.t.insert(&c.replace("\r\n", "\n"));
+                        }
+                    }
+                    "all" => self.t.select(0, self.t.len()),
+                    _ => {}
+                }
+                self.changed();
+            }
         }
     }
 
@@ -1577,6 +1620,17 @@ impl Ed {
                 let pressed = self.pressed.take();
                 if pressed.is_some() && pressed == hit {
                     self.click(hit.unwrap(), h);
+                }
+                true
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                if let Some(Hit::Text(p)) = hit {
+                    // (Outside the selection: the cursor goes there first.)
+                    if self.t.selection().is_none_or(|(a, b)| p < a || p > b) {
+                        self.t.move_to(p, false);
+                    }
+                    self.menu_x = Some(e.column as usize);
+                    self.open_context();
                 }
                 true
             }
@@ -1749,4 +1803,22 @@ impl Default for Text {
     fn default() -> Self {
         Text::new()
     }
+}
+
+/// The system clipboard, from the tools that read it (a terminal can't be
+/// asked for it reliably).
+pub fn clipboard() -> Option<String> {
+    let tries: &[&[&str]] = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        &[&["wl-paste", "-n"], &["xclip", "-o", "-selection", "clipboard"], &["xsel", "-ob"]]
+    } else {
+        &[&["xclip", "-o", "-selection", "clipboard"], &["xsel", "-ob"], &["wl-paste", "-n"], &["pbpaste"]]
+    };
+    for t in tries {
+        if let Ok(o) = std::process::Command::new(t[0]).args(&t[1..]).stderr(std::process::Stdio::null()).output() {
+            if o.status.success() {
+                return Some(String::from_utf8_lossy(&o.stdout).into_owned());
+            }
+        }
+    }
+    None
 }

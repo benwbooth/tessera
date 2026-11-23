@@ -1129,6 +1129,33 @@ Rectangle {
                 }
             }
             onCursorRectangleChanged: flick.ensureVisible(cursorRectangle)
+            // Right click: what a text field offers (the cursor goes to the
+            // click first, unless it's in the selection).
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: (pt) => {
+                    const p = edit.positionAt(pt.position.x, pt.position.y)
+                    if (!(edit.selectedText !== "" && p >= edit.selectionStart && p <= edit.selectionEnd)) edit.cursorPosition = p
+                    edit.forceActiveFocus()
+                    editMenu.popup(edit, pt.position.x, pt.position.y)
+                }
+            }
+            SlimMenu {
+                id: editMenu
+                component Sep: MenuSeparator {
+                    topPadding: 3; bottomPadding: 3
+                    contentItem: Rectangle { implicitWidth: 120; implicitHeight: 1; color: Theme.divider }
+                }
+                SlimMenuItem { text: "Undo"; enabled: edit.canUndo; onTriggered: edit.undo() }
+                SlimMenuItem { text: "Redo"; enabled: edit.canRedo; onTriggered: edit.redo() }
+                Sep {}
+                SlimMenuItem { text: "Cut"; enabled: edit.selectedText !== ""; onTriggered: edit.cut() }
+                SlimMenuItem { text: "Copy"; enabled: edit.selectedText !== ""; onTriggered: edit.copy() }
+                SlimMenuItem { text: "Paste"; enabled: edit.canPaste; onTriggered: edit.paste() }
+                SlimMenuItem { text: "Delete"; enabled: edit.selectedText !== ""; onTriggered: edit.remove(edit.selectionStart, edit.selectionEnd) }
+                Sep {}
+                SlimMenuItem { text: "Select All"; enabled: edit.text !== ""; onTriggered: edit.selectAll() }
+            }
             // Pointing at a word (half a second) shows the language server's help for it.
             HoverHandler {
                 id: wordHover
