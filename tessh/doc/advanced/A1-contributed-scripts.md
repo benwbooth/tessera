@@ -2064,3 +2064,427 @@ ___...____
 __.._..___
 _..___..__
 ```
+
+## behead: Removing mail and news message headers
+<!-- help: abs-behead behead mail news headers sed body -->
+
+The scripts from here on carry their own authors. This one is by Mark
+Moraes of the University of Toronto (see the copyright notice at its end):
+it strips the header off a mail or news message, everything up to the first
+empty line, and the blank lines after it.
+
+### Example A-12. behead: Removing mail and news message headers (`behead.sh`)
+
+```bash no-run
+#! /bin/sh
+#  Strips off the header from a mail/News message i.e. till the first
+#+ empty line.
+#  Author: Mark Moraes, University of Toronto
+
+# ==> These comments added by author of this document.
+
+if [ $# -eq 0 ]; then
+# ==> If no command-line args present, then works on file redirected to stdin.
+	sed -e '1,/^$/d' -e '/^[ 	]*$/d'
+	# --> Delete empty lines and all lines until 
+	# --> first one beginning with white space.
+else
+# ==> If command-line args present, then work on files named.
+	for i do
+		sed -e '1,/^$/d' -e '/^[ 	]*$/d' $i
+		# --> Ditto, as above.
+	done
+fi
+
+exit
+
+# ==> Exercise: Add error checking and other options.
+# ==>
+# ==> Note that the small sed script repeats, except for the arg passed.
+# ==> Does it make sense to embed it in a function? Why or why not?
+
+
+/*
+ * Copyright University of Toronto 1988, 1989.
+ * Written by Mark Moraes
+ *
+ * Permission is granted to anyone to use this software for any purpose on
+ * any computer system, and to alter it and redistribute it freely, subject
+ * to the following restrictions:
+ *
+ * 1. The author and the University of Toronto are not responsible 
+ *    for the consequences of use of this software, no matter how awful, 
+ *    even if they arise from flaws in it.
+ *
+ * 2. The origin of this software must not be misrepresented, either by
+ *    explicit claim or by omission.  Since few users ever read sources,
+ *    credits must appear in the documentation.
+ *
+ * 3. Altered versions must be plainly marked as such, and must not be
+ *    misrepresented as being the original software.  Since few users
+ *    ever read sources, credits must appear in the documentation.
+ *
+ * 4. This notice may not be removed or altered.
+ */
+```
+
+The comments ask whether the sed script, written twice, belongs in a
+function. In tessh it does: `body` takes the message's lines and gives back
+the ones to keep, whether they came from standard input or from a file.
+Iterating the same iterator twice is the trick: the `for` loop eats the
+header and stops at the empty line, and the list takes what's left.
+
+```tessh
+import sys
+# (A made-up message to try it on.)
+print "From: bozo@example.com\nSubject: Lunch\n\nNoon, then?\n   \n-- Bozo" >mail.txt
+
+#  Strips off the header from a mail/News message i.e. till the first
+#+ empty line.
+#  Author: Mark Moraes, University of Toronto
+
+def body lines               # The lines after the header, without blank ones.
+  lines = iter $lines
+  for line in $lines         # The header: up to the first empty line.
+    if $line == ""
+      break
+  [$line for line in $lines if ($line.strip)]
+
+def behead args
+  if not $args
+    # If no command-line args present, then works on file redirected to stdin.
+    text = (sys.stdin.read)
+    print *(body ($text.splitlines)) sep="\n"
+  else
+    # If command-line args present, then work on files named.
+    for f in $args
+      print *(body (cat $f).lines) sep="\n"
+
+behead [] <mail.txt          # (As "behead <mail.txt" …
+print ---
+behead [mail.txt]            # … and as "behead mail.txt".)
+```
+
+```output
+Noon, then?
+-- Bozo
+---
+Noon, then?
+-- Bozo
+```
+
+## password: Generating random 8-character passwords
+<!-- help: abs-pw pw password random-password generator secrets random -->
+
+Antek Sawicki's password generator picks eight characters at random from a
+string of letters and digits, using `${MATRIX:pos:1}` substring expansion.
+
+### Example A-13. password: Generating random 8-character passwords (`pw.sh`)
+
+```bash no-run
+#!/bin/bash
+#
+#
+#  Random password generator for Bash 2.x +
+#+ by Antek Sawicki <tenox@tenox.tc>,
+#+ who generously gave usage permission to the ABS Guide author.
+#
+# ==> Comments added by document author ==>
+
+
+MATRIX="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+# ==> Password will consist of alphanumeric characters.
+LENGTH="8"
+# ==> May change 'LENGTH' for longer password.
+
+
+while [ "${n:=1}" -le "$LENGTH" ]
+# ==> Recall that := is "default substitution" operator.
+# ==> So, if 'n' has not been initialized, set it to 1.
+do
+	PASS="$PASS${MATRIX:$(($RANDOM%${#MATRIX})):1}"
+	# ==> Very clever, but tricky.
+
+	# ==> Starting from the innermost nesting...
+	# ==> ${#MATRIX} returns length of array MATRIX.
+
+	# ==> $RANDOM%${#MATRIX} returns random number between 1
+	# ==> and [length of MATRIX] - 1.
+
+	# ==> ${MATRIX:$(($RANDOM%${#MATRIX})):1}
+	# ==> returns expansion of MATRIX at random position, by length 1. 
+	# ==> See {var:pos:len} parameter substitution in Chapter 9.
+	# ==> and the associated examples.
+
+	# ==> PASS=... simply pastes this result onto previous PASS (concatenation).
+
+	# ==> To visualize this more clearly, uncomment the following line
+	#                 echo "$PASS"
+	# ==> to see PASS being built up,
+	# ==> one character at a time, each iteration of the loop.
+
+	let n+=1
+	# ==> Increment 'n' for next pass.
+done
+
+echo "$PASS"      # ==> Or, redirect to a file, as desired.
+
+exit 0
+```
+
+`$MATRIX[i]` is the substring expansion, and `random.randrange` is
+`$RANDOM % ${#MATRIX}`. The tessh version seeds `random` so that it prints
+the same password every time here; a real one wouldn't.
+
+```tessh
+import random
+random.seed 2002             # (So the output is always the same.)
+
+#  Random password generator
+#+ by Antek Sawicki <tenox@tenox.tc>,
+#+ who generously gave usage permission to the ABS Guide author.
+
+MATRIX = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+# Password will consist of alphanumeric characters.
+LENGTH = 8
+# May change 'LENGTH' for longer password.
+
+PASS = ""
+for n in (range $LENGTH)
+  PASS += $MATRIX[random.randrange (len $MATRIX)]
+  # A character of MATRIX at a random position, added to PASS.
+  # print $PASS              # (To see PASS being built up.)
+
+print $PASS                  # Or, redirect to a file, as desired.
+exit 0
+```
+
+```output
+k0WKnfa7
+```
+
+Neither `$RANDOM` nor `random` is fit for real passwords: both are
+predictable. Python's `secrets` module is, and makes the whole script one
+line.
+
+```tessh
+import secrets string
+print (''.join [(secrets.choice (string.ascii_letters + string.digits)) for _ in (range 8)])
+```
+
+```text
+(one run)
+ensggsrs
+```
+
+## fifo: Making daily backups, using named pipes
+<!-- help: abs-fifo fifo named-pipe mkfifo backup tar ssh -->
+
+James R. Van Zandt's backup script, which he says "really exercises quoting
+and escaping": `tar` writes the backup into a named pipe, and `ssh`, run as
+another user, reads it from there and saves it on the remote machine.
+
+### Example A-14. fifo: Making daily backups, using named pipes (`fifo.sh`)
+
+```bash no-run
+#!/bin/bash
+# ==> Script by James R. Van Zandt, and used here with his permission.
+
+# ==> Comments added by author of this document.
+
+  
+  HERE=`uname -n`    # ==> hostname
+  THERE=bilbo
+  echo "starting remote backup to $THERE at `date +%r`"
+  # ==> `date +%r` returns time in 12-hour format, i.e. "08:08:34 PM".
+  
+  # make sure /pipe really is a pipe and not a plain file
+  rm -rf /pipe
+  mkfifo /pipe       # ==> Create a "named pipe", named "/pipe" ...
+  
+  # ==> 'su xyz' runs commands as user "xyz".
+  # ==> 'ssh' invokes secure shell (remote login client).
+  su xyz -c "ssh $THERE \"cat > /home/xyz/backup/${HERE}-daily.tar.gz\" < /pipe"&
+  cd /
+  tar -czf - bin boot dev etc home info lib man root sbin share usr var > /pipe
+  # ==> Uses named pipe, /pipe, to communicate between processes:
+  # ==> 'tar/gzip' writes to /pipe and 'ssh' reads from /pipe.
+
+  # ==> The end result is this backs up the main directories, from / on down.
+
+  # ==>  What are the advantages of a "named pipe" in this situation,
+  # ==>+ as opposed to an "anonymous pipe", with |?
+  # ==>  Will an anonymous pipe even work here?
+
+  # ==>  Is it necessary to delete the pipe before exiting the script?
+  # ==>  How could that be done?
+
+
+  exit 0
+```
+
+It needs root, another user and a remote host, so the tessh version doesn't
+run here. The quoting is no easier: the command for `su -c` is still one
+string with a command for `ssh` inside it. The time comes from Python's
+`time.strftime`.
+
+```tessh no-run
+import time
+# Script by James R. Van Zandt, and used here with his permission.
+
+HERE = uname -n              # hostname
+THERE = bilbo
+print "starting remote backup to $THERE at $(time.strftime '%r')"
+# %r is the time in 12-hour format, i.e. "08:08:34 PM".
+
+# make sure /pipe really is a pipe and not a plain file
+rm -rf /pipe
+mkfifo /pipe                 # Create a "named pipe", named "/pipe" ...
+
+# 'su xyz' runs commands as user "xyz", 'ssh' the remote login.
+su xyz -c "ssh $THERE \"cat > /home/xyz/backup/${HERE}-daily.tar.gz\" < /pipe" &
+cd /
+tar -czf - bin boot dev etc home info lib man root sbin share usr var > /pipe
+# Uses named pipe, /pipe, to communicate between processes:
+# 'tar/gzip' writes to /pipe and 'ssh' reads from /pipe.
+
+exit 0
+```
+
+The same in miniature, in a folder: the reader, started in the
+background, is a `tar` that lists what comes through the pipe. (The reader
+opens the pipe itself, `tar -tzf pipe`: tessh, unlike bash, would block on
+a `<pipe` redirection of a background job.) The script's last question,
+whether the pipe should be deleted at the end, is answered with an `rm`.
+
+```tessh
+# (A made-up folder to back up.)
+mkdir data ; echo a >data/one.txt ; echo b >data/two.txt
+
+mkfifo pipe
+j = tar -tzf pipe &          # The reader: lists what arrives.
+tar -czf - data >pipe        # The writer.
+fg                           # Wait for the reader to finish.
+rm pipe
+```
+
+```output
+data/
+data/one.txt
+data/two.txt
+```
+
+## Generating prime numbers using the modulo operator
+<!-- help: abs-primes primes prime-numbers modulo recursion -->
+
+Stéphane Chazelas generates the primes below 1000 without arrays: the
+list of primes found so far rides along in the positional parameters of a
+recursive function.
+
+### Example A-15. Generating prime numbers using the modulo operator (`primes.sh`)
+
+```bash
+#!/bin/bash
+# primes.sh: Generate prime numbers, without using arrays.
+# Script contributed by Stephane Chazelas.
+
+#  This does *not* use the classic "Sieve of Eratosthenes" algorithm,
+#+ but instead the more intuitive method of testing each candidate number
+#+ for factors (divisors), using the "%" modulo operator.
+
+
+LIMIT=1000                    # Primes, 2 ... 1000.
+
+Primes()
+{
+ (( n = $1 + 1 ))             # Bump to next integer.
+ shift                        # Next parameter in list.
+#  echo "_n=$n i=$i_"
+ 
+ if (( n == LIMIT ))
+ then echo $*
+ return
+ fi
+
+ for i; do                    # "i" set to "@", previous values of $n.
+#   echo "-n=$n i=$i-"
+   (( i * i > n )) && break   # Optimization.
+   (( n % i )) && continue    # Sift out non-primes using modulo operator.
+   Primes $n $@               # Recursion inside loop.
+   return
+   done
+
+   Primes $n $@ $n            #  Recursion outside loop.
+                              #  Successively accumulate
+			      #+ positional parameters.
+                              #  "$@" is the accumulating list of primes.
+}
+
+Primes 1
+
+exit $?
+
+# Pipe output of the script to 'fmt' for prettier printing.
+
+#  Uncomment lines 16 and 24 to help figure out what is going on.
+
+#  Compare the speed of this algorithm for generating primes
+#+ with the Sieve of Eratosthenes (ex68.sh).
+
+
+#  Exercise: Rewrite this script without recursion.
+```
+
+The tessh version keeps the trick: `*primes` gathers the primes so far,
+and `*$primes` passes them on. The recursion goes a thousand calls deep,
+past Python's usual limit, hence `sys.setrecursionlimit`.
+
+```tessh
+import sys
+# primes.tsh: Generate prime numbers, without using arrays.
+# Script contributed by Stephane Chazelas.
+
+#  This does *not* use the classic "Sieve of Eratosthenes" algorithm,
+#+ but instead the more intuitive method of testing each candidate number
+#+ for factors (divisors), using the "%" modulo operator.
+
+LIMIT = 1000                 # Primes, 2 ... 1000.
+sys.setrecursionlimit 5000   # (One call per number: deeper than Python likes.)
+
+def Primes n *primes         # The last number tried, and the primes so far.
+  n += 1                     # Bump to next integer.
+  if $n == $LIMIT
+    print *$primes
+    return
+  for i in $primes
+    if $i * $i > $n          # Optimization.
+      break
+    if $n % $i               # Sift out non-primes using modulo operator.
+      continue
+    Primes $n *$primes       # Recursion inside loop.
+    return
+  Primes $n *$primes $n      # Recursion outside loop: add n to the primes.
+
+Primes 1
+exit 0
+```
+
+```output
+2 3 5 7 11 13 17 19 23 29 31 37 41 43 47 53 59 61 67 71 73 79 83 89 97 101 103 107 109 113 127 131 137 139 149 151 157 163 167 173 179 181 191 193 197 199 211 223 227 229 233 239 241 251 257 263 269 271 277 281 283 293 307 311 313 317 331 337 347 349 353 359 367 373 379 383 389 397 401 409 419 421 431 433 439 443 449 457 461 463 467 479 487 491 499 503 509 521 523 541 547 557 563 569 571 577 587 593 599 601 607 613 617 619 631 641 643 647 653 659 661 673 677 683 691 701 709 719 727 733 739 743 751 757 761 769 773 787 797 809 811 821 823 827 829 839 853 857 859 863 877 881 883 887 907 911 919 929 937 941 947 953 967 971 977 983 991 997
+```
+
+The exercise asks for the same without recursion. A loop and a list do it,
+and Python's `all` tests a number against the primes up to its square root.
+
+```tessh
+LIMIT = 1000
+primes = []
+for n in (range 2 $LIMIT)
+  if all ($n % $p for p in $primes if $p * $p <= $n)
+    primes.append $n
+print (len $primes) $primes[-5:]
+```
+
+```output
+168 [971 977 983 991 997]
+```
