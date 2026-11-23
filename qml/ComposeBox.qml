@@ -135,8 +135,10 @@ Rectangle {
     // (The editor's margins, and the prompt bar with the gap under it.)
     // (The text's real laid-out height, which some fonts make taller than
     // their metrics say, up to ten lines; then it scrolls.)
-    implicitHeight: Math.ceil(Math.min(Math.max(edit.contentHeight, lineHeight), 10 * lineHeight)) + 16
-                    + (promptBar.visible ? promptBar.height + 4 + 4 : 0)
+    // (The toolbar row (modeTag) on top, the prompt bar under it, then the
+    // editor.)
+    implicitHeight: Math.ceil(Math.min(Math.max(edit.contentHeight, lineHeight), 10 * lineHeight)) + flickTop + 9
+    readonly property real flickTop: promptBar.visible ? promptBar.y + promptBar.height + 4 : modeTag.y + modeTag.height + 4
 
     color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
     Rectangle { width: parent.width; height: 1; color: Theme.divider }
@@ -1029,8 +1031,8 @@ Rectangle {
         visible: box.showPrompt
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: 4
+        anchors.top: modeTag.bottom
+        anchors.topMargin: 2
         height: visible ? implicitHeight : 0
         view: box.view
         controller: box.controller
@@ -1063,8 +1065,8 @@ Rectangle {
         id: flick
         anchors.fill: parent
         anchors.leftMargin: 10 + promptChar.implicitWidth + fm.advanceWidth(" ")
-        anchors.rightMargin: modeTag.width + 18
-        anchors.topMargin: 7 + (promptBar.visible ? promptBar.height + 4 : 0)
+        anchors.rightMargin: 10
+        anchors.topMargin: box.flickTop
         anchors.bottomMargin: 7
         contentWidth: width
         contentHeight: edit.contentHeight
@@ -1372,14 +1374,14 @@ Rectangle {
         }
     }
 
-    // The corner: a problem, or the language / vi mode; the history button
-    // and the key switch (Emacs, vi, VS Code).
+    // The toolbar, a row of its own at the top, over the prompt bar (the
+    // editor has the whole width): a problem, or the language / vi mode;
+    // the history button and the key switch (Emacs, vi, VS Code).
     Row {
         id: modeTag
         anchors.right: parent.right
         anchors.rightMargin: 8
-        anchors.top: flick.top
-        anchors.topMargin: -2
+        y: 5
         spacing: 6
         // Working: a turning arc.
         Canvas {
