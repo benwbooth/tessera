@@ -16,6 +16,8 @@ members = [".", "tesserad", "tessh", "tree-sitter-tessh"]
 default-members = [".", "tesserad", "tessh"]
 
 [dependencies]
+# (Language detection, Google's model, run in Rust by tract: src/detect.rs.)
+magika = "=2.0.0-rc.0"
 anyhow = "1.0.104"
 base64 = "0.23.1"
 cxx = "1.0"

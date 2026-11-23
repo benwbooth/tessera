@@ -347,6 +347,13 @@ pub mod ffi {
         /// What a text is clearly written in ("" when it's just a command).
         #[qinvokable]
         fn detect_language(self: &Controller, text: &QString) -> QString;
+        /// What a text is written in, by the Magika model (src/detect.rs), in
+        /// the background: the tree-sitter name, "" when it can't say.
+        #[qinvokable]
+        fn detect_content(self: &Controller, reply: &QString, text: &QString);
+        /// The same for a file on this computer (its start and end).
+        #[qinvokable]
+        fn detect_file(self: &Controller, reply: &QString, path: &QString);
         /// Typed text that doesn't look like a shell command (src/snippets.rs).
         #[qinvokable]
         fn shell_doubt(self: &Controller, text: &QString, aliases: &QString) -> bool;
@@ -1857,6 +1864,16 @@ impl ffi::Controller {
 
     fn detect_language(&self, text: &ffi::QString) -> ffi::QString {
         qs(crate::syntax::detect_language(&text.to_string()))
+    }
+
+    fn detect_content(&self, reply: &ffi::QString, text: &ffi::QString) {
+        let text = text.to_string();
+        self.answer_on(reply, Some("detect"), move || crate::detect::language_of(text.as_bytes()))
+    }
+
+    fn detect_file(&self, reply: &ffi::QString, path: &ffi::QString) {
+        let (host, p) = host_path(&path.to_string());
+        self.answer_on(reply, Some("detect"), move || if host.is_empty() { crate::detect::language_of_file(&p) } else { String::new() })
     }
 
     fn shell_doubt(&self, text: &ffi::QString, aliases: &ffi::QString) -> bool {

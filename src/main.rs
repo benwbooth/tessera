@@ -9,6 +9,7 @@ mod cmdline;
 mod complete;
 mod contrast;
 mod daemon;
+mod detect;
 mod files;
 mod find;
 mod kde;

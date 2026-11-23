@@ -22,7 +22,18 @@ Rectangle {
     // the languages used lately ranked up. It runs with that language's
     // interpreter; see TerminalPane's onSubmitted.)
     property string aiLang: ""
-    readonly property string lang: langOverride !== "" ? langOverride : contentLang !== "" ? contentLang : aiLang !== "" ? aiLang : autoLang
+    readonly property string lang: langOverride !== "" ? langOverride : contentLang !== "" ? contentLang : magikaLang !== "" ? magikaLang : aiLang !== "" ? aiLang : autoLang
+    // (Several lines its own rules can't place, at the shell: Magika's model
+    // says, in the background, a moment after typing stops. Not where the
+    // default is another language: it doesn't know tessh, and would call
+    // tessh code Python or Lisp.)
+    property string magikaLang: ""
+    Timer { id: magikaTimer; interval: 400; onTriggered: box.askMagika() }
+    function askMagika() {
+        const t = edit.text
+        if (!controller || autoLang !== "bash" || langOverride !== "" || contentLang !== "" || t.split("\n").length < 3) { magikaLang = ""; return }
+        Async.call(controller, k => controller.detectContent(k, t), l => { if (edit.text === t) box.magikaLang = l === "bash" ? "" : l })
+    }
     property string runLang: ""        // the language of what was just run
     // Another shell picked to run the input ("": the pane's own), and the one
     // what was just run went to.
@@ -1127,6 +1138,8 @@ Rectangle {
                 seen = text
                 idle.restart()
                 box.contentLang = box.controller && (text.indexOf("\n") >= 0 || /^\s*[{\[]|^#!/.test(text)) ? box.controller.detectLanguage(text) : ""
+                if (text.indexOf("\n") < 0) box.magikaLang = ""
+                magikaTimer.restart()
                 if (text.trim() === "") { box.aiLang = ""; box.langAsked = "" }
                 langTimer.restart()
                 box.analyze(false)

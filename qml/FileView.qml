@@ -429,7 +429,12 @@ Item {
                 Async.call(controller, k => controller.fileLines(k, p, 0, 50), t => {
                     if (n !== pollSeq || p !== path) return
                     if (t.indexOf("\u0000") >= 0) problem = "It's a binary file."
-                    else sniffedLang = sniff(t)
+                    else {
+                        sniffedLang = sniff(t)
+                        // (Still nothing: Magika's model, in the background.)
+                        if (detectedLang === "")
+                            Async.call(controller, k => controller.detectFile(k, p), l => { if (n === pollSeq && p === path && l !== "") sniffedLang = l })
+                    }
                 })
         })
     }
