@@ -512,7 +512,7 @@ def prog(ns, v, mode):
     """`$cmd args…` with a value at the head: a function is called; text or
     a path runs that program, as bash's `$CMD args` does."""
     import os
-    if callable(v) or not isinstance(v, (str, os.PathLike)):
+    if callable(v) or not isinstance(v, (str, os.PathLike)) or not os.fspath(v):
         return v
     import __tessh__
     return lambda *args: __tessh__.cmd(ns, os.fspath(v), list(args), [], mode, True)
