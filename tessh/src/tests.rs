@@ -152,6 +152,17 @@ fn commands_capture_and_status() {
     assert_eq!(out, "attached\n");
 }
 
+/// Builtins that did their work are a success, so `cd dir || exit 1` goes
+/// on; `:` is bash's null command (`: >file`, `while :`).
+#[test]
+fn builtins_succeed_and_null_command() {
+    let (ns, out) = run("cd . || echo failed\ncd . && echo went\nok = (bool (export TESSH_T_X=1))\n: && echo null\nn = 0\nwhile :\n  n += 1\n  if $n > 2\n    break\ne = (:)");
+    assert_eq!(out, "went\nnull\n");
+    assert!(get::<bool>(&ns, "ok"));
+    assert_eq!(get::<i64>(&ns, "n"), 3);
+    assert_eq!(get::<String>(&ns, "e"), "");
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");

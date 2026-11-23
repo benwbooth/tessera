@@ -1085,6 +1085,13 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
             return Ok(py.None());
         }
     }
+    // (`:` is bash's null command: it does nothing, successfully, so
+    // `: >file` empties a file and `while :` loops.)
+    if head_s == ":" && mode != "stage" && mode != "bg" {
+        with_redirs(py, &red, || Ok(()))?;
+        STATUS.store(0, Ordering::SeqCst);
+        return output(py, "", 0, mode != "capture");
+    }
     if !force {
         if let Some(f) = resolve_callable(py, &ns, &head_s)? {
             let kw = PyDict::new(py);
@@ -2228,6 +2235,19 @@ impl Builtin {
 
     #[pyo3(signature = (*args, _ns=None))]
     fn __call__(&self, py: Python<'_>, args: Vec<Bound<'_, PyAny>>, _ns: Option<Bound<'_, PyDict>>) -> PyResult<Py<PyAny>> {
+        // (One that's done its work is a success, exit status 0, as in bash:
+        // so `cd dir || exit 1` and `cd dir && make` go on as they should.)
+        let v = self.run(py, args, _ns)?;
+        if v.is_none(py) && self.name != "glob" {
+            STATUS.store(0, Ordering::SeqCst);
+            return output(py, "", 0, true);
+        }
+        Ok(v)
+    }
+}
+
+impl Builtin {
+    fn run(&self, py: Python<'_>, args: Vec<Bound<'_, PyAny>>, _ns: Option<Bound<'_, PyDict>>) -> PyResult<Py<PyAny>> {
         let words: Vec<String> = args.iter().map(word).collect::<PyResult<_>>()?;
         let none = py.None();
         match self.name {
