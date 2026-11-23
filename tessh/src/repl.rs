@@ -747,7 +747,10 @@ impl Prompt for TesshPrompt {
         Cow::Owned(color.paint(mark).to_string())
     }
     fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        Cow::Owned(Style::new().fg(Color::DarkGray).paint("· ").to_string())
+        // (As wide as the first line's prompt, a dot under its ❯, so each
+        // line's text starts in the same column and its indentation shows.)
+        let pad = unicode_width::UnicodeWidthStr::width(self.cwd.as_str());
+        Cow::Owned(format!("{}{}", " ".repeat(pad), Style::new().fg(Color::DarkGray).paint(" · ")))
     }
     fn render_prompt_history_search_indicator(&self, search: PromptHistorySearch) -> Cow<'_, str> {
         let prefix = match search.status {
