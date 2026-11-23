@@ -13,6 +13,28 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Mutex;
 
 pub static STATUS: AtomicI32 = AtomicI32::new(0);
+/// Whether anything set the status since `begin_line` (a command, `!`, an
+/// exit): a prompt line that set none ends with 0, as its statements succeeded.
+pub static STATUS_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The status, and that it was set.
+pub fn set_status(code: i32) {
+    STATUS.store(code, Ordering::SeqCst);
+    STATUS_SET.store(true, Ordering::SeqCst);
+}
+
+/// A prompt line starts: nothing has set the status yet ($? still the last one).
+pub fn begin_line() {
+    STATUS_SET.store(false, Ordering::SeqCst);
+}
+
+/// A prompt line ran without an error: if no command set the status, it
+/// succeeded (0), so a failure before it doesn't linger.
+pub fn end_line() {
+    if !STATUS_SET.load(Ordering::SeqCst) {
+        STATUS.store(0, Ordering::SeqCst);
+    }
+}
 pub static INTERACTIVE: AtomicBool = AtomicBool::new(false);
 /// Run attached programs with their output captured and passed on through
 /// Python's sys.stdout (the kernel: the notebook shows it).
@@ -951,7 +973,7 @@ fn negate(py: Python<'_>, v: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     if v.hasattr("code")? && v.hasattr("attached")? {
         let code: i32 = v.getattr("code")?.extract()?;
         let new = if code == 0 { 1 } else { 0 };
-        STATUS.store(new, Ordering::SeqCst);
+        set_status(new);
         let text: String = v.str()?.extract()?;
         let attached: bool = v.getattr("attached")?.extract()?;
         return output(py, &text, new, attached);
@@ -1133,7 +1155,7 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
         let d = expanduser(&head_s);
         if pathish && std::path::Path::new(&d).is_dir() {
             go(py, &d, false)?;
-            STATUS.store(0, Ordering::SeqCst);
+            set_status(0);
             return Ok(py.None());
         }
     }
@@ -1141,7 +1163,7 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
     // `: >file` empties a file and `while :` loops.)
     if head_s == ":" && mode != "stage" && mode != "bg" {
         with_redirs(py, &red, || Ok(()))?;
-        STATUS.store(0, Ordering::SeqCst);
+        set_status(0);
         return output(py, "", 0, mode != "capture");
     }
     if !force {
@@ -1223,7 +1245,7 @@ fn run_stages(py: Python<'_>, stages: Vec<Stage>, mode: &str) -> PyResult<Py<PyA
                 let v = s.obj.as_ref().unwrap().call1(py, (arg,))?;
                 data = Some(v.clone_ref(py));
                 result = v;
-                STATUS.store(0, Ordering::SeqCst);
+                set_status(0);
                 i += 1;
             }
             _ => {
@@ -1471,7 +1493,7 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
             let line = cmds.iter().map(|c| pre.clone() + &c.words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join(" | ");
             let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
             if let Some(code) = hook(py, &line, &cwd)? {
-                STATUS.store(code, Ordering::SeqCst);
+                set_status(code);
                 return output(py, "", code, true);
             }
         }
@@ -1586,7 +1608,7 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
                     }
                     None => eprint!("{msg}"),
                 }
-                STATUS.store(code, Ordering::SeqCst);
+                set_status(code);
                 return output(py, "", code, !capture);
             }
         }
@@ -1619,7 +1641,7 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
         });
         let code = wait_all(py, children)?;
         let buf = py.detach(|| reader.join().unwrap_or_default());
-        STATUS.store(code, Ordering::SeqCst);
+        set_status(code);
         let mut text = decode(py, &buf)?;
         if pass {
             let sys = py.import("sys")?;
@@ -1638,7 +1660,7 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
     } else {
         wait_all(py, children)?
     };
-    STATUS.store(code, Ordering::SeqCst);
+    set_status(code);
     py.check_signals()?;
     if code == 130 && job_control {
         return Err(pyo3::exceptions::PyKeyboardInterrupt::new_err(""));
@@ -1844,7 +1866,7 @@ fn wait_all(py: Python<'_>, mut children: Vec<Child>) -> PyResult<i32> {
                     let _ = c.wait();
                 }
             });
-            STATUS.store(130, Ordering::SeqCst);
+            set_status(130);
             return Err(e);
         }
     }
@@ -2369,7 +2391,7 @@ impl Builtin {
         // so `cd dir || exit 1` and `cd dir && make` go on as they should.)
         let v = self.run(py, args, _ns)?;
         if v.is_none(py) && self.name != "glob" {
-            STATUS.store(0, Ordering::SeqCst);
+            set_status(0);
             return output(py, "", 0, true);
         }
         Ok(v)
@@ -2659,7 +2681,7 @@ fn fg(py: Python<'_>, n: Option<String>) -> PyResult<Py<PyAny>> {
         })
     };
     let _ = job.pids;
-    STATUS.store(code, Ordering::SeqCst);
+    set_status(code);
     output(py, "", code, true)
 }
 

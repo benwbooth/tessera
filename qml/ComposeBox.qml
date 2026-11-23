@@ -221,7 +221,7 @@ Rectangle {
                       ["Ctrl+Alt+S", "Indentation: spaces or tabs, and its size"],
                       ["Ctrl+Alt+I", "Input language"],
                       ["Ctrl+Alt+E", "Editor keys: Emacs, vi, VS Code"],
-                      ["Ctrl+Alt+X", "Ask the AI to fix the command that failed"]]]]]
+                      ["Ctrl+Alt+X", "Ask the AI to fix the command that failed"]]]]
         if (box.aiNL && box.chatReady) groups.push(["AI", [["# \u2026", "Say what you want: the AI writes the command, for you to check"]]])
         if (box.keys === "vi") {
             const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")

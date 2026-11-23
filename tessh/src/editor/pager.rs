@@ -214,11 +214,20 @@ impl Guide {
         if self.matches.is_empty() {
             return;
         }
+        // (Else from the view: a match is shown two lines below the top, so
+        // next goes from that line, not finding the one shown again.)
         let t = self.top;
-        let i = if back {
-            self.matches.iter().rposition(|&m| m < t).unwrap_or(self.matches.len() - 1)
+        let shown = t + 2;
+        let n = self.matches.len();
+        let i = if let (Some(at), false) = (self.at, include_top) {
+            // (From the match last shown, wherever the view could put it.)
+            if back { (at + n - 1) % n } else { (at + 1) % n }
+        } else if back {
+            self.matches.iter().rposition(|&m| m < shown).unwrap_or(n - 1)
+        } else if include_top {
+            self.matches.iter().position(|&m| m >= t).unwrap_or(0)
         } else {
-            self.matches.iter().position(|&m| if include_top { m >= t } else { m > t }).unwrap_or(0)
+            self.matches.iter().position(|&m| m > shown).unwrap_or(0)
         };
         self.at = Some(i);
         self.top = self.matches[i].saturating_sub(2);

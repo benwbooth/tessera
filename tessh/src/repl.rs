@@ -1330,6 +1330,7 @@ pub fn run() -> i32 {
         osc(&format!("1337;TesseraCommand={}", b64.encode(&text)));
         osc("133;C");
         let exit = Python::attach(|py| -> Option<i32> {
+            runtime::begin_line();
             let r = runner::run_source(py, &text, ns.bind(py), "<stdin>", true);
             let flush = || {
                 if let Ok(sys) = py.import("sys") {
@@ -1338,7 +1339,7 @@ pub fn run() -> i32 {
                 }
             };
             match r {
-                Ok(()) => {}
+                Ok(()) => runtime::end_line(),
                 Err(TesshError::Py(e)) if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) => {
                     flush();
                     let c = e.value(py).getattr("code").ok().map(|c| if c.is_none() { 0 } else { c.extract::<i32>().unwrap_or(1) }).unwrap_or(0);
