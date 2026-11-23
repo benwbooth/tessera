@@ -1065,3 +1065,922 @@ for c in $commands
 rm -rf junk/old1
 rm -rf junk/old2
 ```
+
+## 16.6 Communications Commands
+<!-- help: abs-communications host ipcalc nslookup dig traceroute ping whois finger ftp uucp telnet wget lynx rsync ssh scp write mail -->
+
+**Information:** `host`, `ipcalc -h`, `nslookup` and `dig` look names and
+addresses up in DNS (`dig -x` the other way), `traceroute` shows the way
+packets go, `ping` checks that a host answers, `whois` asks who owns a
+domain, `finger` and `chfn` show and change user information, `vrfy` checks
+a mail address. **Remote hosts:** `sx`/`rx` and `sz`/`rz` (xmodem and
+zmodem), `ftp`, `uucp`/`uux`/`cu`, `telnet`, `wget` and `lynx -dump` (fetch
+web pages), `rlogin`, `rsh`, `rcp`, `rsync`, and `ssh`/`scp`, which replace
+the insecure ones. **Local network:** `write`, `netconfig`. **Mail:**
+`mail`, `mailto`, `mailstats`, `vacation`.
+
+These need a network (or a mail system), so this section's examples don't
+run here: their tessh versions are checked by `tessh --check` but not run.
+What tessh changes is, again, the glue: a program's output is text to take
+apart with `.split`, `.lines` and regexes, an exit status is an `if`
+condition, and options built up in a list stay one argument each, with no
+`eval`. Python's `socket`, `urllib.request`, `smtplib` and `subprocess`
+can stand in for several of the programs.
+
+`ping` exits 0 when the host answers. The ABS Guide tests whether its
+output is empty; testing its exit status says the same more directly:
+
+```bash no-run
+HNAME=news-15.net  # Notorious spammer.
+# HNAME=$HOST     # Debug: test for localhost.
+  count=2  # Send only two pings.
+
+if [[ `ping -c $count "$HNAME"` ]]
+then
+  echo ""$HNAME" still up and broadcasting spam your way."
+else
+  echo ""$HNAME" seems to be down. Pity."
+fi
+```
+
+```tessh no-run
+HNAME = news-15.net  # Notorious spammer.
+count = 2            # Send only two pings.
+
+if ping -c $count $HNAME >/dev/null
+  print "$HNAME still up and broadcasting spam your way."
+else
+  print "$HNAME seems to be down. Pity."
+```
+
+### Example 16-40. Finding out where to report a spammer (`spam-lookup.sh`)
+
+```bash no-run
+#!/bin/bash
+# spam-lookup.sh: Look up abuse contact to report a spammer.
+# Thanks, Michael Zick.
+
+# Check for command-line arg.
+ARGCOUNT=1
+E_WRONGARGS=85
+if [ $# -ne "$ARGCOUNT" ]
+then
+  echo "Usage: `basename $0` domain-name"
+  exit $E_WRONGARGS
+fi
+
+
+dig +short $1.contacts.abuse.net -c in -t txt
+# Also try:
+#     dig +nssearch $1
+#     Tries to find "authoritative name servers" and display SOA records.
+
+# The following also works:
+#     whois -h whois.abuse.net $1
+#           ^^ ^^^^^^^^^^^^^^^  Specify host.  
+#     Can even lookup multiple spammers with this, i.e."
+#     whois -h whois.abuse.net $spamdomain1 $spamdomain2 . . .
+
+
+#  Exercise:
+#  --------
+#  Expand the functionality of this script
+#+ so that it automatically e-mails a notification
+#+ to the responsible ISP's contact address(es).
+#  Hint: use the "mail" command.
+
+exit $?
+
+# spam-lookup.sh chinatietong.com
+#                A known spam domain.
+
+# "crnet_mgr@chinatietong.com"
+# "crnet_tec@chinatietong.com"
+# "postmaster@chinatietong.com"
+
+
+#  For a more elaborate version of this script,
+#+ see the SpamViz home page, http://www.spamviz.net/index.html.
+```
+
+It asks DNS, so it doesn't run here. `dig +short` prints one quoted address
+per line; captured, `.lines` is the list, and the quotes come off with
+`.strip`.
+
+```tessh no-run
+# spam-lookup.tsh: Look up abuse contact to report a spammer.
+
+ARGCOUNT = 1
+E_WRONGARGS = 85
+if (len $argv) - 1 != $ARGCOUNT
+  print "Usage: $(Path $argv[0]).name domain-name"
+  exit $E_WRONGARGS
+domain = $argv[1]
+
+contacts = dig +short "$domain.contacts.abuse.net" -c in -t txt
+for line in $contacts.lines
+  print ($line.strip '"')
+# Also try:
+#     whois -h whois.abuse.net $domain
+
+exit $contacts.code
+```
+
+### Example 16-41. Analyzing a spam domain (`is-spammer.sh`)
+
+```bash no-run
+#! /bin/bash
+# is-spammer.sh: Identifying spam domains
+
+# $Id: is-spammer, v 1.4 2004/09/01 19:37:52 mszick Exp $
+# Above line is RCS ID info.
+#
+#  This is a simplified version of the "is_spammer.bash
+#+ script in the Contributed Scripts appendix.
+
+# is-spammer <domain.name>
+
+# Uses an external program: 'dig'
+# Tested with version: 9.2.4rc5
+
+# Uses functions.
+# Uses IFS to parse strings by assignment into arrays.
+# And even does something useful: checks e-mail blacklists.
+
+# Use the domain.name(s) from the text body:
+# http://www.good_stuff.spammer.biz/just_ignore_everything_else
+#                       ^^^^^^^^^^^
+# Or the domain.name(s) from any e-mail address:
+# Really_Good_Offer@spammer.biz
+#
+# as the only argument to this script.
+#(PS: have your Inet connection running)
+#
+# So, to invoke this script in the above two instances:
+#       is-spammer.sh spammer.biz
+
+
+# Whitespace == :Space:Tab:Line Feed:Carriage Return:
+WSP_IFS=$'\x20'$'\x09'$'\x0A'$'\x0D'
+
+# No Whitespace == Line Feed:Carriage Return
+No_WSP=$'\x0A'$'\x0D'
+
+# Field separator for dotted decimal ip addresses
+ADR_IFS=${No_WSP}'.'
+
+# Get the dns text resource record.
+# get_txt <error_code> <list_query>
+get_txt() {
+
+    # Parse $1 by assignment at the dots.
+    local -a dns
+    IFS=$ADR_IFS
+    dns=( $1 )
+    IFS=$WSP_IFS
+    if [ "${dns[0]}" == '127' ]
+    then
+        # See if there is a reason.
+        echo $(dig +short $2 -t txt)
+    fi
+}
+
+# Get the dns address resource record.
+# chk_adr <rev_dns> <list_server>
+chk_adr() {
+    local reply
+    local server
+    local reason
+
+    server=${1}${2}
+    reply=$( dig +short ${server} )
+
+    # If reply might be an error code . . .
+    if [ ${#reply} -gt 6 ]
+    then
+        reason=$(get_txt ${reply} ${server} )
+        reason=${reason:-${reply}}
+    fi
+    echo ${reason:-' not blacklisted.'}
+}
+
+# Need to get the IP address from the name.
+echo 'Get address of: '$1
+ip_adr=$(dig +short $1)
+dns_reply=${ip_adr:-' no answer '}
+echo ' Found address: '${dns_reply}
+
+# A valid reply is at least 4 digits plus 3 dots.
+if [ ${#ip_adr} -gt 6 ]
+then
+    echo
+    declare query
+
+    # Parse by assignment at the dots.
+    declare -a dns
+    IFS=$ADR_IFS
+    dns=( ${ip_adr} )
+    IFS=$WSP_IFS
+
+    # Reorder octets into dns query order.
+    rev_dns="${dns[3]}"'.'"${dns[2]}"'.'"${dns[1]}"'.'"${dns[0]}"'.'
+
+# See: http://www.spamhaus.org (Conservative, well maintained)
+    echo -n 'spamhaus.org says: '
+    echo $(chk_adr ${rev_dns} 'sbl-xbl.spamhaus.org')
+
+# See: http://ordb.org (Open mail relays)
+    echo -n '   ordb.org  says: '
+    echo $(chk_adr ${rev_dns} 'relays.ordb.org')
+
+# See: http://www.spamcop.net/ (You can report spammers here)
+    echo -n ' spamcop.net says: '
+    echo $(chk_adr ${rev_dns} 'bl.spamcop.net')
+
+# # # other blacklist operations # # #
+
+# See: http://cbl.abuseat.org.
+    echo -n ' abuseat.org says: '
+    echo $(chk_adr ${rev_dns} 'cbl.abuseat.org')
+
+# See: http://dsbl.org/usage (Various mail relays)
+    echo
+    echo 'Distributed Server Listings'
+    echo -n '       list.dsbl.org says: '
+    echo $(chk_adr ${rev_dns} 'list.dsbl.org')
+
+    echo -n '   multihop.dsbl.org says: '
+    echo $(chk_adr ${rev_dns} 'multihop.dsbl.org')
+
+    echo -n 'unconfirmed.dsbl.org says: '
+    echo $(chk_adr ${rev_dns} 'unconfirmed.dsbl.org')
+
+else
+    echo
+    echo 'Could not use that address.'
+fi
+
+exit 0
+
+# Exercises:
+# --------
+
+# 1) Check arguments to script,
+#    and exit with appropriate error message if necessary.
+
+# 2) Check if on-line at invocation of script,
+#    and exit with appropriate error message if necessary.
+
+# 3) Substitute generic variables for "hard-coded" BHL domains.
+
+# 4) Set a time-out for the script using the "+time=" option
+     to the 'dig' command.
+```
+
+Michael Zick's script parses addresses by setting `IFS` to a dot and
+assigning to an array. In tessh an address is split with `.split "."`, and
+reversing the octets for the blacklist query is `reversed`. The blacklists
+are a list (exercise 3), the `dig` time-out is an option (exercise 4), and
+the argument is checked (exercise 1). It needs DNS, so it doesn't run here.
+
+```tessh no-run
+# is-spammer.tsh: Identifying spam domains
+# After Michael Zick's is-spammer.sh.
+# Uses an external program: 'dig'
+
+E_WRONGARGS = 85
+DIG_OPTS = [+short "+time=5"]       # (Exercise 4: a time-out.)
+
+# Exercise 3: the blacklists as data.
+BLACKLISTS = [
+  ["spamhaus.org" "sbl-xbl.spamhaus.org"]
+  ["ordb.org" "relays.ordb.org"]
+  ["spamcop.net" "bl.spamcop.net"]
+  ["abuseat.org" "cbl.abuseat.org"]
+  ["list.dsbl.org" "list.dsbl.org"]
+  ["multihop.dsbl.org" "multihop.dsbl.org"]
+  ["unconfirmed.dsbl.org" "unconfirmed.dsbl.org"]
+]
+
+# The dns text resource record: a reason, if the reply is an error code.
+def get_txt error_code list_query
+  if ($error_code.split ".")[0] == "127"
+    " ".join (dig *$DIG_OPTS $list_query -t txt).lines
+
+# Look the reversed address up in one blacklist.
+def chk_adr rev_dns list_server
+  server = "$rev_dns$list_server"
+  reply = dig *$DIG_OPTS $server
+  reason = None
+  if (len $reply) > 6                # If reply might be an error code . . .
+    reason = (get_txt $reply $server) or $reply
+  $reason or " not blacklisted."
+
+if (len $argv) != 2                  # (Exercise 1.)
+  print "Usage: $(Path $argv[0]).name domain.name"
+  exit $E_WRONGARGS
+
+# Need to get the IP address from the name.
+print "Get address of: $argv[1]"
+ip_adr = dig *$DIG_OPTS $argv[1]
+print " Found address: $(if $ip_adr then $ip_adr else ' no answer ')"
+
+# A valid reply is at least 4 digits plus 3 dots.
+if (len $ip_adr) > 6
+  print
+  # Reorder octets into dns query order.
+  rev_dns = ".".join (reversed ($ip_adr.split ".")) + "."
+  for [name server] in $BLACKLISTS
+    print "${name:>20} says: $(chk_adr $rev_dns $server)"
+else
+  print
+  print "Could not use that address."
+
+exit 0
+```
+
+`wget` and `lynx -dump` fetch web pages from a script; `wget -c` resumes
+an interrupted download.
+
+### Example 16-42. Getting a stock quote (`quote-fetch.sh`)
+
+```bash no-run
+#!/bin/bash
+# quote-fetch.sh: Download a stock quote.
+
+
+E_NOPARAMS=86
+
+if [ -z "$1" ]  # Must specify a stock (symbol) to fetch.
+  then echo "Usage: `basename $0` stock-symbol"
+  exit $E_NOPARAMS
+fi
+
+stock_symbol=$1
+
+file_suffix=.html
+# Fetches an HTML file, so name it appropriately.
+URL='http://finance.yahoo.com/q?s='
+# Yahoo finance board, with stock query suffix.
+
+# -----------------------------------------------------------
+wget -O ${stock_symbol}${file_suffix} "${URL}${stock_symbol}"
+# -----------------------------------------------------------
+
+
+# To look up stuff on http://search.yahoo.com:
+# -----------------------------------------------------------
+# URL="http://search.yahoo.com/search?fr=ush-news&p=${query}"
+# wget -O "$savefilename" "${URL}"
+# -----------------------------------------------------------
+# Saves a list of relevant URLs.
+
+exit $?
+
+# Exercises:
+# ---------
+#
+# 1) Add a test to ensure the user running the script is on-line.
+#    (Hint: parse the output of 'ps -ax' for "ppp" or "connect."
+#
+# 2) Modify this script to fetch the local weather report,
+#+   taking the user's zip code as an argument.
+```
+
+The same `wget`, with the URL and file name built in f-string fashion (and
+Yahoo's old URL long gone). `urllib.request.urlretrieve` would do it without
+`wget`. It needs the network.
+
+```tessh no-run
+# quote-fetch.tsh: Download a stock quote.
+
+E_NOPARAMS = 86
+
+if not $argv[1:]       # Must specify a stock (symbol) to fetch.
+  print "Usage: $(Path $argv[0]).name stock-symbol"
+  exit $E_NOPARAMS
+
+stock_symbol = $argv[1]
+file_suffix = .html    # Fetches an HTML file, so name it appropriately.
+URL = 'http://finance.yahoo.com/q?s='
+
+# -----------------------------------------------------------
+wget -O "$stock_symbol$file_suffix" "$URL$stock_symbol"
+# -----------------------------------------------------------
+
+exit $?
+```
+
+`rsync` brings a copy of a tree up to date, sending only what changed.
+
+### Example 16-43. Updating FC4 (`fc4upd.sh`)
+
+```bash no-run
+#!/bin/bash
+# fc4upd.sh
+
+# Script author: Frank Wang.
+# Slight stylistic modifications by ABS Guide author.
+# Used in ABS Guide with permission.
+
+
+#  Download Fedora Core 4 update from mirror site using rsync. 
+#  Should also work for newer Fedora Cores -- 5, 6, . . .
+#  Only download latest package if multiple versions exist,
+#+ to save space.
+
+URL=rsync://distro.ibiblio.org/fedora-linux-core/updates/
+# URL=rsync://ftp.kddilabs.jp/fedora/core/updates/
+# URL=rsync://rsync.planetmirror.com/fedora-linux-core/updates/
+
+DEST=${1:-/var/www/html/fedora/updates/}
+LOG=/tmp/repo-update-$(/bin/date +%Y-%m-%d).txt
+PID_FILE=/var/run/${0##*/}.pid
+
+E_RETURN=85        # Something unexpected happened.
+
+
+# General rsync options
+# -r: recursive download
+# -t: reserve time
+# -v: verbose
+
+OPTS="-rtv --delete-excluded --delete-after --partial"
+
+# rsync include pattern
+# Leading slash causes absolute path name match.
+INCLUDE=(
+    "/4/i386/kde-i18n-Chinese*" 
+#   ^                         ^
+# Quoting is necessary to prevent globbing.
+) 
+
+
+# rsync exclude pattern
+# Temporarily comment out unwanted pkgs using "#" . . .
+EXCLUDE=(
+    /1
+    /2
+    /3
+    /testing
+    /4/SRPMS
+    /4/ppc
+    /4/x86_64
+    /4/i386/debug
+   "/4/i386/kde-i18n-*"
+   "/4/i386/openoffice.org-langpack-*"
+   "/4/i386/*i586.rpm"
+   "/4/i386/GFS-*"
+   "/4/i386/cman-*"
+   "/4/i386/dlm-*"
+   "/4/i386/gnbd-*"
+   "/4/i386/kernel-smp*"
+#  "/4/i386/kernel-xen*" 
+#  "/4/i386/xen-*" 
+)
+
+
+init () {
+    # Let pipe command return possible rsync error, e.g., stalled network.
+    set -o pipefail                  # Newly introduced in Bash, version 3.
+
+    TMP=${TMPDIR:-/tmp}/${0##*/}.$$  # Store refined download list.
+    trap "{
+        rm -f $TMP 2>/dev/null
+    }" EXIT                          # Clear temporary file on exit.
+}
+
+
+check_pid () {
+# Check if process exists.
+    if [ -s "$PID_FILE" ]; then
+        echo "PID file exists. Checking ..."
+        PID=$(/bin/egrep -o "^[[:digit:]]+" $PID_FILE)
+        if /bin/ps --pid $PID &>/dev/null; then
+            echo "Process $PID found. ${0##*/} seems to be running!"
+           /usr/bin/logger -t ${0##*/} \
+                 "Process $PID found. ${0##*/} seems to be running!"
+            exit $E_RETURN
+        fi
+        echo "Process $PID not found. Start new process . . ."
+    fi
+}
+
+
+#  Set overall file update range starting from root or $URL,
+#+ according to above patterns.
+set_range () {
+    include=
+    exclude=
+    for p in "${INCLUDE[@]}"; do
+        include="$include --include \"$p\""
+    done
+
+    for p in "${EXCLUDE[@]}"; do
+        exclude="$exclude --exclude \"$p\""
+    done
+}
+
+
+# Retrieve and refine rsync update list.
+get_list () {
+    echo $$ > $PID_FILE || {
+        echo "Can't write to pid file $PID_FILE"
+        exit $E_RETURN
+    }
+
+    echo -n "Retrieving and refining update list . . ."
+
+    # Retrieve list -- 'eval' is needed to run rsync as a single command.
+    # $3 and $4 is the date and time of file creation.
+    # $5 is the full package name.
+    previous=
+    pre_file=
+    pre_date=0
+    eval /bin/nice /usr/bin/rsync \
+        -r $include $exclude $URL | \
+        egrep '^dr.x|^-r' | \
+        awk '{print $3, $4, $5}' | \
+        sort -k3 | \
+        { while read line; do
+            # Get seconds since epoch, to filter out obsolete pkgs.
+            cur_date=$(date -d "$(echo $line | awk '{print $1, $2}')" +%s)
+            #  echo $cur_date
+
+            # Get file name.
+            cur_file=$(echo $line | awk '{print $3}')
+            #  echo $cur_file
+
+            # Get rpm pkg name from file name, if possible.
+            if [[ $cur_file == *rpm ]]; then
+                pkg_name=$(echo $cur_file | sed -r -e \
+                    's/(^([^_-]+[_-])+)[[:digit:]]+\..*[_-].*$/\1/')
+            else
+                pkg_name=
+            fi
+            # echo $pkg_name
+
+            if [ -z "$pkg_name" ]; then   #  If not a rpm file,
+                echo $cur_file >> $TMP    #+ then append to download list.
+            elif [ "$pkg_name" != "$previous" ]; then   # A new pkg found.
+                echo $pre_file >> $TMP                  # Output latest file.
+                previous=$pkg_name                      # Save current.
+                pre_date=$cur_date
+                pre_file=$cur_file
+            elif [ "$cur_date" -gt "$pre_date" ]; then
+                                                #  If same pkg, but newer,
+                pre_date=$cur_date              #+ then update latest pointer.
+                pre_file=$cur_file
+            fi
+            done
+            echo $pre_file >> $TMP              #  TMP contains ALL
+                                                #+ of refined list now.
+            # echo "subshell=$BASH_SUBSHELL"
+
+    }       # Bracket required here to let final "echo $pre_file >> $TMP" 
+            # Remained in the same subshell ( 1 ) with the entire loop.
+
+    RET=$?  # Get return code of the pipe command.
+
+    [ "$RET" -ne 0 ] && {
+        echo "List retrieving failed with code $RET"
+        exit $E_RETURN
+    }
+
+    echo "done"; echo
+}
+
+# Real rsync download part.
+get_file () {
+
+    echo "Downloading..."
+    /bin/nice /usr/bin/rsync \
+        $OPTS \
+        --filter "merge,+/ $TMP" \
+        --exclude '*'  \
+        $URL $DEST     \
+        | /usr/bin/tee $LOG
+
+    RET=$?
+
+   #  --filter merge,+/ is crucial for the intention. 
+   #  + modifier means include and / means absolute path.
+   #  Then sorted list in $TMP will contain ascending dir name and 
+   #+ prevent the following --exclude '*' from "shortcutting the circuit." 
+
+    echo "Done"
+
+    rm -f $PID_FILE 2>/dev/null
+
+    return $RET
+}
+
+# -------
+# Main
+init
+check_pid
+set_range
+get_list
+get_file
+RET=$?
+# -------
+
+if [ "$RET" -eq 0 ]; then
+    /usr/bin/logger -t ${0##*/} "Fedora update mirrored successfully."
+else
+    /usr/bin/logger -t ${0##*/} \
+    "Fedora update mirrored with failure code: $RET"
+fi
+
+exit $RET
+```
+
+Frank Wang's script builds its `--include`/`--exclude` options as one
+string with embedded quotes, which then needs `eval`; in tessh they're a
+list, one argument per item, and the patterns are never globbed because
+they're quoted text. The listing is captured, its exit status checked (no
+`pipefail` needed), and refined in Python: `.split` instead of `awk`, a
+regex instead of `sed`, `datetime.strptime` instead of `date -d`, and a
+dict of the newest file per package instead of a sorted pass with
+`previous` and `pre_date`. `try`/`finally` removes the temporary and PID
+files, as bash's `trap … EXIT` does. It needs the mirror, so it doesn't run
+here.
+
+```tessh no-run
+# fc4upd.tsh
+# After Frank Wang's fc4upd.sh.
+#  Download Fedora Core 4 update from mirror site using rsync.
+#  Only download latest package if multiple versions exist, to save space.
+import os tempfile
+from datetime import datetime
+
+URL = rsync://distro.ibiblio.org/fedora-linux-core/updates/
+ME = (Path $argv[0]).name
+DEST = if $argv[1:] then $argv[1] else /var/www/html/fedora/updates/
+LOG = Path "/tmp/repo-update-$(((datetime.now).date)).txt"
+PID_FILE = Path "/var/run/$ME.pid"
+
+E_RETURN = 85        # Something unexpected happened.
+
+# General rsync options: recursive, keep times, verbose . . .
+OPTS = [-rtv --delete-excluded --delete-after --partial]
+
+# rsync include and exclude patterns (a leading slash anchors the path).
+INCLUDE = ["/4/i386/kde-i18n-Chinese*"]
+EXCLUDE = [
+  /1 /2 /3 /testing /4/SRPMS /4/ppc /4/x86_64 /4/i386/debug
+  "/4/i386/kde-i18n-*"
+  "/4/i386/openoffice.org-langpack-*"
+  "/4/i386/*i586.rpm"
+  "/4/i386/GFS-*" "/4/i386/cman-*" "/4/i386/dlm-*" "/4/i386/gnbd-*"
+  "/4/i386/kernel-smp*"
+]
+
+# Check if process exists.
+def check_pid
+  if ($PID_FILE.exists) and ($PID_FILE.stat).st_size > 0
+    print "PID file exists. Checking ..."
+    PID = (($PID_FILE.read_text).split)[0]
+    if ps --pid $PID &>/dev/null
+      print "Process $PID found. $ME seems to be running!"
+      logger -t $ME "Process $PID found. $ME seems to be running!"
+      exit $E_RETURN
+    print "Process $PID not found. Start new process . . ."
+
+# Set overall file update range, according to above patterns:
+# the rsync options, one argument each (no quotes inside, no eval).
+def set_range
+  opts = []
+  for p in $INCLUDE
+    $opts.extend [--include $p]
+  for p in $EXCLUDE
+    $opts.extend [--exclude $p]
+  $opts
+
+# Retrieve and refine rsync update list: the newest file of each package.
+def get_list tmp
+  try
+    $PID_FILE.write_text "$(os.getpid)\n"
+  except OSError
+    print "Can't write to pid file $PID_FILE"
+    exit $E_RETURN
+
+  print "Retrieving and refining update list . . ." end=""
+  listing = nice rsync -r *(set_range) $URL
+  if $listing.code != 0
+    print "List retrieving failed with code $listing.code"
+    exit $E_RETURN
+
+  newest = {}      # package name -> [date file]
+  others = []      # files that aren't rpms
+  for line in $listing.lines
+    if $line !~ re'^dr.x|^-r'
+      continue
+    [_ _ day time cur_file] = ($line.split)
+    cur_date = datetime.strptime "$day $time" "%Y/%m/%d %H:%M:%S"
+    # Get rpm pkg name from file name, if possible.
+    m = $cur_file =~ re'^((?:[^_-]+[_-])+)\d+\..*[_-].*\.rpm$'
+    if not $m
+      $others.append $cur_file
+    elif ($m.group 1) not in $newest or $cur_date > $newest[($m.group 1)][0]
+      $newest[($m.group 1)] = [$cur_date $cur_file]
+  files = sorted ($others + [$f for [_ f] in ($newest.values)])
+  (Path $tmp).write_text (("\n".join $files) + "\n")
+  print "done" ; print
+
+# Real rsync download part.
+def get_file tmp
+  print "Downloading..."
+  nice rsync *$OPTS --filter "merge,+/ $tmp" --exclude '*' $URL $DEST | tee $LOG
+  RET = $?
+  print "Done"
+  $PID_FILE.unlink missing_ok=True
+  $RET
+
+# -------
+# Main
+[fd tmp] = tempfile.mkstemp prefix="$ME."
+try
+  check_pid
+  get_list $tmp
+  RET = get_file $tmp
+finally
+  os.unlink $tmp        # Clear temporary file on exit.
+# -------
+
+if $RET == 0
+  logger -t $ME "Fedora update mirrored successfully."
+else
+  logger -t $ME "Fedora update mirrored with failure code: $RET"
+
+exit $RET
+```
+
+`ssh` runs a command on another machine, `scp` copies files to and from it.
+In a loop, `ssh` reads the loop's stdin unless given `-n`.
+
+### Example 16-44. Using `ssh` (`remote.bash`)
+
+```bash no-run
+#!/bin/bash
+# remote.bash: Using ssh.
+
+# This example by Michael Zick.
+# Used with permission.
+
+
+#   Presumptions:
+#   ------------
+#   fd-2 isn't being captured ( '2>/dev/null' ).
+#   ssh/sshd presumes stderr ('2') will display to user.
+#
+#   sshd is running on your machine.
+#   For any 'standard' distribution, it probably is,
+#+  and without any funky ssh-keygen having been done.
+
+# Try ssh to your machine from the command-line:
+#
+# $ ssh $HOSTNAME
+# Without extra set-up you'll be asked for your password.
+#   enter password
+#   when done,  $ exit
+#
+# Did that work? If so, you're ready for more fun.
+
+# Try ssh to your machine as 'root':
+#
+#   $  ssh -l root $HOSTNAME
+#   When asked for password, enter root's, not yours.
+#          Last login: Tue Aug 10 20:25:49 2004 from localhost.localdomain
+#   Enter 'exit' when done.
+
+#  The above gives you an interactive shell.
+#  It is possible for sshd to be set up in a 'single command' mode,
+#+ but that is beyond the scope of this example.
+#  The only thing to note is that the following will work in
+#+ 'single command' mode.
+
+
+# A basic, write stdout (local) command.
+
+ls -l
+
+# Now the same basic command on a remote machine.
+# Pass a different 'USERNAME' 'HOSTNAME' if desired:
+USER=${USERNAME:-$(whoami)}
+HOST=${HOSTNAME:-$(hostname)}
+
+#  Now excute the above command-line on the remote host,
+#+ with all transmissions encrypted.
+
+ssh -l ${USER} ${HOST} " ls -l "
+
+#  The expected result is a listing of your username's home
+#+ directory on the remote machine.
+#  To see any difference, run this script from somewhere
+#+ other than your home directory.
+
+#  In other words, the Bash command is passed as a quoted line
+#+ to the remote shell, which executes it on the remote machine.
+#  In this case, sshd does  ' bash -c "ls -l" '   on your behalf.
+
+#  For information on topics such as not having to enter a
+#+ password/passphrase for every command-line, see
+#+    man ssh
+#+    man ssh-keygen
+#+    man sshd_config.
+
+exit 0
+```
+
+`${USERNAME:-$(whoami)}` is "the environment variable, else the command's
+output": `$env.get` with a default does it. It needs an `ssh` server, so it
+doesn't run here.
+
+```tessh no-run
+# remote.tsh: Using ssh.
+# After Michael Zick's remote.bash.
+import getpass socket
+
+# A basic, write stdout (local) command.
+ls -l
+
+# Now the same basic command on a remote machine.
+# Pass a different USERNAME or HOSTNAME in the environment if desired:
+USER = $env.get USERNAME (getpass.getuser)
+HOST = $env.get HOSTNAME (socket.gethostname)
+
+#  Now execute the above command-line on the remote host,
+#+ with all transmissions encrypted.
+ssh -l $USER $HOST " ls -l "
+
+exit 0
+```
+
+`write` sends lines to another user's terminal; `mail` sends mail from a
+script.
+
+### Example 16-45. A script that mails itself (`self-mailer.sh`)
+
+```bash no-run
+#!/bin/sh
+# self-mailer.sh: Self-mailing script
+
+adr=${1:-`whoami`}     # Default to current user, if not specified.
+#  Typing 'self-mailer.sh wiseguy@superdupergenius.com'
+#+ sends this script to that addressee.
+#  Just 'self-mailer.sh' (no argument) sends the script
+#+ to the person invoking it, for example, bozo@localhost.localdomain.
+#
+#  For more on the ${parameter:-default} construct,
+#+ see the "Parameter Substitution" section
+#+ of the "Variables Revisited" chapter.
+
+# ============================================================================
+  cat $0 | mail -s "Script \"`basename $0`\" has mailed itself to you." "$adr"
+# ============================================================================
+
+# --------------------------------------------
+#  Greetings from the self-mailing script.
+#  A mischievous person has run this script,
+#+ which has caused it to mail itself to you.
+#  Apparently, some people have nothing better
+#+ to do with their time.
+# --------------------------------------------
+
+echo "At `date`, script \"`basename $0`\" mailed to "$adr"."
+
+exit 0
+
+#  Note that the "mailx" command (in "send" mode) may be substituted
+#+ for "mail" ... but with somewhat different options.
+```
+
+It sends mail, so it doesn't run here. The script reads itself from
+`$argv[0]` and pipes it to `mail`; the user name comes from `getpass`
+rather than a `whoami` process.
+
+```tessh no-run
+# self-mailer.tsh: Self-mailing script
+import getpass datetime
+
+adr = if $argv[1:] then $argv[1] else (getpass.getuser)  # Default to current user.
+name = (Path $argv[0]).name
+
+# ============================================================================
+cat $argv[0] | mail -s "Script \"$name\" has mailed itself to you." $adr
+# ============================================================================
+
+# --------------------------------------------
+#  Greetings from the self-mailing script.
+#  A mischievous person has run this script,
+#+ which has caused it to mail itself to you.
+# --------------------------------------------
+
+print "At $(((datetime.datetime.now).ctime)), script \"$name\" mailed to $adr."
+exit 0
+```
+
+`mailto` sends MIME mail, `mailstats` shows the mail server's statistics,
+and `vacation` answers mail while you're away. Python's `smtplib` and
+`email` modules send mail directly from a script.
