@@ -18,7 +18,27 @@ Item {
     property string startDir: ""
     property bool flagAll: false        // ls -a
     property bool flagLong: false       // ls -l
-    property string onlyName: ""        // ls -d: just this entry of the folder (the folder itself)
+    // (Which of the folder's entries an ls shows, when not all: names given
+    // (ls a b, ls -d x), patterns (ls *.txt, as regexes), ls -I/--hide/-B's
+    // patterns to leave out, and folders left out (they get panes of their
+    // own: ls a dir).)
+    property var onlyNames: []
+    property var namePatterns: []
+    property var ignorePatterns: []
+    property bool hideDirs: false
+    property bool collapseEmpty: false  // (nothing left: no room taken, not even "(empty)")
+    function picked(x) {
+        if (onlyNames.length === 0 && namePatterns.length === 0) return true
+        if (onlyNames.indexOf(x.name) >= 0) return true
+        return namePatterns.some(p => new RegExp(p).test(x.name))
+    }
+    function shown(x) {
+        return picked(x) && !ignorePatterns.some(p => new RegExp(p).test(x.name))
+    }
+    // The folders an ls names here (ls a dir, ls *): each gets a pane.
+    readonly property var matchedDirs: raw.filter(x => x.dir && (onlyNames.length > 0 || namePatterns.length > 0) && shown(x)).map(x => x.path)
+    // (ls -R: the folders in it, each a pane after it.)
+    readonly property var subDirs: raw.filter(x => x.dir && shown(x) && (showHidden || !x.name.startsWith("."))).map(x => x.path)
     // ls's order: "date" (-t), "size" (-S), "type" (-X), "none" (-U), or "" (by
     // name); flagReverse: -r. Given, they're the card's, over the last choice.
     property string flagSort: ""
@@ -100,7 +120,7 @@ Item {
     onShowHiddenChanged: list()
     onControllerChanged: list()
     readonly property var entries: {
-        const a = onlyName === "" ? raw.slice() : raw.filter(x => x.name === onlyName)
+        const a = raw.filter(x => shown(x) && !(hideDirs && x.dir))
         const name = (x) => x.name.toLowerCase().replace(/^\./, "")
         const cmp = {
             name: (x, y) => name(x).localeCompare(name(y), undefined, { numeric: true }),
@@ -183,7 +203,8 @@ Item {
                                 : view === "details" ? entries.length * row
                                 : view === "tiles" ? Math.ceil(entries.length / tileCols) * (tileW + 24)
                                 : grid.rows * row
-    implicitHeight: headerH + bodyH + 8
+    implicitHeight: collapseEmpty && listed && entries.length === 0 ? 0 : headerH + bodyH + 8
+    visible: !(collapseEmpty && listed && entries.length === 0)
 
     property string selected: ""        // a path
     property double entryTapAt: 0       // an entry was just clicked (not the space around them)

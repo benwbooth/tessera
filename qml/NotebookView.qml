@@ -1753,27 +1753,112 @@ FocusScope {
         // none), and only these options. Any other (-R, -d, -i, -s, -F, two
         // folders, ...): ls's own output, as it printed it.)
         // (ls an alias of lsd, eza or exa counts too: what it lists is the same.)
-        if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && lsViewable(sw.slice(1))) return "files"
+        if (["ls", "ll", "la", "l", "lsd", "eza", "exa", "dir"].indexOf(first) >= 0 && lsPlan(sw.slice(1), "/", "/") !== null) return "files"
         // (cd, then the folder it went to: any cd, its own options and all.)
         if (["cd", "pushd", "popd", "z", "zi"].indexOf(w[0]) >= 0) return "files"
         if ((first === "env" || first === "printenv") && w.length === 1) return "env"
         if (c === "export" || c === "export -p" || c === "declare -x" || c === "typeset -x") return "env"
         return ""
     }
-    function lsViewable(args) {
-        const shortOk = /^-[aAlh1tSXUfrd]+$/
-        const longOk = ["--directory", "--all", "--almost-all", "--human-readable", "--reverse", "--group-directories-first", "--color", "--color=auto", "--color=always", "--color=never"]
-        let paths = 0
-        for (const x of args) {
-            const a = x.text
-            if (a === "--") continue
-            if (a.startsWith("--")) { if (longOk.indexOf(a) < 0 && !/^--sort=(time|size|extension|none|name)$/.test(a)) return false; continue }
-            if (a.startsWith("-") && a !== "-") { if (!shortOk.test(a)) return false; continue }
-            // (A pattern (ls *, ls *.txt): the names it matched, as ls shows them.)
-            if (x.glob) return false
-            if (++paths > 1) return false
+    // An ls (its words after the name, as shellWords gives them) as the
+    // folder view shows it: flags, and the panes. null: something the view
+    // can't (--help, a pattern in a folder's name).
+    //   single: one folder, its contents (ls, ls dir)
+    //   groups: [{dir, names, patterns}] — entries picked from a folder
+    //           (ls a b, ls *.txt, ls -d x); their folders get panes of
+    //           their own after them (unless -d)
+    function lsPlan(args, base, home) {
+        const o = { all: false, long: false, sort: "", reverse: false, foldersFirst: false, selfOnly: false, recursive: false, ignore: [], operands: [] }
+        let opts = true
+        const sortOf = { t: "date", S: "size", X: "type", U: "none", f: "none", v: "", c: "date", u: "date" }
+        for (let i = 0; i < args.length; ++i) {
+            const w = args[i], a = w.text
+            if (opts && a === "--") { opts = false; continue }
+            if (opts && a.startsWith("--") && a.length > 2) {
+                const [k, v] = a.indexOf("=") > 0 ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, null]
+                if (k === "--help" || k === "--version") return null
+                if (k === "--all" || k === "--almost-all") o.all = true
+                else if (k === "--directory") o.selfOnly = true
+                else if (k === "--recursive") o.recursive = true
+                else if (k === "--reverse") o.reverse = true
+                else if (k === "--group-directories-first") o.foldersFirst = true
+                else if (k === "--ignore-backups") o.ignore.push("~$")
+                else if (k === "--ignore" || k === "--hide") { const pat = v !== null ? v : (args[++i] || {}).text; if (pat) o.ignore.push(globRegex(pat)) }
+                else if (k === "--sort") { const m = { time: "date", size: "size", extension: "type", none: "none", name: "", version: "", width: "" }; if (v in m) o.sort = m[v] }
+                else if (k === "--format") o.long = v === "long" || v === "verbose"
+                else if (k === "--full-time") o.long = true
+                else if (["--width", "--tabsize", "--time", "--time-style", "--block-size", "--quoting-style", "--indicator-style"].indexOf(k) >= 0 && v === null) ++i
+                continue
+            }
+            if (opts && a.startsWith("-") && a.length > 1) {
+                for (let j = 1; j < a.length; ++j) {
+                    const c = a[j]
+                    if (c === "a" || c === "A") o.all = true
+                    else if ("lgon".indexOf(c) >= 0) o.long = true
+                    else if ("1Cxm".indexOf(c) >= 0) o.long = false
+                    else if (c === "d") o.selfOnly = true
+                    else if (c === "R") o.recursive = true
+                    else if (c === "r") o.reverse = true
+                    else if (c === "B") o.ignore.push("~$")
+                    else if (c in sortOf && (c !== "c" && c !== "u" || /t/.test(a))) { o.sort = sortOf[c]; if (c === "f") o.all = true }
+                    else if (c === "I" || c === "T" || c === "w") {
+                        const rest = a.slice(j + 1), val = rest !== "" ? rest : (args[++i] || {}).text
+                        if (c === "I" && val) o.ignore.push(globRegex(val))
+                        break
+                    }
+                }
+                continue
+            }
+            o.operands.push(w)
         }
-        return true
+        const abs = (t) => {
+            const p = t.replace(/^~(?=\/|$)/, home)
+            return ((p.startsWith("/") ? p : base + "/" + p).replace(/\/+$/, "")) || "/"
+        }
+        const parentOf = (p) => p.replace(/\/[^\/]*$/, "") || "/"
+        const nameOf = (p) => p.replace(/^.*\//, "")
+        o.single = ""
+        o.groups = []
+        o.headers = o.recursive
+        if (o.operands.length === 0) {
+            if (o.selfOnly && base !== "/") o.groups = [{ dir: parentOf(base), names: [nameOf(base)], patterns: [] }]
+            else o.single = base
+            return o
+        }
+        if (o.operands.length === 1 && !o.operands[0].glob && !o.selfOnly) { o.single = abs(o.operands[0].text); return o }
+        const by = {}
+        for (const w of o.operands) {
+            const p = abs(w.text)
+            if (p === "/") { if (o.selfOnly) return null; o.groups.push({ dir: "/", names: [], patterns: [".*"], all: true }); continue }
+            const dir = parentOf(p), name = nameOf(p)
+            if (w.glob && /[*?\[]/.test(dir.replace(base, ""))) return null   // (a pattern in a folder's name)
+            const g = by[dir] || (by[dir] = { dir: dir, names: [], patterns: [] })
+            if (w.glob) g.patterns.push(globRegex(name)); else g.names.push(name)
+            if (name.startsWith(".")) g.all = true
+        }
+        for (const d in by) o.groups.push(by[d])
+        o.headers = o.recursive || o.operands.length > 1 || o.operands.some(w => w.glob)
+        return o
+    }
+    // A shell pattern (*.txt, ?, [a-c]) as a regex for one name; * and ?
+    // don't match a leading dot, as in the shell.
+    function globRegex(g) {
+        let r = "^" + (g.startsWith(".") ? "" : "(?!\\.)")
+        for (let i = 0; i < g.length; ++i) {
+            const c = g[i]
+            if (c === "*") r += ".*"
+            else if (c === "?") r += "."
+            else if (c === "[") {
+                const j = g.indexOf("]", i + 2)
+                if (j < 0) { r += "\\["; continue }
+                let body = g.slice(i + 1, j)
+                if (body[0] === "!" || body[0] === "^") body = "^" + body.slice(1)
+                r += "[" + body.replace(/\\/g, "\\\\") + "]"
+                i = j
+            }
+            else r += c.replace(/[.+^${}()|\\\/]/g, "\\$&")
+        }
+        return r + "$"
     }
     // (Where a cd took the shell: the folder the next card started in, or the
     // shell's own if it's the last; cd's options, ~user and CDPATH included.)
@@ -3810,60 +3895,108 @@ FocusScope {
     function localPath(p) { let x = (p || "").replace(/^file:\/\/[^/]*/, ""); try { x = decodeURIComponent(x) } catch (e) {} return x }
     function termEditorName(e) { return e === "" ? "your $EDITOR" : ({ vim: "Vim", nvim: "Neovim", "emacs -nw": "Emacs", hx: "Helix", kak: "Kakoune" })[e] || e }
     function shq(s) { return /^[A-Za-z0-9_\/.~+:@-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'" }
+    // A folder view pane of an ls card: the card's flags and choices.
+    component LsPane: FileBrowser {
+        property var card: null
+        readonly property var plan: card ? card.plan : ({})
+        controller: nb.controller
+        themeData: nb.themeData
+        fontFamily: nb.fontFamily
+        pointSize: nb.outputPointSize
+        rowHeight: nb.outputRow > 0 ? nb.outputRow : 18
+        flagAll: !!plan.all
+        flagLong: !!plan.long
+        flagSort: plan.sort || ""
+        flagReverse: !!plan.reverse
+        flagFoldersFirst: !!plan.foldersFirst
+        ignorePatterns: plan.ignore || []
+        refresh: card && card.src.tick ? card.src.tick.length : 0
+        kept: card ? (nb.fileViews[card.src.cid] || null) : null
+        onKeptChanged2: (c) => { if (!card) return; const m = Object.assign({}, nb.fileViews); m[card.src.cid] = c; nb.fileViews = m; nb.touch() }
+        onCommandRequested: (c) => nb.commandRequested(c)
+        onInsertRequested: (t) => nb.insertRequested(t)
+        onViewRequested: (p) => nb.viewRequested(p)
+        onFileCardRequested: (p) => nb.addFileCard(p)
+        onListedChanged: if (listed && card) card.listed = true
+    }
     Component {
         id: filesView
-        FileBrowser {
+        // An ls or cd card, as ls shows it: the entries named (ls a.txt b,
+        // ls *.txt, ls -d x), then a pane for each folder (ls a b, ls *),
+        // headed "name:" when there's more than one, and with -R every
+        // folder under them too.
+        Column {
+            id: lsc
             readonly property var src: parent
-            readonly property var words: nb.shellWords((src.command || "").trim()).map(x => x.text)
-            readonly property bool isCd: ["cd", "pushd", "popd", "z", "zi"].indexOf(words[0]) >= 0
-            readonly property var args: words.slice(1)
-            controller: nb.controller
-            themeData: nb.themeData
-            fontFamily: nb.fontFamily
-            pointSize: nb.outputPointSize
-            rowHeight: nb.outputRow > 0 ? nb.outputRow : 18
-            // (ls -d: the folder itself, as an entry of the one it's in.)
-            readonly property bool selfOnly: !isCd && args.some(a => /^-[a-zA-Z]*d/.test(a) || a === "--directory") && target !== "/"
-            readonly property string target: {
-                const base = nb.localPath(src.cwd) || nb.shellDir
-                const home = nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
-                const a = args.find(x => !x.startsWith("-") || x === "-")
-                if (!a) return base
-                const p = a.replace(/^['"]|['"]$/g, "").replace(/^~(?=\/|$)/, home)
-                return (p.startsWith("/") ? p : base + "/" + p).replace(/\/+$/, "") || "/"
-            }
-            onlyName: selfOnly ? target.replace(/^.*\//, "") : ""
-            flagAll: !isCd && (args.some(a => /^-[a-zA-Z]*[aA]/.test(a) || a === "--all" || a === "--almost-all") || onlyName.startsWith("."))
-            flagLong: !isCd && (args.some(a => /^-[a-zA-Z]*l/.test(a)) || /^(ll|la)$/.test(words[0]))
-            // (ls's order flags; the last one given wins, as in ls.)
-            readonly property string shortFlags: isCd ? "" : args.filter(a => /^-[a-zA-Z]+$/.test(a)).map(a => a.slice(1)).join("")
-            flagSort: {
-                if (isCd) return ""
-                let s = ""
-                for (const a of args) {
-                    const m = /^--sort=(\w+)$/.exec(a)
-                    if (m) s = ({ time: "date", size: "size", extension: "type", none: "none", name: "" })[m[1]] || s
-                    else if (/^-[a-zA-Z]+$/.test(a)) for (const c of a.slice(1)) s = ({ t: "date", S: "size", X: "type", U: "none", f: "none" })[c] || s
-                }
-                return s
-            }
-            flagReverse: !isCd && (/r/.test(shortFlags) || args.indexOf("--reverse") >= 0)
-            flagFoldersFirst: !isCd && args.indexOf("--group-directories-first") >= 0
-            startDir: {
-                const home = nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
+            width: parent ? parent.width : 0
+            readonly property var sw: nb.shellWords((src.command || "").trim())
+            readonly property bool isCd: sw.length > 0 && ["cd", "pushd", "popd", "z", "zi"].indexOf(sw[0].text) >= 0
+            readonly property string home: nb.controller ? (nb.sshHost !== "" ? nb.homeOn(nb.sshHost) : nb.controller.homeDir()) : "~"
+            readonly property string base: nb.localPath(src.cwd) || nb.shellDir
+            readonly property var plan: {
+                const plain = { single: base, groups: [], all: false, long: false, sort: "", reverse: false, foldersFirst: false, ignore: [], recursive: false, headers: false, selfOnly: false }
                 // (cd: where it went, as the shell has it.)
-                if (isCd) return nb.onHost(nb.cwdAfter(src.cid) || home)
-                // (ls -d: the folder it's in, showing just it.)
-                if (selfOnly) return nb.onHost(target.replace(/\/[^\/]*$/, "") || "/")
-                return nb.onHost(target)
+                if (isCd) return Object.assign(plain, { single: nb.cwdAfter(src.cid) || home })
+                const p = nb.lsPlan(sw.slice(1), base, home) || plain
+                if (sw.length > 0 && sw[0].text === "ll") p.long = true
+                if (sw.length > 0 && sw[0].text === "la") { p.long = true; p.all = true }
+                return p
             }
-            refresh: src.tick ? src.tick.length : 0
-            kept: nb.fileViews[src.cid] || null
-            onKeptChanged2: (c) => { const m = Object.assign({}, nb.fileViews); m[src.cid] = c; nb.fileViews = m; nb.touch() }
-            onCommandRequested: (c) => nb.commandRequested(c)
-            onInsertRequested: (t) => nb.insertRequested(t)
-            onViewRequested: (p) => nb.viewRequested(p)
-            onFileCardRequested: (p) => nb.addFileCard(p)
+            // (The folders shown whole, in order: -R puts each one's folders
+            // right after it, as ls does; at most 200.)
+            property var sections: []
+            property bool listed: false   // (a pane's folder read: the card can show)
+            function reset() { sections = plan.single !== "" ? [plan.single] : [] }
+            onPlanChanged: reset()
+            Component.onCompleted: reset()
+            function addAfter(after, dirs) {
+                if (dirs.length === 0) return
+                const s = sections.slice()
+                let at = after === "" ? s.length : s.indexOf(after) + 1
+                for (const d of dirs.slice().sort()) if (s.indexOf(d) < 0 && s.length < 200) s.splice(at++, 0, d)
+                if (s.length !== sections.length) sections = s
+            }
+            function label(d) {
+                const b = base.replace(/\/$/, "")
+                return (d === b ? "." : d.startsWith(b + "/") ? d.slice(b.length + 1) : d) + ":"
+            }
+            Repeater {
+                model: lsc.plan.groups
+                delegate: LsPane {
+                    required property var modelData
+                    card: lsc
+                    width: lsc.width
+                    startDir: nb.onHost(modelData.dir)
+                    onlyNames: modelData.names
+                    namePatterns: modelData.patterns
+                    flagAll: !!lsc.plan.all || !!modelData.all
+                    hideDirs: !lsc.plan.selfOnly
+                    collapseEmpty: !lsc.plan.selfOnly
+                    onMatchedDirsChanged: if (!lsc.plan.selfOnly) lsc.addAfter("", matchedDirs.map(nb.localPath))
+                }
+            }
+            Repeater {
+                model: lsc.sections
+                delegate: Column {
+                    required property var modelData
+                    width: lsc.width
+                    Text {
+                        visible: lsc.plan.headers
+                        topPadding: 6.001
+                        text: lsc.label(modelData)
+                        color: Theme.textDim
+                        font.family: nb.fontFamily
+                        font.pointSize: nb.outputPointSize
+                        renderType: Text.NativeRendering
+                    }
+                    LsPane {
+                        card: lsc
+                        width: lsc.width
+                        startDir: nb.onHost(modelData)
+                        onSubDirsChanged: if (lsc.plan.recursive) lsc.addAfter(modelData, subDirs.map(nb.localPath))
+                    }
+                }
+            }
         }
     }
 
