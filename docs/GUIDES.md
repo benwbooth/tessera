@@ -46,6 +46,15 @@ Files no guide uses any more are removed.
 words in every kept guide: the hits under each guide's title, with the
 heading they're under; one opens that guide at the words.
 
+Sources can be HTML pages, Markdown (and MDX), reStructuredText or
+Gemtext; MkDocs `--8<--` snippets, .NET `[!code-...]` includes and GitHub
+Docs' `{% data %}` names are filled in from their repositories.
+
+Languages with no guide: `comment` and `log` (not languages), `cpon`,
+`lpf` and `xtc` (no documentation found), `t32` (Lauterbach's manuals are
+PDFs behind their site), `mail` and `pem` (their RFCs are plain text that
+doesn't make a guide).
+
 Why fetched and not bundled: together the documents are tens of megabytes,
 and their licenses differ (GNU FDL, CC BY-SA, and some that allow reading
 but not redistribution). Fetched on the reader's own machine, nothing is
@@ -201,6 +210,96 @@ The sources are in `src/guides.rs` (`GUIDES`). To check them all:
 | ledger | [Ledger 3 manual](https://www.ledger-cli.org/3.0/doc/ledger3.html) | [BSD-3-Clause (Ledger)](https://github.com/ledger/ledger/blob/master/LICENSE.md) |
 | pest | [pest: Grammar syntax](https://raw.githubusercontent.com/pest-parser/book/master/src/grammars/syntax.md) | [MIT or Apache-2.0](https://github.com/pest-parser/book) |
 | mojo | [Mojo Manual](https://docs.modular.com/mojo/manual/basics) | [© Modular; read from the site, not redistributed](https://docs.modular.com/) |
+| move | [The Move Book](https://move-book.com/) | [CC BY 4.0](https://github.com/MystenLabs/move-book) |
+| prisma | [Prisma schema](https://www.prisma.io/docs/orm/prisma-schema/overview) | [Apache-2.0](https://github.com/prisma/docs/blob/main/LICENSE) |
+| robot | [Robot Framework User Guide](https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html) | [CC BY 3.0](https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html) |
+| vala | [Vala programming language tutorial](https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/01-00-first-program.md) | [CC BY-SA 4.0](https://github.com/vala-lang/vala-docs) |
+| teal | [The Teal language guide](https://raw.githubusercontent.com/teal-language/tl/master/docs/src/tutorial.md) | [MIT](https://github.com/teal-language/tl/blob/master/LICENSE) |
+| typespec | [TypeSpec language basics](https://typespec.io/docs/language-basics/overview/) | [MIT](https://github.com/microsoft/typespec/blob/main/LICENSE) |
+| slint | [Slint language reference](https://docs.slint.dev/latest/docs/slint/) | [© SixtyFPS; read from the site, not redistributed](https://slint.dev/) |
+| unison | [A tour of Unison](https://www.unison-lang.org/docs/tour/) | [MIT](https://github.com/unisonweb/website) |
+| ponylang | [The Pony Tutorial](https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/getting-started/what-you-need.md) | [BSD-2-Clause](https://github.com/ponylang/pony-tutorial/blob/main/LICENSE) |
+| wren | [Wren language guide](https://wren.io/syntax.html) | [MIT](https://github.com/wren-lang/wren/blob/main/LICENSE) |
+| gren | [The Gren Book](https://gren-lang.org/book/) | [BSD-3-Clause](https://github.com/gren-lang/gren-lang.org) |
+| hoon | [Hoon (Urbit docs)](https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/basic.md) | [MIT](https://github.com/urbit/docs.urbit.org) |
+| sway | [The Sway language (Fuel)](https://docs.fuel.network/docs/sway/) | [Apache-2.0](https://github.com/FuelLabs/sway/blob/master/LICENSE) |
+| circom | [The circom language](https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/signals.md) | [GPL-3.0](https://github.com/iden3/circom/blob/master/COPYING) |
+| clarity | [Clarity functions reference (Stacks)](https://docs.stacks.co/reference/functions) | [© Stacks; read from the site, not redistributed](https://docs.stacks.co/) |
+| tact | [The Tact Book](https://docs.tact-lang.org/book/) | [CC BY 4.0](https://github.com/tact-lang/tact-docs) |
+| quint | [The Quint language](https://quint-lang.org/docs/lang) | [Apache-2.0](https://github.com/informalsystems/quint/blob/main/LICENSE) |
+| alloy | [Alloy documentation: the language](https://alloy.readthedocs.io/en/latest/intro.html) | [MIT](https://github.com/AlloyTools/alloy) |
+| spade | [The Spade language](https://docs.spade-lang.org/print.html) | [EUPL-1.2](https://gitlab.com/spade-lang/spade-docs) |
+| slang | [Slang User Guide](https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/00-introduction.md) | [MIT or Apache-2.0](https://github.com/shader-slang/slang/blob/master/LICENSE) |
+| sourcepawn | [Introduction to SourcePawn](https://wiki.alliedmods.net/Introduction_to_SourcePawn_1.7) | [© AlliedModders; read from the site, not redistributed](https://wiki.alliedmods.net/) |
+| supercollider | [Getting Started With SuperCollider](https://doc.sccode.org/Tutorials/Getting-Started/00-Getting-Started-With-SC.html) | [CC BY-SA 4.0](https://github.com/supercollider/supercollider) |
+| opencl | [The OpenCL C Specification](https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_C.html) | [© Khronos Group; read from the site, not redistributed](https://registry.khronos.org/OpenCL/) |
+| ink | [Writing with Ink](https://raw.githubusercontent.com/inkle/ink/master/Documentation/WritingWithInk.md) | [MIT](https://github.com/inkle/ink/blob/master/LICENSE.txt) |
+| bitbake | [BitBake User Manual: syntax and operators](https://docs.yoctoproject.org/bitbake/bitbake-user-manual/bitbake-user-manual-metadata.html) | [CC BY 2.5](https://docs.yoctoproject.org/bitbake/) |
+| snakemake | [Snakemake: Snakefiles and rules](https://snakemake.readthedocs.io/en/stable/snakefiles/rules.html) | [MIT](https://github.com/snakemake/snakemake/blob/main/LICENSE.md) |
+| earthfile | [Earthfile reference](https://raw.githubusercontent.com/earthly/earthly/main/docs/earthfile/earthfile.md) | [MPL-2.0](https://github.com/earthly/earthly/blob/main/LICENSE) |
+| gn | [GN Language and Operation](https://gn.googlesource.com/gn/+/main/docs/language.md) | [BSD-3-Clause](https://gn.googlesource.com/gn/+/main/LICENSE) |
+| ld | [GNU ld: Linker Scripts](https://sourceware.org/binutils/docs/ld/Scripts.html) | [GNU FDL 1.3](https://www.gnu.org/licenses/fdl-1.3.html) |
+| devicetree | [Devicetree Specification: source format](https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html) | [Apache-2.0](https://github.com/devicetree-org/devicetree-specification) |
+| hocon | [HOCON (Human-Optimized Config Object Notation)](https://raw.githubusercontent.com/lightbend/config/main/HOCON.md) | [Apache-2.0](https://github.com/lightbend/config/blob/main/LICENSE-2.0.txt) |
+| dbml | [DBML: Database Markup Language](https://dbml.dbdiagram.io/docs/) | [Apache-2.0](https://github.com/holistics/dbml/blob/master/LICENSE) |
+| wit | [The WIT format (Component Model)](https://component-model.bytecodealliance.org/design/wit.html) | [Apache-2.0](https://github.com/bytecodealliance/component-docs) |
+| tablegen | [TableGen Programmer's Reference](https://llvm.org/docs/TableGen/ProgRef.html) | [Apache-2.0 with LLVM Exception](https://llvm.org/LICENSE.txt) |
+| heex, eex | [EEx and HEEx templates](https://hexdocs.pm/eex/EEx.html) | [Apache-2.0 (Elixir) and MIT (Phoenix LiveView)](https://github.com/phoenixframework/phoenix_live_view/blob/main/LICENSE.md) |
+| htmldjango | [The Django template language](https://docs.djangoproject.com/en/stable/ref/templates/language/) | [BSD-3-Clause](https://github.com/django/django/blob/main/LICENSE) |
+| tera | [Tera templates](https://keats.github.io/tera/) | [MIT](https://github.com/Keats/tera/blob/master/LICENSE) |
+| templ | [templ syntax and usage](https://templ.guide/syntax-and-usage/basic-syntax) | [MIT](https://github.com/a-h/templ/blob/main/LICENSE) |
+| blade | [Laravel Blade templates](https://laravel.com/docs/12.x/blade) | [MIT](https://github.com/laravel/docs) |
+| glimmer | [Ember component templates](https://guides.emberjs.com/release/components/) | [MIT](https://github.com/ember-learn/guides-source/blob/master/LICENSE) |
+| markdoc | [Markdoc syntax](https://markdoc.dev/docs/syntax) | [MIT](https://github.com/markdoc/markdoc/blob/main/LICENSE) |
+| djot | [Djot syntax reference](https://raw.githubusercontent.com/jgm/djot/main/doc/syntax.md) | [MIT](https://github.com/jgm/djot/blob/main/LICENSE) |
+| bibtex | [BibTeX format explained](https://www.bibtex.com/g/bibtex-format/) | [© bibtex.com; read from the site, not redistributed](https://www.bibtex.com/) |
+| query | [Tree-sitter queries](https://tree-sitter.github.io/tree-sitter/using-parsers/queries/1-syntax.html) | [MIT](https://github.com/tree-sitter/tree-sitter/blob/master/LICENSE) |
+| rust-format-args | [Rust std::fmt (format strings)](https://doc.rust-lang.org/std/fmt/index.html) | [MIT or Apache-2.0](https://www.rust-lang.org/policies/licenses) |
+| embedded-template | [ERB templates (Ruby)](https://docs.ruby-lang.org/en/master/ERB.html) | [Ruby License or BSD-2-Clause](https://www.ruby-lang.org/en/about/license.txt) |
+| csv | [CSV (Python's csv module)](https://docs.python.org/3/library/csv.html) | [PSF License 2.0](https://docs.python.org/3/license.html) |
+| ini | [INI files (Python's configparser)](https://docs.python.org/3/library/configparser.html) | [PSF License 2.0](https://docs.python.org/3/license.html) |
+| properties | [Java .properties files](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Properties.html) | [© Oracle; read from the site, not redistributed](https://www.oracle.com/legal/copyright.html) |
+| po | [GNU gettext: The Format of PO Files](https://www.gnu.org/software/gettext/manual/gettext.html) | [GNU FDL 1.3](https://www.gnu.org/licenses/fdl-1.3.html) |
+| diff | [GNU diffutils: unified and context diffs](https://www.gnu.org/software/diffutils/manual/html_node/Unified-Format.html) | [GNU FDL 1.3](https://www.gnu.org/licenses/fdl-1.3.html) |
+| todotxt | [The todo.txt format](https://raw.githubusercontent.com/todotxt/todo.txt/master/README.md) | [GPL-3.0](https://github.com/todotxt/todo.txt) |
+| hosts | [Linux manual page: hosts(5)](https://man7.org/linux/man-pages/man5/hosts.5.html) | [See the page's colophon (man-pages project and upstream)](https://man7.org/linux/man-pages/) |
+| passwd | [Linux manual page: passwd(5)](https://man7.org/linux/man-pages/man5/passwd.5.html) | [See the page's colophon (man-pages project and upstream)](https://man7.org/linux/man-pages/) |
+| strace | [Linux manual page: strace(1)](https://man7.org/linux/man-pages/man1/strace.1.html) | [See the page's colophon (man-pages project and upstream)](https://man7.org/linux/man-pages/) |
+| sshclientconfig | [Linux manual page: ssh_config(5)](https://man7.org/linux/man-pages/man5/ssh_config.5.html) | [See the page's colophon (man-pages project and upstream)](https://man7.org/linux/man-pages/) |
+| debian | [Debian Policy: control files and their fields](https://www.debian.org/doc/debian-policy/ch-controlfields.html) | [GPL-2.0-or-later](https://www.debian.org/doc/debian-policy/) |
+| dunstrc | [dunst configuration](https://dunst-project.org/documentation/) | [BSD-3-Clause](https://github.com/dunst-project/dunst/blob/master/LICENSE) |
+| hyprlang | [Hyprland wiki: Configuring](https://wiki.hypr.land/configuring/) | [BSD-3-Clause](https://github.com/hyprwm/hyprland-wiki) |
+| ghostty | [Ghostty configuration](https://ghostty.org/docs/config) | [MIT](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) |
+| jjdescription | [Jujutsu tutorial](https://raw.githubusercontent.com/jj-vcs/jj/main/docs/tutorial.md) | [Apache-2.0](https://github.com/jj-vcs/jj/blob/main/LICENSE) |
+| gemini | [Gemtext](https://geminiprotocol.net/docs/gemtext.gmi) | [CC BY 4.0](https://geminiprotocol.net/) |
+| vhs | [VHS tapes](https://raw.githubusercontent.com/charmbracelet/vhs/main/README.md) | [MIT](https://github.com/charmbracelet/vhs/blob/main/LICENSE) |
+| task | [Task (Taskfile) guide](https://taskfile.dev/docs/guide) | [MIT](https://github.com/go-task/task/blob/main/LICENSE) |
+| xit | [[x]it! specification](https://raw.githubusercontent.com/jotaen/xit/main/Specification.md) | [CC0-1.0](https://github.com/jotaen/xit) |
+| textproto | [Protocol Buffers text format](https://raw.githubusercontent.com/protocolbuffers/protocolbuffers.github.io/main/content/reference/protobuf/textformat-spec.md) | [CC BY 4.0](https://github.com/protocolbuffers/protocolbuffers.github.io/blob/main/LICENSE) |
+| gpr | [GNAT Project Manager (GPR files)](https://docs.adacore.com/gprbuild-docs/html/gprbuild_ug/gnat_project_manager.html) | [GNU FDL 1.3](https://docs.adacore.com/) |
+| ungrammar | [Ungrammar](https://raw.githubusercontent.com/rust-analyzer/ungrammar/master/README.md) | [MIT or Apache-2.0](https://github.com/rust-analyzer/ungrammar) |
+| ohm | [Ohm syntax reference](https://ohmjs.org/docs/syntax-reference) | [MIT](https://github.com/ohmjs/ohm/blob/main/LICENSE) |
+| fidl | [FIDL language specification](https://fuchsia.dev/fuchsia-src/reference/fidl/language/language) | [CC BY 4.0](https://fuchsia.dev/) |
+| spicedb | [SpiceDB schema language](https://authzed.com/docs/spicedb/concepts/schema) | [Apache-2.0](https://github.com/authzed/docs) |
+| fga | [OpenFGA configuration language](https://openfga.dev/docs/configuration-language) | [Apache-2.0](https://github.com/openfga/openfga.dev) |
+| smali | [smali wiki](https://github.com/JesusFreke/smali/wiki/Registers) | [BSD-3-Clause](https://github.com/JesusFreke/smali) |
+| llvm-mir | [Machine IR (MIR) Format Reference](https://llvm.org/docs/MIRLangRef.html) | [Apache-2.0 with LLVM Exception](https://llvm.org/LICENSE.txt) |
+| cylc | [Cylc: workflow configuration](https://cylc.github.io/cylc-doc/stable/html/user-guide/writing-workflows/configuration.html) | [GPL-3.0](https://github.com/cylc/cylc-doc) |
+| edoc | [EDoc user's guide](https://www.erlang.org/doc/apps/edoc/chapter.html) | [Apache-2.0](https://www.erlang.org/) |
+| ldif | [LDIF: the LDAP Data Interchange Format](https://ldap.com/ldif-the-ldap-data-interchange-format/) | [© Ping Identity (ldap.com); read from the site, not redistributed](https://ldap.com/) |
+| adl | [ADL: the Algebraic Data Language](https://raw.githubusercontent.com/adl-lang/adl/master/docs/introduction.md) | [BSD-3-Clause](https://github.com/adl-lang/adl/blob/master/LICENSE) |
+| bass | [Bass](https://bass-lang.org/) | [MIT](https://github.com/vito/bass/blob/main/LICENSE) |
+| ql | [QL language reference (CodeQL)](https://codeql.github.com/docs/ql-language-reference/about-the-ql-language/) | [CC BY 4.0](https://github.com/github/codeql/blob/main/LICENSE) |
+| werk | [The Werk book](https://raw.githubusercontent.com/simonask/werk/main/book/src/introduction.md) | [MIT or Apache-2.0](https://github.com/simonask/werk) |
+| esdl | [Gel (EdgeDB) schema language](https://docs.geldata.com/reference/datamodel) | [Apache-2.0](https://github.com/geldata/gel/blob/master/LICENSE) |
+| dtd | [XML 1.0: document type declarations](https://www.w3.org/TR/xml/) | [W3C Document License](https://www.w3.org/copyright/document-license-2023/) |
+| pod | [perlpod: the Plain Old Documentation format](https://perldoc.perl.org/perlpod) | [Artistic License or GPL](https://perldoc.perl.org/perlartistic) |
+| blueprint | [Blueprint syntax reference](https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/index.rst) | [LGPL-3.0](https://gitlab.gnome.org/GNOME/blueprint-compiler) |
+| haskell-persistent | [Persistent (Yesod book)](https://www.yesodweb.com/book/persistent) | [CC BY 4.0](https://www.yesodweb.com/book) |
+| beancount | [Beancount language syntax](https://beancount.github.io/docs/beancount_language_syntax/) | [© Martin Blais; read from the site, not redistributed](https://beancount.github.io/) |
+| yuck | [eww configuration (yuck)](https://elkowar.github.io/eww/configuration.html) | [MIT](https://github.com/elkowar/eww/blob/master/LICENSE) |
+| vento | [Vento templates](https://vento.js.org/syntax/) | [MIT](https://github.com/ventojs/vento/blob/main/LICENSE) |
+| godot_resource | [Godot's TSCN scene file format](https://docs.godotengine.org/en/stable/engine_details/file_formats/tscn.html) | [CC BY 3.0](https://docs.godotengine.org/en/stable/about/license.html) |
 | json | [MDN: Working with JSON](https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/scripting/json/index.md) | [CC BY-SA 2.5](https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license) |
 | yaml, yml | [YAML 1.2.2 Specification](https://yaml.org/spec/1.2.2/) | [Free to copy (the YAML spec's own terms)](https://yaml.org/spec/1.2.2/) |
 | toml | [TOML v1.0.0](https://raw.githubusercontent.com/toml-lang/toml/1.0.0/toml.md) | [MIT](https://github.com/toml-lang/toml/blob/main/LICENSE) |

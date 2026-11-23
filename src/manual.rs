@@ -44,6 +44,8 @@ pub fn code_lang(info: &str, default: &str) -> String {
         "qml" => "qmljs",
         "caddy" => "caddyfile",
         "justfile" => "just",
+        "pony" => "ponylang",
+        "gjs" | "gts" | "hbs" | "handlebars" => "glimmer",
         "pl" | "perl5" => "perl",
         "text" | "txt" | "plain" | "plaintext" | "output" | "none" | "nohighlight" | "default" | "raw" => "",
         l => l,
@@ -80,6 +82,12 @@ fn slug(t: &str) -> String {
 /// document (`<main>`), headings with ids, code highlighted (tessh examples
 /// as `pre.tessh`, their output as `pre.output`).
 pub fn manual_html(md: &str, default_code: &str) -> String {
+    // ("!lang": blocks marked text are that language too, as some sites
+    // mark every block.)
+    let (text_too, default_code) = match default_code.strip_prefix('!') {
+        Some(d) => (true, d),
+        None => (false, default_code),
+    };
     use pulldown_cmark::{html, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_FOOTNOTES;
     // (Heading texts first, for ids and the contents.)
@@ -164,7 +172,7 @@ pub fn manual_html(md: &str, default_code: &str) -> String {
                 let block = match first {
                     "tessh" => format!("<pre class='tessh'><code>{}</code></pre>", crate::syntax::highlight_html("tessh", text)),
                     "output" => format!("<pre class='output'><code>{}</code></pre>", esc(text)),
-                    _ => match code_lang(first, default_code) {
+                    _ => match code_lang(if text_too && matches!(first, "text" | "txt" | "plain" | "none") { "" } else { first }, default_code) {
                         l if l.is_empty() => format!("<pre><code>{}</code></pre>", esc(text)),
                         l => format!("<pre class='code'><code>{}</code></pre>", crate::syntax::highlight_html(&l, text)),
                     },

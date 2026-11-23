@@ -927,6 +927,380 @@ pub static GUIDES: &[Guide] = &[
         "https://docs.modular.com/mojo/manual/errors",
         "https://docs.modular.com/mojo/manual/control-flow",
     ], "article, main", "mojo").drop("nav, aside, .theme-doc-toc-desktop, .pagination-nav, .theme-doc-breadcrumbs"),
+    gi(&["move"], "The Move Book", "CC BY 4.0", "https://github.com/MystenLabs/move-book", ("https://move-book.com/", ".VPSidebar a[href^='/'], nav a[href^='/']"), "main .vp-doc, main", "move").drop("nav, aside, .VPSidebar, .VPDocFooter, .VPLocalNav, header, footer"),
+    g(&["prisma"], "Prisma schema", "Apache-2.0", "https://github.com/prisma/docs/blob/main/LICENSE", &[
+        "https://www.prisma.io/docs/orm/prisma-schema/overview",
+        "https://www.prisma.io/docs/orm/prisma-schema/data-model/models",
+        "https://www.prisma.io/docs/orm/prisma-schema/data-model/relations",
+        "https://www.prisma.io/docs/orm/prisma-schema/data-model/indexes",
+        "https://www.prisma.io/docs/orm/prisma-schema/data-model/database-mapping",
+    ], "article, main", "prisma").drop("nav, aside, header, footer"),
+    g(&["robot"], "Robot Framework User Guide", "CC BY 3.0", "https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html", &["https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html"], "body", "robot").drop("#toc, .contents, #header, #footer"),
+    g(&["vala"], "Vala programming language tutorial", "CC BY-SA 4.0", "https://github.com/vala-lang/vala-docs", &[
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/01-00-first-program.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-01-source-files-and-compilation.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-02-syntax-overview.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-03-comments.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-04-data-types.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-05-operators.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-06-control-structures.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-07-language-elements.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-08-code-attributes.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-09-input-output.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/02-00-basics/02-10-format-strings.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-01-basics.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-02-construction.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-03-destruction.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-04-signals.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-05-properties.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-06-inheritance.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-07-abstract-classes.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-08-interfaces.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-09-polymorphism.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/03-00-object-oriented-programming/03-13-generics.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/04-00-advanced-features.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/04-00-advanced-features/04-02-error-handling.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/04-00-advanced-features/04-03-parameter-directions.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/04-00-advanced-features/04-04-collections.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/04-00-advanced-features/04-08-asynchronous-methods.md",
+        "https://raw.githubusercontent.com/vala-lang/vala-docs/main/docs/tutorials/main/04-00-advanced-features/04-10-ownership.md",
+    ], "", "vala"),
+    g(&["teal"], "The Teal language guide", "MIT", "https://github.com/teal-language/tl/blob/master/LICENSE", &[
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/tutorial.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/types_in_teal.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/local_variables.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/functions.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/arrays.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/tuples.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/maps.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/records.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/interfaces.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/generics.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/enums.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/union_types.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/the_type_any.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/variable_attributes.md",
+        "https://raw.githubusercontent.com/teal-language/tl/master/docs/src/using_tl_with_lua.md",
+    ], "", "teal"),
+    g(&["typespec"], "TypeSpec language basics", "MIT", "https://github.com/microsoft/typespec/blob/main/LICENSE", &[
+        "https://typespec.io/docs/language-basics/overview/",
+        "https://typespec.io/docs/language-basics/built-in-types/",
+        "https://typespec.io/docs/language-basics/identifiers/",
+        "https://typespec.io/docs/language-basics/imports/",
+        "https://typespec.io/docs/language-basics/namespaces/",
+        "https://typespec.io/docs/language-basics/decorators/",
+        "https://typespec.io/docs/language-basics/models/",
+        "https://typespec.io/docs/language-basics/operations/",
+        "https://typespec.io/docs/language-basics/interfaces/",
+        "https://typespec.io/docs/language-basics/templates/",
+        "https://typespec.io/docs/language-basics/enums/",
+        "https://typespec.io/docs/language-basics/unions/",
+        "https://typespec.io/docs/language-basics/scalars/",
+        "https://typespec.io/docs/language-basics/aliases/",
+        "https://typespec.io/docs/language-basics/values/",
+    ], "main article, main", "typespec").drop("nav, aside, header, footer"),
+    gi(&["slint"], "Slint language reference", "© SixtyFPS; read from the site, not redistributed", "https://slint.dev/", ("https://docs.slint.dev/latest/docs/slint/", "a[href*='/docs/slint/guide/language/'], a[href*='/docs/slint/reference/']"), "main article, main", "slint").drop("nav, aside, header, footer"),
+    g(&["unison"], "A tour of Unison", "MIT", "https://github.com/unisonweb/website", &["https://www.unison-lang.org/docs/tour/"], "main article, main", "unison").drop("nav, aside, header, footer"),
+    g(&["ponylang"], "The Pony Tutorial", "BSD-2-Clause", "https://github.com/ponylang/pony-tutorial/blob/main/LICENSE", &[
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/getting-started/what-you-need.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/getting-started/hello-world.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/getting-started/how-it-works.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/at-a-glance.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/classes.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/primitives.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/actors.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/traits-and-interfaces.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/structs.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/type-aliases.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/types/type-expressions.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/literals.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/variables.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/ops.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/arithmetic.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/control-structures.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/methods.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/errors.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/equality.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/sugar.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/object-literals.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/partial-application.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/match.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/expressions/as.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/reference-capabilities/reference-capabilities.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/reference-capabilities/guarantees.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/reference-capabilities/consume-and-destructive-read.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/reference-capabilities/recovering-capabilities.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/reference-capabilities/aliasing.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/reference-capabilities/passing-and-sharing.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/generics/index.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/generics/using-generics.md",
+        "https://raw.githubusercontent.com/ponylang/pony-tutorial/main/docs/modules/use-statement.md",
+    ], "", "ponylang"),
+    g(&["wren"], "Wren language guide", "MIT", "https://github.com/wren-lang/wren/blob/main/LICENSE", &[
+        "https://wren.io/syntax.html",
+        "https://wren.io/values.html",
+        "https://wren.io/lists.html",
+        "https://wren.io/maps.html",
+        "https://wren.io/method-calls.html",
+        "https://wren.io/control-flow.html",
+        "https://wren.io/variables.html",
+        "https://wren.io/functions.html",
+        "https://wren.io/classes.html",
+        "https://wren.io/concurrency.html",
+        "https://wren.io/error-handling.html",
+    ], "main", "wren").drop("nav, header, footer"),
+    gi(&["gren"], "The Gren Book", "BSD-3-Clause", "https://github.com/gren-lang/gren-lang.org", ("https://gren-lang.org/book/", "a[href^='/book/']"), "main, article", "gren").drop("nav, header, footer"),
+    g(&["hoon"], "Hoon (Urbit docs)", "MIT", "https://github.com/urbit/docs.urbit.org", &[
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/basic.md",
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/cheat-sheet.md",
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/advanced.md",
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/irregular.md",
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/auras.md",
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/aura-guide.md",
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/generators.md",
+        "https://raw.githubusercontent.com/urbit/docs.urbit.org/master/content/hoon/hoon-errors.md",
+    ], "", "hoon"),
+    gi(&["sway"], "The Sway language (Fuel)", "Apache-2.0", "https://github.com/FuelLabs/sway/blob/master/LICENSE", ("https://docs.fuel.network/docs/sway/", "a[href^='/docs/sway/basics/'], a[href^='/docs/sway/introduction/']"), "main article, main", "sway").drop("nav, aside, header, footer"),
+    g(&["circom"], "The circom language", "GPL-3.0", "https://github.com/iden3/circom/blob/master/COPYING", &[
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/signals.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/variables-and-mutability.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/constraint-generation.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/templates-and-components.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/control-flow.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/data-types.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/basic-operators.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/the-main-component.md",
+        "https://raw.githubusercontent.com/iden3/circom/master/mkdocs/docs/circom-language/include.md",
+    ], "", "circom"),
+    g(&["clarity"], "Clarity functions reference (Stacks)", "© Stacks; read from the site, not redistributed", "https://docs.stacks.co/", &["https://docs.stacks.co/reference/functions"], "main, article", "clarity").drop("nav, aside, header, footer"),
+    gi(&["tact"], "The Tact Book", "CC BY 4.0", "https://github.com/tact-lang/tact-docs", ("https://docs.tact-lang.org/book/", "a[href^='/book/']"), "main article, main", "tact").drop("nav, aside, header, footer"),
+    g(&["quint"], "The Quint language", "Apache-2.0", "https://github.com/informalsystems/quint/blob/main/LICENSE", &["https://quint-lang.org/docs/lang"], "main article, main", "quint").drop("nav, aside, header, footer"),
+    g(&["alloy"], "Alloy documentation: the language", "MIT", "https://github.com/AlloyTools/alloy", &[
+        "https://alloy.readthedocs.io/en/latest/intro.html",
+        "https://alloy.readthedocs.io/en/latest/language/signatures.html",
+        "https://alloy.readthedocs.io/en/latest/language/sets-and-relations.html",
+        "https://alloy.readthedocs.io/en/latest/language/expressions-and-constraints.html",
+        "https://alloy.readthedocs.io/en/latest/language/predicates-and-functions.html",
+        "https://alloy.readthedocs.io/en/latest/language/commands.html",
+        "https://alloy.readthedocs.io/en/latest/language/time.html",
+        "https://alloy.readthedocs.io/en/latest/language/modules.html",
+    ], "div[role=main], div.body", "alloy"),
+    g(&["spade"], "The Spade language", "EUPL-1.2", "https://gitlab.com/spade-lang/spade-docs", &["https://docs.spade-lang.org/print.html"], "main", "spade").drop(".buttons"),
+    g(&["slang"], "Slang User Guide", "MIT or Apache-2.0", "https://github.com/shader-slang/slang/blob/master/LICENSE", &[
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/00-introduction.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/01-get-started.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/02-conventional-features.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/03-convenience-features.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/04-modules-and-access-control.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/05-capabilities.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/06-interfaces-generics.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/07-autodiff.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/08-compiling.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/09-reflection.md",
+        "https://raw.githubusercontent.com/shader-slang/slang/master/docs/user-guide/09-targets.md",
+    ], "", "slang"),
+    g(&["sourcepawn"], "Introduction to SourcePawn", "© AlliedModders; read from the site, not redistributed", "https://wiki.alliedmods.net/", &["https://wiki.alliedmods.net/Introduction_to_SourcePawn_1.7"], "#mw-content-text", "sourcepawn").drop(".mw-editsection, .toc, #toc"),
+    gi(&["supercollider"], "Getting Started With SuperCollider", "CC BY-SA 4.0", "https://github.com/supercollider/supercollider", ("https://doc.sccode.org/Tutorials/Getting-Started/00-Getting-Started-With-SC.html", "a[href*='Getting-Started/']"), "body", "supercollider").drop("#menubar, #toc, #toctitle, #related, .header, .footer").code_sel(".codeMirrorContainer"),
+    g(&["opencl"], "The OpenCL C Specification", "© Khronos Group; read from the site, not redistributed", "https://registry.khronos.org/OpenCL/", &["https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_C.html"], "#content, body", "opencl").drop("#toc, #header"),
+    g(&["ink"], "Writing with Ink", "MIT", "https://github.com/inkle/ink/blob/master/LICENSE.txt", &["https://raw.githubusercontent.com/inkle/ink/master/Documentation/WritingWithInk.md"], "", "ink"),
+    g(&["bitbake"], "BitBake User Manual: syntax and operators", "CC BY 2.5", "https://docs.yoctoproject.org/bitbake/", &["https://docs.yoctoproject.org/bitbake/bitbake-user-manual/bitbake-user-manual-metadata.html"], "div[role=main], div.body", "bitbake"),
+    g(&["snakemake"], "Snakemake: Snakefiles and rules", "MIT", "https://github.com/snakemake/snakemake/blob/main/LICENSE.md", &[
+        "https://snakemake.readthedocs.io/en/stable/snakefiles/rules.html",
+        "https://snakemake.readthedocs.io/en/stable/snakefiles/configuration.html",
+        "https://snakemake.readthedocs.io/en/stable/snakefiles/deployment.html",
+    ], "div[role=main], div.body", "snakemake"),
+    g(&["earthfile"], "Earthfile reference", "MPL-2.0", "https://github.com/earthly/earthly/blob/main/LICENSE", &[
+        "https://raw.githubusercontent.com/earthly/earthly/main/docs/earthfile/earthfile.md",
+        "https://raw.githubusercontent.com/earthly/earthly/main/docs/earthfile/builtin-args.md",
+    ], "main, article", "earthfile").drop("nav, aside, header, footer"),
+    g(&["gn"], "GN Language and Operation", "BSD-3-Clause", "https://gn.googlesource.com/gn/+/main/LICENSE", &["https://gn.googlesource.com/gn/+/main/docs/language.md"], "div.doc, .Site-content, main", "gn"),
+    gi(&["ld"], "GNU ld: Linker Scripts", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html", ("https://sourceware.org/binutils/docs/ld/Scripts.html", "ul.mini-toc a, ul.menu a"), "body", "ld").drop(GNU_DROP),
+    g(&["devicetree"], "Devicetree Specification: source format", "Apache-2.0", "https://github.com/devicetree-org/devicetree-specification", &["https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html"], "div[role=main], div.body", "devicetree"),
+    g(&["hocon"], "HOCON (Human-Optimized Config Object Notation)", "Apache-2.0", "https://github.com/lightbend/config/blob/main/LICENSE-2.0.txt", &["https://raw.githubusercontent.com/lightbend/config/main/HOCON.md"], "", "hocon"),
+    g(&["dbml"], "DBML: Database Markup Language", "Apache-2.0", "https://github.com/holistics/dbml/blob/master/LICENSE", &["https://dbml.dbdiagram.io/docs/"], "article, main", "!dbml").drop("nav, aside, header, footer"),
+    g(&["wit"], "The WIT format (Component Model)", "Apache-2.0", "https://github.com/bytecodealliance/component-docs", &["https://component-model.bytecodealliance.org/design/wit.html"], "main", "wit").drop(".buttons"),
+    g(&["tablegen"], "TableGen Programmer's Reference", "Apache-2.0 with LLVM Exception", "https://llvm.org/LICENSE.txt", &["https://llvm.org/docs/TableGen/ProgRef.html"], "div[role=main], div.body", "tablegen").drop("#contents, .contents"),
+    g(&["heex", "eex"], "EEx and HEEx templates", "Apache-2.0 (Elixir) and MIT (Phoenix LiveView)", "https://github.com/phoenixframework/phoenix_live_view/blob/main/LICENSE.md", &[
+        "https://hexdocs.pm/eex/EEx.html",
+        "https://hexdocs.pm/phoenix_live_view/assigns-eex.html",
+    ], "#content, main", "heex").drop("#sidebar, .sidebar, footer"),
+    g(&["htmldjango"], "The Django template language", "BSD-3-Clause", "https://github.com/django/django/blob/main/LICENSE", &[
+        "https://docs.djangoproject.com/en/stable/ref/templates/language/",
+        "https://docs.djangoproject.com/en/stable/ref/templates/builtins/",
+    ], "#docs-content, article, main", "htmldjango").drop("nav, aside, header, footer"),
+    g(&["tera"], "Tera templates", "MIT", "https://github.com/Keats/tera/blob/master/LICENSE", &["https://keats.github.io/tera/"], "main, article, body", "tera"),
+    g(&["templ"], "templ syntax and usage", "MIT", "https://github.com/a-h/templ/blob/main/LICENSE", &[
+        "https://templ.guide/syntax-and-usage/basic-syntax",
+        "https://templ.guide/syntax-and-usage/elements",
+        "https://templ.guide/syntax-and-usage/attributes",
+        "https://templ.guide/syntax-and-usage/expressions",
+        "https://templ.guide/syntax-and-usage/statements",
+        "https://templ.guide/syntax-and-usage/if-else",
+        "https://templ.guide/syntax-and-usage/switch",
+        "https://templ.guide/syntax-and-usage/raw-go",
+        "https://templ.guide/syntax-and-usage/template-composition",
+        "https://templ.guide/syntax-and-usage/css-style-management",
+        "https://templ.guide/syntax-and-usage/script-templates",
+    ], "article, main", "templ").drop("nav, aside, header, footer"),
+    g(&["blade"], "Laravel Blade templates", "MIT", "https://github.com/laravel/docs", &["https://laravel.com/docs/12.x/blade"], "#main-content, .docs_main, main, article", "blade").drop("nav, aside, header, footer, #table-of-contents"),
+    g(&["glimmer"], "Ember component templates", "MIT", "https://github.com/ember-learn/guides-source/blob/master/LICENSE", &[
+        "https://guides.emberjs.com/release/components/",
+        "https://guides.emberjs.com/release/components/introducing-components",
+        "https://guides.emberjs.com/release/components/component-arguments-and-html-attributes",
+        "https://guides.emberjs.com/release/components/conditional-content",
+        "https://guides.emberjs.com/release/components/block-content",
+        "https://guides.emberjs.com/release/components/helper-functions",
+        "https://guides.emberjs.com/release/components/looping-through-lists",
+    ], "main article, main, article", "glimmer").drop("nav, aside, header, footer"),
+    g(&["markdoc"], "Markdoc syntax", "MIT", "https://github.com/markdoc/markdoc/blob/main/LICENSE", &[
+        "https://markdoc.dev/docs/syntax",
+        "https://markdoc.dev/docs/nodes",
+        "https://markdoc.dev/docs/tags",
+        "https://markdoc.dev/docs/attributes",
+        "https://markdoc.dev/docs/variables",
+        "https://markdoc.dev/docs/functions",
+    ], "main article, main, article", "markdoc").drop("nav, aside, header, footer"),
+    g(&["djot"], "Djot syntax reference", "MIT", "https://github.com/jgm/djot/blob/main/LICENSE", &["https://raw.githubusercontent.com/jgm/djot/main/doc/syntax.md"], "", "djot"),
+    g(&["bibtex"], "BibTeX format explained", "© bibtex.com; read from the site, not redistributed", "https://www.bibtex.com/", &[
+        "https://www.bibtex.com/g/bibtex-format/",
+        "https://www.bibtex.com/e/entry-types/",
+        "https://www.bibtex.com/format/",
+    ], "article, main", "bibtex").drop("nav, aside, header, footer"),
+    g(&["query"], "Tree-sitter queries", "MIT", "https://github.com/tree-sitter/tree-sitter/blob/master/LICENSE", &[
+        "https://tree-sitter.github.io/tree-sitter/using-parsers/queries/1-syntax.html",
+        "https://tree-sitter.github.io/tree-sitter/using-parsers/queries/2-operators.html",
+        "https://tree-sitter.github.io/tree-sitter/using-parsers/queries/3-predicates-and-directives.html",
+        "https://tree-sitter.github.io/tree-sitter/using-parsers/queries/4-api.html",
+    ], "main", "query").drop(".buttons"),
+    g(&["rust-format-args"], "Rust std::fmt (format strings)", "MIT or Apache-2.0", "https://www.rust-lang.org/policies/licenses", &["https://doc.rust-lang.org/std/fmt/index.html"], "#main-content", "rust"),
+    g(&["embedded-template"], "ERB templates (Ruby)", "Ruby License or BSD-2-Clause", "https://www.ruby-lang.org/en/about/license.txt", &["https://docs.ruby-lang.org/en/master/ERB.html"], "main", "embedded-template"),
+    g(&["csv"], "CSV (Python's csv module)", "PSF License 2.0", "https://docs.python.org/3/license.html", &["https://docs.python.org/3/library/csv.html"], "div.body", "csv"),
+    g(&["ini"], "INI files (Python's configparser)", "PSF License 2.0", "https://docs.python.org/3/license.html", &["https://docs.python.org/3/library/configparser.html"], "div.body", "ini"),
+    g(&["properties"], "Java .properties files", "© Oracle; read from the site, not redistributed", "https://www.oracle.com/legal/copyright.html", &["https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/Properties.html"], "main, .block, body", "properties").drop("nav, header, footer, .sub-nav"),
+    g(&["po"], "GNU gettext: The Format of PO Files", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html", &["https://www.gnu.org/software/gettext/manual/gettext.html"], "div#PO-Files", "po").drop(GNU_DROP),
+    g(&["diff"], "GNU diffutils: unified and context diffs", "GNU FDL 1.3", "https://www.gnu.org/licenses/fdl-1.3.html", &[
+        "https://www.gnu.org/software/diffutils/manual/html_node/Unified-Format.html",
+        "https://www.gnu.org/software/diffutils/manual/html_node/Detailed-Unified.html",
+        "https://www.gnu.org/software/diffutils/manual/html_node/Context-Format.html",
+        "https://www.gnu.org/software/diffutils/manual/html_node/Detailed-Context.html",
+        "https://www.gnu.org/software/diffutils/manual/html_node/Hunks.html",
+    ], "body", "diff").drop(GNU_DROP),
+    g(&["todotxt"], "The todo.txt format", "GPL-3.0", "https://github.com/todotxt/todo.txt", &["https://raw.githubusercontent.com/todotxt/todo.txt/master/README.md"], "", "todotxt"),
+    g(&["hosts"], "Linux manual page: hosts(5)", "See the page's colophon (man-pages project and upstream)", "https://man7.org/linux/man-pages/", &["https://man7.org/linux/man-pages/man5/hosts.5.html"], "body", "hosts").drop("table.top, table.sec-table, .nav-bar, .footer, #top-nav"),
+    g(&["passwd"], "Linux manual page: passwd(5)", "See the page's colophon (man-pages project and upstream)", "https://man7.org/linux/man-pages/", &["https://man7.org/linux/man-pages/man5/passwd.5.html"], "body", "passwd").drop("table.top, table.sec-table, .nav-bar, .footer, #top-nav"),
+    g(&["strace"], "Linux manual page: strace(1)", "See the page's colophon (man-pages project and upstream)", "https://man7.org/linux/man-pages/", &["https://man7.org/linux/man-pages/man1/strace.1.html"], "body", "strace").drop("table.top, table.sec-table, .nav-bar, .footer, #top-nav"),
+    g(&["sshclientconfig"], "Linux manual page: ssh_config(5)", "See the page's colophon (man-pages project and upstream)", "https://man7.org/linux/man-pages/", &["https://man7.org/linux/man-pages/man5/ssh_config.5.html"], "body", "sshclientconfig").drop("table.top, table.sec-table, .nav-bar, .footer, #top-nav"),
+    g(&["debian"], "Debian Policy: control files and their fields", "GPL-2.0-or-later", "https://www.debian.org/doc/debian-policy/", &[
+        "https://www.debian.org/doc/debian-policy/ch-controlfields.html",
+        "https://www.debian.org/doc/debian-policy/ch-relationships.html",
+    ], "div[role=main], div.body", "debian"),
+    g(&["dunstrc"], "dunst configuration", "BSD-3-Clause", "https://github.com/dunst-project/dunst/blob/master/LICENSE", &["https://dunst-project.org/documentation/"], "main, article, body", "dunstrc").drop("nav, header, footer"),
+    gi(&["hyprlang"], "Hyprland wiki: Configuring", "BSD-3-Clause", "https://github.com/hyprwm/hyprland-wiki", ("https://wiki.hypr.land/configuring/", "a[href^='/configuring/']"), "main#content, main article, main, article", "hyprlang").drop("nav, aside, header, footer, main#content > div:first-child, main#content > div:last-child"),
+    g(&["ghostty"], "Ghostty configuration", "MIT", "https://github.com/ghostty-org/ghostty/blob/main/LICENSE", &[
+        "https://ghostty.org/docs/config",
+        "https://ghostty.org/docs/config/reference",
+    ], "main article, main, article", "ghostty").drop("nav, aside, header, footer"),
+    g(&["jjdescription"], "Jujutsu tutorial", "Apache-2.0", "https://github.com/jj-vcs/jj/blob/main/LICENSE", &["https://raw.githubusercontent.com/jj-vcs/jj/main/docs/tutorial.md | https://raw.githubusercontent.com/martinvonz/jj/main/docs/tutorial.md"], "", "jjdescription"),
+    g(&["gemini"], "Gemtext", "CC BY 4.0", "https://geminiprotocol.net/", &["https://geminiprotocol.net/docs/gemtext.gmi"], "", "gemini"),
+    g(&["vhs"], "VHS tapes", "MIT", "https://github.com/charmbracelet/vhs/blob/main/LICENSE", &["https://raw.githubusercontent.com/charmbracelet/vhs/main/README.md"], "", "vhs"),
+    gi(&["task"], "Task (Taskfile) guide", "MIT", "https://github.com/go-task/task/blob/main/LICENSE", ("https://taskfile.dev/docs/guide", "a[href^='/docs/guide']"), "main article, main, article", "task").drop("nav, aside, header, footer"),
+    g(&["xit"], "[x]it! specification", "CC0-1.0", "https://github.com/jotaen/xit", &["https://raw.githubusercontent.com/jotaen/xit/main/Specification.md"], "", "xit"),
+    g(&["textproto"], "Protocol Buffers text format", "CC BY 4.0", "https://github.com/protocolbuffers/protocolbuffers.github.io/blob/main/LICENSE", &["https://raw.githubusercontent.com/protocolbuffers/protocolbuffers.github.io/main/content/reference/protobuf/textformat-spec.md | https://protobuf.dev/reference/protobuf/textformat-spec/"], "main, article", "textproto"),
+    g(&["gpr"], "GNAT Project Manager (GPR files)", "GNU FDL 1.3", "https://docs.adacore.com/", &["https://docs.adacore.com/gprbuild-docs/html/gprbuild_ug/gnat_project_manager.html"], "div[role=main], div.body", "gpr"),
+    g(&["ungrammar"], "Ungrammar", "MIT or Apache-2.0", "https://github.com/rust-analyzer/ungrammar", &[
+        "https://raw.githubusercontent.com/rust-analyzer/ungrammar/master/README.md",
+        "https://rust-analyzer.github.io/blog/2020/10/24/introducing-ungrammar.html",
+    ], "article, main, body", "ungrammar"),
+    g(&["ohm"], "Ohm syntax reference", "MIT", "https://github.com/ohmjs/ohm/blob/main/LICENSE", &["https://ohmjs.org/docs/syntax-reference"], "main article, main", "!ohm").drop("nav, aside, header, footer"),
+    g(&["fidl"], "FIDL language specification", "CC BY 4.0", "https://fuchsia.dev/", &["https://fuchsia.dev/fuchsia-src/reference/fidl/language/language"], "devsite-content article, article, main", "fidl").drop("devsite-toc, nav, aside, header, footer, devsite-feedback"),
+    g(&["spicedb"], "SpiceDB schema language", "Apache-2.0", "https://github.com/authzed/docs", &["https://authzed.com/docs/spicedb/concepts/schema"], "main article, main", "spicedb").drop("nav, aside, header, footer"),
+    g(&["fga"], "OpenFGA configuration language", "Apache-2.0", "https://github.com/openfga/openfga.dev", &[
+        "https://openfga.dev/docs/configuration-language",
+        "https://openfga.dev/docs/modeling/getting-started",
+    ], "main article, main", "fga").drop("nav, aside, header, footer"),
+    g(&["smali"], "smali wiki", "BSD-3-Clause", "https://github.com/JesusFreke/smali", &[
+        "https://github.com/JesusFreke/smali/wiki/Registers",
+        "https://github.com/JesusFreke/smali/wiki/TypesMethodsAndFields",
+        "https://github.com/JesusFreke/smali/wiki",
+    ], "#wiki-body, .markdown-body", "smali"),
+    g(&["llvm-mir"], "Machine IR (MIR) Format Reference", "Apache-2.0 with LLVM Exception", "https://llvm.org/LICENSE.txt", &["https://llvm.org/docs/MIRLangRef.html"], "div[role=main], div.body", "llvm-mir").drop("#contents, .contents"),
+    g(&["cylc"], "Cylc: workflow configuration", "GPL-3.0", "https://github.com/cylc/cylc-doc", &["https://cylc.github.io/cylc-doc/stable/html/user-guide/writing-workflows/configuration.html"], "div[role=main], div.body, article", "cylc"),
+    g(&["edoc"], "EDoc user's guide", "Apache-2.0", "https://www.erlang.org/", &["https://www.erlang.org/doc/apps/edoc/chapter.html"], "#content, main", "edoc"),
+    g(&["ldif"], "LDIF: the LDAP Data Interchange Format", "© Ping Identity (ldap.com); read from the site, not redistributed", "https://ldap.com/", &["https://ldap.com/ldif-the-ldap-data-interchange-format/"], "article, main", "ldif").drop("nav, aside, header, footer"),
+    g(&["adl"], "ADL: the Algebraic Data Language", "BSD-3-Clause", "https://github.com/adl-lang/adl/blob/master/LICENSE", &[
+        "https://raw.githubusercontent.com/adl-lang/adl/master/docs/introduction.md",
+        "https://raw.githubusercontent.com/adl-lang/adl/master/docs/language.md",
+    ], "", "adl"),
+    g(&["bass"], "Bass", "MIT", "https://github.com/vito/bass/blob/main/LICENSE", &["https://bass-lang.org/"], "main, body", "bass").drop("nav, header, footer"),
+    g(&["ql"], "QL language reference (CodeQL)", "CC BY 4.0", "https://github.com/github/codeql/blob/main/LICENSE", &[
+        "https://codeql.github.com/docs/ql-language-reference/about-the-ql-language/",
+        "https://codeql.github.com/docs/ql-language-reference/predicates/",
+        "https://codeql.github.com/docs/ql-language-reference/queries/",
+        "https://codeql.github.com/docs/ql-language-reference/types/",
+        "https://codeql.github.com/docs/ql-language-reference/modules/",
+        "https://codeql.github.com/docs/ql-language-reference/expressions/",
+        "https://codeql.github.com/docs/ql-language-reference/formulas/",
+        "https://codeql.github.com/docs/ql-language-reference/aliases/",
+        "https://codeql.github.com/docs/ql-language-reference/variables/",
+    ], "div[role=main], div.body, main", "ql"),
+    g(&["werk"], "The Werk book", "MIT or Apache-2.0", "https://github.com/simonask/werk", &[
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/introduction.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/getting_started.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/first_example.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/variables.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/strings.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/arrays.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/expressions.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/patterns.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/recipe_commands.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/builtins.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/include.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/language/config.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/build_recipes.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/task_recipes.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/paths.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/examples/c.md",
+        "https://raw.githubusercontent.com/simonask/werk/main/book/src/examples/cargo.md",
+    ], "", "werk"),
+    g(&["esdl"], "Gel (EdgeDB) schema language", "Apache-2.0", "https://github.com/geldata/gel/blob/master/LICENSE", &["https://docs.geldata.com/reference/datamodel"], "main article, main", "esdl").drop("nav, aside, header, footer"),
+    g(&["dtd"], "XML 1.0: document type declarations", "W3C Document License", "https://www.w3.org/copyright/document-license-2023/", &["https://www.w3.org/TR/xml/"], "body", "dtd").drop(".head, .toc, #toc"),
+    g(&["pod"], "perlpod: the Plain Old Documentation format", "Artistic License or GPL", "https://perldoc.perl.org/perlartistic", &[
+        "https://perldoc.perl.org/perlpod",
+        "https://perldoc.perl.org/perlpodspec",
+    ], "#perldocdiv, main", "pod").drop("a.permalink, h1#toc, h1#toc + ul, #more, #breadcrumbs"),
+    g(&["blueprint"], "Blueprint syntax reference", "LGPL-3.0", "https://gitlab.gnome.org/GNOME/blueprint-compiler", &[
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/index.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/document_root.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/objects.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/templates.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/values.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/expressions.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/menus.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/extensions.rst",
+        "https://gitlab.gnome.org/GNOME/blueprint-compiler/-/raw/main/docs/reference/diagnostics.rst",
+    ], "", "blueprint"),
+    g(&["haskell-persistent"], "Persistent (Yesod book)", "CC BY 4.0", "https://www.yesodweb.com/book", &["https://www.yesodweb.com/book/persistent"], "article, main, #content", "haskell"),
+    g(&["beancount"], "Beancount language syntax", "© Martin Blais; read from the site, not redistributed", "https://beancount.github.io/", &["https://beancount.github.io/docs/beancount_language_syntax/"], "main, article", "!beancount").drop("nav, aside, header, footer"),
+    g(&["yuck"], "eww configuration (yuck)", "MIT", "https://github.com/elkowar/eww/blob/master/LICENSE", &[
+        "https://elkowar.github.io/eww/configuration.html",
+        "https://elkowar.github.io/eww/expression_language.html",
+        "https://elkowar.github.io/eww/widgets.html",
+    ], "main", "yuck").drop(".buttons"),
+    g(&["vento"], "Vento templates", "MIT", "https://github.com/ventojs/vento/blob/main/LICENSE", &[
+        "https://vento.js.org/syntax/",
+        "https://vento.js.org/syntax/print/",
+        "https://vento.js.org/syntax/for/",
+        "https://vento.js.org/syntax/if/",
+        "https://vento.js.org/syntax/include/",
+        "https://vento.js.org/syntax/layout/",
+        "https://vento.js.org/syntax/set/",
+        "https://vento.js.org/syntax/function/",
+        "https://vento.js.org/syntax/pipes/",
+    ], "main, article", "vento").drop("nav, aside, header, footer"),
+    g(&["godot_resource"], "Godot's TSCN scene file format", "CC BY 3.0", "https://docs.godotengine.org/en/stable/about/license.html", &["https://docs.godotengine.org/en/stable/engine_details/file_formats/tscn.html | https://docs.godotengine.org/en/stable/contributing/development/file_formats/tscn.html"], "div[role=main], div.body", "godot_resource"),
     g(&["json"], "MDN: Working with JSON", "CC BY-SA 2.5", "https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Attrib_copyright_license",
         &["https://raw.githubusercontent.com/mdn/content/main/files/en-us/learn_web_development/core/scripting/json/index.md"], "", "json"),
     g(&["yaml", "yml"], "YAML 1.2.2 Specification", "Free to copy (the YAML spec's own terms)", "https://yaml.org/spec/1.2.2/",
@@ -1031,7 +1405,7 @@ fn set_progress(key: &str, what: &str) {
 const RENDER_VERSION: &str = "<!-- tessera-guide-render 4 -->";
 /// Marks the kept Markdown: a guide converted by an older Tessera is
 /// fetched and converted again.
-const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 6 -->";
+const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 7 -->";
 
 fn page_html_of(g: &'static Guide, refresh: bool) -> Result<String, String> {
     let path = cache_path(g);
@@ -1083,7 +1457,7 @@ fn page_html_of(g: &'static Guide, refresh: bool) -> Result<String, String> {
     };
     // (The grammars its code is in, unpacked first if need be, as the
     // editor does: the guide's language and those its code blocks name.)
-    let mut langs: Vec<String> = vec![g.code.to_string()];
+    let mut langs: Vec<String> = vec![g.code.trim_start_matches('!').to_string()];
     for l in md.lines().filter_map(|l| l.strip_prefix("```")) {
         let l = crate::manual::code_lang(l, "");
         if !l.is_empty() && !langs.contains(&l) && langs.len() < 6 {
@@ -1570,6 +1944,7 @@ pub fn fetch_markdown(g: &Guide) -> Result<String, String> {
                     }
                     let r = get_or_archived(&urls[i]).and_then(|(text, snapshot)| {
                         let u = urls[i].split(" | ").next().unwrap_or(&urls[i]).trim();
+                        let text = if u.ends_with(".gmi") { gemtext_to_markdown(&text) } else if u.ends_with(".rst") { rst_to_markdown(&text) } else { text };
                         let md = if is_markdown(u) { clean_markdown(&expand_includes(&text, u)) } else { html_to_markdown(&text, g)? };
                         let md = relink(&md, u, &page_ids);
                         Ok(match snapshot {
@@ -1628,6 +2003,7 @@ fn expand_includes(md: &str, page: &str) -> String {
         Regex::new(r#"(?m)^[ \t>]*:::code\s+([^\n]*?):::\s*$"#).unwrap(),
     ]);
     let md = &liquid_data(md, page);
+    let md = &snippets(md, page);
     if !md.contains("[!code-") && !md.contains(":::code") {
         return md.to_string();
     }
@@ -1662,6 +2038,32 @@ fn expand_includes(md: &str, page: &str) -> String {
         out.push_str(&format!("\n```{}\n{}\n```\n", lang.to_lowercase(), code.trim_end()));
     }
     out
+}
+
+/// MkDocs' `--8<-- "file"` lines (pymdownx.snippets): the file put in, from
+/// the repository's code-samples or snippets folder, its root, or beside
+/// the page.
+fn snippets(md: &str, page: &str) -> String {
+    if !md.contains("--8<--") || !page.starts_with("https://raw.githubusercontent.com/") {
+        return md.to_string();
+    }
+    let root: String = page.splitn(7, '/').take(6).collect::<Vec<_>>().join("/") + "/";
+    let re = regex::Regex::new(r#"^\s*--8<--\s+"([^"]+)"\s*$"#).unwrap();
+    md.split_inclusive('\n')
+        .map(|line| match re.captures(line.trim_end()) {
+            Some(c) => {
+                let name = &c[1];
+                ["code-samples/", "snippets/", "docs/snippets/", ""]
+                    .iter()
+                    .map(|d| format!("{root}{d}{name}"))
+                    .chain(std::iter::once(join(page, name)))
+                    .find_map(|u| get(&u).ok())
+                    .map(|t| format!("{}\n", t.trim_end()))
+                    .unwrap_or_else(|| line.to_string())
+            }
+            None => line.to_string(),
+        })
+        .collect()
 }
 
 /// GitHub Docs' `{% data variables.FILE.KEY %}` (a name, from the
@@ -1725,10 +2127,140 @@ fn include_part(text: &str, part: &str) -> String {
     text.to_string()
 }
 
+/// reStructuredText as Markdown, the common parts: titles (underlined, or
+/// over- and underlined; levels in the order their marks first come), code
+/// directives and "::" literal blocks as fenced code, notes as quotes,
+/// links, roles and ``literals``; other directives (toctree, labels) left out.
+fn rst_to_markdown(t: &str) -> String {
+    use regex::Regex;
+    let lines: Vec<&str> = t.lines().collect();
+    let is_rule = |l: &str| {
+        let l = l.trim_end();
+        let Some(c) = l.chars().next() else { return false };
+        l.len() >= 3 && l.chars().all(|x| x == c) && "=-~^\"'`#*+:._".contains(c)
+    };
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    // (The block indented under a directive or a "::" paragraph: its lines
+    // and where it ends.)
+    let block = |from: usize| -> (Vec<String>, usize) {
+        let mut j = from;
+        while j < lines.len() && lines[j].trim().is_empty() {
+            j += 1;
+        }
+        let start_indent = if j < lines.len() { indent(lines[j]) } else { 0 };
+        let mut got = vec![];
+        while j < lines.len() && (lines[j].trim().is_empty() || (start_indent > 0 && indent(lines[j]) >= start_indent)) {
+            got.push(lines[j].get(start_indent..).unwrap_or("").to_string());
+            j += 1;
+        }
+        while got.last().is_some_and(|l| l.trim().is_empty()) {
+            got.pop();
+        }
+        (got, j)
+    };
+    let literal = Regex::new(r"``([^`]+)``").unwrap();
+    let link = Regex::new(r"`([^`<]+?)\s*<([^>]+)>`__?").unwrap();
+    let role = Regex::new(r":[a-z:+-]+:`([^`<]+?)(\s*<[^>]+>)?`").unwrap();
+    let inline = |l: &str| -> String {
+        let l = literal.replace_all(l, "`$1`");
+        let l = link.replace_all(&l, "[$1]($2)");
+        role.replace_all(&l, "`$1`").into_owned()
+    };
+    let mut marks: Vec<String> = vec![];
+    let mut out = String::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let l = lines[i];
+        // Titles.
+        let title = if is_rule(l) && i + 2 < lines.len() && !lines[i + 1].trim().is_empty() && is_rule(lines[i + 2]) {
+            Some((lines[i + 1].trim(), format!("over{}", &l.trim()[..1]), i + 3))
+        } else if !l.trim().is_empty() && indent(l) == 0 && i + 1 < lines.len() && is_rule(lines[i + 1]) && lines[i + 1].trim().len() >= l.trim().chars().count() {
+            Some((l.trim(), lines[i + 1].trim()[..1].to_string(), i + 2))
+        } else {
+            None
+        };
+        if let Some((text, mark, next)) = title {
+            if !marks.contains(&mark) {
+                marks.push(mark.clone());
+            }
+            let level = marks.iter().position(|m| *m == mark).unwrap_or(0) + 1;
+            out.push_str(&format!("{} {}\n\n", "#".repeat(level.min(6)), inline(text)));
+            i = next;
+            continue;
+        }
+        let tl = l.trim_start();
+        if let Some(d) = tl.strip_prefix(".. ") {
+            let (body, j) = block(i + 1);
+            if let Some(lang) = d.strip_prefix("code-block::").or(d.strip_prefix("code::")).or(d.strip_prefix("sourcecode::")) {
+                let code: Vec<String> = body.into_iter().skip_while(|b| b.trim_start().starts_with(':')).collect();
+                out.push_str(&format!("```{}\n{}\n```\n\n", lang.trim(), code.join("\n").trim_matches('\n')));
+            } else if let Some(kind) = ["note::", "warning::", "tip::", "important::", "caution::", "hint::", "seealso::", "admonition::"].iter().find(|k| d.starts_with(*k)) {
+                let first = d[kind.len()..].trim();
+                out.push_str(&format!("> **{}**", kind.trim_end_matches("::")));
+                if !first.is_empty() {
+                    out.push_str(&format!(" {}", inline(first)));
+                }
+                out.push_str("\n>\n");
+                for b in body {
+                    out.push_str(&format!("> {}\n", inline(&b)));
+                }
+                out.push('\n');
+            }
+            i = j;
+            continue;
+        }
+        // A paragraph ending in "::": the indented block after it is code.
+        if tl.ends_with("::") {
+            let text = tl.trim_end_matches("::").trim_end();
+            if !text.is_empty() {
+                out.push_str(&format!("{}{}\n\n", inline(text), if text.ends_with(':') { "" } else { ":" }));
+            }
+            let (body, j) = block(i + 1);
+            if !body.is_empty() {
+                out.push_str(&format!("```\n{}\n```\n\n", body.join("\n")));
+            }
+            i = j;
+            continue;
+        }
+        out.push_str(&inline(l));
+        out.push('\n');
+        i += 1;
+    }
+    out
+}
+
+/// Gemtext (Gemini's own text) as Markdown: its "=> URL text" lines links,
+/// its other lines (headings, lists, quotes, ``` blocks) already Markdown,
+/// each line a paragraph.
+fn gemtext_to_markdown(t: &str) -> String {
+    let mut out = String::new();
+    let mut pre = false;
+    for l in t.lines() {
+        if l.starts_with("```") {
+            pre = !pre;
+            out.push_str(l);
+            out.push('\n');
+            continue;
+        }
+        if pre {
+            out.push_str(l);
+            out.push('\n');
+        } else if let Some(rest) = l.strip_prefix("=>") {
+            let rest = rest.trim();
+            let (url, text) = rest.split_once(char::is_whitespace).map(|(u, t)| (u, t.trim())).unwrap_or((rest, rest));
+            out.push_str(&format!("[{text}]({url})\n\n"));
+        } else {
+            out.push_str(l);
+            out.push_str("\n\n");
+        }
+    }
+    out
+}
+
 /// A Markdown file (MDX too: Markdown with components).
 fn is_markdown(u: &str) -> bool {
     let path = u.split(['?', '#']).next().unwrap_or(u).to_lowercase();
-    path.ends_with(".md") || path.ends_with(".mdx") || path.ends_with(".markdown")
+    path.ends_with(".md") || path.ends_with(".mdx") || path.ends_with(".markdown") || path.ends_with(".gmi") || path.ends_with(".rst")
 }
 
 /// Markdown from a repository, cleaned of what only its site understands:
@@ -1896,7 +2428,9 @@ impl Writer {
 /// One part of a page (its document) as Markdown.
 fn part_markdown(part: scraper::ElementRef, g: &Guide) -> Result<String, String> {
     // (Leave out what isn't the document.)
-    let drop = format!("script, style, noscript, button, template, a.headerlink, a.anchor, .headerlink, .anchorjs-link, .copybutton, .sr-only, .visually-hidden{}{}", if g.drop.is_empty() { "" } else { ", " }, g.drop);
+    // (Never the document, on any site: breadcrumbs, "last updated", a
+    // page's own contents list, "edit this page", mascots.)
+    let drop = format!("script, style, noscript, button, template, a.headerlink, a.anchor, .headerlink, .anchorjs-link, .copybutton, .sr-only, .visually-hidden, nav[aria-label*='readcrumb'], .breadcrumb, .breadcrumbs, [class*='Breadcrumb'], [class*='breadcrumb'], [class*='lastUpdated'], [class*='last-updated'], .table-of-contents, nav.toc, .edit-page, .edit-this-page, img[src*='mascot']{}{}", if g.drop.is_empty() { "" } else { ", " }, g.drop);
     let parse = |list: &str| list.split(',').map(str::trim).filter(|s| !s.is_empty()).filter_map(|s| scraper::Selector::parse(s).ok()).collect::<Vec<_>>();
     let w = Writer {
         drop: parse(&drop),
@@ -2064,6 +2598,21 @@ fn relink(md: &str, page: &str, pages: &[(String, usize)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rst_converted() {
+        let md = rst_to_markdown("=====\nTitle\n=====\n\nSome ``code`` and `a link <https://x.org>`_.\n\nSection\n-------\n\n.. code-block:: python\n\n   x = 1\n\nA literal::\n\n   raw\n\n.. note:: Mind this.\n\n.. toctree::\n   a\n");
+        assert!(md.contains("# Title\n") && md.contains("## Section\n"), "{md}");
+        assert!(md.contains("Some `code` and [a link](https://x.org)."), "{md}");
+        assert!(md.contains("```python\nx = 1\n```") && md.contains("A literal:\n\n```\nraw\n```"), "{md}");
+        assert!(md.contains("> **note** Mind this.") && !md.contains("toctree"), "{md}");
+    }
+
+    #[test]
+    fn gemtext_converted() {
+        let md = gemtext_to_markdown("# Gemtext\n=> https://x.org The link\n```\n=> not a link\n```\n* item\n");
+        assert!(md.contains("# Gemtext") && md.contains("[The link](https://x.org)") && md.contains("=> not a link"), "{md}");
+    }
 
     #[test]
     fn cpp_has_two_guides() {
