@@ -4266,12 +4266,13 @@ FocusScope {
                         id: paneLoader
                         width: lsc.width
                         active: sec.reached
-                        // (Until it's read again, the height it had.)
-                        height: !item ? sec.held : item.listed ? item.height : Math.max(item.height, sec.held)
+                        // (Until it's read again, the height it had. Its own
+                        // height, not .height: a Loader sizes its item to itself.)
+                        height: !item ? sec.held : item.listed ? item.implicitHeight : Math.max(item.implicitHeight, sec.held)
                         Connections {
                             target: paneLoader.item
-                            function onHeightChanged() { if (paneLoader.item.listed) sec.held = paneLoader.item.height }
-                            function onListedChanged() { if (paneLoader.item.listed) sec.held = paneLoader.item.height }
+                            function onImplicitHeightChanged() { if (paneLoader.item.listed) sec.held = paneLoader.item.implicitHeight }
+                            function onListedChanged() { if (paneLoader.item.listed) sec.held = paneLoader.item.implicitHeight }
                             function onViewChanged() { sec.lastView = paneLoader.item.view }
                         }
                         onLoaded: sec.lastView = item.view
