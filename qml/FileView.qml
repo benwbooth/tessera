@@ -54,8 +54,24 @@ Item {
         md: "markdown", sql: "sql", nix: "nix", hs: "haskell", ml: "ocaml", scala: "scala", swift: "swift", zig: "zig", php: "php", pl: "perl",
         r: "r", jl: "julia", ex: "elixir", exs: "elixir", erl: "erlang", cs: "c-sharp", fs: "fsharp", dart: "dart", qml: "qmljs", xml: "xml",
         ini: "ini", cfg: "ini", conf: "ini", dockerfile: "dockerfile", make: "make", mk: "make", cmake: "cmake", tex: "latex", vim: "vim",
-        nu: "nu", xsh: "python", ps1: "powershell", csv: "csv", diff: "diff", patch: "diff"
-    })[ext] || ({ Makefile: "make", Dockerfile: "dockerfile", "CMakeLists.txt": "cmake", ".bashrc": "bash", ".zshrc": "bash", "flake.lock": "json" })[name] || ""
+        nu: "nu", xsh: "python", ps1: "powershell", csv: "csv", diff: "diff", patch: "diff",
+        xaml: "xml", xsd: "xml", xsl: "xml", xslt: "xml", svg: "xml", plist: "xml", csproj: "xml", vbproj: "xml", fsproj: "xml", vcxproj: "xml",
+        props: "xml", targets: "xml", resx: "xml", nuspec: "xml", wsdl: "xml", rss: "xml", atom: "xml", kml: "xml", gpx: "xml", xhtml: "html", htm: "html"
+    })[ext] || ({ Makefile: "make", Dockerfile: "dockerfile", "CMakeLists.txt": "cmake", ".bashrc": "bash", ".zshrc": "bash", "flake.lock": "json" })[name] || sniffedLang
+    // (What its first lines say, when its name doesn't: <?xml, a tag, a #! line.)
+    property string sniffedLang: ""
+    function sniff(head) {
+        const s = head.replace(/^\uFEFF/, "").replace(/^\s+/, "")
+        if (/^<!doctype html|^<html[\s>]/i.test(s)) return "html"
+        if (/^<\?xml[\s?]/.test(s) || /^<[A-Za-z_][\w:.-]*[\s>\/]/.test(s) || /^<!--/.test(s)) return "xml"
+        const m = /^#!\s*(\S+)(?:\s+(\S+))?/.exec(head)
+        if (m) {
+            const prog = (m[1].endsWith("/env") && m[2] ? m[2] : m[1]).replace(/^.*\//, "").replace(/[0-9.]+$/, "")
+            return ({ python: "python", bash: "bash", sh: "bash", zsh: "bash", dash: "bash", ksh: "bash", fish: "fish", node: "javascript", deno: "typescript",
+                      perl: "perl", ruby: "ruby", lua: "lua", php: "php", tessh: "tessh", nu: "nu", pwsh: "powershell", Rscript: "r", julia: "julia", elixir: "elixir" })[prog] || ""
+        }
+        return ""
+    }
 
     // The lines counted so far, and whether that's all of them.
     property int lines: 0
@@ -72,6 +88,7 @@ Item {
         counted = false
         size = 0
         problem = ""
+        sniffedLang = ""
         rev++
         pollSeq++
         polling = false
@@ -410,7 +427,9 @@ Item {
             // (A NUL in the start: binary.)
             if (lines > 0 && problem === "")
                 Async.call(controller, k => controller.fileLines(k, p, 0, 50), t => {
-                    if (n === pollSeq && p === path && t.indexOf("\u0000") >= 0) problem = "It's a binary file."
+                    if (n !== pollSeq || p !== path) return
+                    if (t.indexOf("\u0000") >= 0) problem = "It's a binary file."
+                    else sniffedLang = sniff(t)
                 })
         })
     }
