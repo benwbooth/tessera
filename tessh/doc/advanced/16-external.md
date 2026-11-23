@@ -1324,3 +1324,713 @@ block, and its report isn't bash's `real/user/sys`.
 `touch`, `at`, `batch`, `cal`, `sleep` and `hwclock` are programs and run
 the same; `sleep` takes fractions (`sleep 0.2`), which makes `usleep`
 unnecessary, and `time.sleep` does it from Python.
+
+## 16.4 Text Processing Commands
+<!-- help: abs-text-processing sort tsort uniq expand cut paste join head tail grep egrep fgrep look sed awk wc tr fold fmt col column colrm nl pr iconv groff -->
+
+The filters: `sort` (`-n` numeric, `-r` reversed, `-k` by field, `-m`
+merging sorted files), `tsort` (a topological sort of pairs), `uniq` (drops
+repeated lines; `-c` counts them), `expand`/`unexpand` (tabs to spaces and
+back), `cut` (fields with `-d` and `-f`, characters with `-c`), `paste`
+(files side by side), `join` (lines of two files with the same key), `head`
+and `tail` (the first or last lines; `tail -f` follows a growing file),
+`grep` (lines matching a regex: `-i`, `-w`, `-l`, `-r`, `-n`, `-v`, `-c`,
+`-o`, `-q`; `grep -E` is `egrep`, `grep -F` is `fgrep`), `look` (words
+starting with a prefix in a sorted list), `sed` and `awk`, `wc` (lines,
+words, characters), `tr` (translates or deletes characters), `fold` and
+`fmt` (wrap lines), `column` (lines into a table), `colrm` (removes
+columns), `nl` (numbers lines), `pr` (paginates), `iconv` and `recode`
+(change encodings), and the typesetters `groff`, TeX and friends.
+
+They all run in tessh as in bash, in pipes as filters. What tessh adds is
+that the text can become values at either end: `(cmd).lines` is a list,
+a Python stage in a pipe gets the text, a list or string can feed a pipe,
+and `re'…'`, `str` methods and `collections.Counter` do much of what
+`grep`, `cut`, `tr` and `uniq -c` are called for in a script.
+
+```bash
+cat > testfile <<'END'
+This line occurs only once.
+This line occurs twice.
+This line occurs twice.
+This line occurs three times.
+This line occurs three times.
+This line occurs three times.
+END
+uniq -c testfile
+sort testfile | uniq -c | sort -nr
+```
+
+```output bash
+      1 This line occurs only once.
+      2 This line occurs twice.
+      3 This line occurs three times.
+      3 This line occurs three times.
+      2 This line occurs twice.
+      1 This line occurs only once.
+```
+
+```tessh
+cat > testfile <<'END'
+This line occurs only once.
+This line occurs twice.
+This line occurs twice.
+This line occurs three times.
+This line occurs three times.
+This line occurs three times.
+END
+uniq -c testfile
+sort testfile | uniq -c | sort -nr
+# The counting as a value:
+from collections import Counter
+print ((Counter (cat testfile).lines).most_common 1)
+```
+
+```output
+      1 This line occurs only once.
+      2 This line occurs twice.
+      3 This line occurs three times.
+      3 This line occurs three times.
+      2 This line occurs twice.
+      1 This line occurs only once.
+[('This line occurs three times.', 3)]
+```
+
+`cut` takes fields out of lines. Looping over its output is the ABS
+Guide's way to list the users in `/etc/passwd`; in tessh, `.lines` gives
+the list (here of a made-up passwd file), or `str.split` takes the field
+without `cut`.
+
+```bash no-run
+# List all the users in /etc/passwd.
+
+FILENAME=/etc/passwd
+
+for user in $(cut -d: -f1 $FILENAME)
+do
+  echo $user
+done
+
+# Thanks, Oleg Philon for suggesting this.
+```
+
+```tessh
+# (A made-up /etc/passwd.)
+cat >passwd <<'END'
+root:x:0:0:root:/root:/bin/bash
+bozo:x:1000:100:Bozo:/home/bozo:/bin/bash
+nobody:x:65534:65534:nobody:/:/sbin/nologin
+END
+FILENAME = ./passwd               # (/etc/passwd in the original)
+
+for user in (cut -d: -f1 $FILENAME).lines
+  print $user
+# Or without cut:
+print [($line.split ":")[0] for line in (cat $FILENAME).lines]
+```
+
+```output
+root
+bozo
+nobody
+['root' 'bozo' 'nobody']
+```
+
+`paste` puts files side by side and `join` joins lines with the same key:
+
+```bash
+printf 'alphabet blocks\nbuilding blocks\ncables\n' > items
+printf '$1.00/dozen\n$2.50 ea.\n$3.75\n' > prices
+paste items prices
+printf '100 Shoes\n200 Laces\n300 Socks\n' > 1.data
+printf '100 $40.00\n200 $1.00\n300 $2.00\n' > 2.data
+join 1.data 2.data
+```
+
+```output bash
+alphabet blocks	$1.00/dozen
+building blocks	$2.50 ea.
+cables	$3.75
+100 Shoes $40.00
+200 Laces $1.00
+300 Socks $2.00
+```
+
+In Python, `zip` pairs the lines and a dict does the join.
+
+```tessh
+printf 'alphabet blocks\nbuilding blocks\ncables\n' > items
+printf '$1.00/dozen\n$2.50 ea.\n$3.75\n' > prices
+paste items prices
+printf '100 Shoes\n200 Laces\n300 Socks\n' > 1.data
+printf '100 $40.00\n200 $1.00\n300 $2.00\n' > 2.data
+join 1.data 2.data
+# The same with values:
+for [item price] in (zip (cat items).lines (cat prices).lines)
+  print "$item\t$price"
+prices = dict [($l.split " " 1) for l in (cat 2.data).lines]
+for [key what] in [($l.split " " 1) for l in (cat 1.data).lines]
+  print $key $what $prices[$key]
+```
+
+```output
+alphabet blocks	$1.00/dozen
+building blocks	$2.50 ea.
+cables	$3.75
+100 Shoes $40.00
+200 Laces $1.00
+300 Socks $2.00
+alphabet blocks	$1.00/dozen
+building blocks	$2.50 ea.
+cables	$3.75
+100 Shoes $40.00
+200 Laces $1.00
+300 Socks $2.00
+```
+
+### Example 16-12. Word Frequency Analysis (`wf.sh`)
+
+```bash no-run
+#!/bin/bash
+# wf.sh: Crude word frequency analysis on a text file.
+# This is a more efficient version of the "wf2.sh" script.
+
+
+# Check for input file on command-line.
+ARGS=1
+E_BADARGS=85
+E_NOFILE=86
+
+if [ $# -ne "$ARGS" ]  # Correct number of arguments passed to script?
+then
+  echo "Usage: `basename $0` filename"
+  exit $E_BADARGS
+fi
+
+if [ ! -f "$1" ]       # Check if file exists.
+then
+  echo "File \"$1\" does not exist."
+  exit $E_NOFILE
+fi
+
+
+
+########################################################
+# main ()
+sed -e 's/\.//g'  -e 's/\,//g' -e 's/ /\
+/g' "$1" | tr 'A-Z' 'a-z' | sort | uniq -c | sort -nr
+#                           =========================
+#                            Frequency of occurrence
+
+#  Filter out periods and commas, and
+#+ change space between words to linefeed,
+#+ then shift characters to lowercase, and
+#+ finally prefix occurrence count and sort numerically.
+
+#  Arun Giridhar suggests modifying the above to:
+#  . . . | sort | uniq -c | sort +1 [-f] | sort +0 -nr
+#  This adds a secondary sort key, so instances of
+#+ equal occurrence are sorted alphabetically.
+#  As he explains it:
+#  "This is effectively a radix sort, first on the
+#+ least significant column
+#+ (word or string, optionally case-insensitive)
+#+ and last on the most significant column (frequency)."
+#
+#  As Frank Wang explains, the above is equivalent to
+#+       . . . | sort | uniq -c | sort +0 -nr
+#+ and the following also works:
+#+       . . . | sort | uniq -c | sort -k1nr -k
+########################################################
+
+exit 0
+
+# Exercises:
+# ---------
+# 1) Add 'sed' commands to filter out other punctuation,
+#+   such as semicolons.
+# 2) Modify the script to also filter out multiple spaces and
+#+   other whitespace.
+```
+
+The counting is a `Counter`: the text, without periods and commas, made
+lowercase and split into words. Sorting by the count and then the word,
+both reversed, gives `sort -nr`'s order, and `${n:7d}` lays the numbers out
+as `uniq -c` does. (Arun Giridhar's alphabetical order for ties is `key=(fn
+[kv] (- $kv[1], $kv[0]))` without `reverse`.) This runs on the ABS
+Guide's `testfile`.
+
+```tessh
+from collections import Counter
+# (The ABS Guide's testfile.)
+printf "%s\n" "This line occurs only once." "This line occurs twice." \
+  "This line occurs twice." "This line occurs three times." \
+  "This line occurs three times." "This line occurs three times." > testfile
+
+ARGS = 1
+E_BADARGS = 85
+E_NOFILE = 86
+
+args = $argv[1:] or [testfile]   # (sample argument, when none is given)
+if (len $args) != $ARGS          # Correct number of arguments passed to script?
+  print "Usage: $(Path $argv[0]).name filename"
+  exit $E_BADARGS
+file = Path $args[0]
+if not ($file.is_file)           # Check if file exists.
+  print "File \"$file\" does not exist."
+  exit $E_NOFILE
+
+# main
+# Filter out periods and commas, shift to lowercase, split into words,
+# count them, and sort by frequency of occurrence.
+text = re'[.,]'.sub "" ($file.read_text)
+counts = Counter (($text.lower).split)
+for [word n] in (sorted ($counts.items) key=(fn [kv] ($kv[1], $kv[0])) reverse=True)
+  print "${n:7d} $word"
+
+exit 0
+```
+
+```output
+      6 this
+      6 occurs
+      6 line
+      3 times
+      3 three
+      2 twice
+      1 only
+      1 once
+```
+
+`head` lists the start of a file, `-c N` its first N bytes:
+
+### Example 16-13. Which files are scripts? (`script-detector.sh`)
+
+```bash no-run
+#!/bin/bash
+# script-detector.sh: Detects scripts within a directory.
+
+TESTCHARS=2    # Test first 2 characters.
+SHABANG='#!'   # Scripts begin with a "sha-bang."
+
+for file in *  # Traverse all the files in current directory.
+do
+  if [[ `head -c$TESTCHARS "$file"` = "$SHABANG" ]]
+  #      head -c2                      #!
+  #  The '-c' option to "head" outputs a specified
+  #+ number of characters, rather than lines (the default).
+  then
+    echo "File \"$file\" is a script."
+  else
+    echo "File \"$file\" is *not* a script."
+  fi
+done
+  
+exit 0
+
+#  Exercises:
+#  ---------
+#  1) Modify this script to take as an optional argument
+#+    the directory to scan for scripts
+#+    (rather than just the current working directory).
+#
+#  2) As it stands, this script gives "false positives" for
+#+    Perl, awk, and other scripting language scripts.
+#     Correct this.
+```
+
+`head -c2` works the same; here the first two bytes are read in Python
+instead, from a file opened in binary mode, so a binary file doesn't
+trouble it. A folder is skipped (`head` on one is an error), and it runs on
+a few made-up files.
+
+```tessh
+# (Made-up files to try it on.)
+printf '#!/bin/bash\necho hi\n' > hello.sh
+printf '#!/usr/bin/env tessh\nprint hi\n' > hi.tsh
+printf 'Just some notes.\n' > notes.txt
+printf '\x7fELF\x02\x01' > program
+
+TESTCHARS = 2     # Test first 2 characters.
+SHABANG = b"#!"   # Scripts begin with a "sha-bang."
+
+for file in *     # Traverse all the files in current directory.
+  if not ($file.is_file)
+    continue
+  with (open $file rb) as f
+    start = $f.read $TESTCHARS
+  if $start == $SHABANG
+    print "File \"$file\" is a script."
+  else
+    print "File \"$file\" is *not* a script."
+
+exit 0
+```
+
+```output
+File "hello.sh" is a script.
+File "hi.tsh" is a script.
+File "notes.txt" is *not* a script.
+File "program" is *not* a script.
+```
+
+### Example 16-14. Generating 10-digit random numbers (`rnd.sh`)
+
+```bash
+#!/bin/bash
+# rnd.sh: Outputs a 10-digit random number
+
+# Script by Stephane Chazelas.
+
+head -c4 /dev/urandom | od -N4 -tu4 | sed -ne '1s/.* //p'
+
+
+# =================================================================== #
+
+# Analysis
+# --------
+
+# head:
+# -c4 option takes first 4 bytes.
+
+# od:
+# -N4 option limits output to 4 bytes.
+# -tu4 option selects unsigned decimal format for output.
+
+# sed: 
+# -n option, in combination with "p" flag to the "s" command,
+# outputs only matched lines.
+
+
+
+# The author of this script explains the action of 'sed', as follows.
+
+# head -c4 /dev/urandom | od -N4 -tu4 | sed -ne '1s/.* //p'
+# ----------------------------------> |
+
+# Assume output up to "sed" --------> |
+# is 0000000 1198195154\n
+
+#  sed begins reading characters: 0000000 1198195154\n.
+#  Here it finds a newline character,
+#+ so it is ready to process the first line (0000000 1198195154).
+#  It looks at its <range><action>s. The first and only one is
+
+#   range     action
+#   1         s/.* //p
+
+#  The line number is in the range, so it executes the action:
+#+ tries to substitute the longest string ending with a space in the line
+#  ("0000000 ") with nothing (//), and if it succeeds, prints the result
+#  ("p" is a flag to the "s" command here, this is different
+#+ from the "p" command).
+
+#  sed is now ready to continue reading its input. (Note that before
+#+ continuing, if -n option had not been passed, sed would have printed
+#+ the line once again).
+
+#  Now, sed reads the remainder of the characters, and finds the
+#+ end of the file.
+#  It is now ready to process its 2nd line (which is also numbered '$' as
+#+ it's the last one).
+#  It sees it is not matched by any <range>, so its job is done.
+
+#  In few word this sed commmand means:
+#  "On the first line only, remove any character up to the right-most space,
+#+ then print it."
+
+# A better way to do this would have been:
+#           sed -e 's/.* //;q'
+
+# Here, two <range><action>s (could have been written
+#           sed -e 's/.* //' -e q):
+
+#   range                    action
+#   nothing (matches line)   s/.* //
+#   nothing (matches line)   q (quit)
+
+#  Here, sed only reads its first line of input.
+#  It performs both actions, and prints the line (substituted) before
+#+ quitting (because of the "q" action) since the "-n" option is not passed.
+
+# =================================================================== #
+
+# An even simpler altenative to the above one-line script would be:
+#           head -c4 /dev/urandom| od -An -tu4
+
+exit
+```
+
+Stéphane Chazelas' pipeline runs as is in tessh. The Python way reads the
+same four bytes and makes them a number, with no text to cut up.
+
+```tessh
+# rnd.tsh: Outputs a 10-digit random number
+head -c4 /dev/urandom | od -N4 -tu4 | sed -ne '1s/.* //p'
+
+import os
+print (int.from_bytes (os.urandom 4))   # (or random.getrandbits 32)
+```
+
+```text
+(one run)
+3244878020
+1079381601
+```
+
+`tail` lists the end of a file, and `tail -f` keeps printing what's
+appended to it:
+
+### Example 16-15. Using `tail` to monitor the system log (`ex12.sh`)
+
+```bash no-run
+#!/bin/bash
+
+filename=sys.log
+
+cat /dev/null > $filename; echo "Creating / cleaning out file."
+#  Creates the file if it does not already exist,
+#+ and truncates it to zero length if it does.
+#  : > filename   and   > filename also work.
+
+tail /var/log/messages > $filename  
+# /var/log/messages must have world read permission for this to work.
+
+echo "$filename contains tail end of system log."
+
+exit 0
+```
+
+It reads a made-up `messages` here (there's no `/var/log/messages` on
+systems that log to the journal; `journalctl -n 10` is the modern `tail`
+of the log).
+
+```tessh
+# (A made-up /var/log/messages.)
+for i in (range 1 13)
+  print "Nov 23 10:${i:02d} host kernel: event $i" >>messages
+
+filename = sys.log
+
+cat /dev/null > $filename ; print "Creating / cleaning out file."
+#  Creates the file if it does not already exist,
+#+ and truncates it to zero length if it does.
+
+tail messages > $filename      # (/var/log/messages in the original)
+
+print "$filename contains tail end of system log."
+head -n 2 $filename            # (To see it.)
+exit 0
+```
+
+```output
+Creating / cleaning out file.
+sys.log contains tail end of system log.
+Nov 23 10:03 host kernel: event 3
+Nov 23 10:04 host kernel: event 4
+```
+
+`head -n 8 file | tail -n 1` is the 8th line, `(cat file).lines[7]` in
+tessh. `grep` searches files for a regex. `-q` makes it quiet, for its exit
+status alone, and a tessh `if` takes a command as its condition, so the
+ABS Guide's `grep -q` test needs no `$?`:
+
+```bash
+SUCCESS=0                      # if grep lookup succeeds
+word=Linux
+filename=data.file
+printf 'All about Linux.\n' > $filename    # (a made-up data.file)
+
+grep -q "$word" "$filename"    #  The "-q" option
+                               #+ causes nothing to echo to stdout.
+if [ $? -eq $SUCCESS ]
+# if grep -q "$word" "$filename"   can replace lines 5 - 7.
+then
+  echo "$word found in $filename"
+else
+  echo "$word not found in $filename"
+fi
+```
+
+```output bash
+Linux found in data.file
+```
+
+```tessh
+word = Linux
+filename = data.file
+printf 'All about Linux.\n' > $filename    # (a made-up data.file)
+
+if grep -q $word $filename
+  print "$word found in $filename"
+else
+  print "$word not found in $filename"
+# Or in Python:
+print ($word in ((Path $filename).read_text))
+```
+
+```output
+Linux found in data.file
+True
+```
+
+### Example 16-16. Printing out the *From* lines in stored e-mail messages (`from.sh`)
+
+```bash no-run
+#!/bin/bash
+# from.sh
+
+#  Emulates the useful 'from' utility in Solaris, BSD, etc.
+#  Echoes the "From" header line in all messages
+#+ in your e-mail directory.
+
+
+MAILDIR=~/mail/*               #  No quoting of variable. Why?
+# Maybe check if-exists $MAILDIR:   if [ -d $MAILDIR ] . . .
+GREP_OPTS="-H -A 5 --color"    #  Show file, plus extra context lines
+                               #+ and display "From" in color.
+TARGETSTR="^From"              # "From" at beginning of line.
+
+for file in $MAILDIR           #  No quoting of variable.
+do
+  grep $GREP_OPTS "$TARGETSTR" "$file"
+  #    ^^^^^^^^^^              #  Again, do not quote this variable.
+  echo
+done
+
+exit $?
+
+#  You might wish to pipe the output of this script to 'more'
+#+ or redirect it to a file . . .
+```
+
+The ABS Guide leaves `$MAILDIR` and `$GREP_OPTS` unquoted on purpose: one
+must glob, the other must split into words. In tessh they're values that
+say so: `./mail/*` written bare is a Glob, read again each time it's
+looped over, and the options are a list, one argument per item. It runs on
+a made-up `mail` folder (`~/mail/*` in the original).
+
+```tessh
+# (A made-up mail folder.)
+mkdir mail
+cat >mail/inbox <<'END'
+From bozo@example.com Mon Nov 23 10:00:00 2026
+Subject: lunch?
+To: you
+
+Tacos at noon.
+END
+cat >mail/saved <<'END'
+From ann@example.org Sun Nov 22 09:30:00 2026
+Subject: the report
+To: you
+
+Attached.
+END
+
+MAILDIR = ./mail/*             # A Glob (~/mail/* in the original).
+GREP_OPTS = [-H -A 2]          # Show file, plus extra context lines.
+TARGETSTR = "^From"            # "From" at beginning of line.
+
+for file in $MAILDIR
+  grep *$GREP_OPTS $TARGETSTR $file
+  print
+
+exit $?
+```
+
+```output
+./mail/inbox:From bozo@example.com Mon Nov 23 10:00:00 2026
+./mail/inbox-Subject: lunch?
+./mail/inbox-To: you
+
+./mail/saved:From ann@example.org Sun Nov 22 09:30:00 2026
+./mail/saved-Subject: the report
+./mail/saved-To: you
+
+```
+
+### Example 16-17. Emulating `grep` in a script (`grp.sh`)
+
+```bash no-run
+#!/bin/bash
+# grp.sh: Rudimentary reimplementation of grep.
+
+E_BADARGS=85
+
+if [ -z "$1" ]    # Check for argument to script.
+then
+  echo "Usage: `basename $0` pattern"
+  exit $E_BADARGS
+fi  
+
+echo
+
+for file in *     # Traverse all files in $PWD.
+do
+  output=$(sed -n /"$1"/p $file)  # Command substitution.
+
+  if [ ! -z "$output" ]           # What happens if "$output" is not quoted?
+  then
+    echo -n "$file: "
+    echo "$output"
+  fi              #  sed -ne "/$1/s|^|${file}: |p"  is equivalent to above.
+
+  echo
+done  
+
+echo
+
+exit 0
+
+# Exercises:
+# ---------
+# 1) Add newlines to output, if more than one match in any given file.
+# 2) Add features.
+```
+
+A grep in Python: the pattern compiled with `re.compile`, each file's lines
+kept when it matches. bash's `sed -n /"$1"/p` breaks on a pattern with a `/`
+in it; `re.compile` doesn't care.
+
+```tessh
+import re
+# (Made-up files to search.)
+printf 'This is a file containing information about Linux.\nNothing here.\n' > osinfo.txt
+printf 'The Linux operating system is steadily gaining in popularity.\n' > misc.txt
+printf 'No penguins.\n' > other.txt
+
+E_BADARGS = 85
+
+args = $argv[1:] or [Linux]      # (sample argument, when none is given)
+if not $args or not $args[0]     # Check for argument to script.
+  print "Usage: $(Path $argv[0]).name pattern"
+  exit $E_BADARGS
+pattern = re.compile $args[0]
+
+print
+
+for file in *                    # Traverse all files in the folder.
+  output = [$l for l in (($file.read_text).splitlines) if ($pattern.search $l)]
+  if $output
+    print "$file: " end=""
+    print ("\n".join $output)
+  print
+
+print
+exit 0
+```
+
+```output
+
+misc.txt: The Linux operating system is steadily gaining in popularity.
+
+osinfo.txt: This is a file containing information about Linux.
+
+
+
+```
+
+To find the lines with *both* of two patterns, pipe one `grep` into the
+other, as in bash (`grep file tstfile | grep text`), or test both with
+`and` in Python.
