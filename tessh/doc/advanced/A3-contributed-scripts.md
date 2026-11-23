@@ -6470,3 +6470,2116 @@ second line
 ABS reader
 only line
 ```
+
+## The Gronsfeld cipher
+<!-- help: abs-gronsfeld gronsfeld.bash cipher vigenere encrypt -->
+
+The Gronsfeld cipher (a GPL3 script from 2011 in the ABS Guide's
+collection) is a Vigenère cipher with only ten alphabets: each letter
+shifts forward by the matching letter of a ten-letter key, in groups of
+five, and the text ends with `29379`, which marks it for decryption.
+
+### Example A-56. The Gronsfeld Cipher (`gronsfeld.bash`)
+
+```bash no-run
+#!/bin/bash
+# gronsfeld.bash
+
+# License: GPL3
+# Reldate 06/23/11
+
+#  This is an implementation of the Gronsfeld Cipher.
+#  It's essentially a stripped-down variant of the 
+#+ polyalphabetic Vigenère Tableau, but with only 10 alphabets.
+#  The classic Gronsfeld has a numeric sequence as the key word,
+#+ but here we substitute a letter string, for ease of use.
+#  Allegedly, this cipher was invented by the eponymous Count Gronsfeld
+#+ in the 17th Century. It was at one time considered to be unbreakable.
+#  Note that this is ###not### a secure cipher by modern standards.
+
+#  Global Variables  #
+Enc_suffix="29379"   #  Encrypted text output with this 5-digit suffix. 
+                     #  This functions as a decryption flag,
+                     #+ and when used to generate passwords adds security.
+Default_key="gronsfeldk"
+                     #  The script uses this if key not entered below
+                     #  (at "Keychain").
+                     #  Change the above two values frequently
+                     #+ for added security.
+
+GROUPLEN=5           #  Output in groups of 5 letters, per tradition.
+alpha1=( abcdefghijklmnopqrstuvwxyz )
+alpha2=( {A..Z} )    #  Output in all caps, per tradition.
+                     #  Use   alpha2=( {a..z} )   for password generator.
+wraplen=26           #  Wrap around if past end of alphabet.
+dflag=               #  Decrypt flag (set if $Enc_suffix present).
+E_NOARGS=76          #  Missing command-line args?
+DEBUG=77             #  Debugging flag.
+declare -a offsets   #  This array holds the numeric shift values for
+                     #+ encryption/decryption.
+
+########Keychain#########
+key=  ### Put key here!!!
+      # 10 characters!
+#########################
+
+
+
+# Function
+: ()
+{ # Encrypt or decrypt, depending on whether $dflag is set.
+  # Why ": ()" as a function name? Just to prove that it can be done.
+
+  local idx keydx mlen off1 shft
+  local plaintext="$1"
+  local mlen=${#plaintext}
+
+for (( idx=0; idx<$mlen; idx++ ))
+do
+  let "keydx = $idx % $keylen"
+  shft=${offsets[keydx]}
+
+  if [ -n "$dflag" ]
+  then                  # Decrypt!
+    let "off1 = $(expr index "${alpha1[*]}" ${plaintext:idx:1}) - $shft"
+    # Shift backward to decrypt.
+  else                  # Encrypt!
+    let "off1 = $(expr index "${alpha1[*]}" ${plaintext:idx:1}) + $shft"
+    # Shift forward to encrypt.
+    test $(( $idx % $GROUPLEN)) = 0 && echo -n " "  # Groups of 5 letters.
+    #  Comment out above line for output as a string without whitespace,
+    #+ for example, if using the script as a password generator.
+  fi
+
+  ((off1--))   # Normalize. Why is this necessary?
+
+      if [ $off1 -lt 0 ]
+      then     # Catch negative indices.
+        let "off1 += $wraplen"
+      fi
+
+  ((off1 %= $wraplen))   # Wrap around if past end of alphabet.
+
+  echo -n "${alpha2[off1]}"
+
+done
+
+  if [ -z "$dflag" ]
+  then
+    echo " $Enc_suffix"
+#   echo "$Enc_suffix"  # For password generator.
+  else
+    echo
+  fi
+} # End encrypt/decrypt function.
+
+
+
+# int main () {
+
+# Check for command-line args.
+if [ -z "$1" ]
+then
+   echo "Usage: $0 TEXT TO ENCODE/DECODE"
+   exit $E_NOARGS
+fi
+
+if [ ${!#} == "$Enc_suffix" ]
+#    ^^^^^ Final command-line arg.
+then
+  dflag=ON
+  echo -n "+"           # Flag decrypted text with a "+" for easy ID.
+fi
+
+if [ -z "$key" ]
+then
+  key="$Default_key"    # "gronsfeldk" per above.
+fi
+
+keylen=${#key}
+
+for (( idx=0; idx<$keylen; idx++ ))
+do  # Calculate shift values for encryption/decryption.
+  offsets[idx]=$(expr index "${alpha1[*]}" ${key:idx:1})   # Normalize.
+  ((offsets[idx]--))  #  Necessary because "expr index" starts at 1,
+                      #+ whereas array count starts at 0.
+  # Generate array of numerical offsets corresponding to the key.
+  # There are simpler ways to accomplish this.
+done
+
+args=$(echo "$*" | sed -e 's/ //g' | tr A-Z a-z | sed -e 's/[0-9]//g')
+# Remove whitespace and digits from command-line args.
+# Can modify to also remove punctuation characters, if desired.
+
+         # Debug:
+         # echo "$args"; exit $DEBUG
+
+: "$args"               # Call the function named ":".
+# : is a null operator, except . . . when it's a function name!
+
+exit $?    # } End-of-script
+
+
+#   **************************************************************   #
+#   This script can function as a  password generator,
+#+  with several minor mods, see above.
+#   That would allow an easy-to-remember password, even the word
+#+ "password" itself, which encrypts to vrgfotvo29379
+#+  a fairly secure password not susceptible to a dictionary attack.
+#   Or, you could use your own name (surely that's easy to remember!).
+#   For example, Bozo Bozeman encrypts to hfnbttdppkt29379.
+#   **************************************************************   #
+```
+
+bash's function is named `:`, "just to prove that it can be done"; a tessh
+function needs a Python name, so it's `crypt`, and it gives its result back
+rather than echoing it a letter at a time. `.find` + 1 is `expr index` (0
+for a character not in the alphabet), `%` wraps around the alphabet (Python's
+`%` is never negative, so the extra check for a negative index isn't
+needed), and one regex removes the spaces and digits. With no arguments it
+encrypts a sample, decrypts the result and encrypts "password", which
+gives `vrgfotvo` as the original's notes say.
+
+```tessh
+import re
+# gronsfeld.bash: an implementation of the Gronsfeld Cipher.
+# License: GPL3. Reldate 06/23/11
+#  A stripped-down variant of the polyalphabetic Vigenère Tableau,
+#+ but with only 10 alphabets, and a letter string for the key here,
+#+ for ease of use. Not a secure cipher by modern standards.
+
+Enc_suffix = "29379"     # Encrypted text output with this 5-digit suffix:
+                         # it functions as a decryption flag.
+Default_key = gronsfeldk # The script uses this if key not entered below.
+GROUPLEN = 5             # Output in groups of 5 letters, per tradition.
+alpha1 = abcdefghijklmnopqrstuvwxyz
+alpha2 = ABCDEFGHIJKLMNOPQRSTUVWXYZ   # Output in all caps, per tradition.
+wraplen = 26             # Wrap around if past end of alphabet.
+E_NOARGS = 76
+
+########Keychain#########
+key = ""  ### Put key here!!! (10 characters!)
+#########################
+
+def crypt plaintext offsets decrypt
+  # Encrypt or decrypt, depending on decrypt.
+  # (bash names this function ":", just to prove that it can be done;
+  #  a tessh name has to be a Python name.)
+  out = ""
+  for [idx c] in (enumerate $plaintext)
+    shft = $offsets[$idx % (len $offsets)]
+    pos = ($alpha1.find $c) + 1   # 1-based, 0 if not a letter (as expr index).
+    if $decrypt
+      off1 = $pos - $shft         # Shift backward to decrypt.
+    else
+      off1 = $pos + $shft         # Shift forward to encrypt.
+      if $idx % $GROUPLEN == 0
+        out += " "                # Groups of 5 letters.
+    out += $alpha2[($off1 - 1) % $wraplen]   # Normalize, wrap around.
+  if $decrypt then $out else "$out $Enc_suffix"
+
+def main args
+  if not $args
+    print "Usage: $(Path $argv[0]).name TEXT TO ENCODE/DECODE"
+    exit $E_NOARGS
+  dflag = $args[-1] == $Enc_suffix   # Final command-line arg.
+  k = $key or $Default_key
+  # The shift values for encryption/decryption, from the key.
+  offsets = [($alpha1.index $c) for c in $k]
+  # Remove whitespace and digits from command-line args.
+  text = re'[\s0-9]'.sub "" (.lower (" ".join $args))
+  print (if $dflag then "+" else "") (crypt $text $offsets $dflag) sep=""
+
+# (Sample arguments, when none are given: three runs.)
+if $argv[1:]
+  main $argv[1:]
+else
+  main [Hello World]
+  main [NVZYG BSCON "29379"]
+  main [password]
+```
+
+```output
+ NVZYG BSCON 29379
++HELLOWORLD
+ VRGFO TVO 29379
+```
+
+## Bingo
+<!-- help: abs-bingo bingo.sh bingo random no-duplicates -->
+
+A bingo caller: each key calls a new number from 1 to 75, never one called
+before, until `q`; then it prints which numbers were called, by column.
+
+### Example A-57. Bingo Number Generator (`bingo.sh`)
+
+```bash no-run
+#!/bin/bash
+# bingo.sh
+# Bingo number generator
+# Reldate 20Aug12, License: Public Domain
+
+#######################################################################
+# This script generates bingo numbers.
+# Hitting a key generates a new number.
+# Hitting 'q' terminates the script.
+# In a given run of the script, there will be no duplicate numbers.
+# When the script terminates, it prints a log of the numbers generated.
+#######################################################################
+
+MIN=1       # Lowest allowable bingo number.
+MAX=75      # Highest allowable bingo number.
+COLS=15     # Numbers in each column (B I N G O).
+SINGLE_DIGIT_MAX=9
+
+declare -a Numbers
+Prefix=(B I N G O)
+
+initialize_Numbers ()
+{  # Zero them out to start.
+   # They'll be incremented if chosen.
+   local index=0
+   until [ "$index" -gt $MAX ]
+   do
+     Numbers[index]=0
+     ((index++))
+   done
+
+   Numbers[0]=1   # Flag zero, so it won't be selected.
+}
+
+
+generate_number ()
+{
+   local number
+
+   while [ 1 ]
+   do
+     let "number = $(expr $RANDOM % $MAX)"
+     if [ ${Numbers[number]} -eq 0 ]    # Number not yet called.
+     then
+       let "Numbers[number]+=1"         # Flag it in the array.
+       break                            # And terminate loop.
+     fi   # Else if already called, loop and generate another number.
+   done
+   # Exercise: Rewrite this more elegantly as an until-loop.
+
+   return $number
+}
+
+
+print_numbers_called ()
+{   # Print out the called number log in neat columns.
+    # echo ${Numbers[@]}
+
+local pre2=0                #  Prefix a zero, so columns will align
+                            #+ on single-digit numbers.
+
+echo "Number Stats"
+
+for (( index=1; index<=MAX; index++))
+do
+  count=${Numbers[index]}
+  let "t = $index - 1"      # Normalize, since array begins with index 0.
+  let "column = $(expr $t / $COLS)"
+  pre=${Prefix[column]}
+# echo -n "${Prefix[column]} "
+
+if [ $(expr $t % $COLS) -eq 0 ]
+then
+  echo   # Newline at end of row.
+fi
+
+  if [ "$index" -gt $SINGLE_DIGIT_MAX ]  # Check for single-digit number.
+  then
+    echo -n "$pre$index#$count "
+  else    # Prefix a zero.
+    echo -n "$pre$pre2$index#$count "
+  fi
+
+done
+}
+
+
+
+# main () {
+RANDOM=$$   # Seed random number generator.
+
+initialize_Numbers   # Zero out the number tracking array.
+
+clear
+echo "Bingo Number Caller"; echo
+
+while [[ "$key" != "q" ]]   # Main loop.
+do
+  read -s -n1 -p "Hit a key for the next number [q to exit] " key
+  # Usually 'q' exits, but not always.
+  # Can always hit Ctl-C if q fails.
+  echo
+
+  generate_number; new_number=$?
+
+  let "column = $(expr $new_number / $COLS)"
+  echo -n "${Prefix[column]} "   # B-I-N-G-O
+
+  echo $new_number
+done
+
+echo; echo
+
+# Game over ...
+print_numbers_called
+echo; echo "[#0 = not called . . . #1 = called]"
+
+echo
+
+exit 0
+# }
+
+
+# Certainly, this script could stand some improvement.
+#See also the author's Instructable:
+#www.instructables.com/id/Binguino-An-Arduino-based-Bingo-Number-Generato/
+```
+
+`read -s -n1` reads one key without echoing it; here the keys are canned
+(eight, then `q`; as in bash, `q` still calls a number before the loop
+ends) and `random` is seeded. For the real keys, see the stopwatch's
+`keys` above. The call log is a list of counts, as bash's array is, and
+`"${index:02d}"` pads the single digits. Two of the original's slips are
+kept: `$RANDOM % 75` never calls 75, and `number / 15` puts 15, 30, 45 and
+60 in the next column (here "O 60"). `random.sample (range 1 76) 75`
+would give a whole game's calls, in order, without either.
+
+```tessh
+import sys random
+# bingo.sh: Bingo number generator
+# Reldate 20Aug12, License: Public Domain
+# Hitting a key generates a new number; hitting 'q' terminates the script,
+# which then prints a log of the numbers generated. No duplicates.
+
+MIN = 1          # Lowest allowable bingo number.
+MAX = 75         # Highest allowable bingo number.
+COLS = 15        # Numbers in each column (B I N G O).
+Prefix = [B I N G O]
+
+# How often each number was called; 0 is flagged, so it won't be selected.
+Numbers = [1] + [0] * $MAX
+
+def generate_number
+  while True
+    number = random.randrange $MAX
+    if $Numbers[$number] == 0     # Number not yet called.
+      $Numbers[$number] += 1      # Flag it.
+      return $number
+
+def print_numbers_called
+  # Print out the called number log in neat columns.
+  print "Number Stats"
+  for index in (range 1 ($MAX + 1))
+    t = $index - 1
+    if $t % $COLS == 0
+      print                       # Newline at end of row.
+    print "$Prefix[$t // $COLS]${index:02d}#$Numbers[$index]" end=" "
+
+random.seed 2012                  # (RANDOM=$$ in the original.)
+# (The keys hit, canned: eight keys, then q.)
+keys = iter "        q"
+def clear
+  if (sys.stdout.isatty)
+    \clear
+
+clear
+print "Bingo Number Caller" ; print
+key = ""
+while $key != q                   # Main loop.
+  print "Hit a key for the next number [q to exit] " end=""
+  key = next $keys                # (read -s -n1, in the original)
+  print
+  new_number = (generate_number)
+  print $Prefix[$new_number // $COLS] $new_number   # B-I-N-G-O
+print ; print
+# Game over ...
+print_numbers_called
+print ; print "[#0 = not called . . . #1 = called]"
+print
+exit 0
+```
+
+```output
+Bingo Number Caller
+
+Hit a key for the next number [q to exit] 
+B 12
+Hit a key for the next number [q to exit] 
+O 60
+Hit a key for the next number [q to exit] 
+G 46
+Hit a key for the next number [q to exit] 
+I 24
+Hit a key for the next number [q to exit] 
+N 42
+Hit a key for the next number [q to exit] 
+O 74
+Hit a key for the next number [q to exit] 
+B 1
+Hit a key for the next number [q to exit] 
+O 65
+Hit a key for the next number [q to exit] 
+N 39
+
+
+Number Stats
+
+B01#1 B02#0 B03#0 B04#0 B05#0 B06#0 B07#0 B08#0 B09#0 B10#0 B11#0 B12#1 B13#0 B14#0 B15#0 
+I16#0 I17#0 I18#0 I19#0 I20#0 I21#0 I22#0 I23#0 I24#1 I25#0 I26#0 I27#0 I28#0 I29#0 I30#0 
+N31#0 N32#0 N33#0 N34#0 N35#0 N36#0 N37#0 N38#0 N39#1 N40#0 N41#0 N42#1 N43#0 N44#0 N45#0 
+G46#1 G47#0 G48#0 G49#0 G50#0 G51#0 G52#0 G53#0 G54#0 G55#0 G56#0 G57#0 G58#0 G59#0 G60#1 
+O61#0 O62#0 O63#0 O64#0 O65#1 O66#0 O67#0 O68#0 O69#0 O70#0 O71#0 O72#0 O73#0 O74#1 O75#0 
+[#0 = not called . . . #1 = called]
+
+```
+
+## Basics reviewed
+<!-- help: abs-basicsreviewed basics-reviewed.bash review arrays parameter-expansion ifs sparse -->
+
+To end its contributed scripts, the ABS Guide reviews the basics: Michael
+Zick's tour of bash variables, arrays, quoting, functions and parameter
+expansion (edited by the ABS Guide's author, with a section on arrays and
+IFS by Cliff Bamford). Its output is long and partly bash's quirks; it
+prints the script's path near the end, and makes one intentional "command
+not found" error.
+
+### Example A-58. Basics Reviewed (`basics-reviewed.bash`)
+
+```bash no-run
+#!/bin/bash
+# basics-reviewed.bash
+
+# File extension == *.bash == specific to Bash
+
+#   Copyright (c) Michael S. Zick, 2003; All rights reserved.
+#   License: Use in any form, for any purpose.
+#   Revision: $ID$
+#
+#              Edited for layout by M.C.
+#   (author of the "Advanced Bash Scripting Guide")
+#   Fixes and updates (04/08) by Cliff Bamford.
+
+
+#  This script tested under Bash versions 2.04, 2.05a and 2.05b.
+#  It may not work with earlier versions.
+#  This demonstration script generates one --intentional--
+#+ "command not found" error message. See line 436.
+
+#  The current Bash maintainer, Chet Ramey, has fixed the items noted
+#+ for later versions of Bash.
+
+
+
+        ###-------------------------------------------###
+        ###  Pipe the output of this script to 'more' ###
+        ###+ else it will scroll off the page.        ###
+        ###                                           ###
+        ###  You may also redirect its output         ###
+        ###+ to a file for examination.               ###  
+        ###-------------------------------------------###
+
+
+
+#  Most of the following points are described at length in
+#+ the text of the foregoing "Advanced Bash Scripting Guide."
+#  This demonstration script is mostly just a reorganized presentation.
+#      -- msz
+
+# Variables are not typed unless otherwise specified.
+
+#  Variables are named. Names must contain a non-digit.
+#  File descriptor names (as in, for example: 2>&1)
+#+ contain ONLY digits.
+
+# Parameters and Bash array elements are numbered.
+# (Parameters are very similar to Bash arrays.)
+
+# A variable name may be undefined (null reference).
+unset VarNull
+
+# A variable name may be defined but empty (null contents).
+VarEmpty=''                         # Two, adjacent, single quotes.
+
+# A variable name may be defined and non-empty.
+VarSomething='Literal'
+
+# A variable may contain:
+#   * A whole number as a signed 32-bit (or larger) integer
+#   * A string
+# A variable may also be an array.
+
+#  A string may contain embedded blanks and may be treated
+#+ as if it where a function name with optional arguments.
+
+#  The names of variables and the names of functions
+#+ are in different namespaces.
+
+
+#  A variable may be defined as a Bash array either explicitly or
+#+ implicitly by the syntax of the assignment statement.
+#  Explicit:
+declare -a ArrayVar
+
+
+
+# The echo command is a builtin.
+echo $VarSomething
+
+# The printf command is a builtin.
+# Translate %s as: String-Format
+printf %s $VarSomething         # No linebreak specified, none output.
+echo                            # Default, only linebreak output.
+
+
+
+
+# The Bash parser word breaks on whitespace.
+# Whitespace, or the lack of it is significant.
+# (This holds true in general; there are, of course, exceptions.)
+
+
+
+
+# Translate the DOLLAR_SIGN character as: Content-Of.
+
+# Extended-Syntax way of writing Content-Of:
+echo ${VarSomething}
+
+#  The ${ ... } Extended-Syntax allows more than just the variable
+#+ name to be specified.
+#  In general, $VarSomething can always be written as: ${VarSomething}.
+
+# Call this script with arguments to see the following in action.
+
+
+
+#  Outside of double-quotes, the special characters @ and *
+#+ specify identical behavior.
+#  May be pronounced as: All-Elements-Of.
+
+#  Without specification of a name, they refer to the
+#+ pre-defined parameter Bash-Array.
+
+
+
+# Glob-Pattern references
+echo $*                         # All parameters to script or function
+echo ${*}                       # Same
+
+# Bash disables filename expansion for Glob-Patterns.
+# Only character matching is active.
+
+
+# All-Elements-Of references
+echo $@                         # Same as above
+echo ${@}                       # Same as above
+
+
+
+
+#  Within double-quotes, the behavior of Glob-Pattern references
+#+ depends on the setting of IFS (Input Field Separator).
+#  Within double-quotes, All-Elements-Of references behave the same.
+
+
+#  Specifying only the name of a variable holding a string refers
+#+ to all elements (characters) of a string.
+
+
+#  To specify an element (character) of a string,
+#+ the Extended-Syntax reference notation (see below) MAY be used.
+
+
+
+
+#  Specifying only the name of a Bash array references
+#+ the subscript zero element,
+#+ NOT the FIRST DEFINED nor the FIRST WITH CONTENTS element.
+
+#  Additional qualification is needed to reference other elements,
+#+ which means that the reference MUST be written in Extended-Syntax.
+#  The general form is: ${name[subscript]}.
+
+#  The string forms may also be used: ${name:subscript}
+#+ for Bash-Arrays when referencing the subscript zero element.
+
+
+# Bash-Arrays are implemented internally as linked lists,
+#+ not as a fixed area of storage as in some programming languages.
+
+
+#   Characteristics of Bash arrays (Bash-Arrays):
+#   --------------------------------------------
+
+#   If not otherwise specified, Bash-Array subscripts begin with
+#+  subscript number zero. Literally: [0]
+#   This is called zero-based indexing.
+###
+#   If not otherwise specified, Bash-Arrays are subscript packed
+#+  (sequential subscripts without subscript gaps).
+###
+#   Negative subscripts are not allowed.
+###
+#   Elements of a Bash-Array need not all be of the same type.
+###
+#   Elements of a Bash-Array may be undefined (null reference).
+#       That is, a Bash-Array may be "subscript sparse."
+###
+#   Elements of a Bash-Array may be defined and empty (null contents).
+###
+#   Elements of a Bash-Array may contain:
+#     * A whole number as a signed 32-bit (or larger) integer
+#     * A string
+#     * A string formated so that it appears to be a function name
+#     + with optional arguments
+###
+#   Defined elements of a Bash-Array may be undefined (unset).
+#       That is, a subscript packed Bash-Array may be changed
+#   +   into a subscript sparse Bash-Array.
+###
+#   Elements may be added to a Bash-Array by defining an element
+#+  not previously defined.
+###
+# For these reasons, I have been calling them "Bash-Arrays".
+# I'll return to the generic term "array" from now on.
+#     -- msz
+
+
+echo "========================================================="
+
+#  Lines 202 - 334 supplied by Cliff Bamford. (Thanks!)
+#  Demo --- Interaction with Arrays, quoting, IFS, echo, * and @   ---  
+#+ all affect how things work
+
+ArrayVar[0]='zero'                    # 0 normal
+ArrayVar[1]=one                       # 1 unquoted literal
+ArrayVar[2]='two'                     # 2 normal
+ArrayVar[3]='three'                   # 3 normal
+ArrayVar[4]='I am four'               # 4 normal with spaces
+ArrayVar[5]='five'                    # 5 normal
+unset ArrayVar[6]                     # 6 undefined
+ArrayValue[7]='seven'                 # 7 normal
+ArrayValue[8]=''                      # 8 defined but empty
+ArrayValue[9]='nine'                  # 9 normal
+
+
+echo '--- Here is the array we are using for this test'
+echo
+echo "ArrayVar[0]='zero'             # 0 normal"
+echo "ArrayVar[1]=one                # 1 unquoted literal"
+echo "ArrayVar[2]='two'              # 2 normal"
+echo "ArrayVar[3]='three'            # 3 normal"
+echo "ArrayVar[4]='I am four'        # 4 normal with spaces"
+echo "ArrayVar[5]='five'             # 5 normal"
+echo "unset ArrayVar[6]              # 6 undefined"
+echo "ArrayValue[7]='seven'          # 7 normal"
+echo "ArrayValue[8]=''               # 8 defined but empty"
+echo "ArrayValue[9]='nine'           # 9 normal"
+echo
+
+
+echo
+echo '---Case0: No double-quotes, Default IFS of space,tab,newline ---'
+IFS=$'\x20'$'\x09'$'\x0A'            # In exactly this order.
+echo 'Here is: printf %q {${ArrayVar[*]}'
+printf %q ${ArrayVar[*]}
+echo
+echo 'Here is: printf %q {${ArrayVar[@]}'
+printf %q ${ArrayVar[@]}
+echo
+echo 'Here is: echo ${ArrayVar[*]}'
+echo  ${ArrayVar[@]}
+echo 'Here is: echo {${ArrayVar[@]}'
+echo ${ArrayVar[@]}
+
+echo
+echo '---Case1: Within double-quotes - Default IFS of space-tab- 
+newline ---'
+IFS=$'\x20'$'\x09'$'\x0A'	    #  These three bytes,
+echo 'Here is: printf %q "{${ArrayVar[*]}"'
+printf %q "${ArrayVar[*]}"
+echo
+echo 'Here is: printf %q "{${ArrayVar[@]}"'
+printf %q "${ArrayVar[@]}"
+echo
+echo 'Here is: echo "${ArrayVar[*]}"'
+echo  "${ArrayVar[@]}"
+echo 'Here is: echo "{${ArrayVar[@]}"'
+echo "${ArrayVar[@]}"
+
+echo
+echo '---Case2: Within double-quotes - IFS is q'
+IFS='q'
+echo 'Here is: printf %q "{${ArrayVar[*]}"'
+printf %q "${ArrayVar[*]}"
+echo
+echo 'Here is: printf %q "{${ArrayVar[@]}"'
+printf %q "${ArrayVar[@]}"
+echo
+echo 'Here is: echo "${ArrayVar[*]}"'
+echo  "${ArrayVar[@]}"
+echo 'Here is: echo "{${ArrayVar[@]}"'
+echo "${ArrayVar[@]}"
+
+echo
+echo '---Case3: Within double-quotes - IFS is ^'
+IFS='^'
+echo 'Here is: printf %q "{${ArrayVar[*]}"'
+printf %q "${ArrayVar[*]}"
+echo
+echo 'Here is: printf %q "{${ArrayVar[@]}"'
+printf %q "${ArrayVar[@]}"
+echo
+echo 'Here is: echo "${ArrayVar[*]}"'
+echo  "${ArrayVar[@]}"
+echo 'Here is: echo "{${ArrayVar[@]}"'
+echo "${ArrayVar[@]}"
+
+echo
+echo '---Case4: Within double-quotes - IFS is ^ followed by  
+space,tab,newline'
+IFS=$'^'$'\x20'$'\x09'$'\x0A'       # ^ + space tab newline
+echo 'Here is: printf %q "{${ArrayVar[*]}"'
+printf %q "${ArrayVar[*]}"
+echo
+echo 'Here is: printf %q "{${ArrayVar[@]}"'
+printf %q "${ArrayVar[@]}"
+echo
+echo 'Here is: echo "${ArrayVar[*]}"'
+echo  "${ArrayVar[@]}"
+echo 'Here is: echo "{${ArrayVar[@]}"'
+echo "${ArrayVar[@]}"
+
+echo
+echo '---Case6: Within double-quotes - IFS set and empty '
+IFS=''
+echo 'Here is: printf %q "{${ArrayVar[*]}"'
+printf %q "${ArrayVar[*]}"
+echo
+echo 'Here is: printf %q "{${ArrayVar[@]}"'
+printf %q "${ArrayVar[@]}"
+echo
+echo 'Here is: echo "${ArrayVar[*]}"'
+echo  "${ArrayVar[@]}"
+echo 'Here is: echo "{${ArrayVar[@]}"'
+echo "${ArrayVar[@]}"
+
+echo
+echo '---Case7: Within double-quotes - IFS is unset'
+unset IFS
+echo 'Here is: printf %q "{${ArrayVar[*]}"'
+printf %q "${ArrayVar[*]}"
+echo
+echo 'Here is: printf %q "{${ArrayVar[@]}"'
+printf %q "${ArrayVar[@]}"
+echo
+echo 'Here is: echo "${ArrayVar[*]}"'
+echo  "${ArrayVar[@]}"
+echo 'Here is: echo "{${ArrayVar[@]}"'
+echo "${ArrayVar[@]}"
+
+echo
+echo '---End of Cases---'
+echo "========================================================="; echo
+
+
+
+# Put IFS back to the default.
+# Default is exactly these three bytes.
+IFS=$'\x20'$'\x09'$'\x0A'           # In exactly this order.
+
+# Interpretation of the above outputs:
+#   A Glob-Pattern is I/O; the setting of IFS matters.
+###
+#   An All-Elements-Of does not consider IFS settings.
+###
+#   Note the different output using the echo command and the
+#+  quoted format operator of the printf command.
+
+
+#  Recall:
+#   Parameters are similar to arrays and have the similar behaviors.
+###
+#  The above examples demonstrate the possible variations.
+#  To retain the shape of a sparse array, additional script
+#+ programming is required.
+###
+#  The source code of Bash has a routine to output the
+#+ [subscript]=value   array assignment format.
+#  As of version 2.05b, that routine is not used,
+#+ but that might change in future releases.
+
+
+
+# The length of a string, measured in non-null elements (characters):
+echo
+echo '- - Non-quoted references - -'
+echo 'Non-Null character count: '${#VarSomething}' characters.'
+
+# test='Lit'$'\x00''eral'           # $'\x00' is a null character.
+# echo ${#test}                     # See that?
+
+
+
+#  The length of an array, measured in defined elements,
+#+ including null content elements.
+echo
+echo 'Defined content count: '${#ArrayVar[@]}' elements.'
+# That is NOT the maximum subscript (4).
+# That is NOT the range of the subscripts (1 . . 4 inclusive).
+# It IS the length of the linked list.
+###
+#  Both the maximum subscript and the range of the subscripts may
+#+ be found with additional script programming.
+
+# The length of a string, measured in non-null elements (characters):
+echo
+echo '- - Quoted, Glob-Pattern references - -'
+echo 'Non-Null character count: '"${#VarSomething}"' characters.'
+
+#  The length of an array, measured in defined elements,
+#+ including null-content elements.
+echo
+echo 'Defined element count: '"${#ArrayVar[*]}"' elements.'
+
+#  Interpretation: Substitution does not effect the ${# ... } operation.
+#  Suggestion:
+#  Always use the All-Elements-Of character
+#+ if that is what is intended (independence from IFS).
+
+
+
+#  Define a simple function.
+#  I include an underscore in the name
+#+ to make it distinctive in the examples below.
+###
+#  Bash separates variable names and function names
+#+ in different namespaces.
+#  The Mark-One eyeball isn't that advanced.
+###
+_simple() {
+    echo -n 'SimpleFunc'$@          #  Newlines are swallowed in
+}                                   #+ result returned in any case.
+
+
+# The ( ... ) notation invokes a command or function.
+# The $( ... ) notation is pronounced: Result-Of.
+
+
+# Invoke the function _simple
+echo
+echo '- - Output of function _simple - -'
+_simple                             # Try passing arguments.
+echo
+# or
+(_simple)                           # Try passing arguments.
+echo
+
+echo '- Is there a variable of that name? -'
+echo $_simple not defined           # No variable by that name.
+
+# Invoke the result of function _simple (Error msg intended)
+
+###
+$(_simple)                          # Gives an error message:
+#                          line 436: SimpleFunc: command not found
+#                          ---------------------------------------
+
+echo
+###
+
+#  The first word of the result of function _simple
+#+ is neither a valid Bash command nor the name of a defined function.
+###
+# This demonstrates that the output of _simple is subject to evaluation.
+###
+# Interpretation:
+#   A function can be used to generate in-line Bash commands.
+
+
+# A simple function where the first word of result IS a bash command:
+###
+_print() {
+    echo -n 'printf %q '$@
+}
+
+echo '- - Outputs of function _print - -'
+_print parm1 parm2                  # An Output NOT A Command.
+echo
+
+$(_print parm1 parm2)               #  Executes: printf %q parm1 parm2
+                                    #  See above IFS examples for the
+                                    #+ various possibilities.
+echo
+
+$(_print $VarSomething)             # The predictable result.
+echo
+
+
+
+# Function variables
+# ------------------
+
+echo
+echo '- - Function variables - -'
+# A variable may represent a signed integer, a string or an array.
+# A string may be used like a function name with optional arguments.
+
+# set -vx                           #  Enable if desired
+declare -f funcVar                  #+ in namespace of functions
+
+funcVar=_print                      # Contains name of function.
+$funcVar parm1                      # Same as _print at this point.
+echo
+
+funcVar=$(_print )                  # Contains result of function.
+$funcVar                            # No input, No output.
+$funcVar $VarSomething              # The predictable result.
+echo
+
+funcVar=$(_print $VarSomething)     #  $VarSomething replaced HERE.
+$funcVar                            #  The expansion is part of the
+echo                                #+ variable contents.
+
+funcVar="$(_print $VarSomething)"   #  $VarSomething replaced HERE.
+$funcVar                            #  The expansion is part of the
+echo                                #+ variable contents.
+
+#  The difference between the unquoted and the double-quoted versions
+#+ above can be seen in the "protect_literal.sh" example.
+#  The first case above is processed as two, unquoted, Bash-Words.
+#  The second case above is processed as one, quoted, Bash-Word.
+
+
+
+
+# Delayed replacement
+# -------------------
+
+echo
+echo '- - Delayed replacement - -'
+funcVar="$(_print '$VarSomething')" # No replacement, single Bash-Word.
+eval $funcVar                       # $VarSomething replaced HERE.
+echo
+
+VarSomething='NewThing'
+eval $funcVar                       # $VarSomething replaced HERE.
+echo
+
+# Restore the original setting trashed above.
+VarSomething=Literal
+
+#  There are a pair of functions demonstrated in the
+#+ "protect_literal.sh" and "unprotect_literal.sh" examples.
+#  These are general purpose functions for delayed replacement literals
+#+ containing variables.
+
+
+
+
+
+# REVIEW:
+# ------
+
+#  A string can be considered a Classic-Array of elements (characters).
+#  A string operation applies to all elements (characters) of the string
+#+ (in concept, anyway).
+###
+#  The notation: ${array_name[@]} represents all elements of the
+#+ Bash-Array: array_name.
+###
+#  The Extended-Syntax string operations can be applied to all
+#+ elements of an array.
+###
+#  This may be thought of as a For-Each operation on a vector of strings.
+###
+#  Parameters are similar to an array.
+#  The initialization of a parameter array for a script
+#+ and a parameter array for a function only differ
+#+ in the initialization of ${0}, which never changes its setting.
+###
+#  Subscript zero of the script's parameter array contains
+#+ the name of the script.
+###
+#  Subscript zero of a function's parameter array DOES NOT contain
+#+ the name of the function.
+#  The name of the current function is accessed by the $FUNCNAME variable.
+###
+#  A quick, review list follows (quick, not short).
+
+echo
+echo '- - Test (but not change) - -'
+echo '- null reference -'
+echo -n ${VarNull-'NotSet'}' '          # NotSet
+echo ${VarNull}                         # NewLine only
+echo -n ${VarNull:-'NotSet'}' '         # NotSet
+echo ${VarNull}                         # Newline only
+
+echo '- null contents -'
+echo -n ${VarEmpty-'Empty'}' '          # Only the space
+echo ${VarEmpty}                        # Newline only
+echo -n ${VarEmpty:-'Empty'}' '         # Empty
+echo ${VarEmpty}                        # Newline only
+
+echo '- contents -'
+echo ${VarSomething-'Content'}          # Literal
+echo ${VarSomething:-'Content'}         # Literal
+
+echo '- Sparse Array -'
+echo ${ArrayVar[@]-'not set'}
+
+# ASCII-Art time
+# State     Y==yes, N==no
+#           -       :-
+# Unset     Y       Y       ${# ... } == 0
+# Empty     N       Y       ${# ... } == 0
+# Contents  N       N       ${# ... } > 0
+
+#  Either the first and/or the second part of the tests
+#+ may be a command or a function invocation string.
+echo
+echo '- - Test 1 for undefined - -'
+declare -i t
+_decT() {
+    t=$t-1
+}
+
+# Null reference, set: t == -1
+t=${#VarNull}                           # Results in zero.
+${VarNull- _decT }                      # Function executes, t now -1.
+echo $t
+
+# Null contents, set: t == 0
+t=${#VarEmpty}                          # Results in zero.
+${VarEmpty- _decT }                     # _decT function NOT executed.
+echo $t
+
+# Contents, set: t == number of non-null characters
+VarSomething='_simple'                  # Set to valid function name.
+t=${#VarSomething}                      # non-zero length
+${VarSomething- _decT }                 # Function _simple executed.
+echo $t                                 # Note the Append-To action.
+
+# Exercise: clean up that example.
+unset t
+unset _decT
+VarSomething=Literal
+
+echo
+echo '- - Test and Change - -'
+echo '- Assignment if null reference -'
+echo -n ${VarNull='NotSet'}' '          # NotSet NotSet
+echo ${VarNull}
+unset VarNull
+
+echo '- Assignment if null reference -'
+echo -n ${VarNull:='NotSet'}' '         # NotSet NotSet
+echo ${VarNull}
+unset VarNull
+
+echo '- No assignment if null contents -'
+echo -n ${VarEmpty='Empty'}' '          # Space only
+echo ${VarEmpty}
+VarEmpty=''
+
+echo '- Assignment if null contents -'
+echo -n ${VarEmpty:='Empty'}' '         # Empty Empty
+echo ${VarEmpty}
+VarEmpty=''
+
+echo '- No change if already has contents -'
+echo ${VarSomething='Content'}          # Literal
+echo ${VarSomething:='Content'}         # Literal
+
+
+# "Subscript sparse" Bash-Arrays
+###
+#  Bash-Arrays are subscript packed, beginning with
+#+ subscript zero unless otherwise specified.
+###
+#  The initialization of ArrayVar was one way
+#+ to "otherwise specify".  Here is the other way:
+###
+echo
+declare -a ArraySparse
+ArraySparse=( [1]=one [2]='' [4]='four' )
+# [0]=null reference, [2]=null content, [3]=null reference
+
+echo '- - Array-Sparse List - -'
+# Within double-quotes, default IFS, Glob-Pattern
+
+IFS=$'\x20'$'\x09'$'\x0A'
+printf %q "${ArraySparse[*]}"
+echo
+
+#  Note that the output does not distinguish between "null content"
+#+ and "null reference".
+#  Both print as escaped whitespace.
+###
+#  Note also that the output does NOT contain escaped whitespace
+#+ for the "null reference(s)" prior to the first defined element.
+###
+# This behavior of 2.04, 2.05a and 2.05b has been reported
+#+ and may change in a future version of Bash.
+
+#  To output a sparse array and maintain the [subscript]=value
+#+ relationship without change requires a bit of programming.
+#  One possible code fragment:
+###
+# local l=${#ArraySparse[@]}        # Count of defined elements
+# local f=0                         # Count of found subscripts
+# local i=0                         # Subscript to test
+(                                   # Anonymous in-line function
+    for (( l=${#ArraySparse[@]}, f = 0, i = 0 ; f < l ; i++ ))
+    do
+        # 'if defined then...'
+        ${ArraySparse[$i]+ eval echo '\ ['$i']='${ArraySparse[$i]} ; (( f++ )) }
+    done
+)
+
+# The reader coming upon the above code fragment cold
+#+ might want to review "command lists" and "multiple commands on a line"
+#+ in the text of the foregoing "Advanced Bash Scripting Guide."
+###
+#  Note:
+#  The "read -a array_name" version of the "read" command
+#+ begins filling array_name at subscript zero.
+#  ArraySparse does not define a value at subscript zero.
+###
+#  The user needing to read/write a sparse array to either
+#+ external storage or a communications socket must invent
+#+ a read/write code pair suitable for their purpose.
+###
+# Exercise: clean it up.
+
+unset ArraySparse
+
+echo
+echo '- - Conditional alternate (But not change)- -'
+echo '- No alternate if null reference -'
+echo -n ${VarNull+'NotSet'}' '
+echo ${VarNull}
+unset VarNull
+
+echo '- No alternate if null reference -'
+echo -n ${VarNull:+'NotSet'}' '
+echo ${VarNull}
+unset VarNull
+
+echo '- Alternate if null contents -'
+echo -n ${VarEmpty+'Empty'}' '              # Empty
+echo ${VarEmpty}
+VarEmpty=''
+
+echo '- No alternate if null contents -'
+echo -n ${VarEmpty:+'Empty'}' '             # Space only
+echo ${VarEmpty}
+VarEmpty=''
+
+echo '- Alternate if already has contents -'
+
+# Alternate literal
+echo -n ${VarSomething+'Content'}' '        # Content Literal
+echo ${VarSomething}
+
+# Invoke function
+echo -n ${VarSomething:+ $(_simple) }' '    # SimpleFunc Literal
+echo ${VarSomething}
+echo
+
+echo '- - Sparse Array - -'
+echo ${ArrayVar[@]+'Empty'}                 # An array of 'Empty'(ies)
+echo
+
+echo '- - Test 2 for undefined - -'
+
+declare -i t
+_incT() {
+    t=$t+1
+}
+
+#  Note:
+#  This is the same test used in the sparse array
+#+ listing code fragment.
+
+# Null reference, set: t == -1
+t=${#VarNull}-1                     # Results in minus-one.
+${VarNull+ _incT }                  # Does not execute.
+echo $t' Null reference'
+
+# Null contents, set: t == 0
+t=${#VarEmpty}-1                    # Results in minus-one.
+${VarEmpty+ _incT }                 # Executes.
+echo $t'  Null content'
+
+# Contents, set: t == (number of non-null characters)
+t=${#VarSomething}-1                # non-null length minus-one
+${VarSomething+ _incT }             # Executes.
+echo $t'  Contents'
+
+# Exercise: clean up that example.
+unset t
+unset _incT
+
+# ${name?err_msg} ${name:?err_msg}
+#  These follow the same rules but always exit afterwards
+#+ if an action is specified following the question mark.
+#  The action following the question mark may be a literal
+#+ or a function result.
+###
+#  ${name?} ${name:?} are test-only, the return can be tested.
+
+
+
+
+# Element operations
+# ------------------
+
+echo
+echo '- - Trailing sub-element selection - -'
+
+#  Strings, Arrays and Positional parameters
+
+#  Call this script with multiple arguments
+#+ to see the parameter selections.
+
+echo '- All -'
+echo ${VarSomething:0}              # all non-null characters
+echo ${ArrayVar[@]:0}               # all elements with content
+echo ${@:0}                         # all parameters with content;
+                                    # ignoring parameter[0]
+
+echo
+echo '- All after -'
+echo ${VarSomething:1}              # all non-null after character[0]
+echo ${ArrayVar[@]:1}               # all after element[0] with content
+echo ${@:2}                         # all after param[1] with content
+
+echo
+echo '- Range after -'
+echo ${VarSomething:4:3}            # ral
+                                    # Three characters after
+                                    # character[3]
+
+echo '- Sparse array gotch -'
+echo ${ArrayVar[@]:1:2}     #  four - The only element with content.
+                            #  Two elements after (if that many exist).
+                            #  the FIRST WITH CONTENTS
+                            #+ (the FIRST WITH  CONTENTS is being
+                            #+ considered as if it
+                            #+ were subscript zero).
+#  Executed as if Bash considers ONLY array elements with CONTENT
+#  printf %q "${ArrayVar[@]:0:3}"    # Try this one
+
+#  In versions 2.04, 2.05a and 2.05b,
+#+ Bash does not handle sparse arrays as expected using this notation.
+#
+#  The current Bash maintainer, Chet Ramey, has corrected this.
+
+
+echo '- Non-sparse array -'
+echo ${@:2:2}               # Two parameters following parameter[1]
+
+# New victims for string vector examples:
+stringZ=abcABC123ABCabc
+arrayZ=( abcabc ABCABC 123123 ABCABC abcabc )
+sparseZ=( [1]='abcabc' [3]='ABCABC' [4]='' [5]='123123' )
+
+echo
+echo ' - - Victim string - -'$stringZ'- - '
+echo ' - - Victim array - -'${arrayZ[@]}'- - '
+echo ' - - Sparse array - -'${sparseZ[@]}'- - '
+echo ' - [0]==null ref, [2]==null ref, [4]==null content - '
+echo ' - [1]=abcabc [3]=ABCABC [5]=123123 - '
+echo ' - non-null-reference count: '${#sparseZ[@]}' elements'
+
+echo
+echo '- - Prefix sub-element removal - -'
+echo '- - Glob-Pattern match must include the first character. - -'
+echo '- - Glob-Pattern may be a literal or a function result. - -'
+echo
+
+
+# Function returning a simple, Literal, Glob-Pattern
+_abc() {
+    echo -n 'abc'
+}
+
+echo '- Shortest prefix -'
+echo ${stringZ#123}                 # Unchanged (not a prefix).
+echo ${stringZ#$(_abc)}             # ABC123ABCabc
+echo ${arrayZ[@]#abc}               # Applied to each element.
+
+# echo ${sparseZ[@]#abc}            # Version-2.05b core dumps.
+# Has since been fixed by Chet Ramey.
+
+# The -it would be nice- First-Subscript-Of
+# echo ${#sparseZ[@]#*}             # This is NOT valid Bash.
+
+echo
+echo '- Longest prefix -'
+echo ${stringZ##1*3}                # Unchanged (not a prefix)
+echo ${stringZ##a*C}                # abc
+echo ${arrayZ[@]##a*c}              # ABCABC 123123 ABCABC
+
+# echo ${sparseZ[@]##a*c}           # Version-2.05b core dumps.
+# Has since been fixed by Chet Ramey.
+
+echo
+echo '- - Suffix sub-element removal - -'
+echo '- - Glob-Pattern match must include the last character. - -'
+echo '- - Glob-Pattern may be a literal or a function result. - -'
+echo
+echo '- Shortest suffix -'
+echo ${stringZ%1*3}                 # Unchanged (not a suffix).
+echo ${stringZ%$(_abc)}             # abcABC123ABC
+echo ${arrayZ[@]%abc}               # Applied to each element.
+
+# echo ${sparseZ[@]%abc}            # Version-2.05b core dumps.
+# Has since been fixed by Chet Ramey.
+
+# The -it would be nice- Last-Subscript-Of
+# echo ${#sparseZ[@]%*}             # This is NOT valid Bash.
+
+echo
+echo '- Longest suffix -'
+echo ${stringZ%%1*3}                # Unchanged (not a suffix)
+echo ${stringZ%%b*c}                # a
+echo ${arrayZ[@]%%b*c}              # a ABCABC 123123 ABCABC a
+
+# echo ${sparseZ[@]%%b*c}           # Version-2.05b core dumps.
+# Has since been fixed by Chet Ramey.
+
+echo
+echo '- - Sub-element replacement - -'
+echo '- - Sub-element at any location in string. - -'
+echo '- - First specification is a Glob-Pattern - -'
+echo '- - Glob-Pattern may be a literal or Glob-Pattern function result. - -'
+echo '- - Second specification may be a literal or function result. - -'
+echo '- - Second specification may be unspecified. Pronounce that'
+echo '    as: Replace-With-Nothing (Delete) - -'
+echo
+
+
+
+# Function returning a simple, Literal, Glob-Pattern
+_123() {
+    echo -n '123'
+}
+
+echo '- Replace first occurrence -'
+echo ${stringZ/$(_123)/999}         # Changed (123 is a component).
+echo ${stringZ/ABC/xyz}             # xyzABC123ABCabc
+echo ${arrayZ[@]/ABC/xyz}           # Applied to each element.
+echo ${sparseZ[@]/ABC/xyz}          # Works as expected.
+
+echo
+echo '- Delete first occurrence -'
+echo ${stringZ/$(_123)/}
+echo ${stringZ/ABC/}
+echo ${arrayZ[@]/ABC/}
+echo ${sparseZ[@]/ABC/}
+
+#  The replacement need not be a literal,
+#+ since the result of a function invocation is allowed.
+#  This is general to all forms of replacement.
+echo
+echo '- Replace first occurrence with Result-Of -'
+echo ${stringZ/$(_123)/$(_simple)}  # Works as expected.
+echo ${arrayZ[@]/ca/$(_simple)}     # Applied to each element.
+echo ${sparseZ[@]/ca/$(_simple)}    # Works as expected.
+
+echo
+echo '- Replace all occurrences -'
+echo ${stringZ//[b2]/X}             # X-out b's and 2's
+echo ${stringZ//abc/xyz}            # xyzABC123ABCxyz
+echo ${arrayZ[@]//abc/xyz}          # Applied to each element.
+echo ${sparseZ[@]//abc/xyz}         # Works as expected.
+
+echo
+echo '- Delete all occurrences -'
+echo ${stringZ//[b2]/}
+echo ${stringZ//abc/}
+echo ${arrayZ[@]//abc/}
+echo ${sparseZ[@]//abc/}
+
+echo
+echo '- - Prefix sub-element replacement - -'
+echo '- - Match must include the first character. - -'
+echo
+
+echo '- Replace prefix occurrences -'
+echo ${stringZ/#[b2]/X}             # Unchanged (neither is a prefix).
+echo ${stringZ/#$(_abc)/XYZ}        # XYZABC123ABCabc
+echo ${arrayZ[@]/#abc/XYZ}          # Applied to each element.
+echo ${sparseZ[@]/#abc/XYZ}         # Works as expected.
+
+echo
+echo '- Delete prefix occurrences -'
+echo ${stringZ/#[b2]/}
+echo ${stringZ/#$(_abc)/}
+echo ${arrayZ[@]/#abc/}
+echo ${sparseZ[@]/#abc/}
+
+echo
+echo '- - Suffix sub-element replacement - -'
+echo '- - Match must include the last character. - -'
+echo
+
+echo '- Replace suffix occurrences -'
+echo ${stringZ/%[b2]/X}             # Unchanged (neither is a suffix).
+echo ${stringZ/%$(_abc)/XYZ}        # abcABC123ABCXYZ
+echo ${arrayZ[@]/%abc/XYZ}          # Applied to each element.
+echo ${sparseZ[@]/%abc/XYZ}         # Works as expected.
+
+echo
+echo '- Delete suffix occurrences -'
+echo ${stringZ/%[b2]/}
+echo ${stringZ/%$(_abc)/}
+echo ${arrayZ[@]/%abc/}
+echo ${sparseZ[@]/%abc/}
+
+echo
+echo '- - Special cases of null Glob-Pattern - -'
+echo
+
+echo '- Prefix all -'
+# null substring pattern means 'prefix'
+echo ${stringZ/#/NEW}               # NEWabcABC123ABCabc
+echo ${arrayZ[@]/#/NEW}             # Applied to each element.
+echo ${sparseZ[@]/#/NEW}            # Applied to null-content also.
+                                    # That seems reasonable.
+
+echo
+echo '- Suffix all -'
+# null substring pattern means 'suffix'
+echo ${stringZ/%/NEW}               # abcABC123ABCabcNEW
+echo ${arrayZ[@]/%/NEW}             # Applied to each element.
+echo ${sparseZ[@]/%/NEW}            # Applied to null-content also.
+                                    # That seems reasonable.
+
+echo
+echo '- - Special case For-Each Glob-Pattern - -'
+echo '- - - - This is a nice-to-have dream - - - -'
+echo
+
+_GenFunc() {
+    echo -n ${0}                    # Illustration only.
+    # Actually, that would be an arbitrary computation.
+}
+
+# All occurrences, matching the AnyThing pattern.
+# Currently //*/ does not match null-content nor null-reference.
+# /#/ and /%/ does match null-content but not null-reference.
+echo ${sparseZ[@]//*/$(_GenFunc)}
+
+
+#  A possible syntax would be to make
+#+ the parameter notation used within this construct mean:
+#   ${1} - The full element
+#   ${2} - The prefix, if any, to the matched sub-element
+#   ${3} - The matched sub-element
+#   ${4} - The suffix, if any, to the matched sub-element
+#
+# echo ${sparseZ[@]//*/$(_GenFunc ${3})}   # Same as ${1} here.
+# Perhaps it will be implemented in a future version of Bash.
+
+
+exit 0
+```
+
+tessh's answer to each point follows, in the script's order, as short
+scripts of its own.
+
+**Variables.** Values have types (Python's); a name that was never set, or
+was `del`eted, is an error to read, not an empty string. `None` is the
+value for "nothing". Functions and variables are in one namespace, so a
+function's name is a variable holding the function: bash's "is there a
+variable named `_simple`?" is yes in tessh.
+
+```tessh
+# Values have types: str, int, float, list, dict, None...
+VarEmpty = ''                     # Defined but empty (null contents).
+VarSomething = 'Literal'          # Defined and non-empty.
+VarNull = None                    # Defined as "no value" (Python's null).
+del VarNull                       # Undefined again (bash's unset).
+
+print $VarSomething
+printf %s $VarSomething           # The printf program: no newline asked, none output.
+echo
+print "${VarSomething}"           # ${…} is for gluing, in a string.
+print (type $VarSomething).__name__ (type 42).__name__ (type (2 ** 100)).__name__ (type [1 2]).__name__
+
+# An undefined name is an error (after looking for an environment variable).
+try
+  print $VarNull
+except NameError as e
+  print NameError: $e
+
+# Functions and variables share one namespace, Python's.
+def _simple = "SimpleFunc"
+print (callable $_simple)         # The name is the function.
+```
+
+```output
+Literal
+Literal
+Literal
+str int int list
+NameError: name 'VarNull' is not defined
+True
+```
+
+**Parameters.** The arguments are the list `$argv` (`$argv[0]` is the
+script). `"$*"` is `" ".join`, `$@` is the list itself, and a list given to
+a program is one argument per item, never split again. Strings index and
+slice as lists do.
+
+```tessh
+args = $argv[1:] or [one "two words" three]   # (sample arguments, when none are given)
+print (" ".join $args)            # "$*": one string, joined with spaces
+print *$args                      # $@: each argument its own word to print
+printf "<%s>" $args               # A list gives a program one argument per item,
+echo                              #+ never split again, as "$@" does.
+print $args[0] $args[-1] (len $args)   # Indexes (negative too), and $#.
+s = $args[1]
+print $s[0] $s[-5:] (len $s)      # A string's characters, the same way.
+```
+
+```output
+one two words three
+one two words three
+<one><two words><three>
+one three 3
+t words 9
+```
+
+**Arrays and IFS.** A list is packed, can hold any types, and takes
+negative indexes. Cliff Bamford's cases show how quoting and IFS change
+`${ArrayVar[*]}` and `${ArrayVar[@]}`. tessh has no IFS: a list stays a
+list until you join it, with the separator you name, and a string stays
+one argument until you split it. (The original also sets `ArrayValue[7..9]`
+where it means `ArrayVar`, so the array has six elements, there and here.)
+`printf %q` is the coreutils program here, which quotes with `'…'` where
+bash's builtin uses backslashes.
+
+```tessh
+# A list is packed: items 0, 1, 2…, no gaps; indexes may be negative.
+ArrayVar = [zero one two three "I am four" five]
+# (The original sets ArrayValue[7..9], not ArrayVar: a typo, so its
+#  array has 6 elements too.)
+print $ArrayVar
+print (len $ArrayVar) $ArrayVar[-1] [1 two 3.0 None]   # Any types, mixed.
+
+# There's no IFS: text is joined, and split, where you say so.
+print "--- printf %q of each item, as printf %q \"\${ArrayVar[@]}\" (any IFS)"
+printf %q $ArrayVar ; echo
+print "--- joined with IFS's first character, then quoted: printf %q \"\${ArrayVar[*]}\""
+for sep in [" " q "^" ""]
+  printf %q ($sep.join $ArrayVar) ; echo
+print "--- bash's unquoted \${ArrayVar[*]}: joined, then split again"
+printf %q ((" ".join $ArrayVar).split) ; echo
+print "--- echo \"\${ArrayVar[@]}\" (any IFS)"
+echo $ArrayVar
+print (" ".join $ArrayVar)
+
+# Lengths.
+VarSomething = Literal
+print "Non-Null character count: $(len $VarSomething) characters."
+print "Defined content count: $(len $ArrayVar) elements."
+```
+
+```output
+['zero' 'one' 'two' 'three' 'I am four' 'five']
+6 five [1 'two' 3.0 None]
+--- printf %q of each item, as printf %q "${ArrayVar[@]}" (any IFS)
+zeroonetwothree'I am four'five
+--- joined with IFS's first character, then quoted: printf %q "${ArrayVar[*]}"
+'zero one two three I am four five'
+'zeroqoneqtwoqthreeqI am fourqfive'
+'zero^one^two^three^I am four^five'
+'zeroonetwothreeI am fourfive'
+--- bash's unquoted ${ArrayVar[*]}: joined, then split again
+zeroonetwothreeIamfourfive
+--- echo "${ArrayVar[@]}" (any IFS)
+zero one two three I am four five
+zero one two three I am four five
+Non-Null character count: 7 characters.
+Defined content count: 6 elements.
+```
+
+**Functions and their results.** bash's `$(func)` is what the function
+prints, and a line that starts with it runs that text as a command. A
+tessh function gives back a value, and text becomes a command only on
+purpose: `shlex.split` it into words and hand them to `env` (the program,
+which runs the program named first). A function is a value, so
+`funcVar = $_print` holds the function, and "delayed replacement", bash's
+`eval` of a quoted `'$VarSomething'`, is a function (here an `fn`) that
+reads the variable when it's called.
+
+**Gap:** tessh can't run a program whose name is in a variable directly
+(bash's `$funcVar parm1`): `$p args` calls `$p` as a Python function, and
+`*$cmd` alone is an error. `env $p args` and `env *$cmd` do it.
+
+```tessh
+import shlex
+VarSomething = Literal
+
+# A function's result is what it gives back, not what it prints.
+def _simple *args = "SimpleFunc" + (" ".join $args)
+print '- - Output of function _simple - -'
+print (_simple)
+print '- Is there a variable of that name? -'
+print $_simple.__name__           # Yes: the function itself.
+
+# bash runs the text $(_simple) prints as a command. tessh runs text as a
+# command only when told to: split it into words, and run them with env
+# (the program: it runs the program named first).
+env *(shlex.split (_simple))   # Gives an error message (on stderr), as intended.
+
+def _print *args = "printf %q " + (" ".join $args)
+print '- - Outputs of function _print - -'
+print (_print parm1 parm2)        # A result, not a command.
+env *(shlex.split (_print parm1 parm2)) ; echo   # Runs: printf %q parm1 parm2
+env *(shlex.split (_print $VarSomething)) ; echo
+
+# Function variables: a function is a value like any other.
+print '- - Function variables - -'
+funcVar = $_print                 # The function itself.
+print (funcVar parm1)
+funcVar = (_print)                # Its result, a string.
+env *(shlex.split $funcVar) ; echo    # printf %q with nothing to quote
+env *(shlex.split $funcVar) $VarSomething ; echo
+funcVar = _print $VarSomething    # $VarSomething replaced HERE.
+env *(shlex.split $funcVar) ; echo
+
+# Delayed replacement: bash keeps '$VarSomething' in the text and evals it
+# later. In tessh, a function (here a fn) runs the code later.
+print '- - Delayed replacement - -'
+later = fn [] (_print $VarSomething)
+env *(shlex.split (later)) ; echo     # $VarSomething replaced HERE.
+VarSomething = NewThing
+env *(shlex.split (later)) ; echo
+VarSomething = Literal
+```
+
+```output
+- - Output of function _simple - -
+SimpleFunc
+- Is there a variable of that name? -
+_simple
+- - Outputs of function _print - -
+printf %q parm1 parm2
+parm1parm2
+Literal
+- - Function variables - -
+printf %q parm1
+
+Literal
+Literal
+- - Delayed replacement - -
+Literal
+NewThing
+```
+
+**Defaults and alternates.** `${x-default}`, `${x:-default}`,
+`${x=default}`, `${x:=default}`, `${x+alt}` and `${x:+alt}` tell an unset
+variable from an empty one. In tessh, "unset" is `None` and "empty" is
+`''`, `is None` tells them apart and `or` treats both as false. The
+"default" can be code, as in bash's tests that run `_decT` and `_incT`;
+running the function named in a string means looking it up (`globals`).
+`${x?message}` is raising an exception.
+
+```tessh
+VarNull = None                    # The null reference.
+VarEmpty = ''                     # Null contents.
+VarSomething = Literal            # Contents.
+
+# ${x-default}: when it's None.  ${x:-default}: when it's None or empty.
+print '- - Test (but not change) - -'
+for [x name] in [[$VarNull null] [$VarEmpty empty] [$VarSomething contents]]
+  print "- $name -" (if $x is None then 'Default' else $x) ($x or 'Default') sep=" | "
+
+# State     is None   not x   len
+# None      True      True    (no len: a TypeError)
+# ''        False     True    0
+# 'Literal' False     False   7
+
+# The "default" can run code: bash's ${VarNull- _decT } runs _decT.
+print '- - Test 1 for undefined - -'
+t = 0
+def _decT
+  global t
+  t -= 1
+if $VarNull is None
+  _decT
+print $t                          # -1
+t = len $VarEmpty
+if $VarEmpty is None
+  _decT                           # Not run.
+print $t                          # 0
+# bash then runs the *contents* of VarSomething='_simple' as a command;
+# tessh looks a function up by name only if you ask: globals.
+def _simple = print SimpleFunc end=""
+VarSomething = _simple
+t = len $VarSomething
+if $VarSomething is not None
+  f = (globals)[$VarSomething]
+  f
+print $t
+VarSomething = Literal
+
+# ${x=default} and ${x:=default}: set it, too.
+print '- - Test and Change - -'
+if $VarNull is None
+  VarNull = NotSet
+print $VarNull $VarNull
+VarEmpty = $VarEmpty or 'Empty'
+print $VarEmpty $VarEmpty
+VarSomething = $VarSomething or 'Content'
+print $VarSomething
+d = {}                            # A dict has it built in:
+print ($d.setdefault key NotSet) ($d.get other NotSet) $d
+
+# ${x+alt} and ${x:+alt}: the alternate when it is set (and not empty).
+VarNull = None
+VarEmpty = ''
+print '- - Conditional alternate (But not change)- -'
+for [x name] in [[$VarNull null] [$VarEmpty empty] [$VarSomething contents]]
+  print "- $name -" (if $x is not None then 'Alt' else '') (if $x then 'Alt' else '') sep=" | "
+
+print '- - Test 2 for undefined - -'
+def _incT
+  global t
+  t += 1
+for [x what] in [[$VarNull "Null reference"] [$VarEmpty " Null content"] [$VarSomething " Contents"]]
+  t = (len ($x or '')) - 1
+  if $x is not None
+    _incT
+  print "$t $what"
+
+# ${x?message} and ${x:?message}: stop with the message. In tessh, raise.
+try
+  if $VarNull is None
+    raise (ValueError "VarNull: parameter null or not set")
+except ValueError as e
+  print $e
+```
+
+```output
+- - Test (but not change) - -
+- null - | Default | Default
+- empty - |  | Default
+- contents - | Literal | Literal
+- - Test 1 for undefined - -
+-1
+0
+SimpleFunc7
+- - Test and Change - -
+NotSet NotSet
+Empty Empty
+Literal
+NotSet NotSet {key: 'NotSet'}
+- - Conditional alternate (But not change)- -
+- null - |  | 
+- empty - | Alt | 
+- contents - | Alt | Alt
+- - Test 2 for undefined - -
+-1 Null reference
+0  Null content
+7  Contents
+VarNull: parameter null or not set
+```
+
+**Sparse arrays and slices.** bash arrays may have gaps (`[1]=one
+[2]='' [4]=four`), and printing one loses the subscripts; a dict keeps
+them, and tells "no element" (`in`, `.get`) from an empty one. Slices
+(`${VarSomething:4:3}`, `${ArrayVar[@]:1:2}`, `${@:2}`) are Python's,
+`[start:end]`, the same for strings, lists and `$argv`, with no sparse
+gotcha.
+
+```tessh
+import shlex
+# A sparse array is a dict: only the keys that are there are there.
+ArraySparse = {1: one 2: '' 4: four}   # [0] and [3]: null references
+print '- - Array-Sparse List - -'
+print (shlex.quote (" ".join ($ArraySparse.values)))
+for [i v] in ($ArraySparse.items)      # [subscript]=value, kept.
+  print " [$i]=$v"
+print (0 in $ArraySparse) (2 in $ArraySparse) ($ArraySparse.get 3)
+
+# Slices: strings, lists and arguments alike.
+VarSomething = Literal
+ArrayVar = [zero one two three "I am four" five]
+args = $argv[1:] or [a b c d]         # (sample arguments, when none are given)
+print '- All -'
+print $VarSomething[0:] $ArrayVar[0:] $args[0:]
+print '- All after -'
+print $VarSomething[1:] $ArrayVar[1:] $args[1:]
+print '- Range after -'
+print $VarSomething[4:7] $ArrayVar[1:3] $args[1:3]   # ral; no sparse gotcha
+```
+
+```output
+- - Array-Sparse List - -
+'one  four'
+ [1]=one
+ [2]=
+ [4]=four
+False True None
+- All -
+Literal ['zero' 'one' 'two' 'three' 'I am four' 'five'] ['a' 'b' 'c' 'd']
+- All after -
+iteral ['one' 'two' 'three' 'I am four' 'five'] ['b' 'c' 'd']
+- Range after -
+ral ['one' 'two'] ['b' 'c']
+```
+
+**Taking off a prefix or a suffix.** `#`, `##`, `%` and `%%` remove the
+shortest or longest match of a glob from the front or back, of a string
+or of each element. Python's `str` has `.removeprefix` and
+`.removesuffix` for literal text; for a glob, `fnmatchcase` tried on each
+prefix (or suffix) does it, shortest or longest first. `[… for x in
+$arrayZ]` applies it to each element. (Note `"123123"`: written bare, it
+would be a number. And where a result is empty, joining shows it as an
+extra space, which bash's unquoted `echo` drops.)
+
+```tessh
+from fnmatch import fnmatchcase
+# New victims for string vector examples:
+stringZ = abcABC123ABCabc
+arrayZ = [abcabc ABCABC "123123" ABCABC abcabc]   # ("123123" quoted: bare, it's a number.)
+sparseZ = {1: abcabc 3: ABCABC 4: '' 5: "123123"}
+
+print " - - Victim string - -$stringZ- - "
+print " - - Victim array - -$(' '.join $arrayZ)- - "
+print " - - Sparse array - -$(' '.join ($sparseZ.values))- - "
+print " - non-null-reference count: $(len $sparseZ) elements"
+
+# bash's #, ##, % and %% take a glob off the front or the back, the
+# shortest or the longest match. As tessh functions, with fnmatch:
+def cut_prefix s pat longest=False
+  ends = if $longest then (range (len $s) -1 -1) else (range ((len $s) + 1))
+  for i in $ends
+    if (fnmatchcase $s[:$i] $pat)
+      return $s[$i:]
+  $s
+def cut_suffix s pat longest=False
+  starts = if $longest then (range ((len $s) + 1)) else (range (len $s) -1 -1)
+  for i in $starts
+    if (fnmatchcase $s[$i:] $pat)
+      return $s[:$i]
+  $s
+
+def _abc = "abc"                  # A function's result as the pattern.
+print '- Shortest prefix -'
+print (cut_prefix $stringZ "123")
+print (cut_prefix $stringZ (_abc))
+print (" ".join [(cut_prefix $x abc) for x in $arrayZ])   # Applied to each element.
+print '- Longest prefix -'
+print (cut_prefix $stringZ "1*3" longest=True)
+print (cut_prefix $stringZ "a*C" longest=True)
+print (" ".join [(cut_prefix $x "a*c" longest=True) for x in $arrayZ])   # (Two empty ones.)
+print '- Shortest suffix -'
+print (cut_suffix $stringZ "1*3")
+print (cut_suffix $stringZ (_abc))
+print (" ".join [(cut_suffix $x abc) for x in $arrayZ])
+print '- Longest suffix -'
+print (cut_suffix $stringZ "1*3" longest=True)
+print (cut_suffix $stringZ "b*c" longest=True)
+print (" ".join [(cut_suffix $x "b*c" longest=True) for x in $arrayZ])
+# (For a literal prefix or suffix, str has its own: .removeprefix .removesuffix)
+print ($stringZ.removeprefix abc) ($stringZ.removesuffix abc)
+```
+
+```output
+ - - Victim string - -abcABC123ABCabc- - 
+ - - Victim array - -abcabc ABCABC 123123 ABCABC abcabc- - 
+ - - Sparse array - -abcabc ABCABC  123123- - 
+ - non-null-reference count: 4 elements
+- Shortest prefix -
+abcABC123ABCabc
+ABC123ABCabc
+abc ABCABC 123123 ABCABC abc
+- Longest prefix -
+abcABC123ABCabc
+abc
+ ABCABC 123123 ABCABC 
+- Shortest suffix -
+abcABC123ABCabc
+abcABC123ABC
+abc ABCABC 123123 ABCABC abc
+- Longest suffix -
+abcABC123ABCabc
+a
+a ABCABC 123123 ABCABC a
+ABC123ABCabc abcABC123ABC
+```
+
+**Replacing.** `${s/old/new}` and `${s//old/new}` are `.replace` (with a
+count of 1 for the first only); a pattern such as `[b2]`, or one anchored
+at the start (`/#`) or the end (`/%`), is a regex: `re'[b2]'.sub`,
+`re'^abc'.sub`, `re'abc$'.sub`. The replacement can be any value, a
+function's result included. A small `each` applies a function to each
+element and joins the results as `echo` would. These match bash's output
+line for line.
+
+```tessh
+stringZ = abcABC123ABCabc
+arrayZ = [abcabc ABCABC "123123" ABCABC abcabc]
+sparseZ = {1: abcabc 3: ABCABC 4: '' 5: "123123"}
+def _123 = "123"
+def _abc = "abc"
+def _simple = "SimpleFunc"
+# Applied to each element, the results joined as echo shows them
+# (bash's unquoted echo drops the empty ones).
+def each f xs = " ".join [$r for r in (map $f $xs) if $r]
+
+# ${s/old/new} is .replace with a count of 1; ${s//old/new} is .replace.
+# A glob such as [b2] is a regex here: re'[b2]'.sub.
+print '- Replace first occurrence -'
+print ($stringZ.replace (_123) "999" 1)
+print ($stringZ.replace ABC xyz 1)
+print (each (fn ($%.replace ABC xyz 1)) $arrayZ)
+print (each (fn ($%.replace ABC xyz 1)) ($sparseZ.values))
+print '- Delete first occurrence -'
+print ($stringZ.replace (_123) "" 1)
+print ($stringZ.replace ABC "" 1)
+print (each (fn ($%.replace ABC "" 1)) $arrayZ)
+print (each (fn ($%.replace ABC "" 1)) ($sparseZ.values))
+print '- Replace first occurrence with Result-Of -'
+print ($stringZ.replace (_123) (_simple) 1)
+print (each (fn ($%.replace ca (_simple) 1)) $arrayZ)
+print (each (fn ($%.replace ca (_simple) 1)) ($sparseZ.values))
+print '- Replace all occurrences -'
+print (re'[b2]'.sub X $stringZ)
+print ($stringZ.replace abc xyz)
+print (each (fn ($%.replace abc xyz)) $arrayZ)
+print (each (fn ($%.replace abc xyz)) ($sparseZ.values))
+print '- Delete all occurrences -'
+print (re'[b2]'.sub "" $stringZ)
+print ($stringZ.replace abc "")
+print (each (fn ($%.replace abc "")) $arrayZ)
+print (each (fn ($%.replace abc "")) ($sparseZ.values))
+
+# ${s/#old/new} and ${s/%old/new}: only at the start, or the end.
+print '- Replace prefix occurrences -'
+print (re'^[b2]'.sub X $stringZ)
+print (re'^abc'.sub XYZ $stringZ)
+print (each (fn (re'^abc'.sub XYZ $%)) $arrayZ)
+print (each (fn (re'^abc'.sub XYZ $%)) ($sparseZ.values))
+print '- Delete prefix occurrences -'
+print (re'^[b2]'.sub "" $stringZ)
+print ($stringZ.removeprefix (_abc))
+print (each (fn ($%.removeprefix abc)) $arrayZ)
+print (each (fn ($%.removeprefix abc)) ($sparseZ.values))
+print '- Replace suffix occurrences -'
+print (re'[b2]$'.sub X $stringZ)
+print (re'abc$'.sub XYZ $stringZ)
+print (each (fn (re'abc$'.sub XYZ $%)) $arrayZ)
+print (each (fn (re'abc$'.sub XYZ $%)) ($sparseZ.values))
+print '- Delete suffix occurrences -'
+print (re'[b2]$'.sub "" $stringZ)
+print ($stringZ.removesuffix (_abc))
+print (each (fn ($%.removesuffix abc)) $arrayZ)
+print (each (fn ($%.removesuffix abc)) ($sparseZ.values))
+
+# ${s/#/NEW} and ${s/%/NEW}: an empty pattern, so just glue it on.
+print '- Prefix all -'
+print ("NEW" + $stringZ)
+print (each (fn ("NEW" + $%)) $arrayZ)
+print (" ".join [("NEW" + $v) for v in ($sparseZ.values)])   # Null content too.
+print '- Suffix all -'
+print ($stringZ + "NEW")
+print (each (fn ($% + "NEW")) $arrayZ)
+print (" ".join [($v + "NEW") for v in ($sparseZ.values)])
+```
+
+```output
+- Replace first occurrence -
+abcABC999ABCabc
+abcxyz123ABCabc
+abcabc xyzABC 123123 xyzABC abcabc
+abcabc xyzABC 123123
+- Delete first occurrence -
+abcABCABCabc
+abc123ABCabc
+abcabc ABC 123123 ABC abcabc
+abcabc ABC 123123
+- Replace first occurrence with Result-Of -
+abcABCSimpleFuncABCabc
+abSimpleFuncbc ABCABC 123123 ABCABC abSimpleFuncbc
+abSimpleFuncbc ABCABC 123123
+- Replace all occurrences -
+aXcABC1X3ABCaXc
+xyzABC123ABCxyz
+xyzxyz ABCABC 123123 ABCABC xyzxyz
+xyzxyz ABCABC 123123
+- Delete all occurrences -
+acABC13ABCac
+ABC123ABC
+ABCABC 123123 ABCABC
+ABCABC 123123
+- Replace prefix occurrences -
+abcABC123ABCabc
+XYZABC123ABCabc
+XYZabc ABCABC 123123 ABCABC XYZabc
+XYZabc ABCABC 123123
+- Delete prefix occurrences -
+abcABC123ABCabc
+ABC123ABCabc
+abc ABCABC 123123 ABCABC abc
+abc ABCABC 123123
+- Replace suffix occurrences -
+abcABC123ABCabc
+abcABC123ABCXYZ
+abcXYZ ABCABC 123123 ABCABC abcXYZ
+abcXYZ ABCABC 123123
+- Delete suffix occurrences -
+abcABC123ABCabc
+abcABC123ABC
+abc ABCABC 123123 ABCABC abc
+abc ABCABC 123123
+- Prefix all -
+NEWabcABC123ABCabc
+NEWabcabc NEWABCABC NEW123123 NEWABCABC NEWabcabc
+NEWabcabc NEWABCABC NEW NEW123123
+- Suffix all -
+abcABC123ABCabcNEW
+abcabcNEW ABCABCNEW 123123NEW ABCABCNEW abcabcNEW
+abcabcNEW ABCABCNEW NEW 123123NEW
+```
+
+**The "nice-to-have dream".** The script ends wishing for a replacement
+computed from each match, with the parts of the element around it. That
+is Python's `re.sub` with a function as the replacement: it gets each
+match, and the match has the whole string and where it starts and ends.
+
+```tessh
+sparseZ = {1: abcabc 3: ABCABC 4: '' 5: "123123"}
+
+# The "nice-to-have dream": a replacement computed from each match, given
+# the whole element, the part before the match, the match and the part after.
+# A function as re.sub's replacement gets each match, and all of that with it.
+def _GenFunc m
+  whole = $m.string
+  start = ($m.start) ; end = ($m.end)
+  "<$whole[0:$start]|$($m[0].upper)|$whole[$end:]>"
+
+for v in ($sparseZ.values)
+  print (repr (re'b.'.sub $_GenFunc $v))
+```
+
+```output
+'a<a|BC|abc>a<abca|BC|>'
+'ABCABC'
+''
+'123123'
+```
