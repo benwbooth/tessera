@@ -435,6 +435,110 @@ fn guide_examples() {
     assert!(failed.is_empty(), "{} of {} examples:\n\n{}", failed.len(), blocks.len(), failed.join("\n\n"));
 }
 
+/// Every tessh example in the Advanced guide (doc/advanced/*.md, the ABS
+/// Guide ported) runs and prints its `output` block, as in the guide's
+/// test. Each runs in a fresh folder as the script `ex.tsh`; an `exit` ends
+/// it. (Its checker with the prebuilt tessh, and --bless, is the porting
+/// notes' check-examples.py.)
+#[test]
+fn advanced_guide_examples() {
+    use crate::runner::{check, new_namespace, run_source, tests::capture_fd1, tests::LOCK, TesshError};
+    // (The list names every chapter file.)
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/doc/advanced");
+    let mut on_disk: Vec<String> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.ends_with(".md")).collect();
+    on_disk.sort();
+    let listed: Vec<String> = crate::help::ADVANCED.iter().map(|(n, _)| n.to_string()).collect();
+    assert_eq!(listed, on_disk, "doc/advanced.rs lists doc/advanced/*.md in order");
+    let addr = |s: &str| {
+        let mut o = String::new();
+        let mut rest = s;
+        while let Some(k) = rest.find("at 0x") {
+            o.push_str(&rest[..k + 3]);
+            o.push_str("ADDR");
+            rest = rest[k + 3..].trim_start_matches(|c: char| c == 'x' || c.is_ascii_hexdigit());
+        }
+        o + rest
+    };
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut failed = Vec::new();
+    let mut count = 0;
+    Python::attach(|py| {
+        let home = std::env::current_dir().unwrap();
+        for (file, text) in crate::help::ADVANCED {
+            let lines: Vec<&str> = text.lines().collect();
+            let mut i = 0;
+            while i < lines.len() {
+                let Some(info) = lines[i].strip_prefix("```tessh") else {
+                    i += 1;
+                    continue;
+                };
+                let line = i + 1;
+                let mut code = String::new();
+                i += 1;
+                while i < lines.len() && !lines[i].starts_with("```") {
+                    code.push_str(lines[i]);
+                    code.push('\n');
+                    i += 1;
+                }
+                i += 1;
+                let mut j = i;
+                while j < lines.len() && lines[j].trim().is_empty() {
+                    j += 1;
+                }
+                let want = if j < lines.len() && lines[j] == "```output" {
+                    let mut w = String::new();
+                    j += 1;
+                    while j < lines.len() && !lines[j].starts_with("```") {
+                        w.push_str(lines[j]);
+                        w.push('\n');
+                        j += 1;
+                    }
+                    Some(w)
+                } else {
+                    None
+                };
+                count += 1;
+                if !info.contains("no-check") {
+                    let errs = check(py, &code, "<advanced>");
+                    if !errs.is_empty() {
+                        failed.push(format!("{file}:{line}: check: {errs:?}\n{code}"));
+                        continue;
+                    }
+                }
+                if info.contains("no-run") {
+                    continue;
+                }
+                let d = std::env::temp_dir().join(format!("tessh-advanced-{}-{count}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&d);
+                std::fs::create_dir_all(&d).unwrap();
+                std::env::set_current_dir(&d).unwrap();
+                let ns = new_namespace(py, "__main__", vec!["ex.tsh".to_string()]).unwrap();
+                let mut err = None;
+                let out = capture_fd1(py, || {
+                    if let Err(e) = run_source(py, &code, &ns, "<advanced>", false) {
+                        err = match e {
+                            TesshError::Py(e) if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) => None,
+                            TesshError::Py(e) => Some(format!("{}", e.value(py))),
+                            e => Some(format!("{:?}", e.position())),
+                        };
+                    }
+                });
+                std::env::set_current_dir(&home).unwrap();
+                let _ = std::fs::remove_dir_all(&d);
+                if let Some(e) = err {
+                    failed.push(format!("{file}:{line}: error: {e}\n{code}--- printed:\n{out}"));
+                } else if let Some(w) = want {
+                    if addr(&out) != w {
+                        failed.push(format!("{file}:{line}: printed\n{out}--- not\n{w}"));
+                    }
+                }
+            }
+        }
+    });
+    assert!(count > 5, "{count} examples");
+    assert!(failed.is_empty(), "{} of {} examples:\n\n{}", failed.len(), count, failed.join("\n\n"));
+}
+
 #[test]
 fn help_topics() {
     let ts = crate::help::topics();
@@ -443,6 +547,10 @@ fn help_topics() {
     assert!(crate::help::lookup("|").unwrap().contains("Pipes"));
     assert!(crate::help::lookup("").unwrap().contains("`help macros`"));
     assert!(crate::help::lookup("zzqx").is_none());
+    // (The Advanced guide: its contents, a chapter, and words only it has.)
+    assert!(crate::help::lookup("advanced").unwrap().contains("`help abs-sha-bang`"));
+    assert!(crate::help::lookup("abs-sha-bang").unwrap().starts_with("# 2. Starting Off With a Sha-Bang"));
+    assert!(crate::help::advanced_topics().len() > 3);
 }
 
 #[test]

@@ -548,9 +548,24 @@ pub fn tessh_manual_html() -> String {
     crate::manual::manual_html(&md, "")
 }
 
+/// The Advanced tessh Scripting Guide (tessh/doc/advanced, the ABS Guide
+/// ported to tessh) as a manual, as the tessh guide is.
+pub fn tessh_advanced_manual_html() -> String {
+    const FILES: &[(&str, &str)] = include!("../tessh/doc/advanced.rs");
+    let md: String = FILES.iter().flat_map(|(_, t)| t.lines().chain(["", ""])).filter(|l| !l.starts_with("<!-- help:")).collect::<Vec<_>>().join("\n");
+    crate::manual::manual_html(&md, "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tessh_advanced_manual() {
+        let m = tessh_advanced_manual_html();
+        assert!(m.starts_with("<nav>") && m.contains("<main>") && m.contains("Sha-Bang"), "{}", &m[..200]);
+        assert!(m.contains("<pre class='tessh'><code>") && m.contains("<pre class='output'>") && !m.contains("<!-- help:"));
+    }
 
     #[test]
     fn tessh_manual() {

@@ -6,6 +6,20 @@ use pyo3::types::PyString;
 
 pub const GUIDE: &str = include_str!("../doc/guide.md");
 
+/// The Advanced tessh Scripting Guide (doc/advanced/*.md, the ABS Guide
+/// ported): its files, by name, in order.
+pub const ADVANCED: &[(&str, &str)] = include!("../doc/advanced.rs");
+
+/// The Advanced guide as one Markdown text.
+pub fn advanced() -> String {
+    let mut s = String::new();
+    for (_, md) in ADVANCED {
+        s.push_str(md.trim_end());
+        s.push_str("\n\n");
+    }
+    s
+}
+
 pub struct Topic {
     pub title: String,
     pub part: String,
@@ -17,11 +31,20 @@ pub struct Topic {
 /// The guide's topics in order: a `#` or `##` heading with a
 /// `<!-- help: key… -->` line under it. (`#` lines in code are code.)
 pub fn topics() -> Vec<Topic> {
+    topics_of(GUIDE)
+}
+
+/// The Advanced guide's topics: its chapters and their sections.
+pub fn advanced_topics() -> Vec<Topic> {
+    topics_of(&advanced())
+}
+
+fn topics_of(guide: &str) -> Vec<Topic> {
     let mut out: Vec<Topic> = Vec::new();
     let mut part = String::new();
     let mut fence = false;
     let mut pending: Option<(String, String)> = None; // a heading, waiting for its keys line
-    for line in GUIDE.lines() {
+    for line in guide.lines() {
         if line.starts_with("```") {
             fence = !fence;
         }
@@ -61,16 +84,31 @@ pub fn topics() -> Vec<Topic> {
 }
 
 /// What `help word` shows: a topic it names, else the topics that mention it.
+/// The tessh guide first, then the Advanced guide (`help advanced` is its
+/// contents, `help abs-loops` a chapter of it).
 pub fn lookup(word: &str) -> Option<String> {
     let ts = topics();
     let w = word.trim().to_lowercase();
     if w.is_empty() {
         return Some(overview(&ts));
     }
-    if let Some(t) = ts.iter().find(|t| t.keys.contains(&w) || t.title.to_lowercase() == w) {
-        return Some(clean(&t.body));
+    let named = |ts: &[Topic]| ts.iter().position(|t| t.keys.contains(&w) || t.title.to_lowercase() == w);
+    if let Some(i) = named(&ts) {
+        return Some(clean(&ts[i].body));
     }
-    let hits: Vec<&Topic> = ts.iter().filter(|t| t.keys.iter().any(|k| k.starts_with(&w)) || mentions(&t.body, word.trim())).collect();
+    let adv = advanced_topics();
+    if let Some(i) = named(&adv) {
+        return Some(if i == 0 { overview(&adv) } else { clean(&adv[i].body) });
+    }
+    let hits_in = |ts: &[Topic]| -> Vec<usize> { (0..ts.len()).filter(|&i| ts[i].keys.iter().any(|k| k.starts_with(&w)) || mentions(&ts[i].body, word.trim())).collect() };
+    let (ts, hits) = match hits_in(&ts) {
+        h if !h.is_empty() => (ts, h),
+        _ => {
+            let h = hits_in(&adv);
+            (adv, h)
+        }
+    };
+    let hits: Vec<&Topic> = hits.into_iter().map(|i| &ts[i]).collect();
     match hits.len() {
         0 => None,
         1 => Some(clean(&hits[0].body)),
@@ -114,6 +152,9 @@ fn mentions(body: &str, word: &str) -> bool {
 
 fn overview(ts: &[Topic]) -> String {
     let mut s = clean(&ts[0].body);
+    if ts.get(1).is_some_and(|t| t.part.is_empty()) {
+        s.push('\n');
+    }
     let mut part = "";
     for t in &ts[1..] {
         if t.part != part {

@@ -17,7 +17,7 @@ Rectangle {
     // (A language with more than one guide: the one chosen, "" for its first.)
     property string guideId: ""
     readonly property string key: guideId !== "" ? guideId : lang
-    readonly property var choices: backend && lang !== "tessh" ? JSON.parse(backend.guideChoices(lang) || "[]") : []
+    readonly property var choices: backend ? JSON.parse(backend.guideChoices(lang) || "[]") : []
     signal chose(string id, string title)
     // (A hit in another guide, from All Guides: that guide, at the words.)
     signal openOther(string target, string query)
@@ -174,7 +174,7 @@ Rectangle {
                 Text { topPadding: 0.001; text: page.title; color: Theme.fg; font.pixelSize: 14; font.bold: true; renderType: Text.NativeRendering; elide: Text.ElideRight; Layout.maximumWidth: page.width * 0.4 }
                 Text {
                     topPadding: 0.001
-                    text: page.lang === "tessh" ? "help TOPIC in tessh shows one part" : page.busy ? (page.progress || "Fetching…") : "From the language's own documentation; source and license at the top"
+                    text: page.key === "tessh-advanced" ? "The ABS Guide's examples, bash beside tessh; help advanced in tessh lists it" : page.lang === "tessh" ? "help TOPIC in tessh shows one part" : page.busy ? (page.progress || "Fetching…") : "From the language's own documentation; source and license at the top"
                     color: Theme.textDim; font.pixelSize: 12; renderType: Text.NativeRendering; visible: page.width >= 900
                 }
                 Item { Layout.fillWidth: true }

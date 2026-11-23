@@ -1338,6 +1338,10 @@ pub fn find(key: &str) -> Option<&'static Guide> {
     GUIDES.iter().find(|g| !g.id.is_empty() && g.id == key).or_else(|| GUIDES.iter().find(|g| g.langs.contains(&key)))
 }
 
+/// The Advanced tessh Scripting Guide's key: tessh's second guide, built in
+/// as its first is (tessh/doc/advanced).
+pub const TESSH_ADVANCED: &str = "tessh-advanced";
+
 /// Guides there are (JSON {lang: title of its first guide}), tessh's own included.
 pub fn list_json() -> String {
     let mut m = serde_json::Map::new();
@@ -1352,6 +1356,10 @@ pub fn list_json() -> String {
 
 /// A language's guides, when it has more than one (JSON [[key, title]]).
 pub fn choices_json(lang: &str) -> String {
+    // (tessh's own two: its guide, and the ABS Guide ported to it.)
+    if lang == "tessh" || lang == TESSH_ADVANCED {
+        return serde_json::to_string(&[["tessh", "tessh guide"], [TESSH_ADVANCED, "Advanced tessh Scripting Guide"]]).unwrap_or_default();
+    }
     // (The language the name stands for: "c++" is C++, so is "learncpp".)
     let lang = find(lang).map(|g| g.langs[0]).unwrap_or(lang);
     let list: Vec<[&str; 2]> = GUIDES.iter().filter(|g| g.langs.contains(&lang)).map(|g| [g.key(), g.title]).collect();
@@ -1372,6 +1380,9 @@ fn cache_path(g: &Guide) -> PathBuf {
 pub fn page_html(lang: &str, refresh: bool) -> Result<String, String> {
     if lang == "tessh" {
         return Ok(crate::cells::tessh_manual_html());
+    }
+    if lang == TESSH_ADVANCED {
+        return Ok(crate::cells::tessh_advanced_manual_html());
     }
     let g = find(lang).ok_or_else(|| format!("No guide for {lang}."))?;
     let r = page_html_of(g, refresh);
@@ -1516,6 +1527,7 @@ fn tidy_once() {
         let mut names: std::collections::HashSet<&str> = GUIDES.iter().map(|g| g.key()).collect();
         names.extend(GUIDES.iter().flat_map(|g| g.langs.iter().copied()));
         names.insert("tessh");
+        names.insert(TESSH_ADVANCED);
         let Ok(rd) = std::fs::read_dir(cache_dir()) else { return };
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
