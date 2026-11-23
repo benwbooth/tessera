@@ -142,7 +142,7 @@ echo $a $t2
 t2 = do
   a = 9
   15 // 3
-print $a ${t2}
+print $a $t2
 ```
 
 ```output
@@ -248,7 +248,7 @@ echo $var0
 
 ```tessh
 var1 = 50
-var0 = if ${var1} < 98 then 9 else 21
+var0 = if $var1 < 98 then 9 else 21
 print $var0
 ```
 
@@ -284,8 +284,8 @@ echo $'tab\there' $'\x41'
 var1 = 5
 var2 = 23skidoo
 
-print ${var1}  # 5
-print ${var2}  # 23skidoo
+print $var1  # 5
+print $var2  # 23skidoo
 print "tab\there" "\x41"
 ```
 
@@ -294,9 +294,6 @@ print "tab\there" "\x41"
 23skidoo
 tab	here A
 ```
-
-(tessh reads `$var1` as `$var` then `1` for now, a bug; `${var1}` is the
-same variable.)
 
 ## 3.5 Groups, blocks and brackets
 <!-- help: abs-groups-blocks subshell code-block ( ) { } [ ] [[ ]] (( )) $[ ] -->
@@ -389,11 +386,11 @@ with (open $File) as f
   line2 = ($f.readline).rstrip "\n"
 
 print "First line in $File is:"
-print ${line1}
+print $line1
 print
 print "Second line in $File is:"
-print ${line2}
-print "Its fields:" (.split ${line2})
+print $line2
+print "Its fields:" (.split $line2)
 
 exit 0
 ```
@@ -453,38 +450,39 @@ echo "Results of rpm test in file $1.test"
 exit 0
 ```
 
-The block becomes a function, and its call is redirected. A redirected
-Python call sends Python's printing to the file, but (a bug, for now) not
-what the programs it runs print, so the function prints their captured
-output. `rpm -i --test`'s exit status is its value's `.ok`. Without an
+The block becomes a function, and its call is redirected, as bash's block
+is: everything it prints, its programs' output included, goes to the
+file. `rpm -i --test`'s exit status is its value's `.ok`. Without an
 argument the script stops with its usage message, which is what it does
 here.
 
 ```tessh
+SUCCESS = 0
 E_NOARGS = 65
 
 if (len $argv) < 2 or not $argv[1]
   print "Usage: $(Path $argv[0]).name rpm-file"
   exit $E_NOARGS
-rpm = $argv[1]
+rpm_file = $argv[1]
 
-def report
+def report                    # Begin code block.
   print
   print "Archive Description:"
-  print (rpm -qpi $rpm)        # Query description.
+  rpm -qpi $rpm_file          # Query description.
   print
   print "Archive Listing:"
-  print (rpm -qpl $rpm)        # Query listing.
+  rpm -qpl $rpm_file          # Query listing.
   print
-  if (rpm -i --test $rpm 2>&1).ok   # Query whether rpm file can be installed.
-    print "$rpm can be installed."
+  rpm -i --test $rpm_file     # Query whether rpm file can be installed.
+  if $? == $SUCCESS
+    print "$rpm_file can be installed."
   else
-    print "$rpm cannot be installed."
-  print
+    print "$rpm_file cannot be installed."
+  print                       # End code block.
 
-report >"${rpm}.test"            # Everything the block prints goes to the file.
+report >"${rpm_file}.test"    # Redirects output of everything in block to file.
 
-print "Results of rpm test in file ${rpm}.test"
+print "Results of rpm test in file ${rpm_file}.test"
 exit 0
 ```
 
@@ -656,8 +654,8 @@ fi
 veg1 = carrots
 veg2 = tomatoes
 
-if ${veg1} < ${veg2}
-  print "Although ${veg1} precede ${veg2} in the dictionary,"
+if $veg1 < $veg2
+  print "Although $veg1 precede $veg2 in the dictionary,"
   print "this does not necessarily imply anything " end=""
   print "about my culinary preferences."
 else

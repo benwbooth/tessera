@@ -26,7 +26,7 @@ fi
 var = 27
 category = minerals  # Spaces are fine.
 string1 = rock ; string2 = rock
-if ${string1} == ${string2}
+if $string1 == $string2
   print "same"
 ```
 
@@ -396,9 +396,9 @@ fi
 
 ```tessh
 condition1 = yes ; condition2 = yes
-if ${condition1} and ${condition2}
+if $condition1 and $condition2
   print "both"
-if ${condition1} && ${condition2}       # Also works.
+if $condition1 && $condition2       # Also works.
   print "both again"
 ```
 
@@ -558,12 +558,12 @@ t1 = do
   5 + 3
   7 - 1
   15 - 4
-print "t1 = ${t1}"
+print "t1 = $t1"
 
 t2 = do
   a = 9
   15 // 3
-print "t2 = ${t2}    a = $a"
+print "t2 = $t2    a = $a"
 ```
 
 ```output
@@ -947,6 +947,6 @@ if [[ "$v1" -gt "$v2" ]] || [[ "$v1" -lt "$v2" ]] && [[ -e "$filename" ]]
 ```
 
 ```tessh no-run
-if (${v1} > ${v2}) or (${v1} < ${v2} and (os.path.exists $filename))
+if ($v1 > $v2) or ($v1 < $v2 and (os.path.exists $filename))
   pass
 ```

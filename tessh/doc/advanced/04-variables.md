@@ -24,7 +24,7 @@ echo $variable1
 ```tessh
 variable1 = 23
 print variable1
-print ${variable1}
+print $variable1
 ```
 
 ```output
@@ -231,7 +231,7 @@ print "\$hello (null value) = $hello"     # $hello (null value) =
 
 var1=21  var2=22  var3=($env.get V3 "")
 print
-print "var1=${var1}   var2=${var2}   var3=${var3}"
+print "var1=$var1   var2=$var2   var3=$var3"
 
 # --------------------------------------------------------------
 

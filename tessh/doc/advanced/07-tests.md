@@ -419,7 +419,7 @@ exit 0
 
 (`no-run`: not every system has `/usr/bin/test`; NixOS, where this was
 written, doesn't.) In tessh `test` is the program, found on `PATH`; a
-program at a path held in a variable runs through `env`. `[` can't be used
+program at a path held in a variable runs as `$name args`. `[` can't be used
 at the start of a line (it's a list), and the plain Python test is the
 tessh way.
 
@@ -437,7 +437,7 @@ else
 print
 
 test_program = shutil.which "test"     # /usr/bin/test, or wherever it is.
-if env $test_program -z $arg1
+if $test_program -z $arg1
   print "No command-line arguments."
 else
   print "First command-line argument is $arg1."
@@ -563,7 +563,7 @@ except OSError
 
 var1 = 20
 var2 = 22
-${var1} != ${var2} && print "${var1} is not equal to ${var2}"
+$var1 != $var2 && print "$var1 is not equal to $var2"
 
 home = /home/bozo
 (os.path.isdir $home) || print "$home directory does not exist."
@@ -680,8 +680,8 @@ except ZeroDivisionError as e
 var1 = 5
 var2 = 4
 
-if ${var1} > ${var2}
-  print "${var1} is greater than ${var2}"
+if $var1 > $var2
+  print "$var1 is greater than $var2"
 
 exit 0
 ```

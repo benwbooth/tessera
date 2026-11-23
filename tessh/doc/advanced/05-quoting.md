@@ -139,14 +139,14 @@ printf "<%s>" "$variable2 $variable2 $variable2" ; echo    # 1 argument (2 space
 
 ```tessh
 variable1 = "a variable containing five words"
-printf "<%s>" This is ${variable1} ; echo              # 3 arguments
-printf "<%s>" This is *(.split ${variable1}) ; echo     # 7 arguments
-printf "<%s>" "This is ${variable1}" ; echo            # 1 argument
+printf "<%s>" This is $variable1 ; echo              # 3 arguments
+printf "<%s>" This is *(.split $variable1) ; echo     # 7 arguments
+printf "<%s>" "This is $variable1" ; echo            # 1 argument
 
 variable2 = ""    # Empty.
-printf "<%s>" ${variable2} ${variable2} ${variable2} ; echo   # 3 empty arguments
-printf "<%s>" [$v for v in [${variable2}] if $v] ; echo     # none: an empty list
-printf "<%s>" "${variable2} ${variable2} ${variable2}" ; echo # 1 argument (2 spaces)
+printf "<%s>" $variable2 $variable2 $variable2 ; echo   # 3 empty arguments
+printf "<%s>" [$v for v in [$variable2] if $v] ; echo     # none: an empty list
+printf "<%s>" "$variable2 $variable2 $variable2" ; echo # 1 argument (2 spaces)
 ```
 
 ```output
@@ -300,7 +300,7 @@ print "$var3"    # \\\\
 print "$(echo '"')"          # "
 
 var1 = "Two bits"
-print "\$var1 = ${var1}"     # $var1 = Two bits
+print "\$var1 = $var1"     # $var1 = Two bits
 
 # Or, comparing two files' sizes (made-up files to try it on):
 print aaaa >My_File1 ; print a >My_File2
