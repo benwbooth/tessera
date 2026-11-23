@@ -453,8 +453,9 @@ exit 0
 ```
 
 A command used as a value is captured: `a = echo Hello!` needs neither
-backquotes nor `$(…)`. The value is text without its last newline (with
-`.lines` and `.code` besides). Joining it into one line is a split away.
+backquotes nor `$(…)`. (A program with no arguments goes in parentheses,
+`d = (date)`: `d = date` is the word.) The value is text without its last
+newline (with `.lines` and `.code` besides). Joining it into one line is a split away.
 (`ls -go --time-style=+%F` here, on made-up files, leaves out the owner
 and the time, so the output is the same every run.)
 

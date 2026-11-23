@@ -126,7 +126,7 @@ character: in tessh `re'a.c'`.
   starts with `/`, `./`, `../` or `~` is a Path, so `$p.parent`, `$p.name`
   and `$p / more` work.
 - `` `command` `` is bash's old command substitution. tessh has no
-  backquoted commands: a command used as a value is captured (`x = date`,
+  backquoted commands: a command used as a value is captured (`x = (date)`,
   `"today is $(date +%A)"`). Backticks in tessh make a function infix
   (``3 `max` 9``).
 - `,` is bash's arithmetic comma operator (`let "t2 = ((a = 9, 15 / 3))"`:
