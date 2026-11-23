@@ -1437,7 +1437,7 @@ if (pwd) != $TargetDirectory    # Keep from wiping out wrong directory by accide
   exit $E_WRONG_DIRECTORY
 
 rm -rf *
-rm (list .[A-Za-z0-9]*)   # Delete dotfiles.  (See below.)
+rm .[A-Za-z0-9]*    # Delete dotfiles.
 result = $?         # Result of delete operations. If successful = 0.
 
 print
@@ -1457,9 +1457,6 @@ Old files deleted in GreatAmericanNovel.
 
 ```
 
-**Gap:** `rm .[A-Za-z0-9]*` should delete the dotfiles, as in bash, but a
-pattern starting with a dot doesn't match them in a command yet. Used as a
-value it does, so `(list .[A-Za-z0-9]*)` gives the names.
 
 ## 9.2 Typing variables: declare or typeset
 <!-- help: abs-declare declare typeset readonly integer-variables -->
