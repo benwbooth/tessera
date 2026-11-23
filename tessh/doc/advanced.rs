@@ -40,6 +40,8 @@
     ("34-gotchas.md", include_str!("advanced/34-gotchas.md")),
     ("35-scrstyle.md", include_str!("advanced/35-scrstyle.md")),
     ("36-miscellany.md", include_str!("advanced/36-miscellany.md")),
+    ("37-bash2.md", include_str!("advanced/37-bash2.md")),
+    ("38-endnotes.md", include_str!("advanced/38-endnotes.md")),
     ("A1-contributed-scripts.md", include_str!("advanced/A1-contributed-scripts.md")),
     ("A2-contributed-scripts.md", include_str!("advanced/A2-contributed-scripts.md")),
     ("A3-contributed-scripts.md", include_str!("advanced/A3-contributed-scripts.md")),
@@ -54,4 +56,8 @@
     ("J-tabexpansion.md", include_str!("advanced/J-tabexpansion.md")),
     ("K-localization.md", include_str!("advanced/K-localization.md")),
     ("L-histcommands.md", include_str!("advanced/L-histcommands.md")),
+    ("M-sample-bashrc.md", include_str!("advanced/M-sample-bashrc.md")),
+    ("N-dosbatch.md", include_str!("advanced/N-dosbatch.md")),
+    ("O-exercises.md", include_str!("advanced/O-exercises.md")),
+    ("T-asciitable.md", include_str!("advanced/T-asciitable.md")),
 ]
