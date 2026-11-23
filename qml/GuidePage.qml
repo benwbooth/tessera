@@ -36,6 +36,15 @@ Rectangle {
         return c ? c[1] : fallbackTitle
     }
     color: Theme.bg
+    // The contents list's width: dragged at its right edge, kept (settings).
+    readonly property int navWidth: {
+        const w = page.Window.window
+        const v = w && w.settings ? w.settings.guide_contents_width : 230
+        return Math.max(140, Math.min(700, v || 230))
+    }
+    function setNavWidth(w) {
+        if (backend) backend.setSetting("guide_contents_width", String(Math.round(Math.max(140, Math.min(700, w)))))
+    }
     function find(text) { findField.text = text; findField.forceActiveFocus() }
     function focusFind() { findField.forceActiveFocus() }
     // (Test hook: a touchpad swipe, ten 30 px moves 16 ms apart, then how
@@ -55,7 +64,7 @@ Rectangle {
             + "pre{background:" + c(Theme.field) + ";padding:10px 12px;border-radius:7px;overflow:auto}pre code{background:none;padding:0}"
             + "table{border-collapse:collapse}th,td{border:1px solid " + c(Theme.divider) + ";padding:5px 10px}th{background:" + c(Theme.field) + "}"
             + "::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:" + c(Theme.divider) + ";border-radius:5px}"
-            + "nav{width:230px;flex:none;overflow:auto;padding:14px 10px 30px 14px;border-right:1px solid " + c(Theme.divider) + ";font-size:13px;line-height:1.35}"
+            + "nav{width:" + page.navWidth + "px;flex:none;overflow:auto;padding:14px 10px 30px 14px;border-right:1px solid " + c(Theme.divider) + ";font-size:13px;line-height:1.35}"
             + "nav .title{font-weight:bold;font-size:15px;margin-bottom:10px;color:" + c(Theme.fg) + "}"
             + "nav a{display:block;color:" + c(Theme.text) + ";text-decoration:none;padding:2px 6px;border-radius:5px}"
             + "nav a:hover{background:" + c(Theme.field) + "}"
@@ -66,6 +75,9 @@ Rectangle {
             // relays out only what shows, not the whole page.)
             + "main>*{content-visibility:auto;contain-intrinsic-size:auto 80px}"
             + "pre.tessh{border-left:3px solid " + c(Theme.accent) + "}"
+            // (The contents list's edge: drag to make it wider or narrower.)
+            + "#navsplit{flex:none;width:6px;margin-left:-3px;margin-right:-3px;cursor:col-resize;z-index:2}"
+            + "#navsplit:hover,#navsplit.on{background:" + c(Theme.accent) + ";opacity:.5}"
             // (The Advanced guide's examples: bash and tessh tabs.)
             + ".ex-tabs{margin:.9em 0;position:relative}.ex-tabs>input{position:absolute;opacity:0;pointer-events:none}"
             + ".ex-tabs>label{display:inline-block;padding:3px 14px;margin-right:3px;border-radius:7px 7px 0 0;font-size:12px;cursor:pointer;color:" + c(Theme.textDim) + "}"
@@ -109,7 +121,20 @@ Rectangle {
             + "<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(!a)return;const h=a.getAttribute('href');e.preventDefault();"
             + "if(h.startsWith('#')){const t=document.getElementById(decodeURIComponent(h.slice(1)));if(t)t.scrollIntoView({block:'start'})}else if(/^(https?|mailto|tessera-guide):/.test(h))window.open(h)})</script>"
             + "<script>" + momentum + "</script>"
+            + "<script>" + navSplit + "</script>"
     }
+    // The contents list's edge, dragged: the list follows the pointer; let go,
+    // the width goes to Tessera to keep ("tessera-navw:N" on the console).
+    readonly property string navSplit: "document.addEventListener('DOMContentLoaded',()=>{const nav=document.querySelector('nav');if(!nav)return;"
+        + "const sp=document.createElement('div');sp.id='navsplit';sp.title='Drag to resize the contents';nav.after(sp);"
+        + "sp.addEventListener('mousedown',ev=>{if(ev.button!==0)return;ev.preventDefault();const x0=ev.clientX,w0=nav.getBoundingClientRect().width;sp.classList.add('on');"
+        + "document.body.style.cursor='col-resize';document.body.style.userSelect='none';"
+        + "const mv=e=>{nav.style.width=Math.max(140,Math.min(700,w0+e.clientX-x0))+'px'};"
+        + "const up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);sp.classList.remove('on');document.body.style.cursor='';document.body.style.userSelect='';"
+        + "console.log('tessera-navw:'+Math.round(nav.getBoundingClientRect().width))};"
+        + "addEventListener('mousemove',mv);addEventListener('mouseup',up)});"
+        + "sp.addEventListener('dblclick',()=>{nav.style.width='230px';console.log('tessera-navw:230')})})"
+
     // Momentum scrolling in the page, as MomentumWheel does it in QML: a
     // wheel notch eases 120 px to a set destination (quicker for longer
     // runs, a notch mid-glide extends it); a touchpad follows the fingers,
@@ -271,7 +296,10 @@ Rectangle {
                 SlimMenuItem { text: "Select All"; onTriggered: web.triggerWebAction(WebEngineView.SelectAll) }
             }
             // (The page's own test lines, to the log.)
-            onJavaScriptConsoleMessage: (level, message) => { if (message.startsWith("tessera-")) console.log(message) }
+            onJavaScriptConsoleMessage: (level, message) => {
+                if (message.startsWith("tessera-navw:")) { page.setNavWidth(Number(message.slice(13))); return }
+                if (message.startsWith("tessera-")) console.log(message)
+            }
             // (Nothing navigates the page away: links open in the browser.)
             onNavigationRequested: (req) => { if (req.navigationType === WebEngineNavigationRequest.LinkClickedNavigation) { req.reject(); Qt.openUrlExternally(req.url) } }
             onLoadingChanged: (r) => { if (r.status === WebEngineView.LoadSucceededStatus && findField.text !== "") findText(findField.text) }

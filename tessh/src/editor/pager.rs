@@ -95,6 +95,9 @@ struct Guide {
 
 const MENU: [&str; 2] = ["Copy", "Select All"];
 
+/// The contents column's width as dragged (0: as wide as suits the terminal).
+static SIDE_W: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// An example's tab bar as text: "tessh" at columns 2–8, "bash (original)"
 /// at 11–27.
 const TAB_BAR: &str = "   tessh    bash (original) ";
@@ -283,9 +286,12 @@ impl Guide {
 
     fn sidebar_w(cols: usize) -> usize {
         if cols < 70 {
-            0
-        } else {
-            (cols / 4).clamp(20, 34)
+            return 0;
+        }
+        // (Dragged at its edge: that width, kept while tessh runs.)
+        match SIDE_W.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => (cols / 4).clamp(20, 34),
+            w => w.clamp(12, cols.saturating_sub(30)),
         }
     }
 
@@ -455,6 +461,7 @@ fn run(mut g: Guide, at: &str) {
             g.step(false, true);
         }
     }
+    let mut resizing = false;
     loop {
         let (c, r) = crossterm::terminal::size().unwrap_or((80, 24));
         let (cols, rows) = (c as usize, r as usize);
@@ -614,6 +621,22 @@ fn run(mut g: Guide, at: &str) {
                         _ => {}
                     }
                     continue;
+                }
+                // (The contents column's edge, the │: dragged, it resizes the column.)
+                match m.kind {
+                    MouseEventKind::Down(MouseButton::Left) if sw > 0 && m.row >= 1 && (m.column as usize) == sw => {
+                        resizing = true;
+                        continue;
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) if resizing => {
+                        SIDE_W.store((m.column as usize).clamp(12, cols.saturating_sub(30)), std::sync::atomic::Ordering::Relaxed);
+                        continue;
+                    }
+                    MouseEventKind::Up(_) if resizing => {
+                        resizing = false;
+                        continue;
+                    }
+                    _ => {}
                 }
                 // (A click on an example's tab bar shows that version.)
                 if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && in_text {

@@ -74,6 +74,8 @@ pub struct Settings {
     pub editor_line_numbers: bool,
     /// A file card's terminal editor ("" = the shell's $VISUAL or $EDITOR).
     pub terminal_editor: String,
+    /// The guide page's contents list, how wide (dragged at its edge).
+    pub guide_contents_width: u32,
     // -- Notebook: Markdown output as a page ("rich") or as styled
     // monospace text, the way a terminal Markdown viewer shows it ("text").
     pub markdown_style: String,
@@ -150,6 +152,7 @@ impl Default for Settings {
             editor_indent_guides: true,
             editor_line_numbers: true,
             terminal_editor: String::new(),
+            guide_contents_width: 230,
             markdown_style: "rich".into(),
             notebook_kernel: "tessh".into(),
             editor_prompt: true,
