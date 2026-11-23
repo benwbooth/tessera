@@ -428,7 +428,13 @@ pub fn is_number(t: &str) -> bool {
     if s.is_empty() {
         return false;
     }
+    let imag = s.ends_with(['j', 'J']);
     let s = s.strip_suffix(['j', 'J']).unwrap_or(s);
+    // (0123 isn't a Python number, as a decimal integer can't start with 0:
+    // it's a word, the text, as in bash.)
+    if !imag && s.len() > 1 && s.starts_with('0') && s.chars().all(|c| c.is_ascii_digit() || c == '_') && s.chars().any(|c| c.is_ascii_digit() && c != '0') {
+        return false;
+    }
     let ok_digits = |d: &str, radix: u32| !d.is_empty() && !d.starts_with('_') && !d.ends_with('_') && !d.contains("__") && d.chars().all(|c| c == '_' || c.is_digit(radix));
     if let Some(r) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         return ok_digits(r, 16);

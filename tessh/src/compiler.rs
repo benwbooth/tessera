@@ -2129,6 +2129,11 @@ impl<'py, 's> Compiler<'py, 's> {
         };
         for x in items {
             match &x.kind {
+                // ($x[:(f $n)]: a slice up to a calculation, not a `:(…)` template.)
+                Kind::Quasi(g) => {
+                    toks.push(None);
+                    toks.push(Some((**g).clone()));
+                }
                 Kind::Sym { name, .. } if name.contains(':') => {
                     for (k, p) in name.split(':').enumerate() {
                         if k > 0 {

@@ -236,6 +236,23 @@ fn globs_starting_with_a_set() {
     assert_eq!(out.lines().filter(|l| !l.starts_with('/')).collect::<Vec<_>>(), ["a.1 b.1", "c.1", "c.1", "True False", ".bashrc .bashrc .bashrc", ".bashrc"]);
 }
 
+/// `0123` is a word (Python has no such number), `007j` and `0` numbers.
+#[test]
+fn leading_zero_is_a_word() {
+    let (ns, out) = run("x = 0123456789\necho 0042\ny = 0");
+    assert_eq!(get::<String>(&ns, "x"), "0123456789");
+    assert_eq!(get::<i64>(&ns, "y"), 0);
+    assert_eq!(out, "0042\n");
+}
+
+/// `$x[:(expr)]` is a slice, not a `:(…)` template.
+#[test]
+fn slice_to_a_calculation() {
+    let (ns, _) = run("x = abcdef\nn = 2\ny = $x[:($n + 1)]\nz = $x[1:($n * 2)]");
+    assert_eq!(get::<String>(&ns, "y"), "abc");
+    assert_eq!(get::<String>(&ns, "z"), "bcd");
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");
