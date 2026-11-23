@@ -772,6 +772,8 @@ Rectangle {
     // command line context, item, and kind.)
     property var fetchedDoc: ({})
     // (A command with examples of its own: its man page goes under them.)
+    // The editor language's guide, at the word (Shift+F1, the Guide chip).
+    function openGuideAtWord() { if (guideChip.guide !== "") Window.window.openGuide(guideChip.guide, guideWord()) }
     // The word to look up in the guide: the selection (one line), else the
     // word the cursor is in or just after.
     function guideWord() {
@@ -1231,7 +1233,7 @@ Rectangle {
                     done = box.acceptGhost()
                 if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
                 if (!done && e.key === Qt.Key_Escape && box.aiBusy !== "") { box.controller.aiCancel(box.aiKey + "-cmd"); box.aiBusy = ""; done = true }
-                if (!done && e.key === Qt.Key_F1 && (e.modifiers & Qt.ShiftModifier) && guideChip.guide !== "") { Window.window.openGuide(guideChip.guide, box.guideWord()); done = true }
+                if (!done && e.key === Qt.Key_F1 && (e.modifiers & Qt.ShiftModifier) && guideChip.guide !== "") { box.openGuideAtWord(); done = true }
                 if (!done && e.key === Qt.Key_F1) { box.hoverAtPosition(cursorPosition); done = true }
                 if (!done) done = box.compKey(e)
                 if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
@@ -1496,7 +1498,7 @@ Rectangle {
             tip: (guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
                 : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept")
                 + ". Opens at the selected word, or the word at the cursor (Shift+F1)"
-            onClicked: Window.window.openGuide(guide, box.guideWord())
+            onClicked: box.openGuideAtWord()
         }
         Chip {
             visible: box.jobsAll > 0

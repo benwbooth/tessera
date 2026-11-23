@@ -1893,6 +1893,8 @@ ApplicationWindow {
             // (TESSERA_TEST_GUIDE_SWITCH=GUIDE: its chip clicked, as a person would.)
             // (TESSERA_TEST_GUIDE_SEARCH=1: TESSERA_TEST_GUIDE's words looked for in every guide.)
             else if (controller.testEnv("GUIDE_SEARCH") !== "") { t.pageItem.find(controller.testEnv("GUIDE")); t.pageItem.searchAll() }
+            // (TESSERA_TEST_GUIDE_RESTYLE=1: the profile's colours changed under an open guide.)
+            else if (controller.testEnv("GUIDE_RESTYLE") !== "") { t.pageItem.ansi = Array(16).fill("#ff3030"); t.pageItem.find(controller.testEnv("GUIDE")) }
             else if (controller.testEnv("GUIDE_SWITCH") !== "") t.pageItem.chose(controller.testEnv("GUIDE_SWITCH"), controller.testEnv("GUIDE_SWITCH"))
             else t.pageItem.find(controller.testEnv("GUIDE"))
         }
@@ -2014,7 +2016,7 @@ ApplicationWindow {
     Timer { id: tabTestTimer; interval: 5000; onTriggered: { currentTab = parseInt(controller.testEnv("TAB")); if (activePane) focusPane(activePane) } }
     Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
-    Timer { id: composeTestTimer; interval: Number(controller.testEnv("COMPOSE_DELAY") || 4000); onTriggered: if (activePane) { activePane.compose.focusEditor(); if (controller.testEnv("COMPOSE_LANG") !== "") activePane.compose.pickLanguage(controller.testEnv("COMPOSE_LANG")); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_TAB") !== "") activePane.compose.openComp(); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory() } }
+    Timer { id: composeTestTimer; interval: Number(controller.testEnv("COMPOSE_DELAY") || 4000); onTriggered: if (activePane) { activePane.compose.focusEditor(); if (controller.testEnv("COMPOSE_LANG") !== "") activePane.compose.pickLanguage(controller.testEnv("COMPOSE_LANG")); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_TAB") !== "") activePane.compose.openComp(); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory(); if (controller.testEnv("COMPOSE_GUIDE") !== "") activePane.compose.openGuideAtWord() } }
     Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.openAt(menuButton, 0, menuButton.height + 4); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
     P.Menu {
