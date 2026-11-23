@@ -2034,3 +2034,1058 @@ osinfo.txt: This is a file containing information about Linux.
 To find the lines with *both* of two patterns, pipe one `grep` into the
 other, as in bash (`grep file tstfile | grep text`), or test both with
 `and` in Python.
+
+`grep` makes a crossword solver: a pattern with dots for the unknown letters,
+anchored at both ends, run against a word list.
+
+### Example 16-18. Crossword puzzle solver (`cw-solver.sh`)
+
+```bash no-run
+#!/bin/bash
+# cw-solver.sh
+# This is actually a wrapper around a one-liner (line 46).
+
+#  Crossword puzzle and anagramming word game solver.
+#  You know *some* of the letters in the word you're looking for,
+#+ so you need a list of all valid words
+#+ with the known letters in given positions.
+#  For example: w...i....n
+#               1???5????10
+# w in position 1, 3 unknowns, i in the 5th, 4 unknowns, n at the end.
+# (See comments at end of script.)
+
+
+E_NOPATT=71
+DICT=/usr/share/dict/word.lst
+#                    ^^^^^^^^   Looks for word list here.
+#  ASCII word list, one word per line.
+#  If you happen to need an appropriate list,
+#+ download the author's "yawl" word list package.
+#  http://ibiblio.org/pub/Linux/libs/yawl-0.3.2.tar.gz
+#  or
+#  http://bash.deta.in/yawl-0.3.2.tar.gz
+
+
+if [ -z "$1" ]   #  If no word pattern specified
+then             #+ as a command-line argument . . .
+  echo           #+ . . . then . . .
+  echo "Usage:"  #+ Usage message.
+  echo
+  echo ""$0" \"pattern,\""
+  echo "where \"pattern\" is in the form"
+  echo "xxx..x.x..."
+  echo
+  echo "The x's represent known letters,"
+  echo "and the periods are unknown letters (blanks)."
+  echo "Letters and periods can be in any position."
+  echo "For example, try:   sh cw-solver.sh w...i....n"
+  echo
+  exit $E_NOPATT
+fi
+
+echo
+# ===============================================
+# This is where all the work gets done.
+grep ^"$1"$ "$DICT"   # Yes, only one line!
+#    |    |
+# ^ is start-of-word regex anchor.
+# $ is end-of-word regex anchor.
+
+#  From _Stupid Grep Tricks_, vol. 1,
+#+ a book the ABS Guide author may yet get around
+#+ to writing . . . one of these days . . .
+# ===============================================
+echo
+
+
+exit $?  # Script terminates here.
+#  If there are too many words generated,
+#+ redirect the output to a file.
+
+$ sh cw-solver.sh w...i....n
+
+wellington
+workingman
+workingmen
+```
+
+It runs on a made-up word list here. The one line is the same `grep`; in
+Python it's `re.fullmatch`, which anchors both ends itself.
+
+```tessh
+import re
+# (A made-up word list, one word per line.)
+printf "%s\n" welcome wellington window winning workingman workingmen \
+  worshipping wrestling > word.lst
+
+E_NOPATT = 71
+DICT = ./word.lst             # (/usr/share/dict/word.lst in the original)
+
+args = $argv[1:] or ["w...i....n"]   # (sample argument, when none is given)
+if not $args or not $args[0]  # If no word pattern specified . . .
+  print
+  print "Usage:"
+  print
+  print "$argv[0] \"pattern,\""
+  print "where \"pattern\" is in the form"
+  print "xxx..x.x..."
+  print
+  print "The x's represent known letters,"
+  print "and the periods are unknown letters (blanks)."
+  print "Letters and periods can be in any position."
+  print "For example, try:   tessh cw-solver.tsh w...i....n"
+  print
+  exit $E_NOPATT
+pattern = $args[0]
+
+print
+# ===============================================
+# This is where all the work gets done.
+grep "^$pattern$" $DICT       # Yes, only one line!
+# ===============================================
+print
+# Or in Python:
+print [$w for w in (cat $DICT).lines if (re.fullmatch $pattern $w)]
+```
+
+```output
+
+wellington
+workingman
+workingmen
+
+['wellington' 'workingman' 'workingmen']
+```
+
+### Example 16-19. Looking up definitions in *Webster's 1913 Dictionary* (`dict-lookup.sh`)
+
+```bash no-run
+#!/bin/bash
+# dict-lookup.sh
+
+#  This script looks up definitions in the 1913 Webster's Dictionary.
+#  This Public Domain dictionary is available for download
+#+ from various sites, including
+#+ Project Gutenberg (http://www.gutenberg.org/etext/247).
+#
+#  Convert it from DOS to UNIX format (with only LF at end of line)
+#+ before using it with this script.
+#  Store the file in plain, uncompressed ASCII text.
+#  Set DEFAULT_DICTFILE variable below to path/filename.
+
+
+E_BADARGS=85
+MAXCONTEXTLINES=50                        # Maximum number of lines to show.
+DEFAULT_DICTFILE="/usr/share/dict/webster1913-dict.txt"
+                                          # Default dictionary file pathname.
+                                          # Change this as necessary.
+#  Note:
+#  ----
+#  This particular edition of the 1913 Webster's
+#+ begins each entry with an uppercase letter
+#+ (lowercase for the remaining characters).
+#  Only the *very first line* of an entry begins this way,
+#+ and that's why the search algorithm below works.
+
+
+
+if [[ -z $(echo "$1" | sed -n '/^[A-Z]/p') ]]
+#  Must at least specify word to look up, and
+#+ it must start with an uppercase letter.
+then
+  echo "Usage: `basename $0` Word-to-define [dictionary-file]"
+  echo
+  echo "Note: Word to look up must start with capital letter,"
+  echo "with the rest of the word in lowercase."
+  echo "--------------------------------------------"
+  echo "Examples: Abandon, Dictionary, Marking, etc."
+  exit $E_BADARGS
+fi
+
+
+if [ -z "$2" ]                            #  May specify different dictionary
+                                          #+ as an argument to this script.
+then
+  dictfile=$DEFAULT_DICTFILE
+else
+  dictfile="$2"
+fi
+
+# ---------------------------------------------------------
+Definition=$(fgrep -A $MAXCONTEXTLINES "$1 \\" "$dictfile")
+#                  Definitions in form "Word \..."
+#
+#  And, yes, "fgrep" is fast enough
+#+ to search even a very large text file.
+
+
+# Now, snip out just the definition block.
+
+echo "$Definition" |
+sed -n '1,/^[A-Z]/p' |
+#  Print from first line of output
+#+ to the first line of the next entry.
+sed '$d' | sed '$d'
+#  Delete last two lines of output
+#+ (blank line and first line of next entry).
+# ---------------------------------------------------------
+
+exit $?
+
+# Exercises:
+# ---------
+# 1)  Modify the script to accept any type of alphabetic input
+#   + (uppercase, lowercase, mixed case), and convert it
+#   + to an acceptable format for processing.
+#
+# 2)  Convert the script to a GUI application,
+#   + using something like 'gdialog' or 'zenity' . . .
+#     The script will then no longer take its argument(s)
+#   + from the command-line.
+#
+# 3)  Modify the script to parse one of the other available
+#   + Public Domain Dictionaries, such as the U.S. Census Bureau Gazetteer.
+```
+
+Instead of `fgrep -A 50` and two `sed '$d'`s to trim what came after, the
+tessh version finds the entry's first line and takes the lines up to the
+next entry, then strips the blank line at the end. The dictionary is a
+made-up excerpt in the same format. Exercise 1 (any case) is
+`$word.capitalize`.
+
+```tessh
+# (A made-up excerpt of the dictionary, in its format.)
+cat >webster1913-dict.txt <<'END'
+Abandon \A*ban"don\, v. t.
+   To give up wholly; to forsake.
+
+Abandoned \A*ban"doned\, a.
+   Given up, as to a vice; shamelessly wicked.
+
+Abase \A*base"\, v. t.
+   To lower or depress.
+END
+
+E_BADARGS = 85
+MAXCONTEXTLINES = 50                      # Maximum number of lines to show.
+DEFAULT_DICTFILE = ./webster1913-dict.txt # (/usr/share/dict/… in the original)
+
+args = $argv[1:] or [abandon]       # (sample argument, when none is given)
+word = if $args then ($args[0].capitalize) else ""   # (Exercise 1: any case.)
+if not ($word =~ re'^[A-Z]')
+  print "Usage: $(Path $argv[0]).name Word-to-define [dictionary-file]"
+  print
+  print "Note: Word to look up must start with capital letter,"
+  print "with the rest of the word in lowercase."
+  print "--------------------------------------------"
+  print "Examples: Abandon, Dictionary, Marking, etc."
+  exit $E_BADARGS
+
+# May specify different dictionary as an argument to this script.
+dictfile = if (len $args) > 1 then $args[1] else $DEFAULT_DICTFILE
+
+# ---------------------------------------------------------
+# Definitions are in the form "Word \...": find the first line of the
+# entry, then take lines up to the first line of the next entry.
+lines = (cat $dictfile).lines
+for [i line] in (enumerate $lines)
+  if ($line.startswith "$word \\")
+    entry = [$line]
+    for more in $lines[$i + 1 : $i + $MAXCONTEXTLINES]
+      if $more =~ re'^[A-Z]'
+        break
+      $entry.append $more
+    print (("\n".join $entry).rstrip)
+    break
+# ---------------------------------------------------------
+```
+
+```output
+Abandon \A*ban"don\, v. t.
+   To give up wholly; to forsake.
+```
+
+`look` finds the words in a sorted list that start with a prefix, and its
+exit status says whether there were any.
+
+### Example 16-20. Checking words in a list for validity (`lookup.sh`)
+
+```bash no-run
+#!/bin/bash
+# lookup: Does a dictionary lookup on each word in a data file.
+
+file=words.data  # Data file from which to read words to test.
+
+echo
+echo "Testing file $file"
+echo
+
+while [ "$word" != end ]  # Last word in data file.
+do               # ^^^
+  read word      # From data file, because of redirection at end of loop.
+  look $word > /dev/null  # Don't want to display lines in dictionary file.
+  #  Searches for words in the file /usr/share/dict/words
+  #+ (usually a link to linux.words).
+  lookup=$?      # Exit status of 'look' command.
+
+  if [ "$lookup" -eq 0 ]
+  then
+    echo "\"$word\" is valid."
+  else
+    echo "\"$word\" is invalid."
+  fi  
+
+done <"$file"    # Redirects stdin to $file, so "reads" come from there.
+
+echo
+
+exit 0
+
+# ----------------------------------------------------------------
+# Code below line will not execute because of "exit" command above.
+
+
+# Stephane Chazelas proposes the following, more concise alternative:
+
+while read word && [[ $word != end ]]
+do if look "$word" > /dev/null
+   then echo "\"$word\" is valid."
+   else echo "\"$word\" is invalid."
+   fi
+done <"$file"
+
+exit 0
+```
+
+The loop reads the data file's lines as a list instead of redirecting the
+whole loop's stdin, and `if look …` tests the exit status directly. There's
+no `/usr/share/dict/words` here, so `look` gets a made-up sorted word list
+as its second argument.
+
+```tessh
+# (A made-up dictionary, sorted, and data file.)
+printf "%s\n" apple banana cherry date end > words
+printf "%s\n" banana kumquat cherry xyzzy end > words.data
+
+file = words.data  # Data file from which to read words to test.
+
+print
+print "Testing file $file"
+print
+
+for word in (cat $file).lines
+  if look $word words >/dev/null   # (words: /usr/share/dict/words)
+    print "\"$word\" is valid."
+  else
+    print "\"$word\" is invalid."
+  if $word == end                  # Last word in data file.
+    break
+
+print
+exit 0
+```
+
+```output
+
+Testing file words.data
+
+"banana" is valid.
+"kumquat" is invalid.
+"cherry" is valid.
+"xyzzy" is invalid.
+"end" is valid.
+
+```
+
+`sed` and `awk` have chapters of their own in the ABS Guide (Appendix C).
+`wc` counts lines, words and characters (`-l`, `-w`, `-c`, `-m`, `-L`).
+The ABS Guide's uses of it count things that are values in tessh:
+
+```bash
+touch a.txt b.txt c.txt d.dat
+printf 'hello\n' > e.log ; printf 'some text\n' > f.log
+ls *.txt | wc -l
+wc [d-h]* | grep total | awk '{print $3}'
+```
+
+```tessh
+touch a.txt b.txt c.txt d.dat
+printf 'hello\n' > e.log ; printf 'some text\n' > f.log
+print (len *.txt)               # No filename can upset it.
+print (sum (($f.stat).st_size for f in [d-h]*))
+```
+
+```output
+3
+16
+```
+
+`tr` translates characters: `tr a-z A-Z`, `tr -d` deletes them, `-s`
+squeezes runs of one into one, `-c` works on the characters *not* in the
+set, and it knows the POSIX classes (`[:alpha:]`). The Python side has
+`str.upper`, `str.translate` with `str.maketrans`, and `re.sub`.
+
+```bash
+echo "abcdef" | tr -d b-d
+echo "XXXXX" | tr --squeeze-repeats 'X'
+echo "acfdeb123" | tr -c b-d +
+echo "abcd2ef1" | tr '[:alpha:]' -
+```
+
+```output bash
+aef
+X
++c+d+b++++----2--1
+```
+
+```tessh
+echo "abcdef" | tr -d b-d
+echo "XXXXX" | tr --squeeze-repeats 'X'
+echo "acfdeb123" | tr -c b-d +
+echo "abcd2ef1" | tr '[:alpha:]' -
+# The same in Python:
+print ("abcdef".translate (str.maketrans "" "" "bcd"))
+print (re'X+'.sub "X" "XXXXX")
+print (re'[^b-d]'.sub "+" "acfdeb123\n") end=""
+print (re'[a-zA-Z]'.sub "-" "abcd2ef1")
+```
+
+```output
+aef
+X
++c+d+b++++----2--1
+aef
+X
++c+d+b++++----2--1
+```
+
+### Example 16-21. *toupper*: Transforms a file to all uppercase. (`ex49.sh`)
+
+```bash no-run
+#!/bin/bash
+# Changes a file to all uppercase.
+
+E_BADARGS=85
+
+if [ -z "$1" ]  # Standard check for command-line arg.
+then
+  echo "Usage: `basename $0` filename"
+  exit $E_BADARGS
+fi  
+
+tr a-z A-Z <"$1"
+
+# Same effect as above, but using POSIX character set notation:
+#        tr '[:lower:]' '[:upper:]' <"$1"
+# Thanks, S.C.
+
+#     Or even . . .
+#     cat "$1" | tr a-z A-Z
+#     Or dozens of other ways . . .
+
+exit 0
+
+#  Exercise:
+#  Rewrite this script to give the option of changing a file
+#+ to *either* upper or lowercase.
+#  Hint: Use either the "case" or "select" command.
+```
+
+`tr` works as it is; Python's `str.upper` is the other way. The exercise
+(upper *or* lower) is a `match` on a second argument.
+
+```tessh
+printf 'Hello, World.\nSmall letters, big letters.\n' > sample.txt   # (made up)
+
+E_BADARGS = 85
+
+args = $argv[1:] or [sample.txt]   # (sample argument, when none is given)
+if not $args or not $args[0]       # Standard check for command-line arg.
+  print "Usage: $(Path $argv[0]).name filename [upper|lower]"
+  exit $E_BADARGS
+
+tr a-z A-Z <$args[0]
+
+# The exercise: either case, in Python.
+text = ((Path $args[0]).read_text)
+match $args[1:]
+  case [] | [upper]
+    print ($text.upper) end=""
+  case [lower]
+    print ($text.lower) end=""
+exit 0
+```
+
+```output
+HELLO, WORLD.
+SMALL LETTERS, BIG LETTERS.
+HELLO, WORLD.
+SMALL LETTERS, BIG LETTERS.
+```
+
+### Example 16-22. *lowercase*: Changes all filenames in working directory to lowercase. (`lowercase.sh`)
+
+```bash no-run
+#!/bin/bash
+#
+#  Changes every filename in working directory to all lowercase.
+#
+#  Inspired by a script of John Dubois,
+#+ which was translated into Bash by Chet Ramey,
+#+ and considerably simplified by the author of the ABS Guide.
+
+
+for filename in *                # Traverse all files in directory.
+do
+   fname=`basename $filename`
+   n=`echo $fname | tr A-Z a-z`  # Change name to lowercase.
+   if [ "$fname" != "$n" ]       # Rename only files not already lowercase.
+   then
+     mv $fname $n
+   fi  
+done   
+
+exit $?
+
+
+# Code below this line will not execute because of "exit".
+#--------------------------------------------------------#
+# To run it, delete script above line.
+
+# The above script will not work on filenames containing blanks or newlines.
+# Stephane Chazelas therefore suggests the following alternative:
+
+
+for filename in *    # Not necessary to use basename,
+                     # since "*" won't return any file containing "/".
+do n=`echo "$filename/" | tr '[:upper:]' '[:lower:]'`
+#                             POSIX char set notation.
+#                    Slash added so that trailing newlines are not
+#                    removed by command substitution.
+   # Variable substitution:
+   n=${n%/}          # Removes trailing slash, added above, from filename.
+   [[ $filename == $n ]] || mv "$filename" "$n"
+                     # Checks if filename already lowercase.
+done
+
+exit $?
+```
+
+The first version breaks on names with spaces, as Stéphane Chazelas says,
+and the second needs a slash trick against command substitution's
+stripping of newlines. In tessh the name is a Path and `.lower` a method:
+nothing is split or stripped.
+
+```tessh
+# (Made-up files to rename.)
+touch README.TXT Notes.md 'My Letter.DOC' already.lower
+
+for filename in *                  # Traverse all files in directory.
+  n = ($filename.name.lower)       # Change name to lowercase.
+  if $filename.name != $n          # Rename only files not already lowercase.
+    mv $filename $n
+
+ls -1
+exit 0
+```
+
+```output
+already.lower
+my letter.doc
+notes.md
+readme.txt
+```
+
+### Example 16-23. *du*: DOS to UNIX text file conversion. (`Du.sh`)
+
+```bash no-run
+#!/bin/bash
+# Du.sh: DOS to UNIX text file converter.
+
+E_WRONGARGS=85
+
+if [ -z "$1" ]
+then
+  echo "Usage: `basename $0` filename-to-convert"
+  exit $E_WRONGARGS
+fi
+
+NEWFILENAME=$1.unx
+
+CR='\015'  # Carriage return.
+           # 015 is octal ASCII code for CR.
+           # Lines in a DOS text file end in CR-LF.
+           # Lines in a UNIX text file end in LF only.
+
+tr -d $CR < $1 > $NEWFILENAME
+# Delete CR's and write to new file.
+
+echo "Original DOS text file is \"$1\"."
+echo "Converted UNIX text file is \"$NEWFILENAME\"."
+
+exit 0
+
+# Exercise:
+# --------
+# Change the above script to convert from UNIX to DOS.
+```
+
+`tr -d` works the same. With bytes in Python, the file is read, its CRs
+taken out and written back without any program, and `cat -A` shows the line
+ends.
+
+```tessh
+printf 'line one\r\nline two\r\n' > dos.txt     # (A made-up DOS file.)
+
+E_WRONGARGS = 85
+
+args = $argv[1:] or [dos.txt]      # (sample argument, when none is given)
+if not $args or not $args[0]
+  print "Usage: $(Path $argv[0]).name filename-to-convert"
+  exit $E_WRONGARGS
+file = Path $args[0]
+
+NEWFILENAME = Path ($file + .unx)
+CR = '\015'        # Carriage return, in octal, as tr reads it.
+
+tr -d $CR <$file >$NEWFILENAME
+# Delete CR's and write to new file.
+
+print "Original DOS text file is \"$file\"."
+print "Converted UNIX text file is \"$NEWFILENAME\"."
+cat -A $file $NEWFILENAME
+
+# Or in Python:
+$NEWFILENAME.write_bytes (($file.read_bytes).replace b"\r" b"")
+exit 0
+```
+
+```output
+Original DOS text file is "dos.txt".
+Converted UNIX text file is "dos.txt.unx".
+line one^M$
+line two^M$
+line one$
+line two$
+```
+
+### Example 16-24. *rot13*: ultra-weak encryption. (`rot13.sh`)
+
+```bash no-run
+#!/bin/bash
+# rot13.sh: Classic rot13 algorithm,
+#           encryption that might fool a 3-year old
+#           for about 10 minutes.
+
+# Usage: ./rot13.sh filename
+# or     ./rot13.sh <filename
+# or     ./rot13.sh and supply keyboard input (stdin)
+
+cat "$@" | tr 'a-zA-Z' 'n-za-mN-ZA-M'   # "a" goes to "n", "b" to "o" ...
+#  The   cat "$@"   construct
+#+ permits input either from stdin or from files.
+
+exit 0
+```
+
+`cat "$@"` reads the files given, or stdin when there are none. tessh's
+`cat *$argv[1:]` does the same, since an empty list adds no arguments. As
+stdin isn't usable here, it's given a made-up file. Python knows rot13 as a
+codec.
+
+```tessh
+import codecs
+printf 'Hello, world.\n' > secret.txt          # (made up)
+
+files = $argv[1:] or [secret.txt]   # (sample argument, when none is given)
+cat *$files | tr 'a-zA-Z' 'n-za-mN-ZA-M'       # "a" goes to "n", "b" to "o" ...
+
+print (codecs.encode ((Path secret.txt).read_text) rot13) end=""
+exit 0
+```
+
+```output
+Uryyb, jbeyq.
+Uryyb, jbeyq.
+```
+
+### Example 16-25. Generating *Crypto-Quote* Puzzles (`crypto-quote.sh`)
+
+```bash no-run
+#!/bin/bash
+# crypto-quote.sh: Encrypt quotes
+
+#  Will encrypt famous quotes in a simple monoalphabetic substitution.
+#  The result is similar to the "Crypto Quote" puzzles
+#+ seen in the Op Ed pages of the Sunday paper.
+
+
+key=ETAOINSHRDLUBCFGJMQPVWZYXK
+# The "key" is nothing more than a scrambled alphabet.
+# Changing the "key" changes the encryption.
+
+# The 'cat "$@"' construction gets input either from stdin or from files.
+# If using stdin, terminate input with a Control-D.
+# Otherwise, specify filename as command-line parameter.
+
+cat "$@" | tr "a-z" "A-Z" | tr "A-Z" "$key"
+#        |  to uppercase  |     encrypt       
+# Will work on lowercase, uppercase, or mixed-case quotes.
+# Passes non-alphabetic characters through unchanged.
+
+
+# Try this script with something like:
+# "Nothing so needs reforming as other people's habits."
+# --Mark Twain
+#
+# Output is:
+# "CFPHRCS QF CIIOQ MINFMBRCS EQ FPHIM GIFGUI'Q HETRPQ."
+# --BEML PZERC
+
+# To reverse the encryption:
+# cat "$@" | tr "$key" "A-Z"
+
+
+#  This simple-minded cipher can be broken by an average 12-year old
+#+ using only pencil and paper.
+
+exit 0
+
+#  Exercise:
+#  --------
+#  Modify the script so that it will either encrypt or decrypt,
+#+ depending on command-line argument(s).
+```
+
+`str.maketrans` makes the same table as `tr "A-Z" "$key"`, and decrypting
+swaps its two strings. That gives the exercise, encrypting or decrypting by
+a `-d` option. The quote is fed from a string, as stdin isn't usable here.
+
+```tessh
+import string
+key = ETAOINSHRDLUBCFGJMQPVWZYXK
+# The "key" is nothing more than a scrambled alphabet.
+
+quote = """"Nothing so needs reforming as other people's habits."
+--Mark Twain
+"""
+
+$quote | tr "a-z" "A-Z" | tr "A-Z" $key
+#      |  to uppercase  |     encrypt
+
+# In Python, with the exercise: encrypt, or decrypt with -d.
+def crypto text decrypt=False
+  [frm to] = [$string.ascii_uppercase $key]
+  if $decrypt
+    [frm to] = [$to $frm]
+  ($text.upper).translate (str.maketrans $frm $to)
+
+secret = crypto $quote
+print $secret end=""
+print (crypto $secret decrypt=True) end=""
+exit 0
+```
+
+```output
+"CFPHRCS QF CIIOQ MINFMBRCS EQ FPHIM GIFGUI'Q HETRPQ."
+--BEML PZERC
+"CFPHRCS QF CIIOQ MINFMBRCS EQ FPHIM GIFGUI'Q HETRPQ."
+--BEML PZERC
+"NOTHING SO NEEDS REFORMING AS OTHER PEOPLE'S HABITS."
+--MARK TWAIN
+```
+
+The ABS Guide's obfuscated "Just another Perl hacker" is `tr` too:
+
+```bash
+#!/bin/bash
+# jabh.sh
+
+x="wftedskaebjgdBstbdbsmnjgz"
+echo $x | tr "a-z" 'oh, turtleneck Phrase Jar!'
+
+# Based on the Wikipedia "Just another Perl hacker" article.
+```
+
+```tessh
+x = wftedskaebjgdBstbdbsmnjgz
+echo $x | tr "a-z" 'oh, turtleneck Phrase Jar!'
+```
+
+```output
+Just another Bash hacker!
+```
+
+`fold` and `fmt` wrap text to a width (`fold -s`, `fmt -w`).
+
+### Example 16-26. Formatted file listing. (`ex50.sh`)
+
+```bash no-run
+#!/bin/bash
+
+WIDTH=40                    # 40 columns wide.
+
+b=`ls /usr/local/bin`       # Get a file listing...
+
+echo $b | fmt -w $WIDTH
+
+# Could also have been done by
+#    echo $b | fold - -s -w $WIDTH
+ 
+exit 0
+```
+
+bash's unquoted `echo $b` puts the names on one line; `fmt` joins lines
+into a paragraph anyway, so tessh can pipe the list of names straight in.
+Python's `textwrap.fill` wraps the same way. A made-up folder stands in for
+`/usr/local/bin`.
+
+```tessh
+import textwrap
+mkdir bin ; cd bin                              # (A made-up /usr/local/bin.)
+touch backup-home cleanup convert-images deploy fetch-mail mkthumbs \
+  rename-photos sync-music update-all weather
+cd ..
+
+WIDTH = 40                  # 40 columns wide.
+
+b = (ls bin)                # Get a file listing...
+
+$b.lines | fmt -w $WIDTH
+print (textwrap.fill (" ".join $b.lines) $WIDTH)
+exit 0
+```
+
+```output
+backup-home cleanup convert-images
+deploy fetch-mail mkthumbs rename-photos
+sync-music update-all weather
+backup-home cleanup convert-images
+deploy fetch-mail mkthumbs rename-photos
+sync-music update-all weather
+```
+
+`col` removes reverse line feeds, `column -t` lines up columns, and
+`colrm` cuts columns of characters out.
+
+### Example 16-27. Using `column` to format a directory listing (`colm.sh`)
+
+```bash
+#!/bin/bash
+# colms.sh
+# A minor modification of the example file in the "column" man page.
+
+
+(printf "PERMISSIONS LINKS OWNER GROUP SIZE MONTH DAY HH:MM PROG-NAME\n" \
+; ls -l | sed 1d) | column -t
+#         ^^^^^^           ^^
+
+#  The "sed 1d" in the pipe deletes the first line of output,
+#+ which would be "total        N",
+#+ where "N" is the total number of files found by "ls -l".
+
+# The -t option to "column" pretty-prints a table.
+
+exit 0
+```
+
+bash's `( printf …; ls -l | sed 1d )` runs two commands into one pipe.
+tessh has no such group; the header and the lines of `ls -l` after the
+first go in a list, which feeds the pipe one item per line. The owners and
+times change from system to system, hence the one run.
+
+```tessh
+touch one.txt two.txt three.txt          # (Something to list.)
+
+header = "PERMISSIONS LINKS OWNER GROUP SIZE MONTH DAY HH:MM PROG-NAME"
+[$header *(ls -l).lines[1:]] | column -t
+exit 0
+```
+
+```text
+(one run)
+PERMISSIONS  LINKS  OWNER  GROUP  SIZE  MONTH  DAY  HH:MM  PROG-NAME
+-rw-r--r--   1      ben    users  0     Nov    23   14:05  one.txt
+-rw-r--r--   1      ben    users  0     Nov    23   14:05  three.txt
+-rw-r--r--   1      ben    users  0     Nov    23   14:05  two.txt
+```
+
+`nl` numbers the lines that aren't blank; `cat -n` numbers them all.
+
+### Example 16-28. *nl*: A self-numbering script. (`line-number.sh`)
+
+```bash no-run
+#!/bin/bash
+# line-number.sh
+
+# This script echoes itself twice to stdout with its lines numbered.
+
+echo "     line number = $LINENO" # 'nl' sees this as line 4
+#                                   (nl does not number blank lines).
+#                                   'cat -n' sees it correctly as line #6.
+
+nl `basename $0`
+
+echo; echo  # Now, let's try it with 'cat -n'
+
+cat -n `basename $0`
+# The difference is that 'cat -n' numbers the blank lines.
+# Note that 'nl -ba' will also do so.
+
+exit 0
+# -----------------------------------------------------------------
+```
+
+`$argv[0]` is the script's path, so it needs no `basename` (which would
+only work from the script's own folder). tessh has no `$LINENO`; Python's
+`inspect` knows the line it's on.
+
+**Gap:** no `$LINENO`; `(inspect.currentframe).f_lineno` is the stand-in.
+
+```tessh
+# line-number.tsh
+import inspect
+
+# This script echoes itself twice to stdout with its lines numbered.
+
+print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 4, cat -n: 6
+
+nl $argv[0]
+
+print ; print  # Now, let's try it with 'cat -n'
+
+cat -n $argv[0]
+# The difference is that 'cat -n' numbers the blank lines.
+# Note that 'nl -ba' will also do so.
+
+exit 0
+```
+
+```output
+     line number = 6
+     1	# line-number.tsh
+     2	import inspect
+       
+     3	# This script echoes itself twice to stdout with its lines numbered.
+       
+     4	print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 4, cat -n: 6
+       
+     5	nl $argv[0]
+       
+     6	print ; print  # Now, let's try it with 'cat -n'
+       
+     7	cat -n $argv[0]
+     8	# The difference is that 'cat -n' numbers the blank lines.
+     9	# Note that 'nl -ba' will also do so.
+       
+    10	exit 0
+
+
+     1	# line-number.tsh
+     2	import inspect
+     3	
+     4	# This script echoes itself twice to stdout with its lines numbered.
+     5	
+     6	print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 4, cat -n: 6
+     7	
+     8	nl $argv[0]
+     9	
+    10	print ; print  # Now, let's try it with 'cat -n'
+    11	
+    12	cat -n $argv[0]
+    13	# The difference is that 'cat -n' numbers the blank lines.
+    14	# Note that 'nl -ba' will also do so.
+    15	
+    16	exit 0
+```
+
+`pr` paginates (`pr -o 5 --width=65`, `-d` double-spaced). `gettext`,
+`msgfmt`, `iconv` and `recode` are for translations and encodings. Peter
+Knowles' function writes a string to a file in UTF-16 without its
+byte-order mark:
+
+```bash no-run
+function write_utf8_string {
+    STRING=$1
+    BOOKLIST=$2
+    echo -n "$STRING" | iconv -f UTF8 -t UTF16 | \
+    cut -b 3- | tr -d \\n >> "$BOOKLIST"
+}
+```
+
+Python's encoder does it without three programs (`utf-16-le` has no
+byte-order mark). Unlike the original, it keeps any newline in the
+string; `tr -d \\n` was deleting a byte of the UTF-16 text.
+
+```tessh
+def write_utf8_string string booklist
+  with (open $booklist ab) as f
+    $f.write ($string.encode "utf-16-le")
+
+write_utf8_string "Hi" BookList
+od -c BookList
+```
+
+```output
+0000000   H  \0   i  \0
+0000004
+```
+
+TeX, Ghostscript (`gs`), `texexec`, `enscript`, `groff` with `tbl` and
+`eqn`, and `lex`/`yacc` (`flex`/`bison`) are programs a script runs like any
+other.
+
+### Example 16-29. *manview*: Viewing formatted manpages (`manview.sh`)
+
+```bash no-run
+#!/bin/bash
+# manview.sh: Formats the source of a man page for viewing.
+
+#  This script is useful when writing man page source.
+#  It lets you look at the intermediate results on the fly
+#+ while working on it.
+
+E_WRONGARGS=85
+
+if [ -z "$1" ]
+then
+  echo "Usage: `basename $0` filename"
+  exit $E_WRONGARGS
+fi
+
+# ---------------------------
+groff -Tascii -man $1 | less
+# From the man page for groff.
+# ---------------------------
+
+#  If the man page includes tables and/or equations,
+#+ then the above code will barf.
+#  The following line can handle such cases.
+#
+#   gtbl < "$1" | geqn -Tlatin1 | groff -Tlatin1 -mtty-char -man
+#
+#   Thanks, S.C.
+
+exit $?   # See also the "maned.sh" script.
+```
+
+It shows the page in `less`, which needs a terminal, so it doesn't run
+here (and `groff` isn't installed).
+
+```tessh no-run
+# manview.tsh: Formats the source of a man page for viewing.
+
+E_WRONGARGS = 85
+
+if not $argv[1:]
+  print "Usage: $(Path $argv[0]).name filename"
+  exit $E_WRONGARGS
+
+# ---------------------------
+groff -Tascii -man $argv[1] | less
+# ---------------------------
+# With tables or equations:
+#   gtbl <$argv[1] | geqn -Tlatin1 | groff -Tlatin1 -mtty-char -man
+
+exit $?
+```
