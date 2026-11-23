@@ -914,6 +914,73 @@ fn heredocs(text: &str) -> Result<std::borrow::Cow<'_, str>, ReadError> {
     Ok(if changed { std::borrow::Cow::Owned(out.join("\n")) } else { std::borrow::Cow::Borrowed(text) })
 }
 
+/// A line ending in `|`, `&&` or `||` (a comment after it allowed) goes on
+/// to the next, as in bash: one stage a line, each with its comment. It's
+/// given a trailing `\` (its comment taken off), so lines stay where they are.
+fn pipe_continuations(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('|') && !text.contains("&&") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out: Vec<String> = vec![];
+    let mut in_triple: Option<&str> = None;
+    let mut changed = false;
+    for line in text.split('\n') {
+        if let Some(q) = in_triple {
+            if line.matches(q).count() % 2 == 1 {
+                in_triple = None;
+            }
+            out.push(line.to_string());
+            continue;
+        }
+        for q in ["\"\"\"", "\'\'\'"] {
+            if line.matches(q).count() % 2 == 1 {
+                in_triple = Some(q);
+            }
+        }
+        // (The code part: up to a # comment that's outside quotes.)
+        let b = line.as_bytes();
+        let mut quote: Option<u8> = None;
+        let mut end = b.len();
+        let mut k = 0;
+        while k < b.len() {
+            let c = b[k];
+            match quote {
+                Some(q) => {
+                    if c == b'\\' && q == b'"' {
+                        k += 1;
+                    } else if c == q {
+                        quote = None;
+                    }
+                }
+                None => {
+                    if c == b'\\' {
+                        k += 1;
+                    } else if c == b'"' || c == b'\'' {
+                        quote = Some(c);
+                    } else if c == b'#' && (k == 0 || b[k - 1] == b' ' || b[k - 1] == b'\t') {
+                        end = k;
+                        break;
+                    }
+                }
+            }
+            k += 1;
+        }
+        let code = line[..end].trim_end();
+        let cont = in_triple.is_none() && quote.is_none() && [" |", " ||", " &&"].iter().any(|e| code.ends_with(e)) && !code.ends_with("||||");
+        if cont {
+            changed = true;
+            out.push(format!("{code} \\"));
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    if changed {
+        std::borrow::Cow::Owned(out.join("\n"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 /// A heredoc body line for `"""…"""`: as bash has it, `$` interpolates and
 /// a backslash is only special before `$`, `` ` `` and `\\`.
 fn heredoc_escape(l: &str) -> String {
@@ -1005,6 +1072,7 @@ fn heredoc_tokens(line: &str) -> Vec<(usize, usize, String, bool, bool, String)>
 
 pub fn read_at(text: &str, first_line: u32) -> Result<Vec<Form>, ReadError> {
     let hd = heredocs(text).map_err(|e| ReadError { line: e.line + first_line - 1, ..e })?;
+    let hd = pipe_continuations(&hd);
     let text: &str = &hd;
     let idx = LineIndex::new(text);
     let raw = match lines_parser().parse(text).into_result() {
@@ -1266,6 +1334,10 @@ mod tests {
         let ls = read("echo a \\\n  b; echo c").unwrap();
         assert_eq!(ls.len(), 2);
         assert_eq!(show(&ls[0]), "echo a b");
+        // (A line ending in |, && or || goes on, a comment after it allowed.)
+        let ls = read("cat f |   # the file\n  sort |\n  uniq\ntrue &&\n  echo '#|'").unwrap();
+        assert_eq!(ls.len(), 2);
+        assert_eq!(show(&ls[0]), "cat f | sort | uniq");
     }
 
     #[test]

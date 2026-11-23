@@ -263,6 +263,21 @@ fn splats_and_uncalled_methods() {
     assert_eq!(get::<String>(&ns, "bad"), "error");
 }
 
+/// "command not found" goes where the command's errors go; a Glob in a list
+/// given to a program is its names; a line ending in | goes on.
+#[test]
+fn not_found_redirect_and_list_globs() {
+    let d = std::env::temp_dir().join(format!("tessh-nf-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("a.1"), "").unwrap();
+    std::fs::write(d.join("b.1"), "").unwrap();
+    let d = d.to_string_lossy().to_string();
+    let (ns, out) = run(&format!("cd {d}\nno-such-program-x 2>err.txt\ne = cat err.txt\ndef ll *w\n  echo *$w\nll *.1\nprintf 'b\\na\\n' |  # sorted\n  sort\ncd -"));
+    let _ = std::fs::remove_dir_all(&d);
+    assert!(get::<String>(&ns, "e").contains("command not found: no-such-program-x"));
+    assert_eq!(out.lines().filter(|l| !l.starts_with('/')).collect::<Vec<_>>(), ["a.1 b.1", "a", "b"]);
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");

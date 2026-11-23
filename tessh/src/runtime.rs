@@ -1025,7 +1025,13 @@ fn argv(py: Python<'_>, items: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
             out.extend(glob_expand(&x.getattr("pattern")?.extract::<String>()?));
         } else if x.is_instance_of::<PyList>() || x.is_instance_of::<PyTuple>() {
             for y in x.try_iter()? {
-                out.push(word(&y?)?);
+                let y = y?;
+                // (A glob in it, as `def ll *w` then `ls *$w` gives: its names.)
+                if y.is_instance(&globc)? {
+                    out.extend(glob_expand(&y.getattr("pattern")?.extract::<String>()?));
+                } else {
+                    out.push(word(&y)?);
+                }
             }
         } else if x.is_none() || is_attached_output(&x) {
             continue;
@@ -1546,7 +1552,25 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
                     std::io::ErrorKind::PermissionDenied => (126, "permission denied"),
                     _ => (126, "can't run"),
                 };
-                eprintln!("tessh: {what}: {}", c.words[0]);
+                // (Where the command's errors were to go: 2>f, 2>>f, &>f, 2>&-.)
+                let mut to: Option<(String, bool)> = None;
+                let mut closed = false;
+                for (op, target) in &c.redirs {
+                    match parse_redir(op) {
+                        Some((2, RKind::Out)) | Some((_, RKind::Both)) => (to, closed) = (target.clone().map(|t| (t, false)), false),
+                        Some((2, RKind::Append)) | Some((_, RKind::BothAppend)) => (to, closed) = (target.clone().map(|t| (t, true)), false),
+                        Some((2, RKind::Close)) => closed = true,
+                        _ => {}
+                    }
+                }
+                let msg = format!("tessh: {what}: {}\n", c.words[0]);
+                match to {
+                    _ if closed => {}
+                    Some((f, append)) => {
+                        let _ = std::fs::OpenOptions::new().create(true).write(true).append(append).truncate(!append).open(&f).and_then(|mut fl| fl.write_all(msg.as_bytes()));
+                    }
+                    None => eprint!("{msg}"),
+                }
                 STATUS.store(code, Ordering::SeqCst);
                 return output(py, "", code, !capture);
             }
