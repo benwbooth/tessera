@@ -701,12 +701,17 @@ anyway
 ```
 
 ## Redirections
-<!-- help: redirections redirection redirect > >> < 2>&1 stderr stdout -->
+<!-- help: redirections redirection redirect > >> < 2>&1 >&2 &> >| <> <<< << heredoc here-string fd stderr stdout process substitution <( >( -->
 
-`>f` writes, `>>f` appends, `<f` reads, `2>f` and `2>>f` send errors,
-`&>f` both, `2>&1` errors to output and `>&2` output to errors. Glued to the
-file they work anywhere, Python calls included. Spaced (`> f`) they work in
-commands.
+They're bash's. `>f` writes, `>>f` appends, `>|f` writes even over a file
+(tessh has no noclobber), `<f` reads and `<>f` opens for both. A number in
+front picks the file descriptor (`2>f`, `2>>f`, `3>f`, `0<f`); `&>f` and
+`&>>f` (or `>&f`) take output and errors both. `2>&1` makes errors go where
+output goes, `>&2` the other way, `3>&1` and `0<&3` copy any, and `2>&-`
+closes one. They're done left to right, as in bash: `>f 2>&1` puts both in
+the file, `2>&1 >f` sends errors where output went before. Glued to the file
+they work anywhere, Python calls included (descriptors 0, 1 and 2 there);
+spaced (`> f`) they work in commands.
 
 ```tessh
 echo first >out.txt
@@ -720,6 +725,8 @@ sh -c "echo o; echo e >&2" &>all.txt
 sh -c "echo e2 >&2" 2>>all.txt
 cat all.txt
 echo to-stderr >&2 2>/dev/null
+sh -c "echo three >&3" 3>&1
+sh -c "echo gone >&2; true" 2>&-
 ```
 
 ```output
@@ -731,6 +738,56 @@ BOTH
 o
 e
 e2
+three
+```
+
+`<<<word` gives a program the word (and a newline) as its input. A heredoc,
+`<<END`, gives it the lines up to one that's just `END`; `$name` and `$(…)`
+in them are filled in, unless the word is quoted (`<<'END'`), and `<<-END`
+takes the tabs off the front of each.
+
+```tessh
+tr a-z A-Z <<<hello
+name = world
+cat <<END
+hi $name
+  kept as is
+END
+cat <<'END'
+$name stays
+END
+```
+
+```output
+HELLO
+hi world
+  kept as is
+$name stays
+```
+
+`<(…)` and `>(…)` with something run in them (a program, a command, a
+function called) are process substitution, as in bash: a path that reads
+what it prints (a function's printing, then what it gives back), or that it
+reads what's written to. With a value in them
+(`>$f`, `>("out" + ".txt")`) they're the file it names.
+
+```tessh
+diff <(printf "a\nb\n") <(printf "a\nc\n")
+echo split | tee >(tr a-z A-Z) >/dev/null
+def numbers
+  print 1
+  print 2
+paste <(numbers) <(printf "a\nb\n")
+```
+
+```output
+2c2
+< b
+---
+> c
+SPLIT
+1	a
+2	b
 ```
 
 ## Jobs

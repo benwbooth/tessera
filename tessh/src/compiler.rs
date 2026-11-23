@@ -1008,14 +1008,14 @@ impl<'py, 's> Compiler<'py, 's> {
         let mut k = 0;
         while k < rest.len() {
             let x = &rest[k];
-            if let Some(op) = x.op_name() {
-                if SPACED_REDIRS.contains(&op) && k + 1 < rest.len() {
+            if let Some(op) = x.op_name().or_else(|| x.sym_name()) {
+                if (SPACED_REDIRS.contains(&op) || crate::reader::redir_op(op) == Some(op.len())) && k + 1 < rest.len() {
                     redirs.push((op.to_string(), self.cmd_word(&rest[k + 1])?));
                     k += 2;
                     continue;
                 }
             }
-            if let Kind::Redir { op, target } = &x.kind {
+            if let (Kind::Redir { op, target }, None) = (&x.kind, self.procsub_parts(x)) {
                 let t = match target {
                     Some(t) => self.cmd_word(t)?,
                     None => Res::e(self.cnone()?),
@@ -1029,7 +1029,7 @@ impl<'py, 's> Compiler<'py, 's> {
         for c in children {
             let (ci, cc) = line_parts(c);
             if ci.len() == 1 && cc.is_empty() {
-                if let Kind::Redir { op, target } = &ci[0].kind {
+                if let (Kind::Redir { op, target }, None) = (&ci[0].kind, self.procsub_parts(&ci[0])) {
                     let t = match target {
                         Some(t) => self.cmd_word(t)?,
                         None => Res::e(self.cnone()?),
@@ -1055,7 +1055,62 @@ impl<'py, 's> Compiler<'py, 's> {
             red.push(self.tuple(vec![self.c(op.as_str())?, e.clone()], false)?);
         }
         let e = self.rcall("cmd", vec![self.globals()?, prog, self.list_node(arg_es)?, self.list_node(red)?, self.c(mode)?, self.c(force)?])?;
-        Ok(Res::s(stmts, self.at(e, &items[0])))
+        let r = Res::s(stmts, self.at(e, &items[0]));
+        // (Its <(…) and >(…) closed and waited for when it's done; in a pipe, the pipe's.)
+        if mode != "stage" && self.has_procsub(items, children) {
+            return self.with_procsubs(r);
+        }
+        Ok(r)
+    }
+
+    /// `<(…)` or `>(…)` with something run in it (each part of a pipe a
+    /// program, command or call): process substitution, as in bash. With a
+    /// value in it, the file it names, as before. (direction, what's in it)
+    fn procsub_parts<'f>(&self, x: &'f Form) -> Option<(&'f str, &'f [Form])> {
+        let Kind::Redir { op, target: Some(t) } = &x.kind else { return None };
+        if op != "<" && op != ">" {
+            return None;
+        }
+        let Kind::Group { open: '(', items } = &t.kind else { return None };
+        if items.is_empty() {
+            return None;
+        }
+        // (Something run: a program, a command, a function called; not a
+        // value — $f, "name", a path, x + "y".)
+        let runs = |s: &[Form]| match self.segment_kind(s) {
+            "command" => true,
+            "expr" => {
+                s[0].sym_name().is_some_and(|n| !WORD_OPS.contains(&n) && !["True", "False", "None", "..."].contains(&n))
+                    && self.is_known(&s[0])
+                    && !s[1..].iter().any(|x| matches!(x.kind, Kind::Op { .. }))
+            }
+            _ => false,
+        };
+        let segs = self.pipe_split(items);
+        segs.iter().all(|s| !s.is_empty() && runs(s)).then_some((op.as_str(), items.as_slice()))
+    }
+
+    fn compile_procsub(&mut self, dir: &str, items: &[Form]) -> R<Res<'py>> {
+        let segs = self.pipe_split(items);
+        let mut stages = vec![];
+        for (k, seg) in segs.iter().enumerate() {
+            stages.push(self.compile_stage(seg, &[], k == 0)?);
+        }
+        let (stmts, exprs) = self.gather_e(stages)?;
+        Ok(Res::s(stmts, self.rcall("procsub", vec![self.c(dir)?, self.list_node(exprs)?])?))
+    }
+
+    fn has_procsub(&self, items: &[Form], children: &[Form]) -> bool {
+        items.iter().chain(children.iter().filter_map(|c| match line_parts(c) { (ci, cc) if ci.len() == 1 && cc.is_empty() => ci.first(), _ => None })).any(|x| self.procsub_parts(x).is_some())
+    }
+
+    /// r, with the <(…)/>(…) it opens closed and waited for after.
+    fn with_procsubs(&mut self, r: Res<'py>) -> R<Res<'py>> {
+        let m = self.tmp("ps");
+        let mut stmts = vec![self.assign(&m, self.rcall("ps_mark", vec![])?)?];
+        stmts.extend(r.stmts);
+        let e = self.rcall("ps_done", vec![self.name(&m, false)?, self.val(r.expr)?])?;
+        Ok(Res::s(stmts, e))
     }
 
     fn list_node(&self, elts: Vec<Obj<'py>>) -> R<Obj<'py>> {
@@ -1065,6 +1120,9 @@ impl<'py, 's> Compiler<'py, 's> {
     /// An argument of a command: a string, a glob, or a value (a list becomes
     /// several arguments).
     fn cmd_word(&mut self, x: &Form) -> R<Res<'py>> {
+        if let Some((d, it)) = self.procsub_parts(x) {
+            return self.compile_procsub(d, it);
+        }
         let glob = |t: &str| t.contains(['*', '?', '[']);
         match &x.kind {
             Kind::Sym { name, .. } | Kind::Op { name, tick: false } => {
@@ -1123,7 +1181,11 @@ impl<'py, 's> Compiler<'py, 's> {
         let (stmts, exprs) = self.gather_e(stages)?;
         let mode = if ctx == Ctx::Value { "capture" } else { "attach" };
         let e = self.rcall("pipe", vec![self.list_node(exprs)?, self.c(mode)?])?;
-        Ok(Res::s(stmts, self.at(e, &segs[0][0])))
+        let r = Res::s(stmts, self.at(e, &segs[0][0]));
+        if segs.iter().any(|s| self.has_procsub(s, &[])) || self.has_procsub(&[], children) {
+            return self.with_procsubs(r);
+        }
+        Ok(r)
     }
 
     fn compile_stage(&mut self, items: &[Form], children: &[Form], first: bool) -> R<Res<'py>> {
@@ -1157,7 +1219,10 @@ impl<'py, 's> Compiler<'py, 's> {
         let f = self.compile_head(head)?;
         let (astmts, mut args, kws, _) = self.compile_call_args(&items[1..], children)?;
         let (stmts, exprs) = self.gather_e(vec![f, Res { stmts: astmts, expr: None }])?;
-        args.push(self.name("_tessh_in", false)?);
+        // (The first of a pipe has no input to be given: `gen | sort`, <(gen).)
+        if !first {
+            args.push(self.name("_tessh_in", false)?);
+        }
         let lam_args = self.n("arguments", vec![("posonlyargs", self.list(vec![])?), ("args", self.list(vec![self.n("arg", vec![("arg", self.s("_tessh_in"))])?])?), ("kwonlyargs", self.list(vec![])?), ("kw_defaults", self.list(vec![])?), ("defaults", self.list(vec![])?)])?;
         let lam = self.lambda(lam_args, self.call(exprs[0].clone(), args, kws)?)?;
         Ok(Res::s(stmts, self.rcall("call_stage", vec![lam])?))
@@ -1511,6 +1576,9 @@ impl<'py, 's> Compiler<'py, 's> {
             }
             c = self.rcall("redirect", vec![self.lambda(self.noargs()?, c)?, self.list_node(red)?])?;
         }
+        if self.has_procsub(&items[1..], children) {
+            return self.with_procsubs(Res::s(stmts, c));
+        }
         Ok(Res::s(stmts, c))
     }
 
@@ -1803,6 +1871,10 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::Splat { value, n } => {
                 rs.push(self.compile_value(value, Ctx::Value)?);
                 slots.push((if *n == 1 { "star" } else { "kwstar" }, String::new()));
+            }
+            Kind::Redir { .. } if self.procsub_parts(x).is_some() => {
+                rs.push(self.cmd_word(x)?);
+                slots.push(("arg", String::new()));
             }
             Kind::Redir { op, target } => {
                 rs.push(match target {

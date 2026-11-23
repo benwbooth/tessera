@@ -1045,7 +1045,8 @@ fn redirs_of(r: &Bound<'_, PyAny>) -> PyResult<Vec<(String, Option<String>)>> {
         let x = x?;
         let op: String = x.get_item(0)?.extract()?;
         let t = x.get_item(1)?;
-        out.push((op, if t.is_none() { None } else { Some(expanduser(&word(&t)?)) }));
+        let here = op.ends_with("<<") || op.ends_with("<<<");
+        out.push((op, if t.is_none() { None } else if here { Some(word(&t)?) } else { Some(expanduser(&word(&t)?)) }));
     }
     Ok(out)
 }
@@ -1226,10 +1227,138 @@ enum Out {
     File(File),
 }
 
+/// What a redirection does, for which file descriptor.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum RKind {
+    Out,
+    Append,
+    In,
+    ReadWrite,
+    Both,
+    BothAppend,
+    /// n>&m, n<&m: n becomes a copy of m.
+    Dup(i32),
+    Close,
+    /// <<<word, <<EOF: the text on its input.
+    Here,
+}
+
+/// `2>>`, `3<`, `>&-`, `<<<`, `&>` …: (fd, what), by bash's rules.
+fn parse_redir(op: &str) -> Option<(i32, RKind)> {
+    match op {
+        "&>" => return Some((1, RKind::Both)),
+        "&>>" => return Some((1, RKind::BothAppend)),
+        "&>&1" => return Some((2, RKind::Dup(1))),
+        ">&" => return Some((1, RKind::Both)),
+        _ => {}
+    }
+    let d = op.bytes().take_while(|b| b.is_ascii_digit()).count();
+    let fd: Option<i32> = if d > 0 { op[..d].parse().ok() } else { None };
+    let r = &op[d..];
+    let (dflt, k) = match r {
+        ">" | ">|" => (1, RKind::Out),
+        ">>" => (1, RKind::Append),
+        "<" => (0, RKind::In),
+        "<>" => (0, RKind::ReadWrite),
+        "<<<" | "<<" => (0, RKind::Here),
+        _ => {
+            let (dflt, m) = if let Some(m) = r.strip_prefix(">&") { (1, m) } else { (0, r.strip_prefix("<&")?) };
+            (dflt, if m == "-" { RKind::Close } else { RKind::Dup(m.parse().ok()?) })
+        }
+    };
+    Some((fd.unwrap_or(dflt), k))
+}
+
+/// A here-string's or heredoc's text: <<<word gets a newline, a heredoc
+/// loses the one the reader put first.
+fn here_text(op: &str, t: &Option<String>) -> String {
+    let t = t.clone().unwrap_or_default();
+    if op.ends_with("<<<") { t + "\n" } else { t.strip_prefix('\n').map(str::to_string).unwrap_or(t) }
+}
+
+/// A pipe whose read end gives `data` (written by a thread of its own).
+fn data_pipe(data: Vec<u8>) -> PyResult<std::io::PipeReader> {
+    let (r, mut w) = std::io::pipe()?;
+    std::thread::spawn(move || {
+        let _ = w.write_all(&data);
+    });
+    Ok(r)
+}
+
+/// The redirections of a program, done in the child in order, as bash
+/// does them (so `>f 2>&1` and `2>&1 >f` differ): files opened here, then
+/// dup2'd there over the descriptor each names. Kept open till it's run.
+fn child_redirs(command: &mut Command, redirs: &[(String, Option<String>)]) -> PyResult<Vec<std::os::fd::OwnedFd>> {
+    use std::os::fd::{AsRawFd, OwnedFd};
+    let mut keep: Vec<OwnedFd> = vec![];
+    // (src: a descriptor of ours, or -1 for the child's own m; dst; close?)
+    let mut acts: Vec<(i32, i32, i32)> = vec![];
+    for (op, target) in redirs {
+        let Some((fd, k)) = parse_redir(op) else { return Err(PyValueError::new_err(format!("unknown redirection {op}"))) };
+        let ours = |f: OwnedFd, keep: &mut Vec<OwnedFd>| {
+            let raw = f.as_raw_fd();
+            keep.push(f);
+            raw
+        };
+        match k {
+            RKind::Out | RKind::Append | RKind::In | RKind::ReadWrite => {
+                let f = open_redir(match k { RKind::Out => ">", RKind::Append => ">>", RKind::In => "<", _ => "<>" }, target)?;
+                acts.push((ours(f.into(), &mut keep), fd, 0));
+            }
+            RKind::Both | RKind::BothAppend => {
+                let raw = ours(open_redir(if k == RKind::Both { ">" } else { ">>" }, target)?.into(), &mut keep);
+                acts.push((raw, 1, 0));
+                acts.push((raw, 2, 0));
+            }
+            RKind::Here => {
+                let r = data_pipe(here_text(op, target).into_bytes())?;
+                acts.push((ours(r.into(), &mut keep), fd, 0));
+            }
+            RKind::Dup(m) => acts.push((-1, fd, m)),
+            RKind::Close => acts.push((-2, fd, 0)),
+        }
+    }
+    if acts.is_empty() {
+        return Ok(keep);
+    }
+    unsafe {
+        command.pre_exec(move || {
+            // (Ours first moved out of the way, above any it'll be put on.)
+            for a in acts.iter_mut() {
+                if a.0 >= 0 {
+                    let h = libc::fcntl(a.0, libc::F_DUPFD_CLOEXEC, 100);
+                    if h < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    a.0 = h;
+                }
+            }
+            for &(src, dst, m) in acts.iter() {
+                let r = match src {
+                    -2 => {
+                        libc::close(dst);
+                        0
+                    }
+                    -1 if m == dst => 0,
+                    -1 => libc::dup2(m, dst),
+                    s => libc::dup2(s, dst),
+                };
+                if r < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+            Ok(())
+        });
+    }
+    Ok(keep)
+}
+
 fn open_redir(op: &str, target: &Option<String>) -> PyResult<File> {
     let t = target.clone().ok_or_else(|| PyValueError::new_err(format!("{op} needs a file")))?;
     let r = if op == "<" {
         File::open(&t)
+    } else if op == "<>" {
+        OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&t)
     } else if op.ends_with(">>") {
         OpenOptions::new().create(true).append(true).open(&t)
     } else {
@@ -1264,7 +1393,8 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
     // (No terminal here: programs whose output is shown run in the one there
     // is, so whichever is a terminal app gets it.)
     if let Some(hook) = TTY_HOOK.get() {
-        if !capture && !bg && data.is_none() && cmds.iter().all(|c| c.redirs.is_empty()) {
+        // (Not with <(…) or >(…) open: their /dev/fd paths are ours, not the terminal's.)
+        if !capture && !bg && data.is_none() && cmds.iter().all(|c| c.redirs.is_empty()) && PROCSUBS.with(|p| p.borrow().is_empty()) {
             // (Variables set or unset here since: given to each program.)
             let mut envs: Vec<String> = vec![];
             if let Some(base) = HOOK_ENV.get() {
@@ -1318,39 +1448,13 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
             reader = Some(r);
             out = Out::Pipe(w);
         }
-        let mut err = Out::Inherit;
-        let mut err_to_out = false;
-        for (op, target) in &c.redirs {
-            let op = op.strip_prefix('1').filter(|o| o.starts_with('>')).unwrap_or(op);
-            match op {
-                ">" | ">>" => out = Out::File(open_redir(op, target)?),
-                "<" => stdin = Some(Stdio::from(open_redir(op, target)?)),
-                "2>" | "2>>" => err = Out::File(open_redir(&op[1..], target)?),
-                "&>" | "&>>" => {
-                    let f = open_redir(&op[1..], target)?;
-                    err = Out::File(f.try_clone()?);
-                    out = Out::File(f);
-                }
-                "2>&1" | "&>&1" => err_to_out = true,
-                ">&2" => out = Out::File(unsafe { <File as std::os::fd::FromRawFd>::from_raw_fd(libc::dup(2)) }),
-                _ => {}
-            }
-        }
         if let Some(s) = stdin {
             command.stdin(s);
         }
         command.stdout(to_stdio(&out)?);
-        command.stderr(if err_to_out {
-            match &out {
-                Out::Inherit => Stdio::from(unsafe { <File as std::os::fd::FromRawFd>::from_raw_fd(libc::dup(1)) }),
-                o => to_stdio(o)?,
-            }
-        } else if pass && matches!(err, Out::Inherit) {
-            // (The kernel: stderr through Python's too, after the run.)
-            Stdio::inherit()
-        } else {
-            to_stdio(&err)?
-        });
+        // (The kernel: stderr through Python's too, after the run.)
+        command.stderr(Stdio::inherit());
+        let _keep = child_redirs(&mut command, &c.redirs)?;
         if job_control || bg {
             command.process_group(pgid);
         }
@@ -1447,6 +1551,162 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
 
 /// Wait for the programs, letting Ctrl+C (a KeyboardInterrupt) through: they
 /// get SIGINT, then SIGKILL if they linger.
+// ---- process substitution: <(cmd) and >(cmd) ----------------------------------------
+
+/// One open: our end of its pipe (its /dev/fd path), and what runs it.
+struct ProcSub {
+    fd: Option<std::os::fd::OwnedFd>,
+    children: Vec<Child>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+thread_local! {
+    /// This thread's open ones, oldest first: the command they're for
+    /// closes and waits for those made since its mark (ps_done).
+    static PROCSUBS: std::cell::RefCell<Vec<ProcSub>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[pyfunction]
+fn ps_mark() -> usize {
+    PROCSUBS.with(|p| p.borrow().len())
+}
+
+/// The command's done: its <(…)/>(…) closed, then waited for (a >(…)'s
+/// program finishes what it was given first).
+#[pyfunction]
+fn ps_done(py: Python<'_>, mark: usize, value: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let mut subs = PROCSUBS.with(|p| {
+        let mut p = p.borrow_mut();
+        let at = mark.min(p.len());
+        p.split_off(at)
+    });
+    for s in subs.iter_mut() {
+        s.fd = None;
+    }
+    py.detach(|| {
+        for s in subs.iter_mut() {
+            for ch in s.children.iter_mut() {
+                let _ = ch.wait();
+            }
+            if let Some(t) = s.thread.take() {
+                let _ = t.join();
+            }
+        }
+    });
+    Ok(value)
+}
+
+/// Programs piped one into the next, the first's input and the last's
+/// output given (or the terminal's): not waited for.
+fn spawn_chain(cmds: &[Stage], mut first_in: Option<Stdio>, mut last_out: Option<Stdio>) -> PyResult<Vec<Child>> {
+    let mut children: Vec<Child> = vec![];
+    let mut prev: Option<std::io::PipeReader> = None;
+    for (k, c) in cmds.iter().enumerate() {
+        let mut command = Command::new(&c.words[0]);
+        command.args(&c.words[1..]);
+        if let Some(r) = prev.take() {
+            command.stdin(Stdio::from(r));
+        } else if let Some(s) = first_in.take() {
+            command.stdin(s);
+        }
+        if k + 1 < cmds.len() {
+            let (r, w) = std::io::pipe()?;
+            command.stdout(Stdio::from(w));
+            prev = Some(r);
+        } else if let Some(s) = last_out.take() {
+            command.stdout(s);
+        }
+        let _keep = child_redirs(&mut command, &c.redirs)?;
+        unsafe {
+            command.pre_exec(|| {
+                for s in [libc::SIGTSTP, libc::SIGTTOU, libc::SIGTTIN, libc::SIGINT, libc::SIGQUIT, libc::SIGPIPE, libc::SIGXFSZ] {
+                    libc::signal(s, libc::SIG_DFL);
+                }
+                Ok(())
+            });
+        }
+        match command.spawn() {
+            Ok(ch) => children.push(ch),
+            Err(e) => {
+                for ch in children.iter_mut() {
+                    let _ = ch.kill();
+                }
+                return Err(PyOSError::new_err(format!("{}: {e}", c.words[0])));
+            }
+        }
+    }
+    Ok(children)
+}
+
+/// `<(cmd)`: a path (/dev/fd/N) that reads what cmd prints; `>(cmd)`: one
+/// that cmd reads what's written to. Programs run alongside; a pipe with
+/// Python in it is run first (<) or after, on what was written (>).
+#[pyfunction]
+fn procsub(py: Python<'_>, dir: &str, stages: Vec<Bound<'_, PyAny>>) -> PyResult<String> {
+    use std::os::fd::{AsRawFd, OwnedFd};
+    let mut ss = vec![];
+    for s in stages {
+        match s.extract::<PyRef<Stage>>() {
+            Ok(st) => ss.push(Stage { kind: st.kind, words: st.words.clone(), redirs: st.redirs.clone(), obj: st.obj.as_ref().map(|o| o.clone_ref(py)) }),
+            Err(_) => ss.push(Stage { kind: "value", words: vec![], redirs: vec![], obj: Some(s.unbind()) }),
+        }
+    }
+    flush_python(py);
+    let programs = ss.iter().all(|s| s.kind == "cmd");
+    let (r, w) = std::io::pipe()?;
+    let (ours, children, thread): (OwnedFd, Vec<Child>, Option<std::thread::JoinHandle<()>>) = if dir == "<" {
+        if programs {
+            (r.into(), spawn_chain(&ss, None, Some(Stdio::from(w)))?, None)
+        } else {
+            // (What it prints, then what it gives back, if anything.)
+            let sys = py.import("sys")?;
+            let saved = sys.getattr("stdout")?;
+            let buf = py.import("io")?.getattr("StringIO")?.call0()?;
+            sys.setattr("stdout", &buf)?;
+            let out = run_stages(py, ss, "capture");
+            sys.setattr("stdout", saved)?;
+            let out = out?;
+            let mut text: String = buf.call_method0("getvalue")?.extract()?;
+            if !out.bind(py).is_none() {
+                text.push_str(&feed_bytes(py, out.bind(py)).map(|b| String::from_utf8_lossy(&b).to_string())?);
+            }
+            let bytes = text.into_bytes();
+            let mut w = w;
+            (r.into(), vec![], Some(std::thread::spawn(move || {
+                let _ = w.write_all(&bytes);
+            })))
+        }
+    } else if programs {
+        (w.into(), spawn_chain(&ss, Some(Stdio::from(r)), None)?, None)
+    } else {
+        let objs: Vec<Py<PyAny>> = ss.into_iter().map(|s| Py::new(py, s).map(|x| x.into_any())).collect::<PyResult<_>>()?;
+        let mut r = r;
+        (w.into(), vec![], Some(std::thread::spawn(move || {
+            let mut buf = vec![];
+            let _ = r.read_to_end(&mut buf);
+            Python::attach(|py| {
+                let text = PyString::new(py, &String::from_utf8_lossy(&buf)).into_any().unbind();
+                let mut st = vec![Stage { kind: "value", words: vec![], redirs: vec![], obj: Some(text) }];
+                for o in &objs {
+                    if let Ok(s) = o.bind(py).extract::<PyRef<Stage>>() {
+                        st.push(Stage { kind: s.kind, words: s.words.clone(), redirs: s.redirs.clone(), obj: s.obj.as_ref().map(|o| o.clone_ref(py)) });
+                    }
+                }
+                if let Err(e) = run_stages(py, st, "attach") {
+                    e.print(py);
+                }
+            });
+        })))
+    };
+    // (Programs started from here on get it: no close-on-exec.)
+    let raw = ours.as_raw_fd();
+    unsafe {
+        libc::fcntl(raw, libc::F_SETFD, 0);
+    }
+    PROCSUBS.with(|p| p.borrow_mut().push(ProcSub { fd: Some(ours), children, thread }));
+    Ok(format!("/dev/fd/{raw}"))
+}
+
 fn wait_all(py: Python<'_>, mut children: Vec<Child>) -> PyResult<i32> {
     let mut code = 0;
     loop {
@@ -1629,37 +1889,42 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
     let open = py.import("builtins")?.getattr("open")?;
     let saved = (sys.getattr("stdout")?, sys.getattr("stderr")?, sys.getattr("stdin")?);
     let mut opened = vec![];
+    // (Python's own streams for 0, 1 and 2; more are only a program's.)
+    let names = ["stdin", "stdout", "stderr"];
     for (op, target) in redirs {
-        let op = op.strip_prefix('1').filter(|o| o.starts_with('>')).unwrap_or(op);
+        let Some((fd, k)) = parse_redir(op) else { return Err(PyValueError::new_err(format!("unknown redirection {op}"))) };
+        let slot = |fd: i32| -> PyResult<&str> {
+            names.get(fd as usize).copied().filter(|_| fd >= 0).ok_or_else(|| PyValueError::new_err(format!("{op}: only a program has file descriptor {fd}")))
+        };
         let file = |mode: &str| -> PyResult<Bound<'py, PyAny>> {
             let t = target.clone().ok_or_else(|| PyValueError::new_err(format!("{op} needs a file")))?;
             open.call1((t, mode))
         };
-        match op {
-            ">" | ">>" => {
-                let fl = file(if op == ">>" { "a" } else { "w" })?;
-                sys.setattr("stdout", &fl)?;
+        match k {
+            RKind::Out | RKind::Append | RKind::In | RKind::ReadWrite => {
+                let fl = file(match k { RKind::Out => "w", RKind::Append => "a", RKind::In => "r", _ => "r+" })?;
+                sys.setattr(slot(fd)?, &fl)?;
                 opened.push(fl);
             }
-            "&>" | "&>>" => {
-                let fl = file(if op == "&>>" { "a" } else { "w" })?;
+            RKind::Both | RKind::BothAppend => {
+                let fl = file(if k == RKind::Both { "w" } else { "a" })?;
                 sys.setattr("stdout", &fl)?;
                 sys.setattr("stderr", &fl)?;
                 opened.push(fl);
             }
-            "2>" | "2>>" => {
-                let fl = file(if op == "2>>" { "a" } else { "w" })?;
-                sys.setattr("stderr", &fl)?;
+            RKind::Here => {
+                let io = py.import("io")?.getattr("StringIO")?.call1((here_text(op, target),))?;
+                sys.setattr(slot(fd)?, &io)?;
+            }
+            RKind::Dup(m) => {
+                let to = sys.getattr(slot(m)?)?;
+                sys.setattr(slot(fd)?, to)?;
+            }
+            RKind::Close => {
+                let fl = open.call1((std::path::Path::new("/dev/null").to_string_lossy().to_string(), if fd == 0 { "r" } else { "w" }))?;
+                sys.setattr(slot(fd)?, &fl)?;
                 opened.push(fl);
             }
-            "2>&1" => sys.setattr("stderr", sys.getattr("stdout")?)?,
-            ">&2" => sys.setattr("stdout", sys.getattr("stderr")?)?,
-            "<" => {
-                let fl = file("r")?;
-                sys.setattr("stdin", &fl)?;
-                opened.push(fl);
-            }
-            _ => {}
         }
     }
     let r = f();
@@ -2290,6 +2555,9 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         wrap_pyfunction!(t, &m)?,
         wrap_pyfunction!(cmd, &m)?,
         wrap_pyfunction!(pipe, &m)?,
+        wrap_pyfunction!(procsub, &m)?,
+        wrap_pyfunction!(ps_mark, &m)?,
+        wrap_pyfunction!(ps_done, &m)?,
         wrap_pyfunction!(call_stage, &m)?,
         wrap_pyfunction!(value_stage, &m)?,
         wrap_pyfunction!(py_bg_call, &m)?,

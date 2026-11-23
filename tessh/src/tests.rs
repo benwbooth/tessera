@@ -592,6 +592,20 @@ fn backslash_escapes_in_words() {
 }
 
 #[test]
+fn redirections_all_of_bash() {
+    let d = std::env::temp_dir().join(format!("tessh-redir-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    let f = |n: &str| d.join(n).to_string_lossy().to_string();
+    let code = format!(
+        "sh -c 'echo o; echo e >&2' >{a} 2>&1\ncat {a}\nsh -c 'echo o; echo e >&2' 2>&1 >{b} | tr a-z A-Z\ncat {b}\necho c >|{c}\ncat <>{c}\nsh -c 'echo three >&3' 3>&1\nsh -c 'echo gone >&2; true' 2>&-\ntr a-z A-Z <<<here\nname = world\ncat <<END\nhi $name\nEND\ncat <<'END'\n$name\nEND\ndiff <(echo x) <(echo y) | head -1\necho up > >(tr a-z A-Z)",
+        a = f("a"), b = f("b"), c = f("c")
+    );
+    let (_, out) = run(&code);
+    let _ = std::fs::remove_dir_all(&d);
+    assert_eq!(out, "o\ne\nE\no\nc\nthree\nHERE\nhi world\n$name\n1c1\nUP\n");
+}
+
+#[test]
 fn bare_assignment_and_env_prefix() {
     let (_, out) = run("a=1\nb=x c=$a\nprint $a $b $c (dict k=2)\nTESSH_T1=v sh -c 'echo $TESSH_T1'\nprint (\"TESSH_T1\" in $env)\ne=\nprint [$e]");
     assert_eq!(out, "1 x 1 {k: 2}\nv\nFalse\n['']\n");

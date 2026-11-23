@@ -455,20 +455,41 @@ pub fn is_ident(s: &str) -> bool {
 }
 
 /// A redirection operator at the start of t: its length.
-fn redir_op(t: &str) -> Option<usize> {
-    for op in ["1>>", "2>>", "&>>", "1>", "2>", "&>", ">>", ">", "<"] {
+/// A redirection's operator at the start of t (its length; the target is
+/// what follows): `>f`, `2>>f`, `3<f`, `<>f`, `>|f`, `<<<word`, `&>f`,
+/// `>&f` (both, as `&>f`). Not `>=`, `<<` (a shift) and the like.
+pub fn redir_op(t: &str) -> Option<usize> {
+    for op in ["&>>", "&>"] {
         if let Some(rest) = t.strip_prefix(op) {
+            return (!rest.starts_with(['<', '>', '=', '&'])).then_some(op.len());
+        }
+    }
+    let d = t.bytes().take_while(|b| b.is_ascii_digit()).count();
+    let r = &t[d..];
+    for op in ["<<<", ">>", ">|", "<>", ">&", ">", "<"] {
+        if let Some(rest) = r.strip_prefix(op) {
+            if op == ">&" {
+                // (>&2, >&-: whole ones; >&file: both to it.)
+                return (d == 0 && !rest.is_empty() && !rest.starts_with(|c: char| c.is_ascii_digit() || c == '-')).then_some(2);
+            }
             if rest.starts_with(['<', '>', '=', '&']) {
                 return None;
             }
-            return Some(op.len());
+            return Some(d + op.len());
         }
     }
     None
 }
 
+/// A redirection with no file: `2>&1`, `>&2`, `3>&1`, `0<&3`, `2>&-`, `>&-`.
 fn is_whole_redir(t: &str) -> bool {
-    matches!(t, "2>&1" | "1>&2" | ">&2" | "&>&1" | "2>&2" | "1>&1" | "0>&1")
+    if t == "&>&1" {
+        return true;
+    }
+    let d = t.bytes().take_while(|b| b.is_ascii_digit()).count();
+    let r = &t[d..];
+    let Some(m) = r.strip_prefix(">&").or_else(|| r.strip_prefix("<&")) else { return false };
+    m == "-" || (!m.is_empty() && m.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn word(parts: Vec<Piece>, pos: Option<Pos>) -> Form {
@@ -512,7 +533,7 @@ fn classify(mut ps: Vec<Piece>, pos: Option<Pos>) -> Form {
             return Form::new(Kind::Op { name: t.to_string(), tick: false }, pos);
         }
         if let Some(n) = redir_op(t) {
-            if n < t.len() && !t.starts_with("<<") {
+            if n < t.len() {
                 return Form::new(Kind::Redir { op: t[..n].to_string(), target: Some(Box::new(classify_text(&t[n..], shift(pos, n)))) }, pos);
             }
         }
@@ -570,8 +591,16 @@ fn classify(mut ps: Vec<Piece>, pos: Option<Pos>) -> Form {
             return Form::new(Kind::KwArg { name: n.to_string(), value: Box::new(word(ps, pos)) }, pos);
         }
     }
+    // (A heredoc, as read_at has it: `<<` glued to the triple-quoted text.)
+    if let Some(d) = first.strip_suffix("<<").filter(|d| d.bytes().all(|b| b.is_ascii_digit())) {
+        if let [Piece::F(f)] = rest.as_slice() {
+            if matches!(f.kind, Kind::Str { .. } | Kind::IStr(_)) {
+                return Form::new(Kind::Redir { op: format!("{d}<<"), target: Some(Box::new(f.clone())) }, pos);
+            }
+        }
+    }
     if let Some(n) = redir_op(&first) {
-        if !first.starts_with("<<") {
+        {
             let mut tgt = vec![];
             if n < first.len() {
                 tgt.push(Piece::Text(first[n..].to_string()));
@@ -804,7 +833,165 @@ pub fn read(text: &str) -> Result<Vec<Form>, ReadError> {
     read_at(text, 1)
 }
 
+/// Heredocs (`cat <<EOF` … `EOF`, `<<-EOF` with tabs taken off, `<<'EOF'`
+/// as it is): written as `<<"""…"""` (or `<<'''…'''`) for the reader,
+/// the body's lines where they were, the rest of the line after the end
+/// word. The text's first newline goes at run time.
+fn heredocs(text: &str) -> Result<std::borrow::Cow<'_, str>, ReadError> {
+    if !text.contains("<<") {
+        return Ok(std::borrow::Cow::Borrowed(text));
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut out: Vec<String> = vec![];
+    let mut in_triple: Option<&str> = None;
+    let mut i = 0;
+    let mut changed = false;
+    while i < lines.len() {
+        let line = lines[i];
+        // (Inside a triple-quoted string from a line before: as it is.)
+        if let Some(q) = in_triple {
+            if line.matches(q).count() % 2 == 1 {
+                in_triple = None;
+            }
+            out.push(line.to_string());
+            i += 1;
+            continue;
+        }
+        let toks = heredoc_tokens(line);
+        if toks.is_empty() {
+            for q in ["\"\"\"", "'''"] {
+                if line.matches(q).count() % 2 == 1 {
+                    in_triple = Some(q);
+                }
+            }
+            out.push(line.to_string());
+            i += 1;
+            continue;
+        }
+        changed = true;
+        let mut cur = String::new();
+        let mut at = 0;
+        let mut j = i + 1;
+        for (start, end, fd, strip, quoted, delim) in toks {
+            cur.push_str(&line[at..start]);
+            let q = if quoted { "'''" } else { "\"\"\"" };
+            cur.push_str(&format!("{fd}<<{q}"));
+            out.push(std::mem::take(&mut cur));
+            loop {
+                let Some(l) = lines.get(j) else {
+                    return Err(ReadError { msg: format!("the heredoc never ends: no line {delim}"), line: i as u32 + 1, col: start as u32, end_col: end as u32 });
+                };
+                let l = l.strip_suffix('\r').unwrap_or(l);
+                let body = if strip { l.trim_start_matches('\t') } else { l };
+                j += 1;
+                if body == delim {
+                    break;
+                }
+                if quoted && body.contains("'''") {
+                    return Err(ReadError { msg: "a quoted heredoc can't hold '''".into(), line: j as u32, col: 0, end_col: 1 });
+                }
+                out.push(if quoted { body.to_string() } else { heredoc_escape(body) });
+            }
+            cur.push_str(q);
+            at = end;
+        }
+        cur.push_str(&line[at..]);
+        out.push(cur);
+        i = j;
+    }
+    Ok(if changed { std::borrow::Cow::Owned(out.join("\n")) } else { std::borrow::Cow::Borrowed(text) })
+}
+
+/// A heredoc body line for `"""…"""`: as bash has it, `$` interpolates and
+/// a backslash is only special before `$`, `` ` `` and `\\`.
+fn heredoc_escape(l: &str) -> String {
+    let mut o = String::with_capacity(l.len());
+    let cs: Vec<char> = l.chars().collect();
+    let mut k = 0;
+    while k < cs.len() {
+        let c = cs[k];
+        if c == '\\' {
+            if matches!(cs.get(k + 1), Some('$' | '`' | '\\')) {
+                o.push(c);
+                o.push(cs[k + 1]);
+                k += 2;
+                continue;
+            }
+            o.push_str("\\\\");
+        } else if c == '"' {
+            o.push_str("\\\"");
+        } else {
+            o.push(c);
+        }
+        k += 1;
+    }
+    o
+}
+
+/// The heredocs a line starts, outside quotes: (start, end, fd, strip
+/// tabs, quoted, end word).
+fn heredoc_tokens(line: &str) -> Vec<(usize, usize, String, bool, bool, String)> {
+    let b = line.as_bytes();
+    let mut out = vec![];
+    let mut quote: Option<u8> = None;
+    let mut k = 0;
+    while k < b.len() {
+        let c = b[k];
+        if let Some(q) = quote {
+            if c == b'\\' && q == b'"' {
+                k += 1;
+            } else if c == q {
+                quote = None;
+            }
+            k += 1;
+            continue;
+        }
+        if c == b'#' && (k == 0 || b[k - 1] == b' ' || b[k - 1] == b'\t') {
+            break;
+        }
+        if c == b'"' || c == b'\'' {
+            quote = Some(c);
+            k += 1;
+            continue;
+        }
+        if c == b'<' && b.get(k + 1) == Some(&b'<') && b.get(k + 2) != Some(&b'<') && (k == 0 || b[k - 1] != b'<') {
+            // (Where its word starts: after a space, with the fd's digits.)
+            let mut s = k;
+            while s > 0 && b[s - 1].is_ascii_digit() {
+                s -= 1;
+            }
+            if s == 0 || b[s - 1] == b' ' || b[s - 1] == b'\t' {
+                let mut p = k + 2;
+                let strip = b.get(p) == Some(&b'-');
+                if strip {
+                    p += 1;
+                }
+                let (quoted, delim, end) = match b.get(p) {
+                    Some(&q) if q == b'\'' || q == b'"' => match line[p + 1..].find(q as char) {
+                        Some(e) if e > 0 => (true, line[p + 1..p + 1 + e].to_string(), p + 2 + e),
+                        _ => (false, String::new(), p),
+                    },
+                    Some(c) if c.is_ascii_alphabetic() || *c == b'_' => {
+                        let e = line[p..].find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')).map(|e| p + e).unwrap_or(line.len());
+                        (false, line[p..e].to_string(), e)
+                    }
+                    _ => (false, String::new(), p),
+                };
+                if !delim.is_empty() {
+                    out.push((s, end, line[s..k].to_string(), strip, quoted, delim));
+                    k = end;
+                    continue;
+                }
+            }
+        }
+        k += 1;
+    }
+    out
+}
+
 pub fn read_at(text: &str, first_line: u32) -> Result<Vec<Form>, ReadError> {
+    let hd = heredocs(text).map_err(|e| ReadError { line: e.line + first_line - 1, ..e })?;
+    let text: &str = &hd;
     let idx = LineIndex::new(text);
     let raw = match lines_parser().parse(text).into_result() {
         Ok(r) => r,
