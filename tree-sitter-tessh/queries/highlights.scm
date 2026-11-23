@@ -10,6 +10,12 @@
 (interpolation "$(" @punctuation.special ")" @punctuation.special)
 (interpolation "${" @punctuation.special "}" @punctuation.special)
 (quasi ":(" @punctuation.special)
+(process_substitution (procsub_open) @punctuation.special ")" @punctuation.special)
+
+; Redirections (2>f, 3>&1, <<<, &>), a heredoc's start (<<END) and its body.
+(redirection) @operator
+(heredoc_start) @operator
+(heredoc_body) @string
 
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
 ["," ";"] @punctuation.delimiter

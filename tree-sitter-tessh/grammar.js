@@ -11,11 +11,13 @@ module.exports = grammar({
 
   word: $ => $.bareword,
 
-  // ("…" strings: src/scanner.c, so interpolations can hold strings.)
-  externals: $ => [$._dq_string],
+  // (src/scanner.c: "…" strings, so interpolations can hold strings;
+  // redirections, which a word would otherwise swallow (2>f, 3>&1, <<<);
+  // <( and >(; heredocs, whose body comes after the line's end.)
+  externals: $ => [$._dq_string, $.redirection, $.procsub_open, $.heredoc_start, $.heredoc_body, $._error_sentinel],
 
   rules: {
-    source_file: $ => seq(optional($._line_or_comment), repeat(seq($._newline, optional($._line_or_comment)))),
+    source_file: $ => seq(optional($._line_or_comment), repeat(seq(choice($._newline, $.heredoc_body), optional($._line_or_comment)))),
 
     _line_or_comment: $ => choice($.line, $.comment),
 
@@ -26,6 +28,9 @@ module.exports = grammar({
     comment: _ => token(seq('#', /[^\n]*/)),
 
     _item: $ => choice(
+      $.redirection,
+      $.heredoc_start,
+      $.process_substitution,
       $.string,
       $.variable,
       $.status,
@@ -54,6 +59,10 @@ module.exports = grammar({
     ),
 
     quasi: $ => seq(':(', optional($._group_items), ')'),
+
+    // <(…), >(…): a program's output or input as a path (or, with a value
+    // in it, the file it names).
+    process_substitution: $ => seq($.procsub_open, optional($._group_items), ')'),
 
     unquote: $ => choice(
       token(seq('~', optional('@'), /[A-Za-z_][A-Za-z0-9_]*/)),

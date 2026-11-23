@@ -24,6 +24,10 @@
           "named": true
         },
         {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
           "type": "infix_function",
           "named": true
         },
@@ -44,7 +48,15 @@
           "named": true
         },
         {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
           "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
           "named": true
         },
         {
@@ -95,6 +107,10 @@
           "named": true
         },
         {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
           "type": "infix_function",
           "named": true
         },
@@ -115,7 +131,15 @@
           "named": true
         },
         {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
           "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
           "named": true
         },
         {
@@ -166,6 +190,10 @@
           "named": true
         },
         {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
           "type": "infix_function",
           "named": true
         },
@@ -186,7 +214,15 @@
           "named": true
         },
         {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
           "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
           "named": true
         },
         {
@@ -237,6 +273,10 @@
           "named": true
         },
         {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
           "type": "infix_function",
           "named": true
         },
@@ -257,7 +297,15 @@
           "named": true
         },
         {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
           "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
           "named": true
         },
         {
@@ -308,6 +356,10 @@
           "named": true
         },
         {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
           "type": "infix_function",
           "named": true
         },
@@ -328,7 +380,102 @@
           "named": true
         },
         {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
           "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
+          "named": true
+        },
+        {
+          "type": "status",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "unquote",
+          "named": true
+        },
+        {
+          "type": "variable",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "process_substitution",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "bareword",
+          "named": true
+        },
+        {
+          "type": "brace",
+          "named": true
+        },
+        {
+          "type": "bracket",
+          "named": true
+        },
+        {
+          "type": "comment",
+          "named": true
+        },
+        {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
+          "type": "infix_function",
+          "named": true
+        },
+        {
+          "type": "interpolation",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "paren",
+          "named": true
+        },
+        {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
+          "type": "procsub_open",
+          "named": true
+        },
+        {
+          "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
           "named": true
         },
         {
@@ -379,6 +526,10 @@
           "named": true
         },
         {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
           "type": "infix_function",
           "named": true
         },
@@ -399,7 +550,15 @@
           "named": true
         },
         {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
           "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
           "named": true
         },
         {
@@ -439,6 +598,10 @@
           "named": true
         },
         {
+          "type": "heredoc_body",
+          "named": true
+        },
+        {
           "type": "line",
           "named": true
         }
@@ -475,6 +638,10 @@
           "named": true
         },
         {
+          "type": "heredoc_start",
+          "named": true
+        },
+        {
           "type": "infix_function",
           "named": true
         },
@@ -495,7 +662,15 @@
           "named": true
         },
         {
+          "type": "process_substitution",
+          "named": true
+        },
+        {
           "type": "quasi",
+          "named": true
+        },
+        {
+          "type": "redirection",
           "named": true
         },
         {
@@ -566,6 +741,14 @@
     "named": true
   },
   {
+    "type": "heredoc_body",
+    "named": true
+  },
+  {
+    "type": "heredoc_start",
+    "named": true
+  },
+  {
     "type": "infix_function",
     "named": true
   },
@@ -575,6 +758,14 @@
   },
   {
     "type": "operator",
+    "named": true
+  },
+  {
+    "type": "procsub_open",
+    "named": true
+  },
+  {
+    "type": "redirection",
     "named": true
   },
   {

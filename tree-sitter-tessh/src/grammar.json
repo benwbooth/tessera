@@ -24,8 +24,17 @@
             "type": "SEQ",
             "members": [
               {
-                "type": "SYMBOL",
-                "name": "_newline"
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_newline"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "heredoc_body"
+                  }
+                ]
               },
               {
                 "type": "CHOICE",
@@ -117,6 +126,18 @@
     "_item": {
       "type": "CHOICE",
       "members": [
+        {
+          "type": "SYMBOL",
+          "name": "redirection"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "heredoc_start"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "process_substitution"
+        },
         {
           "type": "SYMBOL",
           "name": "string"
@@ -339,6 +360,31 @@
         {
           "type": "STRING",
           "value": ":("
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_group_items"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "process_substitution": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "procsub_open"
         },
         {
           "type": "CHOICE",
@@ -918,6 +964,26 @@
     {
       "type": "SYMBOL",
       "name": "_dq_string"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "redirection"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "procsub_open"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "heredoc_start"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "heredoc_body"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_error_sentinel"
     }
   ],
   "inline": [],

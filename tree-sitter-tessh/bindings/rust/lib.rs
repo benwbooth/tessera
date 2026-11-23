@@ -10,6 +10,8 @@ pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_tessh
 
 pub const HIGHLIGHTS_QUERY: &str = include_str!("../../queries/highlights.scm");
 
+pub mod highlight;
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -19,5 +21,15 @@ mod tests {
         let t = p.parse("ls -la | grep x\ndef f x\n  print $x\n", None).unwrap();
         assert!(!t.root_node().has_error());
         tree_sitter::Query::new(&super::LANGUAGE.into(), super::HIGHLIGHTS_QUERY).unwrap();
+    }
+
+    #[test]
+    fn heredocs_and_interpolation() {
+        let t = "cat <<END | tr a-z A-Z\nhi $x\nEND\nprint \"a $y\"\n";
+        let sp = super::highlight::spans(t);
+        let at = |w: &str| sp.iter().rev().find(|(s, e, _)| &t[*s..*e] == w).map(|x| x.2);
+        assert_eq!(at("<<END"), Some("operator"));
+        assert_eq!(at("\nhi $x\nEND"), Some("string"));
+        assert_eq!(at("$y"), Some("variable"));
     }
 }

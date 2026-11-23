@@ -54,7 +54,7 @@ Item {
         md: "markdown", sql: "sql", nix: "nix", hs: "haskell", ml: "ocaml", scala: "scala", swift: "swift", zig: "zig", php: "php", pl: "perl",
         r: "r", jl: "julia", ex: "elixir", exs: "elixir", erl: "erlang", cs: "c-sharp", fs: "fsharp", dart: "dart", qml: "qmljs", xml: "xml",
         ini: "ini", cfg: "ini", conf: "ini", dockerfile: "dockerfile", make: "make", mk: "make", cmake: "cmake", tex: "latex", vim: "vim",
-        nu: "nu", xsh: "python", ps1: "powershell", csv: "csv", diff: "diff", patch: "diff",
+        nu: "nu", xsh: "python", tsh: "tessh", tessh: "tessh", ps1: "powershell", csv: "csv", diff: "diff", patch: "diff",
         xaml: "xml", xsd: "xml", xsl: "xml", xslt: "xml", svg: "xml", plist: "xml", csproj: "xml", vbproj: "xml", fsproj: "xml", vcxproj: "xml",
         props: "xml", targets: "xml", resx: "xml", nuspec: "xml", wsdl: "xml", rss: "xml", atom: "xml", kml: "xml", gpx: "xml", xhtml: "html", htm: "html"
     })[ext] || ({ Makefile: "make", Dockerfile: "dockerfile", "CMakeLists.txt": "cmake", ".bashrc": "bash", ".zshrc": "bash", "flake.lock": "json" })[name] || sniffedLang
