@@ -1401,7 +1401,7 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
     // is, so whichever is a terminal app gets it.)
     if let Some(hook) = TTY_HOOK.get() {
         // (Not with <(…) or >(…) open: their /dev/fd paths are ours, not the terminal's.)
-        if !capture && !bg && data.is_none() && cmds.iter().all(|c| c.redirs.is_empty()) && PROCSUBS.with(|p| p.borrow().is_empty()) {
+        if !capture && !bg && data.is_none() && cmds.iter().all(|c| c.redirs.is_empty()) && PROCSUBS.with(|p| p.borrow().is_empty()) && PY_STREAMS.with(|s| s.borrow().is_empty()) {
             // (Variables set or unset here since: given to each program.)
             let mut envs: Vec<String> = vec![];
             if let Some(base) = HOOK_ENV.get() {
@@ -1424,13 +1424,28 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
             }
         }
     }
-    let pass = PASS_THROUGH.load(Ordering::SeqCst) && !capture && !bg;
+    // (Run by a Python call whose output, errors or input were redirected:
+    // the program's go there too, as in a bash function. Output passes
+    // through Python's stream; errors go to its file; input comes from it.)
+    let (py_out, py_err, py_in) = if bg { (None, None, None) } else { (py_redirected(py, 1), py_redirected(py, 2), py_redirected(py, 0)) };
+    let pass = (PASS_THROUGH.load(Ordering::SeqCst) || py_out.is_some()) && !capture && !bg;
     let capture = capture || pass;
     let job_control = tty_ok() && !capture;
+    let mut in_fd: Option<std::os::fd::OwnedFd> = None;
     let feed = match &data {
         Some(d) => Some(feed_bytes(py, d.bind(py))?),
-        None => None,
+        None => match &py_in {
+            Some(i) => match stream_fd(i) {
+                Some(fd) => {
+                    in_fd = Some(fd);
+                    None
+                }
+                None => Some(feed_bytes(py, &i.call_method0("read")?)?),
+            },
+            None => None,
+        },
     };
+    let err_fd = py_err.as_ref().and_then(stream_fd);
     let mut children: Vec<Child> = vec![];
     let mut pgid: i32 = 0;
     let mut prev_reader: Option<std::io::PipeReader> = None;
@@ -1446,6 +1461,8 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
             stdin = Some(Stdio::from(r));
         } else if k == 0 && feed.is_some() {
             stdin = Some(Stdio::piped());
+        } else if let (0, Some(fd)) = (k, in_fd.take()) {
+            stdin = Some(Stdio::from(fd));
         }
         // stdout
         let mut out = Out::Inherit;
@@ -1460,7 +1477,10 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
         }
         command.stdout(to_stdio(&out)?);
         // (The kernel: stderr through Python's too, after the run.)
-        command.stderr(Stdio::inherit());
+        match err_fd.as_ref().and_then(|f| f.try_clone().ok()) {
+            Some(f) => command.stderr(Stdio::from(f)),
+            None => command.stderr(Stdio::inherit()),
+        };
         let _keep = child_redirs(&mut command, &c.redirs)?;
         if job_control || bg {
             command.process_group(pgid);
@@ -1888,6 +1908,31 @@ fn py_bg_call(py: Python<'_>, thunk: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
 
 // ---- redirections of Python calls ------------------------------------------------------
 
+thread_local! {
+    /// sys.stdout, stderr and stdin as they were before the first redirection
+    /// of a Python call (`f >file`, `f <<<text`) still in force: programs
+    /// the call runs use what took their place.
+    static PY_STREAMS: std::cell::RefCell<Vec<[Py<PyAny>; 3]>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// What a redirected Python call put in place of sys.`name` (0 stdin, 1
+/// stdout, 2 stderr), for a program it runs; None when it's as it was.
+fn py_redirected<'py>(py: Python<'py>, fd: usize) -> Option<Bound<'py, PyAny>> {
+    let base = PY_STREAMS.with(|s| s.borrow().first().map(|b| b[fd].clone_ref(py)))?;
+    let now = py.import("sys").ok()?.getattr(["stdin", "stdout", "stderr"][fd]).ok()?;
+    (!now.is(base.bind(py)) && !now.is_none()).then_some(now)
+}
+
+/// A redirected stream's file descriptor, a copy of it, if it has one.
+fn stream_fd(f: &Bound<'_, PyAny>) -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::{BorrowedFd, AsFd};
+    let n: i32 = f.call_method0("fileno").ok()?.extract().ok()?;
+    if n < 0 {
+        return None;
+    }
+    unsafe { BorrowedFd::borrow_raw(n) }.as_fd().try_clone_to_owned().ok()
+}
+
 fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
     if redirs.is_empty() {
         return f();
@@ -1895,6 +1940,7 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
     let sys = py.import("sys")?;
     let open = py.import("builtins")?.getattr("open")?;
     let saved = (sys.getattr("stdout")?, sys.getattr("stderr")?, sys.getattr("stdin")?);
+    PY_STREAMS.with(|s| s.borrow_mut().push([saved.2.clone().unbind(), saved.0.clone().unbind(), saved.1.clone().unbind()]));
     let mut opened = vec![];
     // (Python's own streams for 0, 1 and 2; more are only a program's.)
     let names = ["stdin", "stdout", "stderr"];
@@ -1935,6 +1981,9 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
         }
     }
     let r = f();
+    PY_STREAMS.with(|s| s.borrow_mut().pop());
+    let _ = sys.getattr("stdout").and_then(|o| o.call_method0("flush"));
+    let _ = sys.getattr("stderr").and_then(|o| o.call_method0("flush"));
     sys.setattr("stdout", saved.0)?;
     sys.setattr("stderr", saved.1)?;
     sys.setattr("stdin", saved.2)?;

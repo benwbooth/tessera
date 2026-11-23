@@ -1091,7 +1091,7 @@ odd
 A command as the condition uses its exit status.
 
 ```tessh
-if grep -q b <<< "abc"
+if grep -q z <<< "abc"
   print never
 if printf "abc" | grep -q b
   print found

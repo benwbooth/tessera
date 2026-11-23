@@ -177,6 +177,33 @@ fn pwd_is_where_tessh_is() {
     assert_eq!(std::env::var("PWD").unwrap(), here);
 }
 
+/// `$name1`: a name with digits in it is the whole name (and `.attr2`).
+#[test]
+fn names_with_digits() {
+    let (ns, out) = run("a1 = 5\nx2y = 7\nprint $a1 \"[$a1]\" $x2y\ns = \"$a1$x2y\"");
+    assert_eq!(out, "5 [5] 7\n");
+    assert_eq!(get::<String>(&ns, "s"), "57");
+}
+
+/// A heredoc's word is bash's: up to a space, so `End-Of-Session` too.
+#[test]
+fn heredoc_word_with_dashes() {
+    let (_, out) = run("cat <<End-Of-Session\nhi\nEnd-Of-Session\necho after");
+    assert_eq!(out, "hi\nafter\n");
+}
+
+/// A redirection on a Python call reaches the programs it runs, as a bash
+/// function's does: output, input and errors.
+#[test]
+fn function_redirections_reach_programs() {
+    let d = std::env::temp_dir().join(format!("tessh-fr-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    let f = d.join("out.txt").to_string_lossy().to_string();
+    let (_, out) = run(&format!("def blk\n  echo from-echo\n  print from-print\nblk >{f}\ncat {f}\ndef g\n  cat\ng <<<four\ndef e\n  sh -c 'echo oops >&2'\ne 2>{f}\ncat {f}"));
+    let _ = std::fs::remove_dir_all(&d);
+    assert_eq!(out, "from-echo\nfrom-print\nfour\noops\n");
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");

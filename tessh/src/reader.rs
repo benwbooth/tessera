@@ -83,7 +83,13 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
     let gws = choice((one_of(" \t\r\n").ignored(), just('\\').then(just('\n')).ignored(), comment))
         .repeated()
         .at_least(1);
-    let ident = text::ascii::ident();
+    // (A name: a letter or _, then letters, digits and _, as in Python and
+    // bash. chumsky's text::ascii::ident stops at a digit: $a1 was $a then 1.)
+    let ident = any()
+        .filter(|c: &char| c.is_ascii_alphabetic() || *c == '_')
+        .then(any().filter(|c: &char| c.is_ascii_alphanumeric() || *c == '_').repeated())
+        .to_slice()
+        .boxed();
 
     let mut group_items = Recursive::declare();
 
@@ -99,7 +105,7 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
 
     // Glued postfixes: .name and [items].
     let postfix = choice((
-        just('.').ignore_then(ident).map_with(|n: &str, e| (Some(n.to_string()), None, sp(e.span()))),
+        just('.').ignore_then(ident.clone()).map_with(|n: &str, e| (Some(n.to_string()), None, sp(e.span()))),
         bracket.clone().map_with(|g: Form, e| (None, Some(g), sp(e.span()))),
     ));
     let with_postfix = move |base: chumsky::Boxed<'a, 'a, &'a str, Form, Ex<'a>>| {
@@ -156,8 +162,8 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
 
     let unquote_inner = choice((
         paren.clone(),
-        just('$').ignore_then(ident).map_with(|n: &str, e| Form::new(Kind::Var(Box::new(Form::sym_at(n, &[], sp(e.span())))), sp(e.span()))).boxed(),
-        ident.map_with(|n: &str, e| Form::sym_at(n, &[], sp(e.span()))).boxed(),
+        just('$').ignore_then(ident.clone()).map_with(|n: &str, e| Form::new(Kind::Var(Box::new(Form::sym_at(n, &[], sp(e.span())))), sp(e.span()))).boxed(),
+        ident.clone().map_with(|n: &str, e| Form::sym_at(n, &[], sp(e.span()))).boxed(),
     ));
     let unquote = just('~')
         .ignore_then(just('@').or_not())
@@ -173,7 +179,7 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
             just('%').then(one_of("123456789&").or_not()).to_slice().map_with(|n: &str, e| Form::new(Kind::Var(Box::new(Form::sym_at(n, &[], sp(e.span())))), sp(e.span()))).boxed(),
             paren.clone().map_with(|g, e| Form::new(Kind::Interp { expr: Box::new(g), conv: None, spec: None, braced: false }, sp(e.span()))).boxed(),
             unquote.clone().map_with(|u, e| Form::new(Kind::Var(Box::new(u)), sp(e.span()))).boxed(),
-            ident.map_with(|n: &str, e| Form::sym_at(n, &[], sp(e.span()))).map_with(|s, e| Form::new(Kind::Var(Box::new(s)), sp(e.span()))).boxed(),
+            ident.clone().map_with(|n: &str, e| Form::sym_at(n, &[], sp(e.span()))).map_with(|s, e| Form::new(Kind::Var(Box::new(s)), sp(e.span()))).boxed(),
         )))
         .map_with(|f, e| {
             let mut f = f;
@@ -971,8 +977,10 @@ fn heredoc_tokens(line: &str) -> Vec<(usize, usize, String, bool, bool, String)>
                         Some(e) if e > 0 => (true, line[p + 1..p + 1 + e].to_string(), p + 2 + e),
                         _ => (false, String::new(), p),
                     },
+                    // (The word up to a space or one of ;|&<>(): bash's, so
+                    // End-Of-Session and EOF.txt are delimiters too.)
                     Some(c) if c.is_ascii_alphabetic() || *c == b'_' => {
-                        let e = line[p..].find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')).map(|e| p + e).unwrap_or(line.len());
+                        let e = line[p..].find(|ch: char| ch.is_whitespace() || ";|&<>()'\"".contains(ch)).map(|e| p + e).unwrap_or(line.len());
                         (false, line[p..e].to_string(), e)
                     }
                     _ => (false, String::new(), p),
