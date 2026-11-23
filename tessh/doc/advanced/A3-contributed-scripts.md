@@ -3845,3 +3845,1879 @@ e7 c8 d6 b7 d8 f7 h8
    after just 7 moves!
 
 ```
+
+## Magic squares
+<!-- help: abs-msquare msquare.sh magic-square odd-order -->
+
+Mendel Cooper's magic square generator, inspired by a C program by Kwon
+Young Shin: every row, column and long diagonal of an odd-order square
+adds up to the same number.
+
+### Example A-46. Magic Squares (`msquare.sh`)
+
+```bash no-run
+#!/bin/bash
+# msquare.sh
+# Magic Square generator (odd-order squares only!)
+
+# Author: mendel cooper
+# reldate: 19 Jan. 2009
+# License: Public Domain
+# A C-program by the very talented Kwon Young Shin inspired this script.
+#     http://user.chollian.net/~brainstm/MagicSquare.htm
+
+# Definition: A "magic square" is a two-dimensional array
+#             of integers in which all the rows, columns,
+#             and *long* diagonals add up to the same number.
+#             Being "square," the array has the same number
+#             of rows and columns. That number is the "order."
+# An example of a magic square of order 3 is:
+#   8  1  6   
+#   3  5  7   
+#   4  9  2   
+# All the rows, columns, and the two long diagonals add up to 15.
+
+
+# Globals
+EVEN=2
+MAXSIZE=31   # 31 rows x 31 cols.
+E_usage=90   # Invocation error.
+dimension=
+declare -i square
+
+usage_message ()
+{
+  echo "Usage: $0 order"
+  echo "   ... where \"order\" (square size) is an ODD integer"
+  echo "       in the range 3 - 31."
+  #  Actually works for squares up to order 159,
+  #+ but large squares will not display pretty-printed in a term window.
+  #  Try increasing MAXSIZE, above.
+  exit $E_usage
+}
+
+
+calculate ()       # Here's where the actual work gets done.
+{
+  local row col index dimadj j k cell_val=1
+  dimension=$1
+
+  let "dimadj = $dimension * 3"; let "dimadj /= 2"   # x 1.5, then truncate.
+
+  for ((j=0; j < dimension; j++))
+  do
+    for ((k=0; k < dimension; k++))
+    do  # Calculate indices, then convert to 1-dim. array index.
+        # Bash doesn't support multidimensional arrays. Pity.
+      let "col = $k - $j + $dimadj"; let "col %= $dimension"
+      let "row = $j * 2 - $k + $dimension"; let "row %= $dimension"
+      let "index = $row*($dimension) + $col"
+      square[$index]=cell_val; ((cell_val++))
+    done
+  done
+}     # Plain math, visualization not required.
+
+
+print_square ()               # Output square, one row at a time.
+{
+  local row col idx d1
+  let "d1 = $dimension - 1"   # Adjust for zero-indexed array.
+ 
+  for row in $(seq 0 $d1)
+  do
+
+    for col in $(seq 0 $d1)
+    do
+      let "idx = $row * $dimension + $col"
+      printf "%3d " "${square[idx]}"; echo -n "  "
+    done   # Displays up to 13th order neatly in 80-column term window.
+
+    echo   # Newline after each row.
+  done
+}
+
+
+#################################################
+if [[ -z "$1" ]] || [[ "$1" -gt $MAXSIZE ]]
+then
+  usage_message
+fi
+
+let "test_even = $1 % $EVEN"
+if [ $test_even -eq 0 ]
+then           # Can't handle even-order squares.
+  usage_message
+fi
+
+calculate $1
+print_square   # echo "${square[@]}"   # DEBUG
+
+exit $?
+#################################################
+
+
+# Exercises:
+# ---------
+# 1) Add a function to calculate the sum of each row, column,
+#    and *long* diagonal. The sums must match.
+#    This is the "magic constant" of that particular order square.
+# 2) Have the print_square function auto-calculate how much space
+#    to allot between square elements for optimized display.
+#    This might require parameterizing the "printf" line.
+# 3) Add appropriate functions for generating magic squares
+#    with an *even* number of rows/columns.
+#    This is non-trivial(!).
+#    See the URL for Kwon Young Shin, above, for help.
+```
+
+bash has no two-dimensional arrays, so the original works out an index
+into one long array; a list of lists holds the square here, as
+`$square[$row][$col]`. (In bash, `square[$index]=cell_val` works without a
+`$` only because `square` is declared `-i`: its values are arithmetic.)
+`calculate` gives the square back rather than setting a global. Exercise 1,
+the sums, is a few comprehensions: one value in the set means they agree.
+Here it builds the sample order 5 and then 3.
+
+```tessh
+# msquare.sh: Magic Square generator (odd-order squares only!)
+# Author: mendel cooper; reldate: 19 Jan. 2009; License: Public Domain
+# A C-program by the very talented Kwon Young Shin inspired this script.
+#   A magic square's rows, columns and long diagonals all add up to the
+#   same number. Of order 3:   8 1 6 / 3 5 7 / 4 9 2   (all add up to 15)
+
+EVEN = 2
+MAXSIZE = 31     # 31 rows x 31 cols.
+E_usage = 90     # Invocation error.
+
+def usage_message
+  print "Usage: $(Path $argv[0]).name order"
+  print "   ... where \"order\" (square size) is an ODD integer"
+  print "       in the range 3 - 31."
+  exit $E_usage
+
+def calculate dimension           # Here's where the actual work gets done.
+  dimadj = $dimension * 3 // 2    # x 1.5, then truncate.
+  square = [[0] * $dimension for _ in (range $dimension)]   # Rows of columns.
+  cell_val = 1
+  for j in (range $dimension)
+    for k in (range $dimension)
+      col = ($k - $j + $dimadj) % $dimension
+      row = ($j * 2 - $k + $dimension) % $dimension
+      $square[$row][$col] = $cell_val
+      cell_val += 1
+  $square                         # Plain math, visualization not required.
+
+def print_square square           # Output square, one row at a time.
+  for row in $square
+    print ("".join ["${n:3d}   " for n in $row])
+
+def main args
+  if not $args or (int $args[0]) > $MAXSIZE or (int $args[0]) % $EVEN == 0
+    usage_message                 # Can't handle even-order squares.
+  square = calculate (int $args[0])
+  print_square $square
+  # (Exercise 1: the sums of the rows, columns and long diagonals.)
+  n = len $square
+  sums = [(sum $r) for r in $square] + [(sum $c) for c in (zip *$square)]
+  sums += [(sum [$square[$i][$i] for i in (range $n)]), (sum [$square[$i][$n - 1 - $i] for i in (range $n)])]
+  print "Magic constant: $(set $sums)"
+
+main ($argv[1:] or ["5"])         # (sample argument, when none is given)
+print
+main ["3"]
+```
+
+```output
+ 17    24     1     8    15   
+ 23     5     7    14    16   
+  4     6    13    20    22   
+ 10    12    19    21     3   
+ 11    18    25     2     9   
+Magic constant: {65}
+
+  8     1     6   
+  3     5     7   
+  4     9     2   
+Magic constant: {15}
+```
+
+## Fifteen Puzzle
+<!-- help: abs-fifteen fifteen.sh fifteen-puzzle sliding-puzzle -->
+
+Antonio Macchi's Fifteen Puzzle: slide the numbered pieces into the space
+until they read 1 to 15 in order.
+
+### Example A-47. Fifteen Puzzle (`fifteen.sh`)
+
+```bash no-run
+#!/bin/bash
+# fifteen.sh
+
+# Classic "Fifteen Puzzle"
+# Author: Antonio Macchi
+# Lightly edited and commented by ABS Guide author.
+# Used in ABS Guide with permission. (Thanks!)
+
+#  The invention of the Fifteen Puzzle is attributed to either
+#+ Sam Loyd or Noyes Palmer Chapman.
+#  The puzzle was wildly popular in the late 19th-century.
+
+#  Object: Rearrange the numbers so they read in order,
+#+ from 1 - 15:   ________________
+#                |  1   2   3   4 |
+#                |  5   6   7   8 |
+#                |  9  10  11  12 |
+#                | 13  14  15     |
+#                 ----------------
+
+
+#######################
+# Constants           #
+  SQUARES=16          #
+  FAIL=70             #
+  E_PREMATURE_EXIT=80 #
+#######################
+
+
+########
+# Data #
+########
+
+Puzzle=( 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 " " )
+
+
+#############
+# Functions #
+#############
+
+function swap
+{
+  local tmp
+
+  tmp=${Puzzle[$1]}
+  Puzzle[$1]=${Puzzle[$2]}
+  Puzzle[$2]=$tmp
+}
+
+
+function Jumble
+{ # Scramble the pieces at beginning of round.
+  local i pos1 pos2
+
+  for i in {1..100}
+  do
+    pos1=$(( $RANDOM % $SQUARES))
+    pos2=$(( $RANDOM % $SQUARES ))
+    swap $pos1 $pos2
+  done
+}
+
+
+function PrintPuzzle
+{
+  local i1 i2 puzpos
+  puzpos=0
+
+  clear
+  echo "Enter  quit  to exit."; echo   # Better that than Ctl-C.
+
+  echo ",----.----.----.----."   # Top border.
+  for i1 in {1..4}
+  do
+    for i2 in {1..4} 
+    do
+      printf "| %2s " "${Puzzle[$puzpos]}"
+      (( puzpos++ ))
+    done
+    echo "|"                     # Right-side border.
+    test $i1 = 4 || echo "+----+----+----+----+"
+  done
+  echo "'----'----'----'----'"   # Bottom border.
+}
+
+
+function GetNum
+{ # Test for valid input.
+  local puznum garbage
+
+  while true
+  do 
+	  echo "Moves: $moves" # Also counts invalid moves.
+    read -p "Number to move: " puznum garbage
+      if [ "$puznum" = "quit" ]; then echo; exit $E_PREMATURE_EXIT; fi
+    test -z "$puznum" -o -n "${puznum//[0-9]/}" && continue
+    test $puznum -gt 0 -a $puznum -lt $SQUARES && break
+  done
+  return $puznum
+}
+
+
+function GetPosFromNum
+{ # $1 = puzzle-number
+  local puzpos
+
+  for puzpos in {0..15}
+  do
+    test "${Puzzle[$puzpos]}" = "$1" && break
+  done
+  return $puzpos
+}
+
+
+function Move
+{ # $1=Puzzle-pos
+  test $1 -gt 3 && test "${Puzzle[$(( $1 - 4 ))]}" = " "\
+       && swap $1 $(( $1 - 4 )) && return 0
+  test $(( $1%4 )) -ne 3 && test "${Puzzle[$(( $1 + 1 ))]}" = " "\
+       && swap $1 $(( $1 + 1 )) && return 0
+  test $1 -lt 12 && test "${Puzzle[$(( $1 + 4 ))]}" = " "\
+       && swap $1 $(( $1 + 4 )) && return 0
+  test $(( $1%4 )) -ne 0 && test "${Puzzle[$(( $1 - 1 ))]}" = " " &&\
+       swap $1 $(( $1 - 1 )) && return 0
+  return 1
+}
+
+
+function Solved
+{
+  local pos
+
+  for pos in {0..14}
+  do
+    test "${Puzzle[$pos]}" = $(( $pos + 1 )) || return $FAIL
+    # Check whether number in each square = square number.
+  done
+  return 0   # Successful solution.
+}
+
+
+################### MAIN () #######################{
+moves=0
+Jumble
+
+while true   # Loop continuously until puzzle solved.
+do
+  echo; echo
+  PrintPuzzle
+  echo
+  while true
+  do
+    GetNum
+    puznum=$?
+    GetPosFromNum $puznum
+    puzpos=$?
+    ((moves++))
+    Move $puzpos && break
+  done
+  Solved && break
+done
+
+echo;echo
+PrintPuzzle
+echo; echo "BRAVO!"; echo
+
+exit 0
+###################################################}
+
+#  Exercise:
+#  --------
+#  Rewrite the script to display the letters A - O,
+#+ rather than the numbers 1 - 15.
+```
+
+The puzzle is a list with `" "` for the space; `swap` is one tuple
+assignment, `GetPosFromNum` is `.index`, and `Move` tries the four
+neighbours from a list of conditions and positions rather than four
+`test … && swap … && return` lines. `GetNum` keeps the first word of the
+line, as `read puznum garbage` does. The canned games: one set up three
+moves from solved (with a piece that can't move and a line that isn't a
+number, which isn't counted), then a real jumble with `random` seeded, two
+moves and `quit`. Note that 100 random swaps make an unsolvable puzzle
+half the time, in bash and here: only an even number of swaps can be
+undone by sliding.
+
+```tessh
+import sys random
+# fifteen.sh: the classic "Fifteen Puzzle".
+# Author: Antonio Macchi. Lightly edited and commented by ABS Guide author.
+#  Object: Rearrange the numbers so they read in order, from 1 - 15,
+#+ with the space last.
+
+SQUARES = 16
+E_PREMATURE_EXIT = 80
+
+Puzzle = [*(range 1 16) " "]
+
+def swap a b
+  [$Puzzle[$a] $Puzzle[$b]] = [$Puzzle[$b] $Puzzle[$a]]
+
+def Jumble                        # Scramble the pieces at beginning of round.
+  for _ in (range 100)
+    swap (random.randrange $SQUARES) (random.randrange $SQUARES)
+
+def clear
+  if (sys.stdout.isatty)
+    \clear
+
+def PrintPuzzle
+  clear
+  print "Enter  quit  to exit." ; print   # Better that than Ctl-C.
+  print ",----.----.----.----."           # Top border.
+  for i in (range 4)
+    print (("".join ["| ${p!s:>2} " for p in $Puzzle[4 * $i : 4 * $i + 4]]) + "|")
+    if $i != 3
+      print "+----+----+----+----+"
+  print "'----'----'----'----'"           # Bottom border.
+
+def GetNum
+  # Test for valid input.
+  while True
+    print "Moves: $moves"         # Also counts invalid moves.
+    puznum = .split (read "Number to move: ")
+    puznum = if $puznum then $puznum[0] else ""   # (The first word; the rest is garbage.)
+    if $puznum == quit
+      print
+      exit $E_PREMATURE_EXIT
+    if ($puznum.isdigit) and 0 < (int $puznum) < $SQUARES
+      return (int $puznum)
+
+def Move pos
+  # Slide the piece at pos into the space next to it, if there is one.
+  for [ok other] in [[($pos > 3) ($pos - 4)] [($pos % 4 != 3) ($pos + 1)]
+                     [($pos < 12) ($pos + 4)] [($pos % 4 != 0) ($pos - 1)]]
+    if $ok and $Puzzle[$other] == " "
+      swap $pos $other
+      return True
+  False
+
+def Solved = $Puzzle[:15] == (list (range 1 16))
+
+def play
+  global moves
+  moves = 0
+  while True                      # Loop continuously until puzzle solved.
+    print ; print
+    PrintPuzzle
+    print
+    while True
+      puzpos = $Puzzle.index (GetNum)
+      moves += 1
+      if (Move $puzpos)
+        break
+    if (Solved)
+      break
+  print ; print
+  PrintPuzzle
+  print ; print "BRAVO!" ; print
+
+# (The player, canned: the lines typed.)
+typed = iter []
+def read prompt
+  line = next $typed
+  print "$prompt$line"
+  $line
+
+# A puzzle a few moves from solved (set by hand, not jumbled):
+# a number that won't move, some garbage, then the solution.
+Puzzle = [1 2 3 4 5 6 7 8 9 10 " " 11 13 14 15 12]
+typed = iter ["2" "x7" "11" "12 thanks"]
+play
+
+# A real round: jumbled, with $RANDOM seeded; two moves, then quit.
+random.seed 15
+Puzzle = [*(range 1 16) " "]
+Jumble
+typed = iter ["4" "1" "quit"]
+play
+```
+
+```output
+
+
+Enter  quit  to exit.
+
+,----.----.----.----.
+|  1 |  2 |  3 |  4 |
++----+----+----+----+
+|  5 |  6 |  7 |  8 |
++----+----+----+----+
+|  9 | 10 |    | 11 |
++----+----+----+----+
+| 13 | 14 | 15 | 12 |
+'----'----'----'----'
+
+Moves: 0
+Number to move: 2
+Moves: 1
+Number to move: x7
+Moves: 1
+Number to move: 11
+
+
+Enter  quit  to exit.
+
+,----.----.----.----.
+|  1 |  2 |  3 |  4 |
++----+----+----+----+
+|  5 |  6 |  7 |  8 |
++----+----+----+----+
+|  9 | 10 | 11 |    |
++----+----+----+----+
+| 13 | 14 | 15 | 12 |
+'----'----'----'----'
+
+Moves: 2
+Number to move: 12 thanks
+
+
+Enter  quit  to exit.
+
+,----.----.----.----.
+|  1 |  2 |  3 |  4 |
++----+----+----+----+
+|  5 |  6 |  7 |  8 |
++----+----+----+----+
+|  9 | 10 | 11 | 12 |
++----+----+----+----+
+| 13 | 14 | 15 |    |
+'----'----'----'----'
+
+BRAVO!
+
+
+
+Enter  quit  to exit.
+
+,----.----.----.----.
+| 10 |    | 14 | 15 |
++----+----+----+----+
+|  1 |  4 |  2 | 12 |
++----+----+----+----+
+|  9 |  6 |  5 |  8 |
++----+----+----+----+
+| 13 |  7 | 11 |  3 |
+'----'----'----'----'
+
+Moves: 0
+Number to move: 4
+
+
+Enter  quit  to exit.
+
+,----.----.----.----.
+| 10 |  4 | 14 | 15 |
++----+----+----+----+
+|  1 |    |  2 | 12 |
++----+----+----+----+
+|  9 |  6 |  5 |  8 |
++----+----+----+----+
+| 13 |  7 | 11 |  3 |
+'----'----'----'----'
+
+Moves: 1
+Number to move: 1
+
+
+Enter  quit  to exit.
+
+,----.----.----.----.
+| 10 |  4 | 14 | 15 |
++----+----+----+----+
+|    |  1 |  2 | 12 |
++----+----+----+----+
+|  9 |  6 |  5 |  8 |
++----+----+----+----+
+| 13 |  7 | 11 |  3 |
+'----'----'----'----'
+
+Moves: 2
+Number to move: quit
+
+```
+
+## The Towers of Hanoi, graphic version
+<!-- help: abs-hanoi2 hanoi2.bash towers-of-hanoi recursion eval -->
+
+Amit Singh's Towers of Hanoi (an earlier example in the ABS Guide), drawn
+in ASCII with code by Antonio Macchi and edited by the ABS Guide's
+author. `dohanoi` is the classic recursion; the rods are drawn after every
+move.
+
+### Example A-48. The Towers of Hanoi, graphic version (`hanoi2.bash`)
+
+```bash no-run
+#! /bin/bash
+# The Towers Of Hanoi
+# Original script (hanoi.bash) copyright (C) 2000 Amit Singh.
+# All Rights Reserved.
+# http://hanoi.kernelthread.com
+
+#  hanoi2.bash
+#  Version 2.00: modded for ASCII-graphic display.
+#  Version 2.01: fixed no command-line param bug.
+#  Uses code contributed by Antonio Macchi,
+#+ with heavy editing by ABS Guide author.
+#  This variant falls under the original copyright, see above.
+#  Used in ABS Guide with Amit Singh's permission (thanks!).
+
+
+###   Variables && sanity check   ###
+
+E_NOPARAM=86
+E_BADPARAM=87            # Illegal no. of disks passed to script.
+E_NOEXIT=88
+
+DISKS=${1:-$E_NOPARAM}   # Must specify how many disks.
+Moves=0
+
+MWIDTH=7
+MARGIN=2
+# Arbitrary "magic" constants; work okay for relatively small # of disks.
+# BASEWIDTH=51   # Original code.
+let "basewidth = $MWIDTH * $DISKS + $MARGIN"       # "Base" beneath rods.
+# Above "algorithm" could likely stand improvement.
+
+###   Display variables   ###
+let "disks1 = $DISKS - 1"
+let "spaces1 = $DISKS" 
+let "spaces2 = 2 * $DISKS" 
+
+let "lastmove_t = $DISKS - 1"                      # Final move?
+
+
+declare -a Rod1 Rod2 Rod3
+
+###   #########################   ###
+
+
+function repeat  {  # $1=char $2=number of repetitions
+  local n           # Repeat-print a character.
+  
+  for (( n=0; n<$2; n++ )); do
+    echo -n "$1"
+  done
+}
+
+function FromRod  {
+  local rod summit weight sequence
+
+  while true; do
+    rod=$1
+    test ${rod/[^123]/} || continue
+
+    sequence=$(echo $(seq 0 $disks1 | tac))
+    for summit in $sequence; do
+      eval weight=\${Rod${rod}[$summit]}
+      test $weight -ne 0 &&
+           { echo "$rod $summit $weight"; return; }
+    done
+  done
+}
+
+
+function ToRod  { # $1=previous (FromRod) weight
+  local rod firstfree weight sequence
+  
+  while true; do
+    rod=$2
+    test ${rod/[^123]} || continue
+
+    sequence=$(echo $(seq 0 $disks1 | tac))
+    for firstfree in $sequence; do
+      eval weight=\${Rod${rod}[$firstfree]}
+      test $weight -gt 0 && { (( firstfree++ )); break; }
+    done
+    test $weight -gt $1 -o $firstfree = 0 &&
+         { echo "$rod $firstfree"; return; }
+  done
+}
+
+
+function PrintRods  {
+  local disk rod empty fill sp sequence
+
+
+  repeat " " $spaces1
+  echo -n "|"
+  repeat " " $spaces2
+  echo -n "|"
+  repeat " " $spaces2
+  echo "|"
+
+  sequence=$(echo $(seq 0 $disks1 | tac))
+  for disk in $sequence; do
+    for rod in {1..3}; do
+      eval empty=$(( $DISKS - (Rod${rod}[$disk] / 2) ))
+      eval fill=\${Rod${rod}[$disk]}
+      repeat " " $empty
+      test $fill -gt 0 && repeat "*" $fill || echo -n "|"
+      repeat " " $empty
+    done
+    echo
+  done
+  repeat "=" $basewidth   # Print "base" beneath rods.
+  echo
+}
+
+
+display ()
+{
+  echo
+  PrintRods
+
+  # Get rod-number, summit and weight
+  first=( `FromRod $1` )
+  eval Rod${first[0]}[${first[1]}]=0
+
+  # Get rod-number and first-free position
+  second=( `ToRod ${first[2]} $2` )
+  eval Rod${second[0]}[${second[1]}]=${first[2]}
+
+
+echo; echo; echo
+if [ "${Rod3[lastmove_t]}" = 1 ]
+then   # Last move? If yes, then display final position.
+    echo "+  Final Position: $Moves moves"; echo
+    PrintRods
+  fi
+}
+
+
+# From here down, almost the same as original (hanoi.bash) script.
+
+dohanoi() {   # Recursive function.
+    case $1 in
+    0)
+        ;;
+    *)
+        dohanoi "$(($1-1))" $2 $4 $3
+	if [ "$Moves" -ne 0 ]
+        then
+	  echo "+  Position after move $Moves"
+        fi
+        ((Moves++))
+        echo -n "   Next move will be:  "
+        echo $2 "-->" $3
+          display $2 $3
+        dohanoi "$(($1-1))" $4 $3 $2
+        ;;
+    esac
+}
+
+
+setup_arrays ()
+{
+  local dim n elem
+
+  let "dim1 = $1 - 1"
+  elem=$dim1
+
+  for n in $(seq 0 $dim1)
+  do
+   let "Rod1[$elem] = 2 * $n + 1"
+   Rod2[$n]=0
+   Rod3[$n]=0
+   ((elem--))
+  done
+}
+
+
+###   Main   ###
+
+setup_arrays $DISKS
+echo; echo "+  Start Position"
+
+case $# in
+    1) case $(($1>0)) in     # Must have at least one disk.
+       1)
+           disks=$1
+           dohanoi $1 1 3 2
+#          Total moves = 2^n - 1, where n = number of disks.
+	   echo
+           exit 0;
+           ;;
+       *)
+           echo "$0: Illegal value for number of disks";
+           exit $E_BADPARAM;
+           ;;
+       esac
+    ;;
+    *)
+       clear
+       echo "usage: $0 N"
+       echo "       Where \"N\" is the number of disks."
+       exit $E_NOPARAM;
+       ;;
+esac
+
+exit $E_NOEXIT   # Shouldn't exit here.
+
+# Note:
+# Redirect script output to a file, otherwise it scrolls off display.
+```
+
+bash gets at "rod number `$rod`" with `eval weight=\${Rod${rod}[$summit]}`;
+here the three rods are lists in a dict, `$Rod[$rod][$summit]`, no `eval`
+needed. `FromRod` and `ToRod` give back lists rather than echoing words
+for the caller to split. A row of the drawing is built with `" " * n` and
+`"*" * n` instead of a `repeat` function. The output is bash's, line for
+line, for the sample 3 disks.
+
+```tessh
+import sys
+# The Towers Of Hanoi
+# Original script (hanoi.bash) copyright (C) 2000 Amit Singh.
+# All Rights Reserved. http://hanoi.kernelthread.com
+#  hanoi2.bash, version 2.01: modded for ASCII-graphic display.
+#  Uses code contributed by Antonio Macchi,
+#+ with heavy editing by ABS Guide author.
+
+E_NOPARAM = 86
+E_BADPARAM = 87  # Illegal no. of disks passed to script.
+E_NOEXIT = 88
+MWIDTH = 7
+MARGIN = 2       # Arbitrary "magic" constants.
+
+args = $argv[1:] or ["3"]         # (sample argument, when none is given)
+if (len $args) != 1
+  print "usage: $(Path $argv[0]).name N"
+  print "       Where \"N\" is the number of disks."
+  exit $E_NOPARAM
+DISKS = int $args[0]
+if $DISKS <= 0                    # Must have at least one disk.
+  print "$argv[0]: Illegal value for number of disks"
+  exit $E_BADPARAM
+
+basewidth = $MWIDTH * $DISKS + $MARGIN   # "Base" beneath rods.
+Moves = 0
+
+# Each rod is a list, bottom first, of the disks' widths (0: no disk).
+# A dict holds the three, so Rod[1] does what bash's eval of Rod${rod} did.
+Rod = {
+  1: [(2 * $n + 1) for n in (range ($DISKS - 1) -1 -1)]
+  2: [0] * $DISKS
+  3: [0] * $DISKS
+}
+
+def FromRod rod                   # The top disk: rod, height, width.
+  for summit in (range ($DISKS - 1) -1 -1)
+    if $Rod[$rod][$summit] != 0
+      return [$rod $summit $Rod[$rod][$summit]]
+
+def ToRod weight rod              # Where a disk of that weight goes: rod, height.
+  firstfree = 0
+  for h in (range ($DISKS - 1) -1 -1)
+    if $Rod[$rod][$h] > 0
+      firstfree = $h + 1
+      break
+  assert ($firstfree == 0 or $Rod[$rod][$firstfree - 1] > $weight)
+  [$rod $firstfree]
+
+def PrintRods
+  print (" " * $DISKS) "|" (" " * (2 * $DISKS)) "|" (" " * (2 * $DISKS)) "|" sep=""
+  for disk in (range ($DISKS - 1) -1 -1)
+    line = ""
+    for rod in [1 2 3]
+      fill = $Rod[$rod][$disk]
+      empty = " " * ($DISKS - $fill // 2)
+      line += $empty + (if $fill > 0 then "*" * $fill else "|") + $empty
+    print $line
+  print ("=" * $basewidth)        # Print "base" beneath rods.
+
+def display src dst
+  print
+  PrintRods
+  [rod summit weight] = FromRod $src
+  $Rod[$rod][$summit] = 0
+  [rod2 free] = ToRod $weight $dst
+  $Rod[$rod2][$free] = $weight
+  print ; print ; print
+  if $Rod[3][$DISKS - 1] == 1     # Last move? If yes, then display final position.
+    print "+  Final Position: $Moves moves" ; print
+    PrintRods
+
+# From here down, almost the same as original (hanoi.bash) script.
+def dohanoi n src dst via         # Recursive function.
+  global Moves
+  if $n == 0
+    return
+  dohanoi ($n - 1) $src $via $dst
+  if $Moves != 0
+    print "+  Position after move $Moves"
+  Moves += 1
+  print "   Next move will be:  $src --> $dst"
+  display $src $dst
+  dohanoi ($n - 1) $via $dst $src
+
+print ; print "+  Start Position"
+dohanoi $DISKS 1 3 2              # Total moves = 2^n - 1, where n = number of disks.
+print
+```
+
+```output
+
++  Start Position
+   Next move will be:  1 --> 3
+
+   |      |      |
+   *      |      |   
+  ***     |      |   
+ *****    |      |   
+=======================
+
+
+
++  Position after move 1
+   Next move will be:  1 --> 2
+
+   |      |      |
+   |      |      |   
+  ***     |      |   
+ *****    |      *   
+=======================
+
+
+
++  Position after move 2
+   Next move will be:  3 --> 2
+
+   |      |      |
+   |      |      |   
+   |      |      |   
+ *****   ***     *   
+=======================
+
+
+
++  Position after move 3
+   Next move will be:  1 --> 3
+
+   |      |      |
+   |      |      |   
+   |      *      |   
+ *****   ***     |   
+=======================
+
+
+
++  Position after move 4
+   Next move will be:  2 --> 1
+
+   |      |      |
+   |      |      |   
+   |      *      |   
+   |     ***   ***** 
+=======================
+
+
+
++  Position after move 5
+   Next move will be:  2 --> 3
+
+   |      |      |
+   |      |      |   
+   |      |      |   
+   *     ***   ***** 
+=======================
+
+
+
++  Position after move 6
+   Next move will be:  1 --> 3
+
+   |      |      |
+   |      |      |   
+   |      |     ***  
+   *      |    ***** 
+=======================
+
+
+
++  Final Position: 7 moves
+
+   |      |      |
+   |      |      *   
+   |      |     ***  
+   |      |    ***** 
+=======================
+
+```
+
+## The Towers of Hanoi, alternate graphic version
+<!-- help: abs-hanoi2a hanoi2a.bash tput cup civis cursor animation -->
+
+The same, but drawn in place: `tput cup` moves the cursor back to the top
+for each move, `tput civis` hides it (and a `trap` on exit shows it
+again), and a two-second `sleep` makes it an animation.
+
+### Example A-49. The Towers of Hanoi, alternate graphic version (`hanoi2a.bash`)
+
+```bash no-run
+#! /bin/bash
+# The Towers Of Hanoi
+# Original script (hanoi.bash) copyright (C) 2000 Amit Singh.
+# All Rights Reserved.
+# http://hanoi.kernelthread.com
+
+#  hanoi2.bash
+#  Version 2: modded for ASCII-graphic display.
+#  Uses code contributed by Antonio Macchi,
+#+ with heavy editing by ABS Guide author.
+#  This variant also falls under the original copyright, see above.
+#  Used in ABS Guide with Amit Singh's permission (thanks!).
+
+
+#   Variables   #
+E_NOPARAM=86
+E_BADPARAM=87   # Illegal no. of disks passed to script.
+E_NOEXIT=88
+DELAY=2         # Interval, in seconds, between moves. Change, if desired.
+DISKS=$1
+Moves=0
+
+MWIDTH=7
+MARGIN=2
+# Arbitrary "magic" constants, work okay for relatively small # of disks.
+# BASEWIDTH=51   # Original code.
+let "basewidth = $MWIDTH * $DISKS + $MARGIN" # "Base" beneath rods.
+# Above "algorithm" could likely stand improvement.
+
+# Display variables.
+let "disks1 = $DISKS - 1"
+let "spaces1 = $DISKS" 
+let "spaces2 = 2 * $DISKS" 
+
+let "lastmove_t = $DISKS - 1"                # Final move?
+
+
+declare -a Rod1 Rod2 Rod3
+
+#################
+
+
+function repeat  {  # $1=char $2=number of repetitions
+  local n           # Repeat-print a character.
+  
+  for (( n=0; n<$2; n++ )); do
+    echo -n "$1"
+  done
+}
+
+function FromRod  {
+  local rod summit weight sequence
+
+  while true; do
+    rod=$1
+    test ${rod/[^123]/} || continue
+
+    sequence=$(echo $(seq 0 $disks1 | tac))
+    for summit in $sequence; do
+      eval weight=\${Rod${rod}[$summit]}
+      test $weight -ne 0 &&
+           { echo "$rod $summit $weight"; return; }
+    done
+  done
+}
+
+
+function ToRod  { # $1=previous (FromRod) weight
+  local rod firstfree weight sequence
+  
+  while true; do
+    rod=$2
+    test ${rod/[^123]} || continue
+
+    sequence=$(echo $(seq 0 $disks1 | tac))
+    for firstfree in $sequence; do
+      eval weight=\${Rod${rod}[$firstfree]}
+      test $weight -gt 0 && { (( firstfree++ )); break; }
+    done
+    test $weight -gt $1 -o $firstfree = 0 &&
+         { echo "$rod $firstfree"; return; }
+  done
+}
+
+
+function PrintRods  {
+  local disk rod empty fill sp sequence
+
+  tput cup 5 0
+
+  repeat " " $spaces1
+  echo -n "|"
+  repeat " " $spaces2
+  echo -n "|"
+  repeat " " $spaces2
+  echo "|"
+
+  sequence=$(echo $(seq 0 $disks1 | tac))
+  for disk in $sequence; do
+    for rod in {1..3}; do
+      eval empty=$(( $DISKS - (Rod${rod}[$disk] / 2) ))
+      eval fill=\${Rod${rod}[$disk]}
+      repeat " " $empty
+      test $fill -gt 0 && repeat "*" $fill || echo -n "|"
+      repeat " " $empty
+    done
+    echo
+  done
+  repeat "=" $basewidth   # Print "base" beneath rods.
+  echo
+}
+
+
+display ()
+{
+  echo
+  PrintRods
+
+  # Get rod-number, summit and weight
+  first=( `FromRod $1` )
+  eval Rod${first[0]}[${first[1]}]=0
+
+  # Get rod-number and first-free position
+  second=( `ToRod ${first[2]} $2` )
+  eval Rod${second[0]}[${second[1]}]=${first[2]}
+
+
+  if [ "${Rod3[lastmove_t]}" = 1 ]
+  then   # Last move? If yes, then display final position.
+    tput cup 0 0
+    echo; echo "+  Final Position: $Moves moves"
+    PrintRods
+  fi
+
+  sleep $DELAY
+}
+
+# From here down, almost the same as original (hanoi.bash) script.
+
+dohanoi() {   # Recursive function.
+    case $1 in
+    0)
+        ;;
+    *)
+        dohanoi "$(($1-1))" $2 $4 $3
+	if [ "$Moves" -ne 0 ]
+        then
+	  tput cup 0 0
+	  echo; echo "+  Position after move $Moves"
+        fi
+        ((Moves++))
+        echo -n "   Next move will be:  "
+        echo $2 "-->" $3
+        display $2 $3
+        dohanoi "$(($1-1))" $4 $3 $2
+        ;;
+    esac
+}
+
+setup_arrays ()
+{
+  local dim n elem
+
+  let "dim1 = $1 - 1"
+  elem=$dim1
+
+  for n in $(seq 0 $dim1)
+  do
+   let "Rod1[$elem] = 2 * $n + 1"
+   Rod2[$n]=0
+   Rod3[$n]=0
+   ((elem--))
+  done
+}
+
+
+###   Main   ###
+
+trap "tput cnorm" 0
+tput civis
+clear
+
+setup_arrays $DISKS
+
+tput cup 0 0
+echo; echo "+  Start Position"
+
+case $# in
+    1) case $(($1>0)) in     # Must have at least one disk.
+       1)
+           disks=$1
+           dohanoi $1 1 3 2
+#          Total moves = 2^n - 1, where n = # of disks.
+	   echo
+           exit 0;
+           ;;
+       *)
+           echo "$0: Illegal value for number of disks";
+           exit $E_BADPARAM;
+           ;;
+       esac
+    ;;
+    *)
+       echo "usage: $0 N"
+       echo "       Where \"N\" is the number of disks."
+       exit $E_NOPARAM;
+       ;;
+esac
+
+exit $E_NOEXIT   # Shouldn't exit here.
+
+#  Exercise:
+#  --------
+#  There is a minor bug in the script that causes the display of
+#+ the next-to-last move to be skipped.
+#+ Fix this.
+```
+
+`tput` is the same program in tessh; here it's called only when the
+output is a terminal, and the delay is 0 when it isn't, so the moves
+simply follow one another below. `atexit` does what `trap … 0` did. With
+the sample 2 disks:
+
+```tessh
+import sys time atexit
+# The Towers Of Hanoi
+# Original script (hanoi.bash) copyright (C) 2000 Amit Singh.
+# All Rights Reserved. http://hanoi.kernelthread.com
+#  hanoi2a.bash, version 2: modded for ASCII-graphic display.
+#  Uses code contributed by Antonio Macchi,
+#+ with heavy editing by ABS Guide author.
+
+E_NOPARAM = 86
+E_BADPARAM = 87  # Illegal no. of disks passed to script.
+E_NOEXIT = 88
+MWIDTH = 7
+MARGIN = 2       # Arbitrary "magic" constants.
+
+tty = (sys.stdout.isatty)
+DELAY = if $tty then 2 else 0     # Interval, in seconds, between moves.
+def tput *what                    # (Cursor moves on a terminal only.)
+  if $tty
+    \tput *$what
+
+args = $argv[1:] or ["2"]         # (sample argument, when none is given)
+if (len $args) != 1
+  print "usage: $(Path $argv[0]).name N"
+  print "       Where \"N\" is the number of disks."
+  exit $E_NOPARAM
+DISKS = int $args[0]
+if $DISKS <= 0                    # Must have at least one disk.
+  print "$argv[0]: Illegal value for number of disks"
+  exit $E_BADPARAM
+
+basewidth = $MWIDTH * $DISKS + $MARGIN   # "Base" beneath rods.
+Moves = 0
+
+# Each rod is a list, bottom first, of the disks' widths (0: no disk).
+# A dict holds the three, so Rod[1] does what bash's eval of Rod${rod} did.
+Rod = {
+  1: [(2 * $n + 1) for n in (range ($DISKS - 1) -1 -1)]
+  2: [0] * $DISKS
+  3: [0] * $DISKS
+}
+
+def FromRod rod                   # The top disk: rod, height, width.
+  for summit in (range ($DISKS - 1) -1 -1)
+    if $Rod[$rod][$summit] != 0
+      return [$rod $summit $Rod[$rod][$summit]]
+
+def ToRod weight rod              # Where a disk of that weight goes: rod, height.
+  firstfree = 0
+  for h in (range ($DISKS - 1) -1 -1)
+    if $Rod[$rod][$h] > 0
+      firstfree = $h + 1
+      break
+  assert ($firstfree == 0 or $Rod[$rod][$firstfree - 1] > $weight)
+  [$rod $firstfree]
+
+def PrintRods
+  tput cup 5 0
+  print (" " * $DISKS) "|" (" " * (2 * $DISKS)) "|" (" " * (2 * $DISKS)) "|" sep=""
+  for disk in (range ($DISKS - 1) -1 -1)
+    line = ""
+    for rod in [1 2 3]
+      fill = $Rod[$rod][$disk]
+      empty = " " * ($DISKS - $fill // 2)
+      line += $empty + (if $fill > 0 then "*" * $fill else "|") + $empty
+    print $line
+  print ("=" * $basewidth)        # Print "base" beneath rods.
+
+def display src dst
+  print
+  PrintRods
+  [rod summit weight] = FromRod $src
+  $Rod[$rod][$summit] = 0
+  [rod2 free] = ToRod $weight $dst
+  $Rod[$rod2][$free] = $weight
+  if $Rod[3][$DISKS - 1] == 1     # Last move? If yes, then display final position.
+    tput cup 0 0
+    print ; print "+  Final Position: $Moves moves"
+    PrintRods
+  time.sleep $DELAY
+
+# From here down, almost the same as original (hanoi.bash) script.
+def dohanoi n src dst via         # Recursive function.
+  global Moves
+  if $n == 0
+    return
+  dohanoi ($n - 1) $src $via $dst
+  if $Moves != 0
+    tput cup 0 0
+    print ; print "+  Position after move $Moves"
+  Moves += 1
+  print "   Next move will be:  $src --> $dst"
+  display $src $dst
+  dohanoi ($n - 1) $via $dst $src
+
+atexit.register (fn [] (tput cnorm))   # trap "tput cnorm" 0: the cursor back.
+tput civis                        # Hide the cursor.
+tput clear
+tput cup 0 0
+print ; print "+  Start Position"
+dohanoi $DISKS 1 3 2              # Total moves = 2^n - 1, where n = number of disks.
+print
+```
+
+```output
+
++  Start Position
+   Next move will be:  1 --> 2
+
+  |    |    |
+  *    |    |  
+ ***   |    |  
+================
+
++  Position after move 1
+   Next move will be:  1 --> 3
+
+  |    |    |
+  |    |    |  
+ ***   *    |  
+================
+
++  Position after move 2
+   Next move will be:  2 --> 3
+
+  |    |    |
+  |    |    |  
+  |    *   *** 
+================
+
++  Final Position: 3 moves
+  |    |    |
+  |    |    *  
+  |    |   *** 
+================
+
+```
+
+## Using getopt
+<!-- help: abs-usegetopt usegetopt.sh getopt gnu_getopt long-options options -->
+
+Peggy Russell's example of the `getopt` program (not the `getopts`
+builtin), which handles long options: it rewrites the arguments with each
+option and its argument separate, then `--`, then the rest, and the script
+`eval set --`s that and loops over it.
+
+### Example A-50. An alternate version of the `getopt-simple.sh` script (`UseGetOpt.sh`)
+
+```bash
+#!/bin/bash
+# UseGetOpt.sh
+
+# Author: Peggy Russell <prusselltechgroup@gmail.com>
+
+UseGetOpt () {
+  declare inputOptions
+  declare -r E_OPTERR=85
+  declare -r ScriptName=${0##*/}
+  declare -r ShortOpts="adf:hlt"
+  declare -r LongOpts="aoption,debug,file:,help,log,test"
+
+DoSomething () {
+    echo "The function name is '${FUNCNAME}'"
+    #  Recall that $FUNCNAME is an internal variable
+    #+ holding the name of the function it is in.
+  }
+
+  inputOptions=$(getopt -o "${ShortOpts}" --long \
+              "${LongOpts}" --name "${ScriptName}" -- "${@}")
+
+  if [[ ($? -ne 0) || ($# -eq 0) ]]; then
+    echo "Usage: ${ScriptName} [-dhlt] {OPTION...}"
+    exit $E_OPTERR
+  fi
+
+  eval set -- "${inputOptions}"
+
+  # Only for educational purposes. Can be removed.
+  #-----------------------------------------------
+  echo "++ Test: Number of arguments: [$#]"
+  echo '++ Test: Looping through "$@"'
+  for a in "$@"; do
+    echo "  ++ [$a]"
+  done
+  #-----------------------------------------------
+
+  while true; do
+    case "${1}" in
+      --aoption | -a)  # Argument found.
+        echo "Option [$1]"
+        ;;
+
+      --debug | -d)    # Enable informational messages.
+        echo "Option [$1] Debugging enabled"
+        ;;
+
+      --file | -f)     #  Check for optional argument.
+        case "$2" in   #+ Double colon is optional argument.
+          "")          #  Not there.
+              echo "Option [$1] Use default"
+              shift
+              ;;
+
+          *) # Got it
+             echo "Option [$1] Using input [$2]"
+             shift
+             ;;
+
+        esac
+        DoSomething
+        ;;
+
+      --log | -l) # Enable Logging.
+        echo "Option [$1] Logging enabled"
+        ;;
+
+      --test | -t) # Enable testing.
+        echo "Option [$1] Testing enabled"
+        ;;
+
+      --help | -h)
+        echo "Option [$1] Display help"
+        break
+        ;;
+
+      --)   # Done! $# is argument number for "--", $@ is "--"
+        echo "Option [$1] Dash Dash"
+        break
+        ;;
+
+       *)
+        echo "Major internal error!"
+        exit 8
+        ;;
+
+    esac
+    echo "Number of arguments: [$#]"
+    shift
+  done
+
+  shift
+  # Only for educational purposes. Can be removed.
+  #----------------------------------------------------------------------
+  echo "++ Test: Number of arguments after \"--\" is [$#] They are: [$@]"
+  echo '++ Test: Looping through "$@"'
+  for a in "$@"; do
+    echo "  ++ [$a]"
+  done
+  #----------------------------------------------------------------------
+  
+}
+
+################################### M A I N ########################
+#  If you remove "function UseGetOpt () {" and corresponding "}",
+#+ you can uncomment the "exit 0" line below, and invoke this script
+#+ with the various options from the command-line.
+#-------------------------------------------------------------------
+# exit 0
+
+echo "Test 1"
+UseGetOpt -f myfile one "two three" four
+
+echo;echo "Test 2"
+UseGetOpt -h
+
+echo;echo "Test 3 - Short Options"
+UseGetOpt -adltf myfile  anotherfile
+
+echo;echo "Test 4 - Long Options"
+UseGetOpt --aoption --debug --log --test --file myfile anotherfile
+
+exit
+```
+
+Python's `getopt` module is the same thing: `gnu_getopt` takes the
+options from anywhere in the arguments, as the program does, gives back
+the options as pairs and the rest as a list, and raises `GetoptError` for
+a bad one. The script turns the pairs back into the program's list so the
+loop and its test lines print what bash's do; `match` is the `case`, and
+`$args.pop 0` the `shift`. (For a script of your own, `argparse` does the
+whole job, usage and help included.)
+
+```tessh
+import getopt
+# UseGetOpt.sh
+# Author: Peggy Russell <prusselltechgroup@gmail.com>
+
+def UseGetOpt *argv
+  E_OPTERR = 85
+  ScriptName = (Path $argv[0]).name
+  ShortOpts = "adf:hlt"
+  LongOpts = [aoption debug "file=" help log test]   # (file: in getopt's spelling)
+
+  def DoSomething
+    print "The function name is '$DoSomething.__name__'"
+
+  # Python's getopt module reads the options as the getopt program does.
+  inputOptions = try
+    getopt.gnu_getopt $argv[1:] $ShortOpts $LongOpts
+  except getopt.GetoptError as e
+    print "$ScriptName: $e"
+    None
+  if $inputOptions is None or not $argv[1:]
+    print "Usage: $ScriptName [-dhlt] {OPTION...}"
+    exit $E_OPTERR
+  [opts rest] = $inputOptions
+  # The options, each with its argument if it takes one, then --, then the rest:
+  # the list getopt prints, which bash sets as its arguments.
+  args = []
+  for [o v] in $opts
+    $args.extend (if $o in [-f --file] then [$o $v] else [$o])
+  args += ["--" *$rest]
+
+  # Only for educational purposes. Can be removed.
+  #-----------------------------------------------
+  print "++ Test: Number of arguments: [$(len $args)]"
+  print '++ Test: Looping through "$@"'
+  for a in $args
+    print "  ++ [$a]"
+  #-----------------------------------------------
+
+  while True
+    match $args[0]
+      case "--aoption" | "-a"     # Argument found.
+        print "Option [$args[0]]"
+      case "--debug" | "-d"       # Enable informational messages.
+        print "Option [$args[0]] Debugging enabled"
+      case "--file" | "-f"        # Check for optional argument.
+        if $args[1] == ""         # Not there.
+          print "Option [$args[0]] Use default"
+        else                      # Got it
+          print "Option [$args[0]] Using input [$args[1]]"
+        $args.pop 0
+        DoSomething
+      case "--log" | "-l"         # Enable Logging.
+        print "Option [$args[0]] Logging enabled"
+      case "--test" | "-t"        # Enable testing.
+        print "Option [$args[0]] Testing enabled"
+      case "--help" | "-h"
+        print "Option [$args[0]] Display help"
+        break
+      case "--"                   # Done!
+        print "Option [$args[0]] Dash Dash"
+        break
+      case _
+        print "Major internal error!"
+        exit 8
+    print "Number of arguments: [$(len $args)]"
+    $args.pop 0
+  $args.pop 0
+
+  # Only for educational purposes. Can be removed.
+  #----------------------------------------------------------------------
+  print "++ Test: Number of arguments after \"--\" is [$(len $args)] They are: [$(' '.join $args)]"
+  print '++ Test: Looping through "$@"'
+  for a in $args
+    print "  ++ [$a]"
+  #----------------------------------------------------------------------
+
+################################### M A I N ########################
+print "Test 1"
+UseGetOpt $argv[0] -f myfile one "two three" four
+
+print ; print "Test 2"
+UseGetOpt $argv[0] -h
+
+print ; print "Test 3 - Short Options"
+UseGetOpt $argv[0] -adltf myfile  anotherfile
+
+print ; print "Test 4 - Long Options"
+UseGetOpt $argv[0] --aoption --debug --log --test --file myfile anotherfile
+```
+
+```output
+Test 1
+++ Test: Number of arguments: [6]
+++ Test: Looping through "$@"
+  ++ [-f]
+  ++ [myfile]
+  ++ [--]
+  ++ [one]
+  ++ [two three]
+  ++ [four]
+Option [-f] Using input [myfile]
+The function name is 'DoSomething'
+Number of arguments: [5]
+Option [--] Dash Dash
+++ Test: Number of arguments after "--" is [3] They are: [one two three four]
+++ Test: Looping through "$@"
+  ++ [one]
+  ++ [two three]
+  ++ [four]
+
+Test 2
+++ Test: Number of arguments: [2]
+++ Test: Looping through "$@"
+  ++ [-h]
+  ++ [--]
+Option [-h] Display help
+++ Test: Number of arguments after "--" is [1] They are: [--]
+++ Test: Looping through "$@"
+  ++ [--]
+
+Test 3 - Short Options
+++ Test: Number of arguments: [8]
+++ Test: Looping through "$@"
+  ++ [-a]
+  ++ [-d]
+  ++ [-l]
+  ++ [-t]
+  ++ [-f]
+  ++ [myfile]
+  ++ [--]
+  ++ [anotherfile]
+Option [-a]
+Number of arguments: [8]
+Option [-d] Debugging enabled
+Number of arguments: [7]
+Option [-l] Logging enabled
+Number of arguments: [6]
+Option [-t] Testing enabled
+Number of arguments: [5]
+Option [-f] Using input [myfile]
+The function name is 'DoSomething'
+Number of arguments: [3]
+Option [--] Dash Dash
+++ Test: Number of arguments after "--" is [1] They are: [anotherfile]
+++ Test: Looping through "$@"
+  ++ [anotherfile]
+
+Test 4 - Long Options
+++ Test: Number of arguments: [8]
+++ Test: Looping through "$@"
+  ++ [--aoption]
+  ++ [--debug]
+  ++ [--log]
+  ++ [--test]
+  ++ [--file]
+  ++ [myfile]
+  ++ [--]
+  ++ [anotherfile]
+Option [--aoption]
+Number of arguments: [8]
+Option [--debug] Debugging enabled
+Number of arguments: [7]
+Option [--log] Logging enabled
+Number of arguments: [6]
+Option [--test] Testing enabled
+Number of arguments: [5]
+Option [--file] Using input [myfile]
+The function name is 'DoSomething'
+Number of arguments: [3]
+Option [--] Dash Dash
+++ Test: Number of arguments after "--" is [1] They are: [anotherfile]
+++ Test: Looping through "$@"
+  ++ [anotherfile]
+```
+
+### Example A-51. The version of the `UseGetOpt.sh` example used in the Tab Expansion appendix (`UseGetOpt-2.sh`)
+
+The same script at the top level, to try with the completion in Appendix
+J. Run without arguments it prints its usage, as here.
+
+```bash
+#!/bin/bash
+
+#  UseGetOpt-2.sh
+#  Modified version of the script for illustrating tab-expansion
+#+ of command-line options.
+#  See the "Introduction to Tab Expansion" appendix.
+
+#  Possible options: -a -d -f -l -t -h
+#+                   --aoption, --debug --file --log --test -- help --
+
+#  Author of original script: Peggy Russell <prusselltechgroup@gmail.com>
+
+
+# UseGetOpt () {
+  declare inputOptions
+  declare -r E_OPTERR=85
+  declare -r ScriptName=${0##*/}
+  declare -r ShortOpts="adf:hlt"
+  declare -r LongOpts="aoption,debug,file:,help,log,test"
+
+DoSomething () {
+    echo "The function name is '${FUNCNAME}'"
+  }
+
+  inputOptions=$(getopt -o "${ShortOpts}" --long \
+              "${LongOpts}" --name "${ScriptName}" -- "${@}")
+
+  if [[ ($? -ne 0) || ($# -eq 0) ]]; then
+    echo "Usage: ${ScriptName} [-dhlt] {OPTION...}"
+    exit $E_OPTERR
+  fi
+
+  eval set -- "${inputOptions}"
+
+
+  while true; do
+    case "${1}" in
+      --aoption | -a)  # Argument found.
+        echo "Option [$1]"
+        ;;
+
+      --debug | -d)    # Enable informational messages.
+        echo "Option [$1] Debugging enabled"
+        ;;
+
+      --file | -f)     #  Check for optional argument.
+        case "$2" in   #+ Double colon is optional argument.
+          "")          #  Not there.
+              echo "Option [$1] Use default"
+              shift
+              ;;
+
+          *) # Got it
+             echo "Option [$1] Using input [$2]"
+             shift
+             ;;
+
+        esac
+        DoSomething
+        ;;
+
+      --log | -l) # Enable Logging.
+        echo "Option [$1] Logging enabled"
+        ;;
+
+      --test | -t) # Enable testing.
+        echo "Option [$1] Testing enabled"
+        ;;
+
+      --help | -h)
+        echo "Option [$1] Display help"
+        break
+        ;;
+
+      --)   # Done! $# is argument number for "--", $@ is "--"
+        echo "Option [$1] Dash Dash"
+        break
+        ;;
+
+       *)
+        echo "Major internal error!"
+        exit 8
+        ;;
+
+    esac
+    echo "Number of arguments: [$#]"
+    shift
+  done
+
+  shift
+  
+#  }
+
+exit
+```
+
+```output bash
+Usage: ex.sh [-dhlt] {OPTION...}
+```
+
+The tessh version takes sample options when it's given none.
+
+**Gap:** bash's `complete -W "…" UseGetOpt-2.sh` makes Tab offer the
+script's options. tessh's REPL completes names, programs and paths, but
+has no way to tell it a command's options.
+
+```tessh
+import getopt
+#  UseGetOpt-2.sh
+#  Modified version of the script for illustrating tab-expansion
+#+ of command-line options.
+#  Possible options: -a -d -f -l -t -h
+#+                   --aoption --debug --file --log --test --help --
+#  Author of original script: Peggy Russell <prusselltechgroup@gmail.com>
+
+cmdline = $argv[1:] or [-dt --file notes.txt extra]   # (sample arguments, when none are given)
+E_OPTERR = 85
+ScriptName = (Path $argv[0]).name
+ShortOpts = "adf:hlt"
+LongOpts = [aoption debug "file=" help log test]
+
+def DoSomething
+  print "The function name is '$DoSomething.__name__'"
+
+inputOptions = try
+  getopt.gnu_getopt $cmdline $ShortOpts $LongOpts
+except getopt.GetoptError as e
+  print "$ScriptName: $e"
+  None
+if $inputOptions is None or not $cmdline
+  print "Usage: $ScriptName [-dhlt] {OPTION...}"
+  exit $E_OPTERR
+
+[opts rest] = $inputOptions
+args = []
+for [o v] in $opts
+  $args.extend (if $o in [-f --file] then [$o $v] else [$o])
+args += ["--" *$rest]
+
+while True
+  match $args[0]
+    case "--aoption" | "-a"       # Argument found.
+      print "Option [$args[0]]"
+    case "--debug" | "-d"         # Enable informational messages.
+      print "Option [$args[0]] Debugging enabled"
+    case "--file" | "-f"          # Check for optional argument.
+      if $args[1] == ""
+        print "Option [$args[0]] Use default"
+      else
+        print "Option [$args[0]] Using input [$args[1]]"
+      $args.pop 0
+      DoSomething
+    case "--log" | "-l"           # Enable Logging.
+      print "Option [$args[0]] Logging enabled"
+    case "--test" | "-t"          # Enable testing.
+      print "Option [$args[0]] Testing enabled"
+    case "--help" | "-h"
+      print "Option [$args[0]] Display help"
+      break
+    case "--"                     # Done!
+      print "Option [$args[0]] Dash Dash"
+      break
+    case _
+      print "Major internal error!"
+      exit 8
+  print "Number of arguments: [$(len $args)]"
+  $args.pop 0
+$args.pop 0
+exit
+```
+
+```output
+Option [-d] Debugging enabled
+Number of arguments: [6]
+Option [-t] Testing enabled
+Number of arguments: [5]
+Option [--file] Using input [notes.txt]
+The function name is 'DoSomething'
+Number of arguments: [3]
+Option [--] Dash Dash
+```
