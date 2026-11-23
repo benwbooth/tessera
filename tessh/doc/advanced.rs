@@ -60,4 +60,5 @@
     ("N-dosbatch.md", include_str!("advanced/N-dosbatch.md")),
     ("O-exercises.md", include_str!("advanced/O-exercises.md")),
     ("T-asciitable.md", include_str!("advanced/T-asciitable.md")),
+    ("Z-gaps.md", include_str!("advanced/Z-gaps.md")),
 ]
