@@ -254,13 +254,11 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
             Outcome::Host(c) => {
                 let (what, arg) = c.split_once(':').unwrap_or((c.as_str(), ""));
                 match what {
-                    "help" | "guide" => {
-                        let md = if what == "guide" && arg.is_empty() { Some(crate::help::guide()) } else { crate::help::lookup(arg) };
-                        match md {
-                            Some(md) => print_md(&md),
-                            None => println!("tessh: no help for {arg}"),
-                        }
-                    }
+                    "guide" => crate::editor::pager::show(&crate::help::guide(), arg),
+                    "help" => match crate::help::lookup(arg) {
+                        Some(md) => print_md(&md),
+                        None => println!("tessh: no help for {arg}"),
+                    },
                     "jobs" => run = Some(("jobs".into(), false, false)),
                     "clear" => {
                         print!("\x1b[H\x1b[2J");
@@ -294,8 +292,7 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                         }
                         "guide" => {
                             let w = editor.ed.guide_word();
-                            let md = if w.is_empty() { Some(crate::help::guide()) } else { crate::help::lookup(&w).or_else(|| Some(crate::help::guide())) };
-                            print_md(&md.unwrap_or_default());
+                            crate::editor::pager::show(&crate::help::guide(), &w);
                         }
                         "jobs" => run = Some(("jobs".into(), false, false)),
                         "fix" => {

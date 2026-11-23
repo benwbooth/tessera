@@ -509,6 +509,12 @@ pub fn help(py: Python<'_>, args: Vec<Bound<'_, PyAny>>) -> PyResult<()> {
         d.call1(py, (Py::new(py, HelpPage { md })?,))?;
         return Ok(());
     }
+    let tty = unsafe { libc::isatty(0) == 1 && libc::isatty(1) == 1 };
+    // (The whole guide at a terminal: full screen, searchable.)
+    if tty && md.len() > 20000 {
+        py.detach(|| crate::editor::pager::show(&md, ""));
+        return Ok(());
+    }
     let color = unsafe { libc::isatty(1) } == 1 && std::env::var_os("NO_COLOR").is_none();
     let text = terminal(&md, color);
     let print = py.import("builtins")?.getattr("print")?;

@@ -112,6 +112,11 @@ fn run(args: Vec<String>) -> i32 {
         "--guide" | "--keys" => {
             let md = if a == "--keys" { Some(repl::keys_help()) } else { help::lookup(&args[1..].join(" ")).or_else(|| (args.len() == 1).then(help::guide)) };
             let md = if args.len() == 1 && a == "--guide" { help::guide() } else { md.unwrap_or_else(|| format!("No topic {:?} in the guide: `tessh --guide` has it all.", args[1..].join(" "))) };
+            // (The whole guide at a terminal: full screen, searchable; else printed.)
+            if a == "--guide" && args.len() == 1 && unsafe { libc::isatty(0) == 1 && libc::isatty(1) == 1 } {
+                editor::pager::show(&md, "");
+                return 0;
+            }
             let color = unsafe { libc::isatty(1) } == 1 && std::env::var_os("NO_COLOR").is_none();
             print!("{}", help::terminal(&md, color));
             return 0;
