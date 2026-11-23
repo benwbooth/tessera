@@ -30,6 +30,8 @@ pub struct Editor {
     focused: bool,
     elsewhere: bool,
     typed_at: Option<Instant>,
+    /// When the terminal last sent a key here.
+    tty_at: Option<Instant>,
 }
 
 fn pause_of(task: &str) -> u64 {
@@ -46,7 +48,7 @@ impl Editor {
         let term = Term::new();
         let mut ed = Ed::new();
         ed.kitty = term.kitty;
-        Editor { term, screen: Screen::new(), ed, bar_fn, bar: Arc::new(Mutex::new((vec![], vec![], 0))), bar_seq: 0, hovered: None, mode_name: Box::new(|_| "INSERT".into()), evdev: None, evdev_tried: false, focused: true, elsewhere: false, typed_at: None }
+        Editor { term, screen: Screen::new(), ed, bar_fn, bar: Arc::new(Mutex::new((vec![], vec![], 0))), bar_seq: 0, hovered: None, mode_name: Box::new(|_| "INSERT".into()), evdev: None, evdev_tried: false, focused: true, elsewhere: false, typed_at: None, tty_at: None }
     }
 
     fn palette(&self) -> Palette {
@@ -218,7 +220,10 @@ impl Editor {
         let Some(e) = &self.evdev else { return };
         let evs: Vec<super::evdev::Ev> = e.rx.try_iter().collect();
         for ev in evs {
-            if ev.down && ev.types() && self.typed_at.is_none() {
+            // (A key the terminal already sent: the two copies come in either
+            // order, so by time, not by which came first.)
+            let came = self.tty_at.is_some_and(|t| t + Duration::from_millis(100) >= ev.at);
+            if ev.down && ev.types() && self.typed_at.is_none() && !came {
                 self.typed_at = Some(ev.at);
             }
             if self.focused && !self.elsewhere {
@@ -226,6 +231,11 @@ impl Editor {
             }
         }
         // (Typed, and nothing came here: another window has the keyboard.)
+        if let (Some(t), Some(tty)) = (self.typed_at, self.tty_at) {
+            if tty + Duration::from_millis(100) >= t {
+                self.typed_at = None;
+            }
+        }
         if self.typed_at.is_some_and(|t| t.elapsed() > Duration::from_millis(150)) {
             self.typed_at = None;
             self.elsewhere = true;
@@ -274,6 +284,7 @@ impl Editor {
                     Ok(Event::Key(k)) => {
                         self.elsewhere = false;
                         self.typed_at = None;
+                        self.tty_at = Some(Instant::now());
                         // (Any key: the mouse is the editor's again.)
                         if !self.term.mouse_on {
                             self.term.set_mouse(true);
