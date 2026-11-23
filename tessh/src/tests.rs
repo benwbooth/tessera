@@ -432,6 +432,14 @@ fn unquote_expression() {
     assert_eq!(get::<i64>(&ns, "r"), 3);
 }
 
+/// `if [ -n "" ]` (bash's test) is a list, always true: an error that says so.
+#[test]
+fn bracket_test_condition_is_an_error() {
+    let e = check_one("if [ -n \"\" ]\n  print x\n");
+    assert!(e.iter().any(|x| x.3.contains("always true")), "{e:?}");
+    assert!(check_one("xs = [1]\nif $xs\n  print x\n").is_empty());
+}
+
 #[test]
 fn macro_errors_have_positions() {
     let e = check_one("defmacro m a\n  quasi\n    ~a\nm\n");

@@ -2967,6 +2967,12 @@ impl<'py, 's> Compiler<'py, 's> {
         if items.is_empty() {
             return err("a condition is missing", Some(f));
         }
+        // (`if [ -n "$x" ]`, bash's test, is a list in tessh: always true. Say so.)
+        if let [one] = items {
+            if matches!(&one.kind, Kind::Group { open: '[', .. }) {
+                return err("a list as the condition is always true (unless empty): for bash's [ … ] test, write `test …` or the test in Python", Some(one));
+            }
+        }
         // (`if ! cmd …`: the command's status, negated, as bash's.)
         if items.len() > 1 && items[0].is_op("!") && matches!(&items[1].kind, Kind::Sym { .. } | Kind::Caret(_)) {
             return self.compile_shell(items, &[], Ctx::Cond);
