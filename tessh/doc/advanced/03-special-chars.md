@@ -217,7 +217,7 @@ function ran
 `!` turns a command's exit status around (`! grep -q x file`), and `!=` is
 "not equal". tessh has `!` before a command (`! grep -q x file && …`) and
 `not` for any value, a command's result included: `if not (grep -q x
-file)`. (`if ! grep …` is an error for now.) History expansion (`!!`, `!$`) is the REPL's business, and tessh
+file)`. History expansion (`!!`, `!$`) is the REPL's business, and tessh
 has none (Appendix L).
 
 `*` is the wildcard of globbing, and `?` matches one character, in both.

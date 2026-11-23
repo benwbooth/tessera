@@ -140,44 +140,34 @@ echo $?                # 0
 # Thanks, Stéphane Chazelas and Kristopher Newsome.
 ```
 
-```output bash
-exit status of "true" = 0
-exit status of "! true" = 1
-127
-0
-```
-
 tessh has no history expansion, so `!true` is only the name of a program
-that isn't there. **Gap:** `! command` inverts the status for `&&`, `||`
-and its value, but leaves `$?` at the command's own status (a bug, for
-now), so the tessh version tests the value.
+that isn't there; the rest is the same. (`not` inverts any value, a
+command's result included: `not (true)` is `False`.)
 
 ```tessh
 true
-print "exit status of \"true\" = $?"         # 0
+print "exit status of \"true\" = $?"       # 0
 
-r = ! true
-print "\"! true\" is" $r                     # False
-! true || print "! true failed, as it should"
-print (not (true))                           # not works on any value
+! true
+print "exit status of \"! true\" = $?"     # 1
 
 # =========================================================== #
-# Preceding a _pipe_ with ! inverts the result.
+# Preceding a _pipe_ with ! inverts the exit status returned.
 ls | bogus_command 2>/dev/null
-print $?                                     # 127
+print $?                                   # 127
 
-! ls | bogus_command 2>/dev/null && print "! inverted the pipe's status"
+! ls | bogus_command 2>/dev/null
+print $?                                   # 0
 # Note that the ! does not change the execution of the pipe.
+# Only the exit status changes.
 # =========================================================== #
 ```
 
 ```output
 exit status of "true" = 0
-"! true" is False
-! true failed, as it should
-False
+exit status of "! true" = 1
 127
-! inverted the pipe's status
+0
 ```
 
 Some exit statuses have reserved meanings (126, 127, 128 + a signal's
