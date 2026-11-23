@@ -10,6 +10,7 @@ import "../../qml"
 Item {
     width: 400; height: 300
     TextEdit { id: edit; width: 400; height: 300; font.family: "monospace" }
+    TextEdit { id: other; visible: false }   // (another app, for the clipboard)
     ExCommands { id: exc; edit: edit; keyHandler: (e) => vik.handle(e); viKeys: vik }
     ViKeys { id: vik; edit: edit; ex: exc }
 
@@ -344,6 +345,27 @@ Item {
             compare(line, ":'<,'>")
             compare(vik.modeName, "NORMAL")
             compare(exc.markLine(">"), 1)
+        }
+        function test_clipboard() {
+            // ("+ and "* are the system clipboard.)
+            check("|foo bar", "\"+yiw", "|foo bar")
+            other.text = ""; other.paste()
+            compare(other.text, "foo")
+            check("|foo bar", "\"+yiw$\"*p", "foo barfo|o")
+            // (Text another app copied.)
+            other.text = "pasted"; other.selectAll(); other.copy()
+            check("|ab", "\"+p", "apaste|db")
+            check("|ab", "v\"+p", "|pastedb")
+            // (Lines yanked into it paste as lines; from elsewhere, a trailing newline makes them lines.)
+            check("|a\nb", "\"+yyj\"+p", "a\nb\n|a")
+            other.text = "x\ny\n"; other.selectAll(); other.copy()
+            check("|a", "\"+P", "|x\ny\na")
+            // (Deleting into it.)
+            check("|foo bar", "\"+dw", "|bar")
+            other.text = ""; other.paste()
+            compare(other.text, "foo ")
+            // (The unnamed register is untouched by "+ only when another register was named; vim sets it too.)
+            check("|foo bar", "\"+yiwwP", "foo fo|obar")
         }
         function test_block_rects() {
             check("|abc\nabc", "<C-v>jl", "a|bc\nabc".replace("a|bc\nabc", "abc\na|bc"))

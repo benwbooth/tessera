@@ -45,7 +45,7 @@ QtObject {
             ["x X s S C D Y J gJ", "Letter; before; change letter, line; change, delete to the end; copy line; join lines"],
             ["r{c} R ~ Ctrl+A Ctrl+X", "Replace a letter; type over; swap case; add to, subtract from the number"],
             ["i a I A o O gi", "Insert: before, after, line start, end, new line below, above, where you last did"],
-            ["p P  \"{a-z}", "Paste after, before; into or from a register: \"ayiw, \"ap"],
+            ["p P  \"{a-z} \"+", "Paste after, before; into or from a register: \"ayiw, \"ap; \"+ (or \"*) the system clipboard: \"+yy, \"+p"],
             ["u  Ctrl+R  .", "Undo, redo, do the last change again"],
             ["v V Ctrl+V  gv  o", "Select letters, lines, a block; the last selection; its other end"],
             ["S{c} (selecting)  I A (block)", "Surround the selection; type on every line of the block"],
@@ -987,10 +987,24 @@ QtObject {
     }
 
     // ---- registers ---------------------------------------------------------------
-    function regName(reg) { return reg === "" || reg === "\"" || reg === "+" || reg === "*" ? "\"" : reg.toLowerCase() }
+    // "+ and "* are the system clipboard (through a hidden field's copy and
+    // paste, as elsewhere here); the rest live in ExCommands.
+    function isClip(reg) { return reg === "+" || reg === "*" }
+    readonly property TextEdit clip: TextEdit { visible: false; textFormat: TextEdit.PlainText }
+    property string clipLast: ""        // (what we put there, so a block or lines paste back as one)
+    function clipSet(t) { clip.text = t; clip.selectAll(); clip.copy(); clip.text = ""; clipLast = t }
+    function clipGet() {
+        clip.text = ""
+        clip.paste()
+        const t = clip.text.replace(/\u2029/g, "\n")
+        clip.text = ""
+        return t
+    }
+    function regName(reg) { return reg === "" || reg === "\"" ? "\"" : isClip(reg) ? "+" : reg.toLowerCase() }
     function putReg(reg, text, kind, isYank) {
         if (reg === "_") return
-        ex.putRegister(reg === "\"" || reg === "+" || reg === "*" ? "" : reg, text)
+        if (isClip(reg)) clipSet(text)
+        ex.putRegister(reg === "\"" || isClip(reg) ? "" : reg, text)
         const rk = Object.assign({}, regKind)
         rk["\""] = kind
         if (reg !== "") rk[regName(reg)] = kind
@@ -1002,6 +1016,10 @@ QtObject {
     }
     function getReg(reg) {
         const name = regName(reg)
+        if (name === "+") {
+            const t = clipGet()
+            return { text: t, kind: t === clipLast && regKind["+"] ? regKind["+"] : (t.endsWith("\n") ? "line" : "char") }
+        }
         const text = name === "\"" ? ex.killRing : (ex.registers[name] || "")
         return { text: text, kind: regKind[name] || (text.endsWith("\n") ? "line" : "char") }
     }
