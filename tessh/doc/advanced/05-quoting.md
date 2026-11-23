@@ -363,10 +363,8 @@ A backslash quotes the one character after it. To `echo -e`, `printf`,
 `sed` and in bash's `$'…'`, an escaped letter instead turns a special
 meaning on: `\n` newline, `\r` return, `\t` tab, `\v` vertical tab, `\b`
 backspace, `\a` alert, `\0nn` an octal character code, `\xhh` a hex one.
-tessh's double-quoted strings take them all, except the octal ones: `\x`
-(hex), `\u` (Unicode), or `chr 0o42` instead. **Gap:** `"\042"` is not an
-octal escape in tessh (Python's strings have them); it reads as `\0` and
-`42`.
+tessh's double-quoted strings take them all, as Python's do: `"\042"` is
+`"`, `"\033"` is escape, and `\x` (hex) and `\u` (Unicode) work too.
 
 ### Example 5-2. Escaped Characters (`escaped.sh`)
 

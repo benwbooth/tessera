@@ -21,9 +21,9 @@ bash's does; with anything else it looks at the value. So the tests are
 Python's: `==`, `<`, `in`, `and`, `or`, `not`, methods such as
 `.startswith`, and the file tests of `pathlib` and `os.path`.
 **Warning:** `[ … ]` at the start of a tessh line is a list, not bash's
-`[` command, so `if [ -n "$x" ]` is always true (a list with something in
-it). Use `test`, the same program, or better a Python test. (`tessh --check`
-doesn't warn about it yet: a bug.)
+`[` command; as an `if` or `while` condition, where it would always be
+true, tessh stops with an error saying so. Use `test`, the same program, or
+better a Python test.
 
 ```bash
 (( 0 && 1 ))                 # Logical AND
