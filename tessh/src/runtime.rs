@@ -502,6 +502,15 @@ class Glob:
 
 _Glob = Glob
 
+def prog(ns, v, mode):
+    """`$cmd args…` with a value at the head: a function is called; text or
+    a path runs that program, as bash's `$CMD args` does."""
+    import os
+    if callable(v) or not isinstance(v, (str, os.PathLike)):
+        return v
+    import __tessh__
+    return lambda *args: __tessh__.cmd(ns, os.fspath(v), list(args), [], mode, True)
+
 def regex(text):
     """re'…': the pattern compiled (re keeps the compiled ones)."""
     import re
@@ -2658,6 +2667,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     m.add("Glob", prelude(py)?.getattr("Glob")?)?;
     m.add("regex", prelude(py)?.getattr("regex")?)?;
     m.add("matches", prelude(py)?.getattr("matches")?)?;
+    m.add("prog", prelude(py)?.getattr("prog")?)?;
     m.add("env_with", prelude(py)?.getattr("env_with")?)?;
     m.add("path_word", prelude(py)?.getattr("_path_word")?)?;
     m.add("pretty", prelude(py)?.getattr("pretty")?)?;

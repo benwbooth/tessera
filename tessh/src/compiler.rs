@@ -1565,7 +1565,13 @@ impl<'py, 's> Compiler<'py, 's> {
         } else if matches!(head.kind, Kind::Caret(_) | Kind::Word(_)) && self.segment_kind(items) == "command" {
             return self.compile_command(items, children, mode);
         }
-        let f = self.compile_head(head)?;
+        let mut f = self.compile_head(head)?;
+        // ($cmd args…: text or a path there runs that program.)
+        if matches!(&head.kind, Kind::Var(v) if v.sym_name().is_some()) {
+            if let Some(e) = f.expr.take() {
+                f.expr = Some(self.rcall("prog", vec![self.globals()?, e, self.c(mode)?])?);
+            }
+        }
         let (astmts, args, kws, reds) = self.compile_call_args(&items[1..], children)?;
         let (stmts, exprs) = self.gather_e(vec![f, Res { stmts: astmts, expr: None }])?;
         let mut c = self.at(self.call(exprs[0].clone(), args, kws)?, head);
@@ -2922,6 +2928,13 @@ impl<'py, 's> Compiler<'py, 's> {
     fn cond(&mut self, items: &[Form], f: &Form) -> R<Res<'py>> {
         if items.is_empty() {
             return err("a condition is missing", Some(f));
+        }
+        // (A lone word, `if false`, `while true`, `until done`, is a command as
+        // a line of its own is, not the text, which would always be true.)
+        if let [one] = items {
+            if matches!(&one.kind, Kind::Sym { name, .. } if !matches!(name.as_str(), "True" | "False" | "None") && !is_number(name)) {
+                return self.compile_shell(items, &[], Ctx::Cond);
+            }
         }
         self.compile_expr(items, Ctx::Cond, &[])
     }

@@ -366,8 +366,8 @@ can't do.
 
 ```tessh no-run
 with (open sysinfo.log a) as log
-  for cmd in [[date] [who] [uptime]]
-    out = (command *$cmd)
+  for cmd in [date who uptime]
+    out = env $cmd           # (env runs the program the value names)
     print $out
     print $out file=$log
 ```

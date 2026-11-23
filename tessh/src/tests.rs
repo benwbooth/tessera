@@ -204,6 +204,24 @@ fn function_redirections_reach_programs() {
     assert_eq!(out, "from-echo\nfrom-print\nfour\noops\n");
 }
 
+/// `if false` and `while true`: a lone word as a condition is the command.
+#[test]
+fn lone_word_conditions_run() {
+    let (ns, out) = run("if false\n  echo bad\nif true\n  echo good\nn = 0\nwhile true\n  n += 1\n  break\nif True\n  echo const");
+    assert_eq!(out, "good\nconst\n");
+    assert_eq!(get::<i64>(&ns, "n"), 1);
+}
+
+/// `$cmd args`: text or a path at the head runs that program; a function is
+/// called as before.
+#[test]
+fn value_head_runs_program() {
+    let (ns, out) = run("exe = echo\n$exe hi there\nx = $exe captured\ndef f a = $a * 2\ng = $f\ny = $g 21");
+    assert_eq!(out, "hi there\n");
+    assert_eq!(get::<String>(&ns, "x"), "captured");
+    assert_eq!(get::<i64>(&ns, "y"), 42);
+}
+
 #[test]
 fn pipes() {
     let (ns, out) = run("n = echo a b c | wc -w\necho x y | tr a-z A-Z\nu = echo hi | str.upper\nv = 'one\ntwo' | wc -l");
