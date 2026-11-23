@@ -39,6 +39,7 @@
     ("33-options.md", include_str!("advanced/33-options.md")),
     ("34-gotchas.md", include_str!("advanced/34-gotchas.md")),
     ("35-scrstyle.md", include_str!("advanced/35-scrstyle.md")),
+    ("36-miscellany.md", include_str!("advanced/36-miscellany.md")),
     ("A1-contributed-scripts.md", include_str!("advanced/A1-contributed-scripts.md")),
     ("A2-contributed-scripts.md", include_str!("advanced/A2-contributed-scripts.md")),
     ("A3-contributed-scripts.md", include_str!("advanced/A3-contributed-scripts.md")),
