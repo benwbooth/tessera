@@ -326,7 +326,7 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         if shown.is_empty() {
             lines.push(vec![Span::new("  Nothing matches.", v.pal.dimmed())]);
         }
-        let x = ed.menu_x.unwrap_or(anchor_col).saturating_sub(w / 2).min(cols.saturating_sub(w + 2));
+        let x = ed.menu_x.unwrap_or(anchor_col).min(cols.saturating_sub(w + 2));
         return Some((boxed(lines, w, v), x));
     }
     if ed.comp.open && ed.comp.hist {
@@ -686,38 +686,22 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
     }
     let editor_top = rows.len();
     rows.extend(shown);
-    let mut cursor = if v.final_ { None } else { Some((editor_top + cur_r.saturating_sub(skip), text_x + cur_c)) };
+    let cursor = if v.final_ { None } else { Some((editor_top + cur_r.saturating_sub(skip), text_x + cur_c)) };
 
-    // ---- the popup, above everything ----
-    let mut popup_rows = 0;
+    // ---- the popup: drawn over what's around the editor, never moving it ----
+    let mut overlay = None;
     if !v.final_ {
         if let Some((lines, x)) = popup(ed, v, anchor_col, spans_for) {
-            popup_rows = lines.len();
-            let mut pre: Vec<Line> = lines
-                .into_iter()
-                .map(|l| {
-                    let mut r = vec![Span::new(" ".repeat(x), Sty::default())];
-                    r.extend(l);
-                    r
-                })
-                .collect();
-            pre.extend(rows);
-            rows = pre;
-            if let Some(c) = cursor.as_mut() {
-                c.0 += popup_rows;
-            }
-            // (vi's : line: the cursor in it.)
+            let mut ocur = None;
             if ed.keys == Keys::Vi && ed.cmd.is_open() {
                 let n = ed.cmd.choices.len().min(8);
-                cursor = Some((1 + n, 1 + 1 + cols_of(&ed.cmd.text[..ed.cmd.cursor.min(ed.cmd.text.len())])));
+                ocur = Some((1 + n, 1 + 1 + cols_of(&ed.cmd.text[..ed.cmd.cursor.min(ed.cmd.text.len())])));
+            } else if ed.comp.hist && ed.comp.open {
+                ocur = Some((1, 1 + 3 + cols_of(&ed.comp.query.text[..ed.comp.query.cursor])));
             }
-            // (History search: the cursor in its field.)
-            if ed.comp.hist && ed.comp.open {
-                cursor = Some((1, 1 + 3 + cols_of(&ed.comp.query.text[..ed.comp.query.cursor])));
-            }
+            overlay = Some(super::screen::Overlay { lines, col: x, cursor: ocur });
         }
     }
-    let _ = v.tooltip_pos;
-    let _ = v.screen_top;
-    Built { frame: Frame { rows, cursor, fill }, popup_rows }
+    let popup_rows = 0;
+    Built { frame: Frame { rows, cursor, fill, overlay }, popup_rows }
 }

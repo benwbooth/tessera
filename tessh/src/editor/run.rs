@@ -114,10 +114,7 @@ impl Editor {
     /// The editor's rows cleared (something's printed where it was; the next
     /// read draws it again under that).
     pub fn clear(&mut self) {
-        use std::io::Write;
-        let mut o = std::io::stdout();
-        let _ = write!(o, "\x1b[{};1H\x1b[J", self.screen.top + 1);
-        let _ = o.flush();
+        self.screen.clear();
         self.term.leave();
     }
 
@@ -266,7 +263,10 @@ impl Editor {
                             self.hovered = hov;
                             self.ed.dirty = true;
                         }
-                        let hit = hit.filter(|x| *x != Hit::None || m.row >= self.screen.top);
+                        let hit = if self.screen.in_popup(m.column, m.row) { Some(hit.unwrap_or_default()) } else { hit.filter(|x| *x != Hit::None || m.row >= self.screen.top) };
+                        if matches!(hit, Some(Hit::Chip(_)) | Some(Hit::Widget(_))) {
+                            self.ed.menu_x = Some(self.screen.run_start(m.column, m.row));
+                        }
                         let keep = self.ed.mouse(m, hit, h);
                         if !keep {
                             self.term.set_mouse(false);

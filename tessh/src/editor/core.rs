@@ -1576,7 +1576,6 @@ impl Ed {
                 }
                 let pressed = self.pressed.take();
                 if pressed.is_some() && pressed == hit {
-                    self.menu_x = Some(e.column as usize);
                     self.click(hit.unwrap(), h);
                 }
                 true
@@ -1601,9 +1600,29 @@ impl Ed {
                     self.accept_comp(Some(i), h);
                 }
             }
-            Hit::Chip(name) => self.done = Some(Outcome::Host(format!("chip:{name}"))),
+            Hit::Chip(name) => {
+                // (Its list open: the click closes it. Another's: that goes first.)
+                let open = match &self.menu {
+                    Some(m) if m.kind == MenuKind::Indent => "indent",
+                    Some(m) if m.kind == MenuKind::Choices("dir".into()) => "folders",
+                    _ if self.comp.open && self.comp.hist => "history",
+                    _ => "",
+                };
+                self.menu = None;
+                self.close_comp();
+                if open != name {
+                    self.done = Some(Outcome::Host(format!("chip:{name}")));
+                }
+            }
             Hit::Path(p) => self.done = Some(Outcome::Host(format!("run:cd {}", crate::repl::quote_path(&p)))),
-            Hit::Widget(w) => self.done = Some(Outcome::Host(format!("widget:{w}"))),
+            Hit::Widget(w) => {
+                let same = matches!(&self.menu, Some(m) if m.kind == MenuKind::Choices(w.clone()));
+                self.menu = None;
+                self.close_comp();
+                if !same {
+                    self.done = Some(Outcome::Host(format!("widget:{w}")));
+                }
+            }
             _ => {}
         }
     }
