@@ -2122,7 +2122,8 @@ Tessera's input editor has.
   at a time; Ctrl+R searches it. History is kept in
   `~/.local/share/tessh/history`, and `~/.config/tessh/rc.tsh` runs first.
 - F1 (or Alt+H) shows help for the word at the cursor, or the keys on an
-  empty line. Ctrl+Alt+J lists background jobs.
+  empty line. Ctrl+Alt+J lists background jobs; Ctrl+Alt+D, the folders
+  you have been in (cd history).
 - Ctrl+C interrupts, Ctrl+Z stops a program (`fg` brings it back), Ctrl+D
   exits. Emacs keys by default; `TESSH_KEYS=vi` for vi's.
 

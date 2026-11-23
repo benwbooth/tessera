@@ -1493,6 +1493,28 @@ fn widget_choices(widget: &str, cwd: &str) -> Vec<Choice> {
                 }
             }
         }
+        // Starship's whole prompt: the choices of what it shows that apply
+        // here (git in a repository, contexts, environments), then its config.
+        "starship" | "starship_right" => {
+            let in_git = !run(cwd, "git", &["rev-parse", "--git-dir"]).trim().is_empty();
+            for (name, title) in [("git", ""), ("kube", ""), ("aws", ""), ("gcloud", ""), ("venv", "Python"), ("nix", "Nix")] {
+                if name == "git" && !in_git {
+                    continue;
+                }
+                let c = widget_choices(name, cwd);
+                if !title.is_empty() && !c.is_empty() {
+                    out.push(head(title));
+                }
+                out.extend(c);
+            }
+            let cfg = env.get("STARSHIP_CONFIG").cloned().unwrap_or_else(|| home.join(".config/starship.toml").to_string_lossy().into_owned());
+            out.push(head("Starship"));
+            out.push(item("Edit starship.toml", format!("${{EDITOR:-vi}} {}", sh_quote(&cfg)), false));
+            // (A heading left with nothing under it goes.)
+            let keep: Vec<bool> = (0..out.len()).map(|i| !out[i].section || out.get(i + 1).is_some_and(|n| !n.section)).collect();
+            let mut k = keep.into_iter();
+            out.retain(|_| k.next().unwrap_or(true));
+        }
         _ => {}
     }
     out

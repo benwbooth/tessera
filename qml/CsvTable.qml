@@ -291,7 +291,9 @@ Item {
             topPadding: 5.001
             color: tv.error !== "" ? tv.ansi(1, "#e06c75") : Theme.textDim
             font.pixelSize: 11
-            elide: Text.ElideRight
+            // (An error wraps (the bar grows), never cut short.)
+            elide: tv.error !== "" ? Text.ElideNone : Text.ElideRight
+            wrapMode: tv.error !== "" ? Text.Wrap : Text.NoWrap
             width: Math.max(60, tv.width - x - 4)
             renderType: Text.NativeRendering
         }

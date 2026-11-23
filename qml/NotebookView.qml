@@ -2790,9 +2790,8 @@ FocusScope {
             x: 12
             width: parent.width - 24 - (bannerActions.visible ? bannerActions.width + 8 : 0)
             anchors.verticalCenter: parent.verticalCenter
+            // (All of it, however long: errors are never cut short.)
             wrapMode: Text.Wrap
-            maximumLineCount: 8
-            elide: Text.ElideRight
             color: Theme.text
             font.pixelSize: 12
             text: nb.loadError !== "" ? "Couldn't read " + nb.fileName + ": " + nb.loadError

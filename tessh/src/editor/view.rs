@@ -141,7 +141,7 @@ pub fn tooltip(ed: &Ed, hit: &Hit) -> String {
     match hit {
         Hit::Chip(n) => match *n {
             "fix" => "Ask the AI to correct the command that just failed".into(),
-            "folders" => "cd history: this session's folders, then recent and frequent ones".into(),
+            "folders" => "cd history: this session's folders, then recent and frequent ones (Ctrl+Alt+D)".into(),
             "history" => "Command history (Ctrl+R)".into(),
             "lang" => "Input language: tessh (highlighting, checks, completion)".into(),
             "guide" => "The tessh guide: every feature, with examples. Opens at the selected word, or the word at the cursor (Shift+F1)".into(),
@@ -169,12 +169,12 @@ pub fn keys_table(ed: &Ed) -> String {
             "Editing",
             vec![
                 ("Right Shift", "New line (tap; or Shift+Enter, Alt+Enter, Ctrl+J)"),
-                ("Left Shift", "Take the grey suggestion (tap; or → / End)"),
+                ("Left Shift", "Take the grey suggestion (tap; or → / End at the end of the line, Alt+/)"),
                 ("Tab", "Complete; in the indentation, indent"),
                 ("Shift+Tab", "Outdent"),
             ],
         ),
-        ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+J", "Background jobs")]),
+        ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+D", "Folders: cd history"), ("Ctrl+Alt+J", "Background jobs")]),
     ];
     if ed.ai.lock().unwrap().command_ready {
         groups.push(("AI", vec![("# …", "Say what you want: the AI writes the command, for you to check")]));
@@ -207,6 +207,42 @@ fn boxed(lines: Vec<Line>, w: usize, v: &ViewIn) -> Vec<Line> {
         out.push(row);
     }
     out.push(vec![Span::new(format!("╰{}╯", "─".repeat(w)), edge)]);
+    out
+}
+
+/// Text in lines of at most `w` columns, broken between words where it can
+/// (a word longer than a line is split); newlines kept.
+fn wrap_text(t: &str, w: usize) -> Vec<String> {
+    let w = w.max(1);
+    let mut out = vec![];
+    for para in t.split('\n') {
+        let mut line = String::new();
+        let mut lw = 0;
+        for word in para.split_inclusive(' ') {
+            let ww = cols_of(word);
+            let bare = cols_of(word.trim_end_matches(' '));
+            if lw + bare > w && lw > 0 {
+                out.push(line.trim_end().to_string());
+                line = String::new();
+                lw = 0;
+            }
+            if bare > w {
+                for c in word.chars() {
+                    let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                    if lw + cw > w {
+                        out.push(std::mem::take(&mut line));
+                        lw = 0;
+                    }
+                    line.push(c);
+                    lw += cw;
+                }
+                continue;
+            }
+            line.push_str(word);
+            lw += ww;
+        }
+        out.push(line.trim_end().to_string());
+    }
     out
 }
 
@@ -551,12 +587,13 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
                 ch.to_string()
             };
             // Indent guides: a line at each level down the indented lines.
-            let guide = !v.final_ && ed.indent_guides && p < lead_end && ch == ' ' && vcol % size == 0 && vcol > 0 && (vcol / size) <= depth[li] / size;
+            // (Level k's at column k × the indent: the first at column 0,
+            // under the block's opening line's first character.)
+            let guide = !v.final_ && ed.indent_guides && p < lead_end && ch == ' ' && vcol % size == 0 && vcol / size < depth[li] / size;
             if guide && sel.is_none_or(|(sa, sb)| p < sa || p >= sb) {
-                let level = vcol / size - 1;
-                let _ = level;
-                let on = block_of(vcol / size - 1, li) && (vcol / size - 1) == cur_level;
-                let g = match v.pal.mix(if on { 0.32 } else { 0.12 }) {
+                let level = vcol / size;
+                let on = block_of(level, li) && level == cur_level;
+                let g = match v.pal.mix(if on { 0.4 } else { 0.22 }) {
                     Some(c) => Sty::fg(c),
                     None => Sty::default().dim(),
                 };
@@ -569,27 +606,18 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
         }
         // (A blank line inside a block: its guides too.)
         if !v.final_ && ed.indent_guides && a == b && depth[li] >= size {
-            let mut c = 0;
-            while c + size <= depth[li] {
-                if c > 0 {
-                    let on = block_of(c / size - 1, li) && c / size - 1 == cur_level;
-                    let g = match v.pal.mix(if on { 0.32 } else { 0.12 }) {
-                        Some(cc) => Sty::fg(cc),
-                        None => Sty::default().dim(),
-                    };
-                    push_cell(&mut row, "│".into(), g, Hit::Text(a), &mut col, &mut wrapped);
-                } else {
-                    push_cell(&mut row, " ".into(), Sty::default(), Hit::Text(a), &mut col, &mut wrapped);
-                }
-                c += 1;
-                let mut k = 1;
-                while k < size && c + size <= depth[li] + size {
-                    push_cell(&mut row, " ".into(), Sty::default(), Hit::Text(a), &mut col, &mut wrapped);
-                    k += 1;
-                    c += 1;
-                }
-                if c >= depth[li] {
-                    break;
+            let levels = depth[li] / size;
+            for level in 0..levels {
+                let on = block_of(level, li) && level == cur_level;
+                let g = match v.pal.mix(if on { 0.4 } else { 0.22 }) {
+                    Some(cc) => Sty::fg(cc),
+                    None => Sty::default().dim(),
+                };
+                push_cell(&mut row, "│".into(), g, Hit::Text(a), &mut col, &mut wrapped);
+                if level + 1 < levels {
+                    for _ in 1..size {
+                        push_cell(&mut row, " ".into(), Sty::default(), Hit::Text(a), &mut col, &mut wrapped);
+                    }
                 }
             }
             if ed.t.cursor == a {
@@ -652,23 +680,41 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
 
     // ---- the toolbar row ----
     if !v.final_ {
-        let mut left: Line = vec![Span::new(" ", Sty::default())];
-        if !ed.problem.is_empty() {
-            left.push(Span::new(format!("⚠ {}", ed.problem), Sty { fg: Some(Col::Ansi(9)), bold: true, ..Default::default() }).hit(Hit::Chip("note")));
+        // (An error or note wraps onto more rows, never cut short.)
+        let note: Option<(String, Sty)> = if !ed.problem.is_empty() {
+            Some((format!("⚠ {}", ed.problem), Sty { fg: Some(Col::Ansi(9)), bold: true, ..Default::default() }))
         } else if !v.ai_busy.is_empty() {
             let what = if v.ai_busy == "fix" { "fixing the command…" } else { "writing the command…" };
-            left.push(Span::new(format!("◜ {what}  esc cancels"), Sty::fg(Col::Ansi(4))));
+            Some((format!("◜ {what}  esc cancels"), Sty::fg(Col::Ansi(4))))
         } else if !ed.ai_note.is_empty() {
-            left.push(Span::new(format!("✦ {}", ed.ai_note), Sty::fg(Col::Ansi(3))).hit(Hit::Chip("note")));
-        }
+            Some((format!("✦ {}", ed.ai_note), Sty::fg(Col::Ansi(3))))
+        } else {
+            None
+        };
         let right = chips(ed, v);
         let rw = super::width(&right);
-        let left = fit(left, cols.saturating_sub(rw + 2));
-        let lw = super::width(&left);
-        let mut row = left;
-        row.push(Span::new(" ".repeat(cols.saturating_sub(lw + rw + 1)), Sty::default()));
-        row.extend(right);
-        rows.push(row);
+        let room = cols.saturating_sub(rw + 3).max(20).min(cols.saturating_sub(2).max(1));
+        let lines = note.as_ref().map(|(t, _)| wrap_text(t, room)).unwrap_or_else(|| vec![String::new()]);
+        for (i, text) in lines.into_iter().enumerate() {
+            let mut row: Line = vec![Span::new(if i == 0 { " " } else { "   " }, Sty::default())];
+            if let Some((_, sty)) = &note {
+                let sp = Span::new(text, sty.clone());
+                row.push(if v.ai_busy.is_empty() || !ed.problem.is_empty() { sp.hit(Hit::Chip("note")) } else { sp });
+            }
+            if i == 0 {
+                let lw = super::width(&row);
+                if lw + rw + 1 <= cols {
+                    row.push(Span::new(" ".repeat(cols.saturating_sub(lw + rw + 1)), Sty::default()));
+                    row.extend(right.iter().cloned());
+                } else {
+                    // (Too narrow for both: the chips get a row of their own.)
+                    rows.push(row);
+                    row = vec![Span::new(" ".repeat(cols.saturating_sub(rw + 1)), Sty::default())];
+                    row.extend(right.iter().cloned());
+                }
+            }
+            rows.push(row);
+        }
     }
     // ---- the prompt bar ----
     for (i, l) in v.bar.iter().enumerate() {

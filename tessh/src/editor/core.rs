@@ -806,6 +806,16 @@ impl Ed {
                     return true;
                 }
                 KeyCode::Char('i') | KeyCode::Char('I') => return true,
+                // (The cd history, as the Folders button: again closes it.)
+                KeyCode::Char('d') | KeyCode::Char('D') => {
+                    let open = matches!(&self.menu, Some(m) if m.kind == MenuKind::Choices("dir".into()));
+                    self.menu = None;
+                    self.close_comp();
+                    if !open {
+                        self.done = Some(Outcome::Host("chip:folders".into()));
+                    }
+                    return true;
+                }
                 _ => {}
             }
         }

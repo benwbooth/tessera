@@ -1648,7 +1648,8 @@ Window {
                                                 text: keyless ? "needs an API key" : m === undefined ? "checking\u2026" : (typeof m === "string" ? m.replace(/^error: /, "\u26a0 ") : m.length + " models")
                                                 color: typeof m === "string" ? "#e06c75" : Theme.textDim
                                                 font.pixelSize: 11
-                                                elide: Text.ElideRight
+                                                // (An error wraps, never cut short.)
+                                                wrapMode: Text.Wrap
                                                 Layout.fillWidth: true
                                             }
                                             PlainButton { implicitHeight: 24; text: "Refresh"; onClicked: prefs.controller.aiListModels(JSON.stringify(provRow.modelData)) }

@@ -206,12 +206,13 @@ Rectangle {
         const groups = [
             ["Running", [["Enter", "Run the command \u2014 while one runs, it waits its turn"],
                          ["Right Ctrl", "Run it in the background, alongside (tap; or Ctrl+Enter)"],
-                         ["Left Ctrl", "Switch between this editor and the terminal (tap)"]]],
-            ["Editing", [["Right Shift", "New line (tap; or Shift+Enter)"],
-                         ["Left Shift", "Take the grey suggestion (tap)"],
+                         ["Left Ctrl", "Switch between this editor and the terminal (tap; or click the terminal's cursor line, and anywhere else in it to come back)"]]],
+            ["Editing", [["Right Shift", "New line (tap; or Shift+Enter, Alt+Enter)"],
+                         ["Left Shift", "Take the grey suggestion (tap; or \u2192 / End at the end of the line)"],
                          ["Tab", "Complete; in the indentation, indent"],
                          ["Shift+Tab", "Outdent"]]],
             ["Finding", [["Ctrl+R", "Search history"],
+                         ["Ctrl+Alt+D", "Folders: cd history"],
                          ["Ctrl+Alt+J", "Background jobs"]]]]
         if (box.aiNL && box.chatReady) groups.push(["AI", [["# \u2026", "Say what you want: the AI writes the command, for you to check"]]])
         if (box.keys === "vi") {
@@ -854,6 +855,7 @@ Rectangle {
     // tooltips say them.)
     function openLanguages() { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
     readonly property bool keysHere: box.visible && Window.window !== null && Window.window.activePane !== null && Window.window.activePane !== undefined && Window.window.activePane.compose === box
+    Shortcut { sequence: "Ctrl+Alt+D"; enabled: box.keysHere && box.showPrompt; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); promptBar.toggleCdHistory(cdChip) } }
     Shortcut { sequence: "Ctrl+Alt+I"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); box.openLanguages() } }
     Shortcut { sequence: "Ctrl+Alt+E"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { const order = ["emacs", "vi", "vscode"]; box.keysPicked(order[(order.indexOf(box.keys) + 1) % order.length]) } }
     function compKey(e) {
@@ -1099,7 +1101,7 @@ Rectangle {
                     width: 1
                     height: modelData.h
                     color: Theme.fg
-                    opacity: modelData.on ? 0.32 : 0.12
+                    opacity: modelData.on ? 0.4 : 0.22
                 }
             }
             ViBlock { vi: vik; color: Theme.accent }
@@ -1433,8 +1435,10 @@ Rectangle {
                   : box.lspNote !== "" ? "\u26a0 " + box.lspNote
                   : ""
             color: box.problem !== "" ? box.ansi(9, "#e05a5a") : spinner.on ? Theme.accent : (box.aiNote !== "" || box.lspNote !== "") ? box.ansi(3, "#e5c07b") : Theme.textDim
+            // (Errors and notes wrap onto more lines, never cut short: the
+            // prompt bar and editor sit under this row and move down.)
             width: Math.min(implicitWidth, box.width * 0.45)
-            elide: Text.ElideRight
+            wrapMode: Text.Wrap
             HoverHandler { id: noteHover }
             ToolTip.visible: noteHover.hovered && (box.aiNote !== "" || box.lspNote !== "" || box.problem !== "")
             ToolTip.text: box.problem !== "" ? box.problem : box.aiNote !== "" ? box.aiNote : box.lspNote
@@ -1470,7 +1474,7 @@ Rectangle {
             visible: box.showPrompt
             base: box.color
             label: "\u25b4 Folders"
-            tip: "cd history: this tab's folders, then recent and frequent ones"
+            tip: "cd history: this tab's folders, then recent and frequent ones (Ctrl+Alt+D)"
             onClicked: promptBar.toggleCdHistory(cdChip)
         }
         // (Test hook: TESSERA_TEST_CDHIST opens it.)

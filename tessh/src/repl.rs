@@ -823,7 +823,7 @@ pub fn keys_help() -> String {
          - **↑ ↓** go line by line, then through history; **PgUp PgDn** a whole entry at a time. **Ctrl+R** searches history.\n\
          - **→** or **End** at the end takes the grey suggestion (history first, then the AI); **Alt+F** one word of it.\n\
          - **# what you want**, then Enter: the AI writes the command for you to check.\n\
-         - **F1** or **Alt+H**: help for the word at the cursor. **Ctrl+Alt+J**: background jobs.\n\
+         - **F1** or **Alt+H**: help for the word at the cursor. **Ctrl+Alt+J**: background jobs. **Ctrl+Alt+D**: folders (cd history).\n\
          - Emacs keys (Ctrl+A, Ctrl+E, Ctrl+K, Ctrl+W, Ctrl+Y, Alt+B, Alt+F, …); `TESSH_KEYS=vi` for vi's.\n",
     );
     s

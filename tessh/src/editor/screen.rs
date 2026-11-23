@@ -39,6 +39,9 @@ pub struct Screen {
     pop_hits: Vec<(u16, Vec<Hit>)>,
     cols: u16,
     rows: u16,
+    /// Where the cursor was left (None: hidden), so an unchanged frame
+    /// writes nothing at all.
+    cursor_at: Option<(u16, u16)>,
 }
 
 pub fn sgr(s: &Sty) -> String {
@@ -117,7 +120,7 @@ fn encode_row(l: &Line, cols: usize, fill: Option<Col>) -> (String, Vec<Hit>) {
 
 impl Screen {
     pub fn new() -> Screen {
-        Screen { top: 0, height: 0, last: vec![], hits: vec![], pop: vec![], pop_hits: vec![], cols: 80, rows: 24 }
+        Screen { top: 0, height: 0, last: vec![], hits: vec![], pop: vec![], pop_hits: vec![], cols: 80, rows: 24, cursor_at: None }
     }
 
     /// Start a new prompt at the cursor's row.
@@ -178,61 +181,38 @@ impl Screen {
         self.pop.iter().any(|(r, c, w, _)| *r == row && (col as usize) >= *c && (col as usize) < c + w)
     }
 
+    /// Draw a frame: only the rows that changed, the popup's rows only
+    /// where they changed, nothing at all when nothing did (a pointer move
+    /// over the same thing). No blank-then-redraw, so nothing flickers.
     pub fn draw(&mut self, f: &Frame) {
-        let mut o = std::io::stdout().lock();
+        use std::fmt::Write as _;
+        let mut b = String::new();
         let cols = self.cols as usize;
         let skip = f.rows.len().saturating_sub(self.rows as usize);
         let rows = &f.rows[skip..];
         let h = rows.len() as u16;
-        let _ = write!(o, "\x1b[?25l");
-        // The popup's old cells first (blanked, the editor drawn after).
         let old_pop = std::mem::take(&mut self.pop);
+        let mut full = false;
         if self.top + h > self.rows {
             // (Taller than the room left: the screen scrolls up, as for any
             // prompt; what was above goes into the scrollback.)
             let over = self.top + h - self.rows;
             for (r, c, w, _) in &old_pop {
-                let _ = write!(o, "\x1b[{};{}H\x1b[0m{}", r + 1, c + 1, " ".repeat(*w));
+                let _ = write!(b, "\x1b[{};{}H\x1b[0m{}", r + 1, c + 1, " ".repeat(*w));
             }
-            let _ = write!(o, "\x1b[{};1H{}", self.rows, "\n".repeat(over as usize));
+            let _ = write!(b, "\x1b[{};1H{}", self.rows, "\n".repeat(over as usize));
             self.top -= over;
             self.last.clear();
-        } else {
-            for (r, c, w, s) in &old_pop {
-                // (Unchanged: left alone.)
-                let same = f.overlay.as_ref().is_some_and(|_| false);
-                let _ = (s, same);
-                if *r < self.top || *r >= self.top + h {
-                    let _ = write!(o, "\x1b[{};{}H\x1b[0m{}", r + 1, c + 1, " ".repeat(*w));
-                }
-            }
+            full = true;
         }
-        let mut hits = Vec::with_capacity(rows.len());
-        let mut encoded = Vec::with_capacity(rows.len());
-        // (Rows the old popup covered inside the editor are drawn again.)
-        let covered: Vec<u16> = old_pop.iter().map(|p| p.0).collect();
-        for (i, l) in rows.iter().enumerate() {
-            let (s, hm) = encode_row(l, cols, f.fill);
-            hits.push(hm);
-            let r = self.top + i as u16;
-            if self.last.get(i) != Some(&s) || covered.contains(&r) {
-                let _ = write!(o, "\x1b[{};1H{}", r + 1, s);
-            }
-            encoded.push(s);
-        }
-        if h < self.height {
-            let _ = write!(o, "\x1b[{};1H\x1b[J", self.top + h + 1);
-        }
-        self.last = encoded;
-        self.hits = hits;
-        self.height = h;
-
-        // The popup: under the editor if it fits there, else over it.
-        self.pop_hits.clear();
+        // The popup as it will be: under the editor if it fits there, else over it.
+        let mut new_pop: Vec<(u16, usize, usize, String)> = vec![];
+        let mut pop_hits = vec![];
         let mut cursor = f.cursor.filter(|(r, _)| *r >= skip).map(|(r, c)| (self.top + (r - skip) as u16, c));
         if let Some(ov) = &f.overlay {
             let n = ov.lines.len();
-            let start: i32 = if self.below() >= n { (self.top + h) as i32 } else { self.top as i32 - n as i32 };
+            let below = self.rows.saturating_sub(self.top + h) as usize;
+            let start: i32 = if below >= n { (self.top + h) as i32 } else { self.top as i32 - n as i32 };
             for (i, l) in ov.lines.iter().enumerate() {
                 let r = start + i as i32;
                 if r < 0 || r >= self.rows as i32 {
@@ -240,12 +220,11 @@ impl Screen {
                 }
                 let r = r as u16;
                 let (s, hm, w) = encode(l, cols.saturating_sub(ov.col));
-                let _ = write!(o, "\x1b[{};{}H{}\x1b[0m", r + 1, ov.col + 1, s);
                 let mut row = vec![Hit::None; ov.col];
                 row.extend(hm);
                 row.resize(cols, Hit::None);
-                self.pop_hits.push((r, row));
-                self.pop.push((r, ov.col, w, s));
+                pop_hits.push((r, row));
+                new_pop.push((r, ov.col, w, s));
             }
             if let Some((cr, cc)) = ov.cursor {
                 let r = start + cr as i32;
@@ -254,9 +233,58 @@ impl Screen {
                 }
             }
         }
+        // (The old popup's rows outside the editor that the new one doesn't
+        // draw the same: blanked.)
+        if !full {
+            for old in &old_pop {
+                let (r, c, w, _) = old;
+                if (*r < self.top || *r >= self.top + h) && !new_pop.contains(old) {
+                    let _ = write!(b, "\x1b[{};{}H\x1b[0m{}", r + 1, c + 1, " ".repeat(*w));
+                }
+            }
+        }
+        let mut hits = Vec::with_capacity(rows.len());
+        let mut encoded = Vec::with_capacity(rows.len());
+        let mut redrawn: Vec<u16> = vec![];
+        for (i, l) in rows.iter().enumerate() {
+            let (s, hm) = encode_row(l, cols, f.fill);
+            hits.push(hm);
+            let r = self.top + i as u16;
+            // (A row the old popup covered, and the new doesn't the same way: drawn again.)
+            let uncovered = old_pop.iter().any(|o| o.0 == r && !new_pop.contains(o));
+            if self.last.get(i) != Some(&s) || uncovered {
+                let _ = write!(b, "\x1b[{};1H{}", r + 1, s);
+                redrawn.push(r);
+            }
+            encoded.push(s);
+        }
+        if h < self.height {
+            let _ = write!(b, "\x1b[{};1H\x1b[J", self.top + h + 1);
+            redrawn.extend(self.top + h..self.top + self.height);
+        }
+        self.last = encoded;
+        self.hits = hits;
+        self.height = h;
+        // The popup's rows: those new or changed, or under a row just drawn.
+        for p in &new_pop {
+            if full || !old_pop.contains(p) || redrawn.contains(&p.0) {
+                let _ = write!(b, "\x1b[{};{}H{}\x1b[0m", p.0 + 1, p.1 + 1, p.3);
+            }
+        }
+        self.pop = new_pop;
+        self.pop_hits = pop_hits;
+        let cursor = cursor.map(|(r, c)| (r, c as u16));
+        if b.is_empty() && cursor == self.cursor_at {
+            return;
+        }
+        let mut o = std::io::stdout().lock();
+        // (One frame, synchronized output: terminals that know it show it whole.)
+        let _ = write!(o, "\x1b[?2026h\x1b[?25l{b}");
         if let Some((r, c)) = cursor {
             let _ = write!(o, "\x1b[{};{}H\x1b[2 q\x1b[?25h", r + 1, c + 1);
         }
+        let _ = write!(o, "\x1b[?2026l");
+        self.cursor_at = cursor;
         let _ = o.flush();
     }
 
@@ -271,6 +299,7 @@ impl Screen {
         self.pop_hits.clear();
         self.height = 0;
         self.last.clear();
+        self.cursor_at = None;
     }
 
     /// The column a run of the same hit starts at on a row (a button's left edge).

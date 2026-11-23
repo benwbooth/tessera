@@ -76,6 +76,9 @@ pub struct Session {
     /// The last pointer-motion report, so the same cell isn't sent again
     /// (Qt repeats hover events while the pointer rests).
     last_motion: Vec<u8>,
+    /// Since when a repaint has waited for the program's frame to finish
+    /// (synchronized output, mode 2026).
+    sync_held: Option<std::time::Instant>,
     outbox: Rc<RefCell<Vec<u8>>>,
     title_changed: Rc<Cell<bool>>,
     pwd_changed: Rc<Cell<bool>>,
@@ -312,6 +315,7 @@ pub fn session_open(
         selecting: false,
         buttons: 0,
         last_motion: Vec::new(),
+        sync_held: None,
         outbox,
         title_changed,
         pwd_changed,
@@ -548,6 +552,21 @@ impl Session {
         }
         if !self.events.is_empty() {
             sig |= SIG_EVENTS;
+        }
+        // (A program drawing a frame inside synchronized output (mode 2026):
+        // no repaint until it ends the frame, so half a frame never shows;
+        // 150 ms at most.)
+        if sig & SIG_DIRTY != 0 && !self.exited {
+            if self.term.mode(Mode::SYNC_OUTPUT).unwrap_or(false) {
+                let since = *self.sync_held.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed() < std::time::Duration::from_millis(150) {
+                    sig &= !SIG_DIRTY;
+                } else {
+                    self.sync_held = None;
+                }
+            } else {
+                self.sync_held = None;
+            }
         }
         sig
     }

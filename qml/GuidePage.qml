@@ -254,6 +254,22 @@ Rectangle {
                     } else page.openOther(target, q)
                 } else Qt.openUrlExternally(req.requestedUrl)
             }
+            // Right click: Copy (the text picked), Copy Link, Select All, in
+            // Tessera's own menu (text picks with the mouse as on any page).
+            property string menuSelection: ""
+            property string menuLink: ""
+            onContextMenuRequested: (req) => {
+                req.accepted = true
+                menuSelection = req.selectedText
+                menuLink = req.linkUrl.toString()
+                guideMenu.popup(web, req.position.x, req.position.y)
+            }
+            SlimMenu {
+                id: guideMenu
+                SlimMenuItem { text: "Copy"; enabled: web.menuSelection !== ""; onTriggered: web.triggerWebAction(WebEngineView.Copy) }
+                SlimMenuItem { text: "Copy Link"; visible: web.menuLink !== ""; onTriggered: web.triggerWebAction(WebEngineView.CopyLinkToClipboard) }
+                SlimMenuItem { text: "Select All"; onTriggered: web.triggerWebAction(WebEngineView.SelectAll) }
+            }
             // (The page's own test lines, to the log.)
             onJavaScriptConsoleMessage: (level, message) => { if (message.startsWith("tessera-")) console.log(message) }
             // (Nothing navigates the page away: links open in the browser.)

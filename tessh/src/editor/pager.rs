@@ -74,11 +74,19 @@ struct Guide {
     searching: bool,
     matches: Vec<usize>,
     at: Option<usize>,
+    /// Text picked with the mouse: (line, char) where the drag began and
+    /// where it is now, in the laid-out lines.
+    sel: Option<((usize, usize), (usize, usize))>,
+    dragging: bool,
+    /// The right-click menu: where (column, row), and the item pointed at.
+    menu: Option<(usize, usize, usize)>,
 }
+
+const MENU: [&str; 2] = ["Copy", "Select All"];
 
 impl Guide {
     fn new(md: &str) -> Guide {
-        let mut g = Guide { md: md.to_string(), width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None };
+        let mut g = Guide { md: md.to_string(), width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None, sel: None, dragging: false, menu: None };
         g.layout(80);
         g
     }
@@ -90,6 +98,8 @@ impl Guide {
         }
         let keep = self.parts.iter().rev().find(|p| p.line <= self.top).map(|p| p.title.clone());
         self.width = width;
+        // (Laid out again, the lines move: a pick no longer means the same text.)
+        self.sel = None;
         let text = crate::help::terminal_at(&self.md, true, width.clamp(20, 100));
         self.lines = text.lines().map(String::from).collect();
         self.plain = self.lines.iter().map(|l| strip(l)).collect();
@@ -146,6 +156,51 @@ impl Guide {
         self.parts.iter().rposition(|p| p.line <= self.top + 1)
     }
 
+    /// The pick in order, start first.
+    fn sel_range(&self) -> Option<((usize, usize), (usize, usize))> {
+        let (a, b) = self.sel?;
+        if a == b {
+            return None;
+        }
+        Some(if a <= b { (a, b) } else { (b, a) })
+    }
+    /// The text picked, lines joined with newlines.
+    fn sel_text(&self) -> String {
+        let Some(((l0, c0), (l1, c1))) = self.sel_range() else { return String::new() };
+        let mut out = vec![];
+        for i in l0..=l1.min(self.plain.len().saturating_sub(1)) {
+            let chars: Vec<char> = self.plain[i].chars().collect();
+            let from = if i == l0 { c0.min(chars.len()) } else { 0 };
+            let to = if i == l1 { c1.min(chars.len()) } else { chars.len() };
+            out.push(chars[from..to.max(from)].iter().collect::<String>().trim_end().to_string());
+        }
+        out.join("\n")
+    }
+    /// The (line, char) under a cell of the guide's text, given its left edge.
+    fn pos_at(&self, col: usize, row: usize, x0: usize, rows: usize) -> (usize, usize) {
+        let body = rows.saturating_sub(2);
+        let r = row.clamp(1, body.max(1)) - 1;
+        let i = (self.top + r).min(self.lines.len().saturating_sub(1));
+        let want = col.saturating_sub(x0);
+        let mut w = 0;
+        let mut n = 0;
+        for c in self.plain.get(i).map(String::as_str).unwrap_or("").chars() {
+            let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+            if w + cw > want {
+                break;
+            }
+            w += cw;
+            n += 1;
+        }
+        (i, n)
+    }
+    fn copy(&mut self) {
+        let t = self.sel_text();
+        if !t.is_empty() {
+            super::term::Term::copy(&t);
+        }
+    }
+
     fn sidebar_w(cols: usize) -> usize {
         if cols < 70 {
             0
@@ -161,7 +216,8 @@ impl Guide {
         let body = rows.saturating_sub(2);
         self.top = self.top.min(self.lines.len().saturating_sub(body));
         let mut o = std::io::stdout().lock();
-        let _ = write!(o, "\x1b[?25l");
+        // (One frame, synchronized output: shown whole, no flicker.)
+        let _ = write!(o, "\x1b[?2026h\x1b[?25l");
         // The search box.
         let count = if self.query.is_empty() {
             String::new()
@@ -207,7 +263,17 @@ impl Guide {
             }
             let i = self.top + r;
             let Some(l) = self.lines.get(i) else { continue };
-            if !q.is_empty() && self.lower[i].contains(&q) {
+            let picked = self.sel_range().filter(|((l0, _), (l1, _))| (*l0..=*l1).contains(&i));
+            if let Some(((l0, c0), (l1, c1))) = picked {
+                // (A line in the pick: the picked part reversed.)
+                let chars: Vec<char> = self.plain[i].chars().collect();
+                let from = if i == l0 { c0.min(chars.len()) } else { 0 };
+                let to = if i == l1 { c1.min(chars.len()) } else { chars.len() };
+                let (a, b, c): (String, String, String) =
+                    (chars[..from].iter().collect(), chars[from..to.max(from)].iter().collect(), chars[to.max(from)..].iter().collect());
+                let b = if b.is_empty() && i != l1 { " ".to_string() } else { b };
+                let _ = write!(o, "{a}\x1b[7m{b}\x1b[27m{c}");
+            } else if !q.is_empty() && self.lower[i].contains(&q) {
                 // (A line with a match: the matches reversed.)
                 let (p, lp) = (&self.plain[i], &self.lower[i]);
                 let mut at = 0;
@@ -231,12 +297,37 @@ impl Guide {
         }
         let total = self.lines.len().max(1);
         let pct = ((self.top + body).min(total) * 100) / total;
-        let hint = format!(" {pct}%   / search   Enter n N next   [ ] parts   ↑↓ PgUp PgDn   q back");
+        let hint = format!(" {pct}%   / search   Enter n N next   [ ] parts   ↑↓ PgUp PgDn   drag to pick, right click to copy   q back");
         let _ = write!(o, "\x1b[{};1H\x1b[0m\x1b[2K\x1b[2m{}\x1b[0m", rows, cut(&hint, cols));
+        // The right-click menu, over the guide.
+        if let Some((mx, my, at)) = self.menu {
+            let w = 14;
+            let (x, y) = (mx.min(cols.saturating_sub(w + 2)), my.min(rows.saturating_sub(MENU.len() + 2)));
+            let _ = write!(o, "\x1b[{};{}H\x1b[0m╭{}╮", y + 1, x + 1, "─".repeat(w));
+            for (k, item) in MENU.iter().enumerate() {
+                let off = k == 0 && self.sel_range().is_none();
+                let label = format!(" {item:<w$}", w = w - 1);
+                let sty = if off { "\x1b[2m" } else if k == at { "\x1b[7m" } else { "" };
+                let _ = write!(o, "\x1b[{};{}H│{sty}{label}\x1b[0m│", y + 2 + k, x + 1);
+            }
+            let _ = write!(o, "\x1b[{};{}H╰{}╯", y + 2 + MENU.len(), x + 1, "─".repeat(w));
+        }
         if self.searching {
             let _ = write!(o, "\x1b[1;{}H\x1b[?25h", 5 + self.query.width());
         }
+        let _ = write!(o, "\x1b[?2026l");
         let _ = o.flush();
+    }
+}
+
+/// A right-click menu item: Copy, Select All.
+fn run_item(g: &mut Guide, i: usize) {
+    match i {
+        0 => g.copy(),
+        _ => {
+            let last = g.plain.len().saturating_sub(1);
+            g.sel = Some(((0, 0), (last, g.plain.get(last).map(|l| l.chars().count()).unwrap_or(0))));
+        }
     }
 }
 
@@ -245,7 +336,7 @@ impl Guide {
 pub fn show(md: &str, at: &str) {
     let mut o = std::io::stdout();
     let _ = crossterm::terminal::enable_raw_mode();
-    let _ = write!(o, "\x1b[?1049h\x1b[?1000h\x1b[?1006h\x1b[H\x1b[2J");
+    let _ = write!(o, "\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[H\x1b[2J");
     let _ = o.flush();
     let mut g = Guide::new(md);
     let (c0, _) = crossterm::terminal::size().unwrap_or((80, 24));
@@ -271,6 +362,27 @@ pub fn show(md: &str, at: &str) {
         match ev {
             Event::Key(k) if k.kind != event::KeyEventKind::Release => {
                 let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+                if let Some((x, y, at)) = g.menu {
+                    match k.code {
+                        KeyCode::Up => g.menu = Some((x, y, at.saturating_sub(1))),
+                        KeyCode::Down => g.menu = Some((x, y, (at + 1).min(MENU.len() - 1))),
+                        KeyCode::Enter => {
+                            g.menu = None;
+                            run_item(&mut g, at);
+                        }
+                        _ => g.menu = None,
+                    }
+                    continue;
+                }
+                // (Ctrl+C with text picked copies it; with none, goes back.)
+                if ctrl && matches!(k.code, KeyCode::Char('c')) && g.sel_range().is_some() {
+                    g.copy();
+                    continue;
+                }
+                if k.code == KeyCode::Esc && !g.searching && g.sel.is_some() {
+                    g.sel = None;
+                    continue;
+                }
                 if g.searching {
                     match k.code {
                         KeyCode::Enter => {
@@ -338,7 +450,57 @@ pub fn show(md: &str, at: &str) {
             Event::Mouse(m) => {
                 let sw = Guide::sidebar_w(cols);
                 let over_toc = sw > 0 && (m.column as usize) < sw && m.row >= 1;
+                let x0 = if sw > 0 { sw + 2 } else { 0 };
+                let in_text = !over_toc && m.row >= 1 && (m.row as usize) <= rows.saturating_sub(2);
+                if let Some((x, y, _)) = g.menu {
+                    // (The menu open: a click on an item does it, anywhere else closes it.)
+                    let (w, col, row) = (14usize, m.column as usize, m.row as usize);
+                    let (x, y) = (x.min(cols.saturating_sub(w + 2)), y.min(rows.saturating_sub(MENU.len() + 2)));
+                    let item = (row > y && row <= y + MENU.len() && col > x && col <= x + w).then(|| row - y - 1);
+                    match m.kind {
+                        MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                            if let (Some(i), Some(mm)) = (item, g.menu.as_mut()) {
+                                mm.2 = i;
+                            }
+                        }
+                        MouseEventKind::Down(_) => {
+                            g.menu = None;
+                            if let Some(i) = item {
+                                run_item(&mut g, i);
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
                 match m.kind {
+                    MouseEventKind::Down(MouseButton::Left) if in_text => {
+                        let p = g.pos_at(m.column as usize, m.row as usize, x0, rows);
+                        g.sel = Some((p, p));
+                        g.dragging = true;
+                        g.searching = false;
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) if g.dragging => {
+                        // (Past the top or bottom: the guide scrolls along.)
+                        if m.row == 0 {
+                            g.top = g.top.saturating_sub(1);
+                        } else if m.row as usize >= rows.saturating_sub(1) {
+                            g.top += 1;
+                        }
+                        let p = g.pos_at(m.column as usize, m.row as usize, x0, rows);
+                        if let Some(s) = g.sel.as_mut() {
+                            s.1 = p;
+                        }
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => g.dragging = false,
+                    MouseEventKind::Down(MouseButton::Right) if in_text => {
+                        // (Outside the pick: nothing picked, so Copy is off.)
+                        let p = g.pos_at(m.column as usize, m.row as usize, x0, rows);
+                        if g.sel_range().is_some_and(|(a, b)| p < a || p > b) {
+                            g.sel = None;
+                        }
+                        g.menu = Some((m.column as usize, m.row as usize, if g.sel_range().is_some() { 0 } else { 1 }));
+                    }
                     MouseEventKind::ScrollDown if over_toc => g.toc_top = (g.toc_top + 3).min(g.parts.len().saturating_sub(1)),
                     MouseEventKind::ScrollUp if over_toc => g.toc_top = g.toc_top.saturating_sub(3),
                     MouseEventKind::ScrollDown => g.top += 3,
@@ -362,7 +524,7 @@ pub fn show(md: &str, at: &str) {
             _ => {}
         }
     }
-    let _ = write!(o, "\x1b[?1006l\x1b[?1000l\x1b[?1049l\x1b[?25h");
+    let _ = write!(o, "\x1b[?1006l\x1b[?1002l\x1b[?1049l\x1b[?25h");
     let _ = o.flush();
     let _ = crossterm::terminal::disable_raw_mode();
 }

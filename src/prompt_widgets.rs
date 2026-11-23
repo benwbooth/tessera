@@ -322,6 +322,28 @@ pub fn choices(widget: &str, cwd: &str, pid: u32) -> String {
                 }
             }
         }
+        // Starship's whole prompt: the choices of what it shows that apply
+        // here (git in a repository, contexts, environments), then its config.
+        "starship" | "starship_right" => {
+            let in_git = !run(cwd, "git", &["rev-parse", "--git-dir"]).trim().is_empty();
+            for (name, title) in [("git", ""), ("kube", ""), ("aws", ""), ("gcloud", ""), ("venv", "Python"), ("nix", "Nix")] {
+                if name == "git" && !in_git {
+                    continue;
+                }
+                let c: Vec<serde_json::Value> = serde_json::from_str(&choices(name, cwd, pid)).unwrap_or_default();
+                if !title.is_empty() && !c.is_empty() {
+                    out.push(head(title));
+                }
+                out.extend(c);
+            }
+            let cfg = env.get("STARSHIP_CONFIG").cloned().unwrap_or_else(|| home.join(".config/starship.toml").to_string_lossy().into_owned());
+            out.push(head("Starship"));
+            out.push(item("Edit starship.toml".into(), format!("${{EDITOR:-vi}} {}", sh_quote(&cfg)), false));
+            // (A heading left with nothing under it goes.)
+            let keep: Vec<bool> = (0..out.len()).map(|i| out[i]["section"] != true || out.get(i + 1).is_some_and(|n| n["section"] != true)).collect();
+            let mut k = keep.into_iter();
+            out.retain(|_| k.next().unwrap_or(true));
+        }
         _ => {}
     }
     serde_json::to_string(&out).unwrap_or_else(|_| "[]".into())
