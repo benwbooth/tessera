@@ -1984,3 +1984,1037 @@ exit 0
 `mailto` sends MIME mail, `mailstats` shows the mail server's statistics,
 and `vacation` answers mail while you're away. Python's `smtplib` and
 `email` modules send mail directly from a script.
+
+## 16.7 Terminal Control Commands
+<!-- help: abs-terminal-control tput infocmp reset clear resize script terminfo -->
+
+`tput` reads the terminal's capabilities from terminfo and sends them:
+`tput clear`, `tput cup ROW COL` (move the cursor), `tput bold`, `smul`
+(underline), `smso` (reverse), `sgr0` (back to normal), `tput longname`.
+`infocmp` prints the whole terminfo entry, `reset` and `clear` reset and
+clear the screen, `resize` prints the commands that set `COLUMNS` and
+`LINES`, and `script` records a terminal session to a file. (`stty`, in
+the previous chapter's company, sets the terminal's modes.)
+
+They're programs, and run the same from tessh. tput's output is a string
+like any command's, so it can be kept in a variable and put in a string;
+Python's `shutil.get_terminal_size` gives the columns and lines without a
+program. They need a terminal, so this doesn't run here.
+
+```tessh no-run
+import shutil
+bold = tput bold
+normal = tput sgr0
+clear
+tput cup 2 10
+print "${bold}Hello${normal}, at row 2, column 10."
+{columns lines} = shutil.get_terminal_size
+print "The terminal is $columns by $lines."
+```
+
+## 16.8 Math Commands
+<!-- help: abs-math-commands factor bc dc awk floating-point decimal math arithmetic -->
+
+`factor` prints a number's prime factors. `bc` is an arbitrary-precision
+calculator with a C-like language, used in bash scripts for floating
+point (`variable=$(echo "scale=9; …" | bc)`, or with a here document for
+longer programs); `-l` loads its math library (`s` sine, `c` cosine, `l`
+log, `e` exp, `sqrt`). `dc` is a stack calculator in reverse Polish
+notation. `awk`'s arithmetic is floating point too.
+
+tessh doesn't need any of them for arithmetic: it's Python, so `/` is
+floating-point division, `**` raises to a power, `math` has the functions,
+`decimal` does exact decimal arithmetic to any precision (what `bc` is
+for), and `fractions` exact fractions. A format spec (`${x:.2f}`) sets the
+places shown. (`bc` and `dc` aren't even installed here, so the bash
+versions of their examples don't run.) Note that `bc` *cuts* a result to
+`scale` places, where Python's formatting rounds.
+
+### Example 16-46. Generating prime numbers (`primes2.sh`)
+
+```bash no-run
+#!/bin/bash
+# primes2.sh
+
+#  Generating prime numbers the quick-and-easy way,
+#+ without resorting to fancy algorithms.
+
+CEILING=10000   # 1 to 10000
+PRIME=0
+E_NOTPRIME=
+
+is_prime ()
+{
+  local factors
+  factors=( $(factor $1) )  # Load output of `factor` into array.
+
+if [ -z "${factors[2]}" ]
+#  Third element of "factors" array:
+#+ ${factors[2]} is 2nd factor of argument.
+#  If it is blank, then there is no 2nd factor,
+#+ and the argument is therefore prime.
+then
+  return $PRIME             # 0
+else
+  return $E_NOTPRIME        # null
+fi
+}
+
+echo
+for n in $(seq $CEILING)
+do
+  if is_prime $n
+  then
+    printf %5d $n
+  fi   #    ^  Five positions per number suffices.
+done   #       For a higher $CEILING, adjust upward, as necessary.
+
+echo
+
+exit
+```
+
+bash runs `factor` once for each number. `factor` takes any number of
+arguments, so tessh runs it once for them all and reads its lines
+(`n: f1 f2 …`) into Python: a number is prime when its only factor is
+itself. That also leaves out 1, which the original counts as prime. The
+ceiling is 100 to keep the output short.
+
+```tessh
+CEILING = 100       # 1 to 100 (10000 in the original)
+
+# One factor run for all the numbers: "n: factor factor ...".
+numbers = list (range 1 ($CEILING + 1))
+primes = []
+for line in (factor *$numbers).lines
+  [n factors] = $line.split ":"
+  if ($factors.split) == [$n]   # Its only factor is itself.
+    $primes.append (int $n)
+
+print
+for n in $primes
+  print "${n:5d}" end=""        # Five positions per number suffices.
+print
+exit 0
+```
+
+```output
+
+    2    3    5    7   11   13   17   19   23   29   31   37   41   43   47   53   59   61   67   71   73   79   83   89   97
+```
+
+### Example 16-47. Monthly Payment on a Mortgage (`monthlypmt.sh`)
+
+```bash no-run
+#!/bin/bash
+# monthlypmt.sh: Calculates monthly payment on a mortgage.
+
+
+#  This is a modification of code in the
+#+ "mcalc" (mortgage calculator) package,
+#+ by Jeff Schmidt
+#+ and
+#+ Mendel Cooper (yours truly, the ABS Guide author).
+#   http://www.ibiblio.org/pub/Linux/apps/financial/mcalc-1.6.tar.gz
+
+echo
+echo "Given the principal, interest rate, and term of a mortgage,"
+echo "calculate the monthly payment."
+
+bottom=1.0
+
+echo
+echo -n "Enter principal (no commas) "
+read principal
+echo -n "Enter interest rate (percent) "  # If 12%, enter "12", not ".12".
+read interest_r
+echo -n "Enter term (months) "
+read term
+
+
+ interest_r=$(echo "scale=9; $interest_r/100.0" | bc) # Convert to decimal.
+                 #           ^^^^^^^^^^^^^^^^^  Divide by 100. 
+                 # "scale" determines how many decimal places.
+
+ interest_rate=$(echo "scale=9; $interest_r/12 + 1.0" | bc)
+ 
+
+ top=$(echo "scale=9; $principal*$interest_rate^$term" | bc)
+          #           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          #           Standard formula for figuring interest.
+
+ echo; echo "Please be patient. This may take a while."
+
+ let "months = $term - 1"
+# ==================================================================== 
+ for ((x=$months; x > 0; x--))
+ do
+   bot=$(echo "scale=9; $interest_rate^$x" | bc)
+   bottom=$(echo "scale=9; $bottom+$bot" | bc)
+#  bottom = $(($bottom + $bot"))
+ done
+# ==================================================================== 
+
+# -------------------------------------------------------------------- 
+#  Rick Boivie pointed out a more efficient implementation
+#+ of the above loop, which decreases computation time by 2/3.
+
+# for ((x=1; x <= $months; x++))
+# do
+#   bottom=$(echo "scale=9; $bottom * $interest_rate + 1" | bc)
+# done
+
+
+#  And then he came up with an even more efficient alternative,
+#+ one that cuts down the run time by about 95%!
+
+# bottom=`{
+#     echo "scale=9; bottom=$bottom; interest_rate=$interest_rate"
+#     for ((x=1; x <= $months; x++))
+#     do
+#          echo 'bottom = bottom * interest_rate + 1'
+#     done
+#     echo 'bottom'
+#     } | bc`       # Embeds a 'for loop' within command substitution.
+# --------------------------------------------------------------------------
+#  On the other hand, Frank Wang suggests:
+#  bottom=$(echo "scale=9; ($interest_rate^$term-1)/($interest_rate-1)" | bc)
+
+#  Because . . .
+#  The algorithm behind the loop
+#+ is actually a sum of geometric proportion series.
+#  The sum formula is e0(1-q^n)/(1-q),
+#+ where e0 is the first element and q=e(n+1)/e(n)
+#+ and n is the number of elements.
+# --------------------------------------------------------------------------
+
+
+ # let "payment = $top/$bottom"
+ payment=$(echo "scale=2; $top/$bottom" | bc)
+ # Use two decimal places for dollars and cents.
+ 
+ echo
+ echo "monthly payment = \$$payment"  # Echo a dollar sign in front of amount.
+ echo
+
+
+ exit 0
+
+
+ # Exercises:
+ #   1) Filter input to permit commas in principal amount.
+ #   2) Filter input to permit interest to be entered as percent or decimal.
+ #   3) If you are really ambitious,
+ #+     expand this script to print complete amortization tables.
+```
+
+The three answers are canned (stdin isn't usable here). Each `bc` call is
+a Python float expression; the loop is Rick Boivie's faster one, and Frank
+Wang's closed form gives the same sum. Exercise 1, commas in the principal,
+is a `.replace`.
+
+```tessh
+print
+print "Given the principal, interest rate, and term of a mortgage,"
+print "calculate the monthly payment."
+
+# (Canned answers; the original reads them from the terminal.)
+answers = ["150,000" "6.5" "360"]
+def ask prompt
+  answer = $answers.pop 0
+  print "$prompt $answer"
+  $answer
+
+print
+principal = float ((ask "Enter principal (no commas)").replace "," "")  # (Exercise 1.)
+interest_r = (float (ask "Enter interest rate (percent)")) / 100.0  # Convert to decimal.
+term = int (ask "Enter term (months)")
+
+interest_rate = $interest_r / 12 + 1.0
+top = $principal * $interest_rate ** $term   # Standard formula for figuring interest.
+
+bottom = 1.0
+for x in (range 1 $term)                     # (Rick Boivie's loop.)
+  bottom = $bottom * $interest_rate + 1
+# Frank Wang's sum of the geometric series gives the same:
+# bottom = ($interest_rate ** $term - 1) / ($interest_rate - 1)
+
+payment = $top / $bottom
+print
+print "monthly payment = \$${payment:.2f}"   # Two decimal places for dollars and cents.
+print
+exit 0
+```
+
+```output
+
+Given the principal, interest rate, and term of a mortgage,
+calculate the monthly payment.
+
+Enter principal (no commas) 150,000
+Enter interest rate (percent) 6.5
+Enter term (months) 360
+
+monthly payment = $948.10
+
+```
+
+### Example 16-48. Base Conversion (`base.sh`)
+
+```bash no-run
+#!/bin/bash
+###########################################################################
+# Shellscript:	base.sh - print number to different bases (Bourne Shell)
+# Author     :	Heiner Steven (heiner.steven@odn.de)
+# Date       :	07-03-95
+# Category   :	Desktop
+# $Id: base.sh,v 1.2 2000/02/06 19:55:35 heiner Exp $
+# ==> Above line is RCS ID info.
+###########################################################################
+# Description
+#
+# Changes
+# 21-03-95 stv	fixed error occuring with 0xb as input (0.2)
+###########################################################################
+
+# ==> Used in ABS Guide with the script author's permission.
+# ==> Comments added by ABS Guide author.
+
+NOARGS=85
+PN=`basename "$0"`			       # Program name
+VER=`echo '$Revision: 1.2 $' | cut -d' ' -f2`  # ==> VER=1.2
+
+Usage () {
+    echo "$PN - print number to different bases, $VER (stv '95)
+usage: $PN [number ...]
+
+If no number is given, the numbers are read from standard input.
+A number may be
+    binary (base 2)		starting with 0b (i.e. 0b1100)
+    octal (base 8)		starting with 0  (i.e. 014)
+    hexadecimal (base 16)	starting with 0x (i.e. 0xc)
+    decimal			otherwise (i.e. 12)" >&2
+    exit $NOARGS 
+}   # ==> Prints usage message.
+
+Msg () {
+    for i   # ==> in [list] missing. Why?
+    do echo "$PN: $i" >&2
+    done
+}
+
+Fatal () { Msg "$@"; exit 66; }
+
+PrintBases () {
+    # Determine base of the number
+    for i      # ==> in [list] missing...
+    do         # ==> so operates on command-line arg(s).
+	case "$i" in
+	    0b*)		ibase=2;;	# binary
+	    0x*|[a-f]*|[A-F]*)	ibase=16;;	# hexadecimal
+	    0*)			ibase=8;;	# octal
+	    [1-9]*)		ibase=10;;	# decimal
+	    *)
+		Msg "illegal number $i - ignored"
+		continue;;
+	esac
+
+	# Remove prefix, convert hex digits to uppercase (bc needs this).
+	number=`echo "$i" | sed -e 's:^0[bBxX]::' | tr '[a-f]' '[A-F]'`
+	# ==> Uses ":" as sed separator, rather than "/".
+
+	# Convert number to decimal
+	dec=`echo "ibase=$ibase; $number" | bc`  # ==> 'bc' is calculator utility.
+	case "$dec" in
+	    [0-9]*)	;;			 # number ok
+	    *)		continue;;		 # error: ignore
+	esac
+
+	# Print all conversions in one line.
+	# ==> 'here document' feeds command list to 'bc'.
+	echo `bc <<!
+	    obase=16; "hex="; $dec
+	    obase=10; "dec="; $dec
+	    obase=8;  "oct="; $dec
+	    obase=2;  "bin="; $dec
+!
+    ` | sed -e 's: :	:g'
+
+    done
+}
+
+while [ $# -gt 0 ]
+# ==>  Is a "while loop" really necessary here,
+# ==>+ since all the cases either break out of the loop
+# ==>+ or terminate the script.
+# ==> (Above comment by Paulo Marcel Coelho Aragao.)
+do
+    case "$1" in
+	--)     shift; break;;
+	-h)     Usage;;                 # ==> Help message.
+	-*)     Usage;;
+         *)     break;;                 # First number
+    esac   # ==> Error checking for illegal input might be appropriate.
+    shift
+done
+
+if [ $# -gt 0 ]
+then
+    PrintBases "$@"
+else					# Read from stdin.
+    while read line
+    do
+	PrintBases $line
+    done
+fi
+
+
+exit
+```
+
+Heiner Steven's script converts with `bc` in both directions; Python's
+`int text base` reads a number in any base and format specs (`X`, `o`,
+`b`) write it in hex, octal and binary. The `case` on the prefix is a
+`match` with patterns and guards, the option loop is a `match` on the
+argument list, and the numbers come from sample arguments rather than
+stdin.
+
+```tessh
+import sys
+
+NOARGS = 85
+PN = (Path $argv[0]).name            # Program name
+VER = ('$Revision: 1.2 $'.split " ")[1]
+
+def Usage
+  print """$PN - print number to different bases, $VER (stv '95)
+usage: $PN [number ...]
+
+If no number is given, the numbers are read from standard input.
+A number may be
+    binary (base 2)		starting with 0b (i.e. 0b1100)
+    octal (base 8)		starting with 0  (i.e. 014)
+    hexadecimal (base 16)	starting with 0x (i.e. 0xc)
+    decimal			otherwise (i.e. 12)""" file=$sys.stderr
+  exit $NOARGS
+
+def Msg *msgs
+  for i in $msgs
+    print "$PN: $i" file=$sys.stderr
+
+def PrintBases numbers
+  for i in $numbers
+    # Determine base of the number, and remove its prefix.
+    [ibase number] = match $i
+      case _ if $i =~ re'^0[bB]'
+        [2 $i[2:]]                     # binary
+      case _ if $i =~ re'^0[xX]|^[a-fA-F]'
+        [16 (re'^0[xX]'.sub "" $i)]    # hexadecimal
+      case _ if $i =~ re'^0'
+        [8 $i]                         # octal
+      case _ if $i =~ re'^[1-9]'
+        [10 $i]                        # decimal
+      case _
+        Msg "illegal number $i - ignored"
+        continue
+    dec = try
+      int $number $ibase               # Convert number to decimal.
+    except ValueError
+      continue                         # error: ignore
+    # Print all conversions in one line.
+    print "hex=${dec:X}\tdec=$dec\toct=${dec:o}\tbin=${dec:b}"
+
+args = $argv[1:] or ["0b1100" "014" "0xc" "12" "ff" "9z"]  # (sample arguments)
+while $args
+  match $args[0]
+    case "--"
+      args = $args[1:]
+      break
+    case _ if ($args[0].startswith "-")
+      Usage                            # Help message.
+    case _
+      break                            # First number
+
+PrintBases $args
+exit 0
+```
+
+```output
+hex=C	dec=12	oct=14	bin=1100
+hex=C	dec=12	oct=14	bin=1100
+hex=C	dec=12	oct=14	bin=1100
+hex=C	dec=12	oct=14	bin=1100
+hex=FF	dec=255	oct=377	bin=11111111
+```
+
+`bc` with a here document takes a whole program, with variables, `scale`
+and the math library.
+
+### Example 16-49. Invoking `bc` using a *here document* (`alt-bc.sh`)
+
+```bash no-run
+#!/bin/bash
+# Invoking 'bc' using command substitution
+# in combination with a 'here document'.
+
+
+var1=`bc << EOF
+18.33 * 19.78
+EOF
+`
+echo $var1       # 362.56
+
+
+#  $( ... ) notation also works.
+v1=23.53
+v2=17.881
+v3=83.501
+v4=171.63
+
+var2=$(bc << EOF
+scale = 4
+a = ( $v1 + $v2 )
+b = ( $v3 * $v4 )
+a * b + 15.35
+EOF
+)
+echo $var2       # 593487.8452
+
+
+var3=$(bc -l << EOF
+scale = 9
+s ( 1.7 )
+EOF
+)
+# Returns the sine of 1.7 radians.
+# The "-l" option calls the 'bc' math library.
+echo $var3       # .991664810
+
+
+# Now, try it in a function...
+hypotenuse ()    # Calculate hypotenuse of a right triangle.
+{                # c = sqrt( a^2 + b^2 )
+hyp=$(bc -l << EOF
+scale = 9
+sqrt ( $1 * $1 + $2 * $2 )
+EOF
+)
+# Can't directly return floating point values from a Bash function.
+# But, can echo-and-capture:
+echo "$hyp"
+}
+
+hyp=$(hypotenuse 3.68 7.31)
+echo "hypotenuse = $hyp"    # 8.184039344
+
+
+exit 0
+```
+
+`decimal` is exact decimal arithmetic, as `bc` is, but it doesn't cut each
+result to a `scale`, so the second answer has all its digits (`bc` says
+593487.8452). `math.sin` and `math.hypot` are the math library, and a
+function returns its float, where bash has to echo it and capture the text.
+
+```tessh
+import math
+from decimal import Decimal
+
+var1 = (Decimal "18.33") * (Decimal "19.78")
+print $var1       # 362.5674 (bc: 362.56)
+
+v1 = Decimal "23.53"
+v2 = Decimal "17.881"
+v3 = Decimal "83.501"
+v4 = Decimal "171.63"
+
+a = $v1 + $v2
+b = $v3 * $v4
+var2 = $a * $b + (Decimal "15.35")
+print $var2
+
+var3 = math.sin 1.7           # The sine of 1.7 radians.
+print "${var3:.9f}"
+
+# Now, try it in a function...
+def hypotenuse a b            # c = sqrt( a^2 + b^2 )
+  math.sqrt ($a * $a + $b * $b)   # (or math.hypot $a $b)
+
+hyp = hypotenuse 3.68 7.31
+print "hypotenuse = ${hyp:.9f}"
+
+exit 0
+```
+
+```output
+362.5674
+593487.84652493
+0.991664810
+hypotenuse = 8.184039345
+```
+
+### Example 16-50. Calculating PI (`cannon.sh`)
+
+```bash no-run
+#!/bin/bash
+# cannon.sh: Approximating PI by firing cannonballs.
+
+# Author: Mendel Cooper
+# License: Public Domain
+# Version 2.2, reldate 13oct08.
+
+# This is a very simple instance of a "Monte Carlo" simulation:
+#+ a mathematical model of a real-life event,
+#+ using pseudorandom numbers to emulate random chance.
+
+#  Consider a perfectly square plot of land, 10000 units on a side.
+#  This land has a perfectly circular lake in its center,
+#+ with a diameter of 10000 units.
+#  The plot is actually mostly water, except for land in the four corners.
+#  (Think of it as a square with an inscribed circle.)
+#
+#  We will fire iron cannonballs from an old-style cannon
+#+ at the square.
+#  All the shots impact somewhere on the square,
+#+ either in the lake or on the dry corners.
+#  Since the lake takes up most of the area,
+#+ most of the shots will SPLASH! into the water.
+#  Just a few shots will THUD! into solid ground
+#+ in the four corners of the square.
+#
+#  If we take enough random, unaimed shots at the square,
+#+ Then the ratio of SPLASHES to total shots will approximate
+#+ the value of PI/4.
+#
+#  The simplified explanation is that the cannon is actually
+#+ shooting only at the upper right-hand quadrant of the square,
+#+ i.e., Quadrant I of the Cartesian coordinate plane.
+#
+#
+#  Theoretically, the more shots taken, the better the fit.
+#  However, a shell script, as opposed to a compiled language
+#+ with floating-point math built in, requires some compromises.
+#  This decreases the accuracy of the simulation.
+
+
+DIMENSION=10000  # Length of each side of the plot.
+                 # Also sets ceiling for random integers generated.
+
+MAXSHOTS=1000    # Fire this many shots.
+                 # 10000 or more would be better, but would take too long.
+PMULTIPLIER=4.0  # Scaling factor.
+
+declare -r M_PI=3.141592654
+                 # Actual 9-place value of PI, for comparison purposes.
+
+get_random ()
+{
+SEED=$(head -n 1 /dev/urandom | od -N 1 | awk '{ print $2 }')
+RANDOM=$SEED                                  #  From "seeding-random.sh"
+                                              #+ example script.
+let "rnum = $RANDOM % $DIMENSION"             #  Range less than 10000.
+echo $rnum
+}
+
+distance=        # Declare global variable.
+hypotenuse ()    # Calculate hypotenuse of a right triangle.
+{                # From "alt-bc.sh" example.
+distance=$(bc -l << EOF
+scale = 0
+sqrt ( $1 * $1 + $2 * $2 )
+EOF
+)
+#  Setting "scale" to zero rounds down result to integer value,
+#+ a necessary compromise in this script.
+#  It decreases the accuracy of this simulation.
+}
+
+
+# ==========================================================
+# main() {
+# "Main" code block, mimicking a C-language main() function.
+
+# Initialize variables.
+shots=0
+splashes=0
+thuds=0
+Pi=0
+error=0
+
+while [ "$shots" -lt  "$MAXSHOTS" ]           # Main loop.
+do
+
+  xCoord=$(get_random)                        # Get random X and Y coords.
+  yCoord=$(get_random)
+  hypotenuse $xCoord $yCoord                  #  Hypotenuse of
+                                              #+ right-triangle = distance.
+  ((shots++))
+
+  printf "#%4d   " $shots
+  printf "Xc = %4d  " $xCoord
+  printf "Yc = %4d  " $yCoord
+  printf "Distance = %5d  " $distance         #   Distance from
+                                              #+  center of lake
+                                              #+  -- the "origin" --
+                                              #+  coordinate (0,0).
+
+  if [ "$distance" -le "$DIMENSION" ]
+  then
+    echo -n "SPLASH!  "
+    ((splashes++))
+  else
+    echo -n "THUD!    "
+    ((thuds++))
+  fi
+
+  Pi=$(echo "scale=9; $PMULTIPLIER*$splashes/$shots" | bc)
+  # Multiply ratio by 4.0.
+  echo -n "PI ~ $Pi"
+  echo
+
+done
+
+echo
+echo "After $shots shots, PI looks like approximately   $Pi"
+#  Tends to run a bit high,
+#+ possibly due to round-off error and imperfect randomness of $RANDOM.
+#  But still usually within plus-or-minus 5% . . .
+#+ a pretty fair rough approximation.
+error=$(echo "scale=9; $Pi - $M_PI" | bc)
+pct_error=$(echo "scale=2; 100.0 * $error / $M_PI" | bc)
+echo -n "Deviation from mathematical value of PI =        $error"
+echo " ($pct_error% error)"
+echo
+
+# End of "main" code block.
+# }
+# ==========================================================
+
+exit 0
+
+#  One might well wonder whether a shell script is appropriate for
+#+ an application as complex and computation-intensive as a simulation.
+#
+#  There are at least two justifications.
+#  1) As a proof of concept: to show it can be done.
+#  2) To prototype and test the algorithms before rewriting
+#+    it in a compiled high-level language.
+```
+
+The random numbers come from Python's `random`, seeded so the run is the
+same each time (the original reseeds `$RANDOM` from `/dev/urandom` for
+every shot), and it fires 20 shots rather than 1000. `math.isqrt` is the
+integer square root that `bc` with `scale = 0` gives; the rest of the
+arithmetic is floating point, so no `bc` at all.
+
+```tessh
+# cannon.tsh: Approximating PI by firing cannonballs.
+# After Mendel Cooper's cannon.sh: a very simple "Monte Carlo" simulation.
+import math random
+
+DIMENSION = 10000  # Length of each side of the plot.
+MAXSHOTS = 20      # Fire this many shots (1000 in the original).
+PMULTIPLIER = 4.0  # Scaling factor.
+M_PI = $math.pi    # For comparison purposes.
+
+random.seed 2      # (So each run is the same.)
+
+def get_random = random.randrange $DIMENSION     # Range less than 10000.
+
+def hypotenuse a b = math.isqrt ($a * $a + $b * $b)  # Rounded down, as bc's scale=0.
+
+# main
+shots = 0
+splashes = 0
+thuds = 0
+Pi = 0
+
+while $shots < $MAXSHOTS                    # Main loop.
+  xCoord = (get_random)                     # Get random X and Y coords.
+  yCoord = (get_random)
+  distance = hypotenuse $xCoord $yCoord     # Distance from the center of the lake.
+  shots += 1
+
+  print "#${shots:4d}   Xc = ${xCoord:4d}  Yc = ${yCoord:4d}  Distance = ${distance:5d}  " end=""
+
+  if $distance <= $DIMENSION
+    print "SPLASH!  " end=""
+    splashes += 1
+  else
+    print "THUD!    " end=""
+    thuds += 1
+
+  Pi = $PMULTIPLIER * $splashes / $shots    # Multiply ratio by 4.0.
+  print "PI ~ ${Pi:.9f}"
+
+print
+print "After $shots shots, PI looks like approximately   ${Pi:.9f}"
+error = $Pi - $M_PI
+pct_error = 100.0 * $error / $M_PI
+print "Deviation from mathematical value of PI =        ${error:.9f} (${pct_error:.2f}% error)"
+print
+exit 0
+```
+
+```output
+#   1   Xc =  926  Yc = 1500  Distance =  1762  SPLASH!  PI ~ 4.000000000
+#   2   Xc = 1390  Yc = 5915  Distance =  6076  SPLASH!  PI ~ 4.000000000
+#   3   Xc = 2770  Yc = 5048  Distance =  5758  SPLASH!  PI ~ 4.000000000
+#   4   Xc = 4121  Yc = 9927  Distance = 10748  THUD!    PI ~ 3.000000000
+#   5   Xc = 3476  Yc = 9941  Distance = 10531  THUD!    PI ~ 2.400000000
+#   6   Xc =  585  Yc = 9522  Distance =  9539  SPLASH!  PI ~ 2.666666667
+#   7   Xc = 2594  Yc = 7056  Distance =  7517  SPLASH!  PI ~ 2.857142857
+#   8   Xc = 6447  Yc = 8340  Distance = 10541  THUD!    PI ~ 2.500000000
+#   9   Xc = 6095  Yc = 8915  Distance = 10799  THUD!    PI ~ 2.222222222
+#  10   Xc = 7288  Yc = 8225  Distance = 10989  THUD!    PI ~ 2.000000000
+#  11   Xc = 4394  Yc =  588  Distance =  4433  SPLASH!  PI ~ 2.181818182
+#  12   Xc =  449  Yc = 5964  Distance =  5980  SPLASH!  PI ~ 2.333333333
+#  13   Xc = 7616  Yc = 5217  Distance =  9231  SPLASH!  PI ~ 2.461538462
+#  14   Xc = 6226  Yc = 6940  Distance =  9323  SPLASH!  PI ~ 2.571428571
+#  15   Xc = 8613  Yc = 2694  Distance =  9024  SPLASH!  PI ~ 2.666666667
+#  16   Xc = 9183  Yc = 2907  Distance =  9632  SPLASH!  PI ~ 2.750000000
+#  17   Xc = 3868  Yc = 3778  Distance =  5406  SPLASH!  PI ~ 2.823529412
+#  18   Xc =  390  Yc = 2895  Distance =  2921  SPLASH!  PI ~ 2.888888889
+#  19   Xc = 5327  Yc = 2844  Distance =  6038  SPLASH!  PI ~ 2.947368421
+#  20   Xc = 2239  Yc = 8358  Distance =  8652  SPLASH!  PI ~ 3.000000000
+
+After 20 shots, PI looks like approximately   3.000000000
+Deviation from mathematical value of PI =        -0.141592654 (-4.51% error)
+
+```
+
+`dc` takes its program as text too: `echo "7 8 * p" | dc` prints 56, and
+`dc <<< 10k5v1+2/p` the golden ratio to ten places. In tessh they're
+expressions:
+
+```tessh
+print (7 * 8)
+import math
+print "${(1 + (math.sqrt 5)) / 2:.10f}"
+```
+
+```output
+56
+1.6180339887
+```
+
+### Example 16-51. Converting a decimal number to hexadecimal (`hexconvert.sh`)
+
+```bash no-run
+#!/bin/bash
+# hexconvert.sh: Convert a decimal number to hexadecimal.
+
+E_NOARGS=85 # Command-line arg missing.
+BASE=16     # Hexadecimal.
+
+if [ -z "$1" ]
+then        # Need a command-line argument.
+  echo "Usage: $0 number"
+  exit $E_NOARGS
+fi          # Exercise: add argument validity checking.
+
+
+hexcvt ()
+{
+if [ -z "$1" ]
+then
+  echo 0
+  return    # "Return" 0 if no arg passed to function.
+fi
+
+echo ""$1" "$BASE" o p" | dc
+#                  o    sets radix (numerical base) of output.
+#                    p  prints the top of stack.
+# For other options: 'man dc' ...
+return
+}
+
+hexcvt "$1"
+
+exit
+```
+
+`${n:X}` is hex in uppercase, as `dc` prints it. The exercise, checking the
+argument, is `int` in a `try`.
+
+```tessh
+E_NOARGS = 85    # Command-line arg missing.
+E_BADARG = 86
+
+def hexcvt n=None
+  if $n is None
+    return 0     # "Return" 0 if no arg passed to function.
+  "${n:X}"
+
+args = $argv[1:] or ["255"]      # (sample argument, when none is given)
+if not $args or not $args[0]     # Need a command-line argument.
+  print "Usage: $argv[0] number"
+  exit $E_NOARGS
+n = try                          # (The exercise: argument validity checking.)
+  int $args[0]
+except ValueError
+  print "Not a number: $args[0]"
+  exit $E_BADARG
+
+print (hexcvt $n)
+exit 0
+```
+
+```output
+FF
+```
+
+### Example 16-52. Factoring (`factr.sh`)
+
+```bash no-run
+#!/bin/bash
+# factr.sh: Factor a number
+
+MIN=2       # Will not work for number smaller than this.
+E_NOARGS=85
+E_TOOSMALL=86
+
+if [ -z $1 ]
+then
+  echo "Usage: $0 number"
+  exit $E_NOARGS
+fi
+
+if [ "$1" -lt "$MIN" ]
+then
+  echo "Number to factor must be $MIN or greater."
+  exit $E_TOOSMALL
+fi  
+
+# Exercise: Add type checking (to reject non-integer arg).
+
+echo "Factors of $1:"
+# -------------------------------------------------------
+echo  "$1[p]s2[lip/dli%0=1dvsr]s12sid2%0=13sidvsr[dli%0=\
+1lrli2+dsi!>.]ds.xd1<2" | dc
+# -------------------------------------------------------
+#  Above code written by Michel Charpentier <charpov@cs.unh.edu>
+#  (as a one-liner, here broken into two lines for display purposes).
+#  Used in ABS Guide with permission (thanks!).
+
+ exit
+
+ # $ sh factr.sh 270138
+ # 2
+ # 3
+ # 11
+ # 4093
+```
+
+Michel Charpentier's `dc` one-liner divides by 2 and then by odd numbers up
+to the square root. The same trial division in Python is a short loop (and
+the `factor` program does it in one call, as in Example 16-46). The
+exercise, rejecting a non-integer, is `str.isdigit`.
+
+```tessh
+MIN = 2       # Will not work for number smaller than this.
+E_NOARGS = 85
+E_TOOSMALL = 86
+E_NOTINT = 87
+
+def factors n
+  # Trial division: by 2, then by odd numbers up to the square root.
+  d = 2
+  while $d * $d <= $n
+    while $n % $d == 0
+      yield $d
+      n //= $d
+    d += if $d == 2 then 1 else 2
+  if $n > 1
+    yield $n
+
+args = $argv[1:] or ["270138"]   # (sample argument, when none is given)
+if not $args or not $args[0]
+  print "Usage: $argv[0] number"
+  exit $E_NOARGS
+if not ($args[0].isdigit)        # (The exercise: type checking.)
+  print "Number to factor must be an integer."
+  exit $E_NOTINT
+number = int $args[0]
+if $number < $MIN
+  print "Number to factor must be $MIN or greater."
+  exit $E_TOOSMALL
+
+print "Factors of $number:"
+for f in (factors $number)
+  print $f
+factor $number                   # (The factor program agrees.)
+exit 0
+```
+
+```output
+Factors of 270138:
+2
+3
+11
+4093
+270138: 2 3 11 4093
+```
+
+### Example 16-53. Calculating the hypotenuse of a triangle (`hypotenuse.sh`)
+
+```bash no-run
+#!/bin/bash
+# hypotenuse.sh: Returns the "hypotenuse" of a right triangle.
+#                (square root of sum of squares of the "legs")
+
+ARGS=2                # Script needs sides of triangle passed.
+E_BADARGS=85          # Wrong number of arguments.
+
+if [ $# -ne "$ARGS" ] # Test number of arguments to script.
+then
+  echo "Usage: `basename $0` side_1 side_2"
+  exit $E_BADARGS
+fi
+
+
+AWKSCRIPT=' { printf( "%3.7f\n", sqrt($1*$1 + $2*$2) ) } '
+#             command(s) / parameters passed to awk
+
+
+# Now, pipe the parameters to awk.
+    echo -n "Hypotenuse of $1 and $2 = "
+    echo $1 $2 | awk "$AWKSCRIPT"
+#   ^^^^^^^^^^^^
+# An echo-and-pipe is an easy way of passing shell parameters to awk.
+
+exit
+
+# Exercise: Rewrite this script using 'bc' rather than awk.
+#           Which method is more intuitive?
+```
+
+The `awk` program runs as it is, with the numbers piped in. The exercise
+asks for `bc`; in tessh it's Python, with `%3.7f` as a format spec.
+
+```tessh
+import math
+ARGS = 2              # Script needs sides of triangle passed.
+E_BADARGS = 85        # Wrong number of arguments.
+
+args = $argv[1:] or ["3" "4.5"]  # (sample arguments, when none are given)
+if (len $args) != $ARGS          # Test number of arguments to script.
+  print "Usage: $(Path $argv[0]).name side_1 side_2"
+  exit $E_BADARGS
+[a b] = $args
+
+AWKSCRIPT = ' { printf( "%3.7f\n", sqrt($1*$1 + $2*$2) ) } '
+
+# Now, pipe the parameters to awk.
+print "Hypotenuse of $a and $b = " end=""
+echo $a $b | awk $AWKSCRIPT
+
+# The exercise, without awk or bc:
+print "Hypotenuse of $a and $b = ${math.hypot (float $a) (float $b):3.7f}"
+exit
+```
+
+```output
+Hypotenuse of 3 and 4.5 = 5.4083269
+Hypotenuse of 3 and 4.5 = 5.4083269
+```
