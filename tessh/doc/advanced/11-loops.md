@@ -1772,9 +1772,8 @@ pattern is a guard, `case _ if $x =~ [a-z]*`, as `=~` with a glob tests
 the whole string; for character classes, `str`'s `isalpha`, `isdigit`,
 `islower` and `isupper` say it in words.
 
-**Gap:** a glob of only brackets, `$x =~ [0-9]`, is read as a list
-literal, not a pattern (`[0-9]*` works); and `fnmatch` has no POSIX
-classes such as `[[:lower:]]`.
+`$x =~ [0-9]` is a one-character glob, as a `case` pattern is.
+**Gap:** globs have no POSIX classes such as `[[:lower:]]`.
 
 ### Example 11-25. Using case (`ex29.sh`)
 

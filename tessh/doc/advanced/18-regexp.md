@@ -458,11 +458,20 @@ True
 ?bashrc
 ```
 
-**Gap:** in this version, a command word starting with `[!…]` or `[^…]`
-isn't negated (`echo [^ab]*` lists the names that *do* start with a or b,
-while `*[!0-9]` works), and globs that start with a literal `.`
-(`.ba?hrc`, `.bashr*`, `.[b]ashrc`) don't find dot files; `.*` gives `./.`
-and `./..`. The `=~` test and a comprehension do it, as above.
+In a command the same globs work as in bash: `echo [!ab]*` and `echo
+[^ab]*` list the names not starting with a or b, `.ba?hrc` and `.bashr*`
+find the dot file, and `.*` lists the dot files without `.` and `..`.
+
+```tessh
+touch a.1 b.1 c.1 .bashrc
+echo [!ab]* [^ab]*
+echo .ba?hrc .bashr* .*
+```
+
+```output
+c.1 c.1
+.bashrc .bashrc .bashrc
+```
 
 bash's `{b*,c*,*est*}` (brace expansion, then globbing) has no tessh form;
 `glob` takes several patterns:

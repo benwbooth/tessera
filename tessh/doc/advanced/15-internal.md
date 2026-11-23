@@ -85,9 +85,9 @@ exit 0
 
 ```
 
-**Gap:** a program named by a value can't head a command: `\$exe args`
-calls the value as a function. `env $exe args` (or
-`subprocess.run [$exe …]`) is the way round.
+A value naming a program can head a command, as bash's `$exe args` does:
+when `$exe` is text or a Path, tessh runs that program (a function value
+is called as usual). The script above uses `env`, which does the same.
 
 bash's `echo` is a builtin, and `/bin/echo` the program; they behave much
 the same. In tessh `echo` is always the program (`print` is the Python

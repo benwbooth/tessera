@@ -610,9 +610,8 @@ pics/a.pbm
 pics/b.pbm
 ```
 
-**Gap:** a program whose name is in a variable can't be run as
-`$OPERATION $file`, as in bash (that calls the string), nor as
-`\$OPERATION $file`; `env $OPERATION $file` runs it.
+`$OPERATION $file` works too, as in bash: text at the head of a command
+runs the program it names. `env $OPERATION $file` says so outright.
 
 The second way, with ImageMagick's `convert`, for `.png` files:
 
