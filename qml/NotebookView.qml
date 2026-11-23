@@ -3944,17 +3944,25 @@ FocusScope {
             }
             // (The folders shown whole, in order: -R puts each one's folders
             // right after it, as ls does; at most 200.)
-            property var sections: []
+            // (A model, added to in place: the panes there stay, with their
+            // listings, as -R finds more.)
+            ListModel { id: sections }
+            property var have: ({})
             property bool listed: false   // (a pane's folder read: the card can show)
-            function reset() { sections = plan.single !== "" ? [plan.single] : [] }
+            function reset() {
+                sections.clear(); have = {}
+                if (plan.single !== "") { sections.append({ path: plan.single }); have[plan.single] = true }
+            }
             onPlanChanged: reset()
             Component.onCompleted: reset()
             function addAfter(after, dirs) {
-                if (dirs.length === 0) return
-                const s = sections.slice()
-                let at = after === "" ? s.length : s.indexOf(after) + 1
-                for (const d of dirs.slice().sort()) if (s.indexOf(d) < 0 && s.length < 200) s.splice(at++, 0, d)
-                if (s.length !== sections.length) sections = s
+                let at = sections.count
+                if (after !== "") for (let i = 0; i < sections.count; ++i) if (sections.get(i).path === after) { at = i + 1; break }
+                for (const d of dirs.slice().sort()) {
+                    if (have[d] || sections.count >= 200) continue
+                    have[d] = true
+                    sections.insert(at++, { path: d })
+                }
             }
             function label(d) {
                 const b = base.replace(/\/$/, "")
@@ -3976,9 +3984,10 @@ FocusScope {
                 }
             }
             Repeater {
-                model: lsc.sections
+                model: sections
                 delegate: Column {
-                    required property var modelData
+                    required property string path
+                    readonly property string modelData: path
                     width: lsc.width
                     Text {
                         visible: lsc.plan.headers
