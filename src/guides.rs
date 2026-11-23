@@ -86,7 +86,7 @@ impl Guide {
     }
 }
 
-const GNU_DROP: &str = ".contents, .shortcontents, .contents-heading, .shortcontents-heading, a.copiable-link, .nav-panel, .header, .navigation, hr, .chapter-toc, .section-toc";
+const GNU_DROP: &str = ".contents, .shortcontents, .contents-heading, .shortcontents-heading, a.copiable-link, .nav-panel, .header, .navigation, hr, .chapter-toc, .section-toc, div.printindex, table[class$='-printindex'], table[class^='index-']";
 
 pub static GUIDES: &[Guide] = &[
     gi(&["python", "python3"], "The Python Tutorial", "PSF License 2.0", "https://docs.python.org/3/license.html",
@@ -156,10 +156,10 @@ pub static GUIDES: &[Guide] = &[
         "https://en.cppreference.com/w/cpp/language/exceptions",
     ], "#mw-content-text", "cpp").drop(".t-navbar, .editsection, #toc, .printfooter").id("cppreference"),
     gi(&["java"], "Learn Java: Language Basics (dev.java)", "© Oracle; read from dev.java, not redistributed", "https://www.oracle.com/legal/copyright.html",
-        ("https://dev.java/learn/language/constructs/basics/", "main a[href^='/learn/language/constructs/basics/']"), "main", "java").code_sel("readonly-code-editor")
+        ("https://dev.java/learn/language/constructs/basics/", "main a[href^='/learn/language/constructs/basics/']"), "main", "java").code_sel("readonly-code-editor").drop(".learn-lesson-navigation, .learn-breadcrumb")
         .pages(&["https://dev.java/learn/language/constructs/basics/"]),
     gi(&["ruby"], "Ruby Syntax (docs.ruby-lang.org)", "Ruby License or BSD-2-Clause", "https://www.ruby-lang.org/en/about/license.txt",
-        ("https://docs.ruby-lang.org/en/master/syntax_rdoc.html", "main a[href^='syntax/']"), "main", "ruby")
+        ("https://docs.ruby-lang.org/en/master/syntax_rdoc.html", "main a[href^='syntax/']"), "main", "ruby").drop("#nav-mobile-panel, header, nav, footer")
         .pages(&["https://www.ruby-lang.org/en/documentation/quickstart/", "https://www.ruby-lang.org/en/documentation/quickstart/2/", "https://www.ruby-lang.org/en/documentation/quickstart/3/", "https://www.ruby-lang.org/en/documentation/quickstart/4/"]),
     g(&["perl"], "Perl documentation (perlintro and friends)", "Artistic License or GPL", "https://perldoc.perl.org/perlartistic", &[
         "https://perldoc.perl.org/perlintro", "https://perldoc.perl.org/perldata", "https://perldoc.perl.org/perlsyn",
@@ -292,7 +292,7 @@ pub static GUIDES: &[Guide] = &[
         "https://raw.githubusercontent.com/swiftlang/swift-book/main/TSPL.docc/LanguageGuide/ClassesAndStructures.md",
     ], "", "swift"),
     g(&["zig"], "Zig Language Reference", "MIT", "https://github.com/ziglang/zig/blob/master/LICENSE",
-        &["https://ziglang.org/documentation/master/"], "#contents, main", "zig").drop("#toc, #navigation"),
+        &["https://ziglang.org/documentation/master/"], "#contents, main", "zig").drop("#toc, #navigation, a.hdr"),
     g(&["nim"], "Nim Tutorial", "MIT", "https://github.com/nim-lang/Nim/blob/devel/copying.txt", &[
         "https://nim-lang.org/docs/tut1.html", "https://nim-lang.org/docs/tut2.html", "https://nim-lang.org/docs/tut3.html",
     ], "#content, .container", "nim").drop("#global-links, .twelve-columns.theme-select-wrapper, #searchInputDiv, .three.columns"),
@@ -411,7 +411,7 @@ pub static GUIDES: &[Guide] = &[
     gi(&["pascal"], "Free Pascal Reference Guide", "Free Pascal documentation license (free to copy)", "https://www.freepascal.org/docs.html",
         ("https://www.freepascal.org/docs-html/ref/ref.html", "a[href^='refch'], a[href^='refse']"), "body", "pascal").code_sel("div.verbatim"),
     gi(&["ada"], "Introduction to Ada (learn.adacore.com)", "CC BY-SA 4.0", "https://github.com/AdaCore/learn/blob/main/LICENSE",
-        ("https://learn.adacore.com/courses/intro-to-ada/index.html", "div.toctree-wrapper li.toctree-l1 > a"), "div[role=main], div.body", "ada"),
+        ("https://learn.adacore.com/courses/intro-to-ada/index.html", "div.toctree-wrapper li.toctree-l1 > a"), "article[role=main], div[role=main], div.body", "ada").drop(".skip-to-content, .related-pages, .back-to-top, .content-icon-container"),
     g(&["gleam"], "The Gleam Language Tour", "Apache-2.0", "https://github.com/gleam-lang/language-tour/blob/main/LICENCE",
         &["https://tour.gleam.run/everything/"], "main, body", "gleam"),
     g(&["koto"], "The Koto Language Guide", "MIT", "https://github.com/koto-lang/koto/blob/main/LICENSE",
@@ -419,7 +419,7 @@ pub static GUIDES: &[Guide] = &[
     gi(&["inko"], "The Inko Manual", "MPL-2.0", "https://github.com/inko-lang/inko/blob/main/LICENSE",
         ("https://docs.inko-lang.org/manual/latest/", "a[href^='getting-started/'], a[href^='references/syntax'], a[href^='references/']"), "main, article", "inko"),
     gi(&["amber"], "Amber Documentation", "GPL-3.0", "https://github.com/amber-lang/amber/blob/master/LICENSE",
-        ("https://docs.amber-lang.com/", "a[href^='/getting_started'], a[href^='/basic_syntax'], a[href^='/advanced_syntax']"), "main, article", "amber"),
+        ("https://docs.amber-lang.com/", "a[href^='/getting_started'], a[href^='/basic_syntax'], a[href^='/advanced_syntax']"), "main, article", "amber").drop("[class*='SideBar-module']"),
     g(&["uxntal"], "Uxntal (XXIIVV wiki)", "CC BY-NC-SA 4.0; read from the wiki, not redistributed", "https://wiki.xxiivv.com/site/about.html",
         &[
         "https://wiki.xxiivv.com/site/uxntal.html", "https://wiki.xxiivv.com/site/uxntal_notation.html", "https://wiki.xxiivv.com/site/uxntal_numbers.html",
@@ -729,7 +729,7 @@ pub static GUIDES: &[Guide] = &[
         "https://svelte.dev/docs/svelte/style",
         "https://svelte.dev/docs/svelte/class",
         "https://svelte.dev/docs/svelte/scoped-styles",
-    ], "main article, main", "svelte").drop("nav, aside, .ts-toggle"),
+    ], "main article, main", "svelte").drop("nav, aside, .ts-toggle, .controls"),
     g(&["astro"], "Astro basics", "MIT", "https://github.com/withastro/docs/blob/main/LICENSE", &[
         "https://raw.githubusercontent.com/withastro/docs/main/src/content/docs/en/basics/project-structure.mdx",
         "https://raw.githubusercontent.com/withastro/docs/main/src/content/docs/en/basics/astro-components.mdx",
@@ -798,7 +798,7 @@ pub static GUIDES: &[Guide] = &[
         "https://hurl.dev/docs/asserting-response.html",
         "https://hurl.dev/docs/filters.html",
         "https://hurl.dev/docs/templates.html",
-    ], "main article, main, article", "hurl").drop("nav, aside, header, footer"),
+    ], "main article, main, article", "hurl").drop("nav, aside, header, footer, .top-nav, .top-nav-toc"),
     g(&["caddyfile"], "The Caddyfile", "Apache-2.0", "https://github.com/caddyserver/website/blob/master/LICENSE", &[
         "https://raw.githubusercontent.com/caddyserver/website/master/src/docs/markdown/caddyfile-tutorial.md",
         "https://raw.githubusercontent.com/caddyserver/website/master/src/docs/markdown/caddyfile/concepts.md",
@@ -1031,7 +1031,7 @@ fn set_progress(key: &str, what: &str) {
 const RENDER_VERSION: &str = "<!-- tessera-guide-render 4 -->";
 /// Marks the kept Markdown: a guide converted by an older Tessera is
 /// fetched and converted again.
-const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 5 -->";
+const CONVERT_VERSION: &str = "<!-- tessera-guide-convert 6 -->";
 
 fn page_html_of(g: &'static Guide, refresh: bool) -> Result<String, String> {
     let path = cache_path(g);
