@@ -8124,9 +8124,14 @@ which runs the program named first). A function is a value, so
 `eval` of a quoted `'$VarSomething'`, is a function (here an `fn`) that
 reads the variable when it's called.
 
-**Gap:** tessh can't run a program whose name is in a variable directly
-(bash's `$funcVar parm1`): `$p args` calls `$p` as a Python function, and
-`*$cmd` alone is an error. `env $p args` and `env *$cmd` do it.
+`$prog args` runs the program a text value names, as bash's `$CMD args`
+does.
+
+**Gap:** text that holds a command *and* its arguments (bash's unquoted
+`$funcVar`, which bash splits into words) has no direct form: `$text`
+runs a program named all of it, and a list of words can't be run as it
+stands (`*$cmd` alone is an error, `$cmd[0] …` calls a string). `env
+*(shlex.split $text)` does it.
 
 ```tessh
 import shlex
@@ -8154,6 +8159,8 @@ env *(shlex.split (_print $VarSomething)) ; echo
 print '- - Function variables - -'
 funcVar = $_print                 # The function itself.
 print (funcVar parm1)
+prog = printf                     # A program's name, as text:
+$prog %q parm1 ; echo             #+ $prog runs it, as bash's $CMD would.
 funcVar = (_print)                # Its result, a string.
 env *(shlex.split $funcVar) ; echo    # printf %q with nothing to quote
 env *(shlex.split $funcVar) $VarSomething ; echo
@@ -8181,6 +8188,7 @@ parm1parm2
 Literal
 - - Function variables - -
 printf %q parm1
+parm1
 
 Literal
 Literal
