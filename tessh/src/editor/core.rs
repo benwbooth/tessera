@@ -183,6 +183,10 @@ pub struct Ed {
     pub pressed: Option<Hit>,
     /// Where a button's list opens (the column clicked).
     pub menu_x: Option<usize>,
+    /// A tap waiting out its moment ('n' new line, 'g' suggestion, 'b'
+    /// background): a key right after it cancels it (keyd sends a Ctrl tap
+    /// just before a tapped Enter).
+    pub pending_tap: Option<(char, Instant)>,
 }
 
 const CONT: &[&str] = &["else", "elif", "except", "except*", "finally"];
@@ -271,6 +275,7 @@ impl Ed {
             dirty: true,
             pressed: None,
             menu_x: None,
+            pending_tap: None,
         }
     }
 
@@ -712,6 +717,7 @@ impl Ed {
         if k.kind == KeyEventKind::Release {
             return;
         }
+        self.pending_tap = None;
         self.shift_side = 0;
         self.ctrl_side = 0;
         if self.menu.is_some() {
@@ -813,6 +819,13 @@ impl Ed {
                 self.open_comp(h);
                 return true;
             }
+        }
+        // (Alt+/: the left Shift tap's other half, the AI asked now.)
+        if alt && !ctrl && k.code == KeyCode::Char('/') {
+            if !self.accept_ghost() {
+                self.ask_ghost_now();
+            }
+            return true;
         }
         if k.code == KeyCode::Char(' ') && ctrl {
             self.open_comp(h);
@@ -1265,12 +1278,7 @@ impl Ed {
                 let side = self.shift_side;
                 self.shift_side = 0;
                 if side != 0 && quick(self.shift_at) {
-                    self.dirty = true;
-                    if side == 2 {
-                        self.newline();
-                    } else if !self.accept_ghost() {
-                        self.ask_ghost_now();
-                    }
+                    self.pending_tap = Some((if side == 2 { 'n' } else { 'g' }, Instant::now()));
                 }
             }
             (ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl, KeyEventKind::Press) => {
@@ -1283,8 +1291,7 @@ impl Ed {
                 // (Right Ctrl: in the background. Left: nothing here, the
                 // editor is the terminal.)
                 if side == 2 && quick(self.ctrl_at) {
-                    self.dirty = true;
-                    self.submit_background();
+                    self.pending_tap = Some(('b', Instant::now()));
                 }
             }
             _ => {
@@ -1553,6 +1560,46 @@ impl Ed {
     // ---- time ---------------------------------------------------------------------------
     /// What waiting does (called every ~50 ms): the list opens once typing
     /// pauses, errors show, tooltips come up.
+    /// A tap whose moment passed with no key after it: done now.
+    pub fn fire_tap(&mut self) {
+        let Some((t, at)) = self.pending_tap else { return };
+        if at.elapsed() < Duration::from_millis(60) {
+            return;
+        }
+        self.pending_tap = None;
+        self.dirty = true;
+        match t {
+            'n' => self.newline(),
+            'g' => {
+                if !self.accept_ghost() {
+                    self.ask_ghost_now();
+                }
+            }
+            _ => self.submit_background(),
+        }
+    }
+
+    /// A key from the keyboard itself (/dev/input): Shift and Ctrl taps; any
+    /// other key spoils a tap in progress.
+    pub fn evdev(&mut self, code: u16, down: bool, h: &mut dyn Hooks) {
+        use super::evdev::*;
+        let m = match code {
+            LEFT_SHIFT => ModifierKeyCode::LeftShift,
+            RIGHT_SHIFT => ModifierKeyCode::RightShift,
+            LEFT_CTRL => ModifierKeyCode::LeftControl,
+            RIGHT_CTRL => ModifierKeyCode::RightControl,
+            _ => {
+                if down {
+                    self.shift_side = 0;
+                    self.ctrl_side = 0;
+                    self.pending_tap = None;
+                }
+                return;
+            }
+        };
+        self.modifier(m, if down { KeyEventKind::Press } else { KeyEventKind::Release }, h);
+    }
+
     pub fn tick(&mut self, h: &mut dyn Hooks, tooltip_for: fn(&Ed, &Hit) -> String, hit_at: impl Fn(u16, u16) -> Option<Hit>) {
         let since = self.edited.map(|t| t.elapsed());
         if let Some(d) = since {

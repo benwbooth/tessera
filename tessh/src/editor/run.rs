@@ -22,6 +22,14 @@ pub struct Editor {
     bar_seq: u64,
     hovered: Option<Hit>,
     pub mode_name: Box<dyn Fn(&Ed) -> String>,
+    /// The keyboards themselves (taps where the terminal can't say).
+    evdev: Option<super::evdev::Evdev>,
+    evdev_tried: bool,
+    /// The terminal's focus reports; and a guess: a key typed that didn't
+    /// come here (another window has the keyboard).
+    focused: bool,
+    elsewhere: bool,
+    typed_at: Option<Instant>,
 }
 
 fn pause_of(task: &str) -> u64 {
@@ -38,7 +46,7 @@ impl Editor {
         let term = Term::new();
         let mut ed = Ed::new();
         ed.kitty = term.kitty;
-        Editor { term, screen: Screen::new(), ed, bar_fn, bar: Arc::new(Mutex::new((vec![], vec![], 0))), bar_seq: 0, hovered: None, mode_name: Box::new(|_| "INSERT".into()) }
+        Editor { term, screen: Screen::new(), ed, bar_fn, bar: Arc::new(Mutex::new((vec![], vec![], 0))), bar_seq: 0, hovered: None, mode_name: Box::new(|_| "INSERT".into()), evdev: None, evdev_tried: false, focused: true, elsewhere: false, typed_at: None }
     }
 
     fn palette(&self) -> Palette {
@@ -204,6 +212,29 @@ impl Editor {
         }
     }
 
+    /// What the keyboards said since: taps (while this terminal has the
+    /// keyboard), and whether keys are going elsewhere.
+    fn keyboard(&mut self, h: &mut dyn Hooks) {
+        let Some(e) = &self.evdev else { return };
+        let evs: Vec<super::evdev::Ev> = e.rx.try_iter().collect();
+        for ev in evs {
+            if ev.down && ev.types() && self.typed_at.is_none() {
+                self.typed_at = Some(ev.at);
+            }
+            if self.focused && !self.elsewhere {
+                self.ed.evdev(ev.code, ev.down, h);
+            }
+        }
+        // (Typed, and nothing came here: another window has the keyboard.)
+        if self.typed_at.is_some_and(|t| t.elapsed() > Duration::from_millis(150)) {
+            self.typed_at = None;
+            self.elsewhere = true;
+            self.ed.pending_tap = None;
+            self.ed.shift_side = 0;
+            self.ed.ctrl_side = 0;
+        }
+    }
+
     pub fn read(&mut self, h: &mut dyn Hooks) -> Outcome {
         self.term.enter();
         self.screen.begin();
@@ -212,7 +243,19 @@ impl Editor {
         self.ed.done = None;
         self.ed.dirty = true;
         let mut last_bar = 0;
+        if !self.term.kitty && !self.evdev_tried {
+            self.evdev_tried = true;
+            self.evdev = super::evdev::start();
+        }
+        if let Some(e) = &self.evdev {
+            e.active.store(true, std::sync::atomic::Ordering::Relaxed);
+            while e.rx.try_recv().is_ok() {}
+        }
+        self.elsewhere = false;
+        self.typed_at = None;
         loop {
+            self.keyboard(h);
+            self.ed.fire_tap();
             {
                 let b = self.bar.lock().unwrap().2;
                 if b != last_bar {
@@ -224,10 +267,13 @@ impl Editor {
                 self.ed.dirty = false;
                 self.draw(h, false);
             }
-            let ready = event::poll(Duration::from_millis(50)).unwrap_or(false);
+            let wait = if self.ed.pending_tap.is_some() || self.typed_at.is_some() { 15 } else { 50 };
+            let ready = event::poll(Duration::from_millis(wait)).unwrap_or(false);
             if ready {
                 match event::read() {
                     Ok(Event::Key(k)) => {
+                        self.elsewhere = false;
+                        self.typed_at = None;
                         // (Any key: the mouse is the editor's again.)
                         if !self.term.mouse_on {
                             self.term.set_mouse(true);
@@ -259,9 +305,15 @@ impl Editor {
                         self.ed.dirty = true;
                     }
                     Ok(Event::FocusGained) => {
+                        self.focused = true;
+                        self.elsewhere = false;
                         self.term.set_mouse(true);
                     }
                     Ok(Event::FocusLost) => {
+                        self.focused = false;
+                        self.ed.pending_tap = None;
+                        self.ed.shift_side = 0;
+                        self.ed.ctrl_side = 0;
                         self.hovered = None;
                         self.ed.tooltip = None;
                         self.ed.dirty = true;
@@ -275,6 +327,9 @@ impl Editor {
             }
             self.ai_tick();
             if let Some(o) = self.ed.done.take() {
+                if let Some(e) = &self.evdev {
+                    e.active.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
                 match &o {
                     Outcome::Submit { .. } | Outcome::Interrupt | Outcome::Eof => {
                         self.ed.close_comp();

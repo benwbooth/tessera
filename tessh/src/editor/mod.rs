@@ -9,6 +9,7 @@
 //! the terminal's scrollback stays as it is.
 
 pub mod core;
+pub mod evdev;
 pub mod run;
 pub mod screen;
 pub mod term;
