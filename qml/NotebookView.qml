@@ -2510,9 +2510,10 @@ FocusScope {
         interval: 16; repeat: true; running: nb.stallLog
         onTriggered: { const t = Date.now(); if (nb.stallLast > 0 && t - nb.stallLast > 60) console.log("stall " + (t - nb.stallLast) + "ms ending " + t % 1000000); nb.stallLast = t }
     }
-    // (Test hook: TESSERA_TEST_ITEMS logs, at 18 s, how many items the notebook has made, by type.)
+    // (Test hook: TESSERA_TEST_ITEMS=<ms> logs then (1: at 18 s) how many items the notebook has made, by type.)
     Timer {
-        interval: 18000; running: nb.controller !== null && nb.controller.testEnv("ITEMS") !== ""
+        interval: nb.controller ? Math.max(1000, parseInt(nb.controller.testEnv("ITEMS")) || 18000) : 18000
+        running: nb.controller !== null && nb.controller.testEnv("ITEMS") !== ""
         onTriggered: {
             const n = {}
             let all = 0
@@ -4192,12 +4193,13 @@ FocusScope {
                 const p = item.mapToItem(lsf, 0, 0).y, q = item.mapToItem(list, 0, 0).y
                 return [Math.max(-p, -q), Math.min(lsf.height - p, list.height - q)]
             }
-            function nearView(item) {
+            function nearView(item, screens) {
                 if (!item || !item.visible) return false
-                // (Within a screen of what shows: the notebook's view, and the card's.)
+                // (Within `screens` (1) of what shows: the notebook's view, and the card's.)
+                const n = screens || 1
                 const p = item.mapToItem(list, 0, 0), q = item.mapToItem(lsf, 0, 0)
-                return p.y < list.height * 2 && p.y + item.height > -list.height
-                    && q.y < lsf.height * 2 && q.y + item.height > -lsf.height
+                return p.y < list.height * (n + 1) && p.y + item.height > -list.height * n
+                    && q.y < lsf.height * (n + 1) && q.y + item.height > -lsf.height * n
             }
             function label(d) {
                 const b = base.replace(/\/$/, "")
@@ -4228,15 +4230,31 @@ FocusScope {
                     required property int index
                     readonly property string modelData: path
                     width: lsc.width
-                    // (Read once it's come near the view, and kept.)
+                    // (Made and read once it's come within a screen of the view;
+                    // let go again past three, its height kept in its place: an
+                    // ls * of a big folder, or an ls -R, kept every pane it had
+                    // shown, hundreds of MB. The first, with the card's
+                    // toolbar, stays.)
                     property bool reached: index === 0
-                    function check() { try { if (!reached && lsc.nearView(sec)) reached = true } catch (e) {} }   // (gone since: nothing)
+                    // (Not read yet: a line's height, as an empty pane has.)
+                    property real held: (nb.outputRow > 0 ? nb.outputRow : 18) + 8
+                    property string lastView: ""
+                    function check() {
+                        try {
+                            if (!reached && lsc.nearView(sec)) reached = true
+                            else if (reached && index !== 0 && !lsc.nearView(sec, 3)) { if (!letGo.running) letGo.start() }
+                            else letGo.stop()
+                        } catch (e) {}   // (gone since: nothing)
+                    }
+                    // (Let go once it's stayed away 2 s: not while it's being
+                    // scrolled past, when it'd cost frames.)
+                    Timer { id: letGo; interval: 2000; onTriggered: { try { if (!lsc.nearView(sec, 3)) sec.reached = false } catch (e) {} } }
                     Connections { target: lsc; function onViewTickChanged() { sec.check() } }
                     onYChanged: Qt.callLater(check)
                     Component.onCompleted: Qt.callLater(check)
                     Text {
                         // (-R of one folder in the table: a tree, no heading needed.)
-                        visible: lsc.plan.headers && !(lsc.plan.recursive && lsc.plan.single !== "" && secPane.view === "details")
+                        visible: lsc.plan.headers && !(lsc.plan.recursive && lsc.plan.single !== "" && sec.lastView === "details")
                         topPadding: 6.001
                         text: lsc.label(modelData)
                         color: Theme.textDim
@@ -4244,11 +4262,26 @@ FocusScope {
                         font.pointSize: nb.outputPointSize
                         renderType: Text.NativeRendering
                     }
+                    Loader {
+                        id: paneLoader
+                        width: lsc.width
+                        active: sec.reached
+                        // (Until it's read again, the height it had.)
+                        height: !item ? sec.held : item.listed ? item.height : Math.max(item.height, sec.held)
+                        Connections {
+                            target: paneLoader.item
+                            function onHeightChanged() { if (paneLoader.item.listed) sec.held = paneLoader.item.height }
+                            function onListedChanged() { if (paneLoader.item.listed) sec.held = paneLoader.item.height }
+                            function onViewChanged() { sec.lastView = paneLoader.item.view }
+                        }
+                        onLoaded: sec.lastView = item.view
+                        sourceComponent: secPaneComp
+                    }
+                    Component {
+                        id: secPaneComp
                     LsPane {
-                        id: secPane
                         card: lsc
                         width: lsc.width
-                        wanted: sec.reached
                         // (One toolbar a card: the first pane's.)
                         showBar: sec.index === 0 && lsc.plan.groups.length === 0
                         startDir: nb.onHost(modelData)
@@ -4258,6 +4291,7 @@ FocusScope {
                         expandAll: !!lsc.plan.recursive && view === "details"
                         onSubDirsChanged: if (lsc.plan.recursive && view !== "details") lsc.addAfter(modelData, subDirs.map(nb.localPath))
                         onViewChanged: if (lsc.plan.recursive && view !== "details") lsc.addAfter(modelData, subDirs.map(nb.localPath))
+                    }
                     }
                 }
             }
