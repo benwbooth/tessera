@@ -550,10 +550,103 @@ pub fn tessh_manual_html() -> String {
 
 /// The Advanced tessh Scripting Guide (tessh/doc/advanced, the ABS Guide
 /// ported to tessh) as a manual, as the tessh guide is.
+/// Each example's tessh and bash versions are two tabs, tessh's shown.
 pub fn tessh_advanced_manual_html() -> String {
     const FILES: &[(&str, &str)] = include!("../tessh/doc/advanced.rs");
     let md: String = FILES.iter().flat_map(|(_, t)| t.lines().chain(["", ""])).filter(|l| !l.starts_with("<!-- help:")).collect::<Vec<_>>().join("\n");
-    crate::manual::manual_html(&md, "")
+    let html = crate::manual::manual_html(&example_tabs(&md), "");
+    let mut out = String::with_capacity(html.len() + 65536);
+    let mut n = 0;
+    let mut rest = html.as_str();
+    while let Some(k) = rest.find("<!--ex-") {
+        out.push_str(&rest[..k]);
+        let Some(e) = rest[k..].find("-->") else { break };
+        match &rest[k + 7..k + e] {
+            "tabs" => {
+                n += 1;
+                out.push_str(&format!(
+                    "<div class='ex-tabs'><input type='radio' class='ex-r-tessh' name='ex{n}' id='ex{n}t' checked><label for='ex{n}t'>tessh</label>\
+                     <input type='radio' class='ex-r-bash' name='ex{n}' id='ex{n}b'><label for='ex{n}b'>bash (original)</label><div class='ex-pane ex-bash'>"
+                ));
+            }
+            "tessh" => out.push_str("</div><div class='ex-pane ex-tessh'>"),
+            "end" => out.push_str("</div></div>"),
+            _ => {}
+        }
+        rest = &rest[k + e + 3..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The Advanced guide's Markdown with each example (a bash block, maybe its
+/// `output bash`, then the tessh block and its output, prose between them
+/// put before) marked for tabs: `<!--ex-tabs-->`, `<!--ex-tessh-->`,
+/// `<!--ex-end-->`.
+fn example_tabs(md: &str) -> String {
+    let lines: Vec<&str> = md.lines().collect();
+    // (The fenced blocks: their info and first and last line.)
+    let mut blocks: Vec<(String, usize, usize)> = vec![];
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(info) = lines[i].strip_prefix("```") {
+            let start = i;
+            i += 1;
+            while i < lines.len() && !lines[i].starts_with("```") {
+                i += 1;
+            }
+            blocks.push((info.trim().to_string(), start, i.min(lines.len() - 1)));
+        }
+        i += 1;
+    }
+    let lang = |b: &(String, usize, usize)| b.0.split_whitespace().next().unwrap_or("").to_string();
+    let between = |a: usize, b: usize| -> Vec<&str> { lines[a + 1..b].to_vec() };
+    // (Groups: bash block, bash output, prose, tessh block, its output.)
+    let mut groups: Vec<(usize, Option<usize>, usize, Option<usize>)> = vec![];
+    let mut k = 0;
+    while k < blocks.len() {
+        if lang(&blocks[k]) != "bash" {
+            k += 1;
+            continue;
+        }
+        let mut j = k + 1;
+        let bout = (j < blocks.len() && blocks[j].0 == "output bash" && between(blocks[k].2, blocks[j].1).iter().all(|l| l.trim().is_empty())).then_some(j);
+        if bout.is_some() {
+            j += 1;
+        }
+        let last = bout.map(|b| blocks[b].2).unwrap_or(blocks[k].2);
+        let ok = j < blocks.len() && lang(&blocks[j]) == "tessh" && !between(last, blocks[j].1).iter().any(|l| l.starts_with('#'));
+        if !ok {
+            k += 1;
+            continue;
+        }
+        let tout = (j + 1 < blocks.len() && blocks[j + 1].0 == "output" && between(blocks[j].2, blocks[j + 1].1).iter().all(|l| l.trim().is_empty())).then_some(j + 1);
+        groups.push((k, bout, j, tout));
+        k = tout.unwrap_or(j) + 1;
+    }
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + groups.len() * 8);
+    let mut at = 0;
+    for (b, bout, t, tout) in groups {
+        let (bs, be) = (blocks[b].1, bout.map(|o| blocks[o].2).unwrap_or(blocks[b].2));
+        let (ts, te) = (blocks[t].1, tout.map(|o| blocks[o].2).unwrap_or(blocks[t].2));
+        out.extend(lines[at..bs].iter().map(|l| l.to_string()));
+        // (The prose between, first.)
+        out.extend(lines[be + 1..ts].iter().map(|l| l.to_string()));
+        out.push(String::new());
+        out.push("<!--ex-tabs-->".into());
+        out.push(String::new());
+        out.extend(lines[bs..=be].iter().map(|l| l.to_string()));
+        out.push(String::new());
+        out.push("<!--ex-tessh-->".into());
+        out.push(String::new());
+        out.extend(lines[ts..=te].iter().map(|l| l.to_string()));
+        out.push(String::new());
+        out.push("<!--ex-end-->".into());
+        out.push(String::new());
+        at = te + 1;
+    }
+    out.extend(lines[at..].iter().map(|l| l.to_string()));
+    out.join("\n")
 }
 
 #[cfg(test)]
@@ -565,6 +658,18 @@ mod tests {
         let m = tessh_advanced_manual_html();
         assert!(m.starts_with("<nav>") && m.contains("<main>") && m.contains("Sha-Bang"), "{}", &m[..200]);
         assert!(m.contains("<pre class='tessh'><code>") && m.contains("<pre class='output'>") && !m.contains("<!-- help:"));
+        // (Examples as bash and tessh tabs, every marker replaced.)
+        assert!(m.matches("<div class='ex-tabs'>").count() > 300 && !m.contains("<!--ex-"));
+        assert_eq!(m.matches("<div class='ex-pane ex-bash'>").count(), m.matches("<div class='ex-pane ex-tessh'>").count());
+    }
+
+    #[test]
+    fn example_tabs_group() {
+        let md = "### Example 1\n\n```bash\necho hi\n```\n\n```output bash\nhi\n```\n\nIn tessh:\n\n```tessh\nprint hi\n```\n\n```output\nhi\n```\n\n```bash\nalone\n```\n";
+        let t = example_tabs(md);
+        let order: Vec<usize> = ["In tessh:", "<!--ex-tabs-->", "```bash", "```output bash", "<!--ex-tessh-->", "```tessh", "```output\n", "<!--ex-end-->", "alone"].iter().map(|x| t.find(x).unwrap()).collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{t}");
+        assert_eq!(t.matches("<!--ex-tabs-->").count(), 1);
     }
 
     #[test]

@@ -3,10 +3,9 @@
 
 This is Mendel Cooper's *Advanced Bash-Scripting Guide* (the ABS Guide,
 version 10, 10 March 2014), ported to tessh. Every chapter follows the
-original, and every example script is shown twice: the original bash, then
-a tessh version that does the same thing, with what it printed. Read them
-side by side to see how a bash habit is written in tessh, and where tessh
-does it another way.
+original, and every example script is there twice: a tessh version, with
+what it printed, and the original bash. Compare them to see how a bash
+habit is written in tessh, and where tessh does it another way.
 
 `help advanced` shows this page in tessh, and `help abs-loops` (or any
 chapter's `abs-` name) one chapter. In Tessera it's the second guide on the
@@ -29,16 +28,18 @@ source community.
 ## How to read it
 <!-- help: abs-conventions abs-how-to-read -->
 
-Each example is three blocks:
+Each example has two versions. On Tessera's Guide page they're two tabs,
+**tessh** (shown first) and **bash (original)**; in `help` and in the
+Markdown the bash comes first, then the tessh.
 
 - **bash**: the original script, as the ABS Guide has it (its file name is
-  in the heading).
-- **tessh**: the same script in tessh. It runs: the guide's test runs every
+  in the heading). Where it printed something else than the tessh version,
+  an `output bash` block shows what.
+- **tessh**: the same script in tessh, starting `#!/usr/bin/env tessh`, and
+  under it the **output** it printed. It runs: the guide's test runs every
   one as a script, `ex.tsh`, in a scratch folder and checks what it prints.
   (A few run tessh itself again, through `/proc/self/exe`; they're marked
   `tessh script` and checked with the tessh program instead.)
-- **output**: what the tessh version printed. Where bash printed something
-  else, an `output bash` block after the bash version shows bash's.
 
 Scripts that need root, delete files, read a terminal or reach the network
 are shown working on a scratch folder or on made-up input instead, and say

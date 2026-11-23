@@ -62,7 +62,17 @@ Rectangle {
             + "nav a.part{font-weight:bold;margin-top:10px;color:" + c(Theme.fg) + "}"
             + "nav .topics a{padding-left:14px;color:" + c(Theme.textDim) + "}"
             + "main{flex:1;overflow:auto;padding:16px 28px 60px}main>*{max-width:860px}"
+            // (What's off screen isn't laid out: a long guide's tab or a find
+            // relays out only what shows, not the whole page.)
+            + "main>*{content-visibility:auto;contain-intrinsic-size:auto 80px}"
             + "pre.tessh{border-left:3px solid " + c(Theme.accent) + "}"
+            // (The Advanced guide's examples: bash and tessh tabs.)
+            + ".ex-tabs{margin:.9em 0;position:relative}.ex-tabs>input{position:absolute;opacity:0;pointer-events:none}"
+            + ".ex-tabs>label{display:inline-block;padding:3px 14px;margin-right:3px;border-radius:7px 7px 0 0;font-size:12px;cursor:pointer;color:" + c(Theme.textDim) + "}"
+            + ".ex-tabs>label:hover{color:" + c(Theme.text) + "}"
+            + ".ex-tabs>input:checked+label{background:" + c(Theme.field) + ";color:" + c(Theme.fg) + ";font-weight:bold}"
+            + ".ex-pane{display:none}.ex-r-bash:checked~.ex-bash,.ex-r-tessh:checked~.ex-tessh{display:block}"
+            + ".ex-pane>pre:first-child{margin-top:0;border-top-left-radius:0}"
             + "pre.output{background:transparent;border:1px dashed " + c(Theme.divider) + ";color:" + c(Theme.textDim) + ";margin-top:-6px}"
             + "pre.output::before{content:'output';display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:2px}"
             + ".t-keyword{color:" + col(5, "#c678dd") + "}.t-string{color:" + col(2, "#98c379") + "}"
