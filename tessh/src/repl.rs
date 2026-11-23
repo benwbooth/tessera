@@ -1,24 +1,49 @@
-//! The terminal REPL: rustyline with auto-indentation and highlighting, and
-//! shell integration (OSC 133 prompt and command marks, OSC 7 folder,
-//! Tessera's command line, environment file and hand-overs from its other
-//! kernels).
+//! The terminal REPL, a daily shell in any terminal: reedline (vendored,
+//! tessh/vendor) with tessh's own Enter (runs what's complete; in a block,
+//! a new line indented for it, and a blank line ends the block, as IPython
+//! does), tree-sitter highlighting (`tree_sitter_tessh::highlight`, the
+//! colors Tessera uses), completion with each name's help beside it, grey
+//! suggestions from history and the AI, a live syntax check under the
+//! input, `# what you want` for the AI to write a command, and shell
+//! integration (OSC 133 prompt and command marks, OSC 7 folder, Tessera's
+//! command line, environment file and hand-overs from its other kernels).
+//!
+//! Keys Tessera's editor has that a terminal can't send (a lone tap of left
+//! or right Shift or Ctrl; Shift+Enter, Ctrl+Enter in most terminals) have
+//! alternatives every terminal sends: see KEYS (shown by F1 on an empty line
+//! and in `help keys`). Under the kitty keyboard protocol (kitty, foot,
+//! WezTerm, Ghostty, Alacritty, iTerm2) the real keys work too.
 
 use crate::compiler::BLOCK_SPECIALS;
 use crate::reader::incomplete;
 use crate::runner::{self, TesshError};
 use crate::runtime;
+use crossterm::event::{Event, KeyCode as CKeyCode, KeyEventKind, ModifierKeyCode};
+use nu_ansi_term::{Color, Style};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use rustyline::completion::{Completer, Pair};
-use rustyline::error::ReadlineError;
-use rustyline::highlight::{CmdKind, Highlighter};
-use rustyline::hint::Hinter;
-use rustyline::validate::Validator;
-use rustyline::{Cmd, ConditionalEventHandler, Editor, Event, EventContext, EventHandler, Helper, KeyCode, KeyEvent, Modifiers, Movement, RepeatCount};
+use reedline::{
+    default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings, default_vi_visual_keybindings, ColumnarMenu, Completer, CompletionResult, DescriptionMode, EditCommand, EditHook, EditHookContext, EditMode, Emacs,
+    FileBackedHistory, Hinter, History, IdeMenu, KeyCode, KeyModifiers, Keybindings, MenuBuilder, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, Reedline, ReedlineEvent, ReedlineMenu, ReedlineRawEvent,
+    RepaintSignal, Signal, Span, StatusLine, StyledText, Suggestion, ValidationResult, Validator, Vi,
+};
 use std::borrow::Cow;
 use std::io::Write;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// The keys Tessera's editor binds to a lone tap of a modifier, or to a
+/// chord most terminals send as plain Enter, and what to press instead.
+/// (Tessera key, what it does, the alternative here, kitty-protocol keys.)
+pub const KEYS: &[(&str, &str, &str, &str)] = &[
+    ("Right Shift (tap)", "New line", "Alt+Enter or Ctrl+J", "right Shift tap, Shift+Enter"),
+    ("Shift+Enter", "New line", "Alt+Enter or Ctrl+J", "Shift+Enter"),
+    ("Left Shift (tap)", "Take the grey suggestion; with none, ask the AI for one", "→ or End at the end takes it; Ctrl+Space takes it or asks", "left Shift tap"),
+    ("Right Ctrl (tap)", "Run in the background (as with a trailing &)", "Alt+&", "right Ctrl tap, Ctrl+Enter"),
+    ("Ctrl+Enter", "Run in the background", "Alt+&", "Ctrl+Enter"),
+    ("Left Ctrl (tap)", "Switch between the editor and the terminal", "Not needed: here the editor is the terminal, and keys typed while a command runs wait for the prompt", "—"),
+];
 
 const CONT_KEYWORDS: &[&str] = &["elif", "else", "except", "except*", "finally"];
 
@@ -133,81 +158,671 @@ pub fn needs_more(lines: &[&str], macros: &[String]) -> bool {
     !lines.last().unwrap_or(&"").trim().is_empty()
 }
 
-// ---- the editor -------------------------------------------------------------------
+// ---- highlighting -----------------------------------------------------------------
 
-struct EnterHandler {
-    macros: Arc<Mutex<Vec<String>>>,
+/// The style for a highlight kind (`tree_sitter_tessh::highlight`'s).
+fn kind_style(kind: &str) -> Option<Style> {
+    Some(match kind {
+        "keyword" => Color::Magenta.bold(),
+        "string" => Style::new().fg(Color::Green),
+        "comment" => Style::new().dimmed().italic(),
+        "number" | "constant" => Style::new().fg(Color::Magenta),
+        "operator" | "attribute" | "escape" => Style::new().fg(Color::Yellow),
+        "function" => Color::Blue.bold(),
+        "variable" => Style::new().fg(Color::Cyan),
+        "punctuation" => Style::new().fg(Color::DarkGray),
+        _ => return None,
+    })
 }
 
-impl ConditionalEventHandler for EnterHandler {
-    fn handle(&self, _evt: &Event, _n: RepeatCount, _positive: bool, ctx: &EventContext) -> Option<Cmd> {
-        let buf = ctx.line();
-        if ctx.pos() < buf.trim_end_matches(' ').len() {
-            // (In the middle of the input: a new line there.)
-            return Some(Cmd::Insert(1, "\n".into()));
+/// The text in runs of one kind each (later spans over earlier ones).
+fn runs(text: &str) -> Vec<(usize, usize, Option<&'static str>)> {
+    let mut kinds: Vec<Option<&'static str>> = vec![None; text.len()];
+    for (s, e, k) in tree_sitter_tessh::highlight::spans(text) {
+        for x in kinds.iter_mut().take(e.min(text.len())).skip(s) {
+            *x = Some(k);
         }
-        let macros = self.macros.lock().unwrap().clone();
-        let lines: Vec<&str> = buf.split('\n').collect();
-        let n = lines.len();
-        if n > 1 {
-            // (An else, elif, except or finally deeper than its if or try:
-            // back a level. Enter again goes on.)
-            let fixed = fix_indent(&lines[..n - 1], lines[n - 1]);
-            if indent_of(&fixed) < indent_of(lines[n - 1]) {
-                return Some(Cmd::Dedent(Movement::WholeLine));
+    }
+    let mut out = vec![];
+    let mut start = 0;
+    for i in 1..=text.len() {
+        if i == text.len() || kinds[i] != kinds[start] {
+            if text.is_char_boundary(i) {
+                out.push((start, i, kinds[start]));
+                start = i;
             }
         }
-        if needs_more(&lines, &macros) {
-            let ind = next_indent(&lines, &macros);
-            return Some(Cmd::Insert(1, format!("\n{}", " ".repeat(ind))));
+    }
+    out
+}
+
+/// A text with ANSI colors, as the editor shows it (for help pages).
+pub fn highlight(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 2);
+    for (s, e, k) in runs(text) {
+        match k.and_then(kind_style) {
+            Some(st) => out.push_str(&st.paint(&text[s..e]).to_string()),
+            None => out.push_str(&text[s..e]),
         }
-        Some(Cmd::AcceptLine)
+    }
+    out
+}
+
+struct TesshHighlighter;
+
+impl reedline::Highlighter for TesshHighlighter {
+    fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
+        let mut st = StyledText::new();
+        for (s, e, k) in runs(line) {
+            st.push((k.and_then(kind_style).unwrap_or_default(), line[s..e].to_string()));
+        }
+        st
     }
 }
 
-/// Backspace in a line's leading spaces takes away a level (two spaces).
-struct BackspaceHandler;
+// ---- state the editor's parts share -----------------------------------------------
 
-impl ConditionalEventHandler for BackspaceHandler {
-    fn handle(&self, _evt: &Event, _n: RepeatCount, _positive: bool, ctx: &EventContext) -> Option<Cmd> {
-        let before = &ctx.line()[..ctx.pos()];
-        let line = before.rsplit('\n').next().unwrap_or("");
-        if !line.is_empty() && line.chars().all(|c| c == ' ') {
-            let k = if line.len() % 2 == 0 { 2 } else { 1 };
-            return Some(Cmd::Kill(Movement::BackwardChar(k)));
-        }
-        None
+#[derive(Default)]
+struct Shared {
+    /// Single-line history entries, oldest first (for suggestions).
+    history: Vec<String>,
+    macros: Vec<String>,
+    /// The suggestion shown now, and the text it's for.
+    hint: String,
+    hint_for: String,
+    ai: Ai,
+}
+
+#[derive(Default)]
+struct Ai {
+    inline_ready: bool,
+    command_ready: bool,
+    /// What the hinter would like asked: (task, text, since).
+    want: Option<(&'static str, String, Instant)>,
+    /// Asked now (a key asked it): skip the pause.
+    now: bool,
+    asking: bool,
+    /// The last answers: (task, text asked) → answer.
+    answers: Vec<((&'static str, String), String)>,
+    note: String,
+}
+
+impl Ai {
+    fn answer(&self, task: &'static str, text: &str) -> Option<&str> {
+        self.answers.iter().rev().find(|((t, q), _)| *t == task && q == text).map(|(_, a)| a.as_str())
+    }
+    fn asked(&self, task: &'static str, text: &str) -> bool {
+        self.answers.iter().any(|((t, q), _)| *t == task && q == text)
     }
 }
 
-struct TesshHelper {
+type SharedRef = Arc<Mutex<Shared>>;
+
+fn recent(sh: &Shared, n: usize) -> String {
+    let h = &sh.history;
+    h[h.len().saturating_sub(n)..].join("\n")
+}
+
+/// Called every poll by the editor: asks the AI once typing has paused.
+fn ai_tick(shared: &SharedRef, repaint: &RepaintSignal) {
+    let (task, text, recent_cmds) = {
+        let mut sh = shared.lock().unwrap();
+        let Some((task, text, since)) = sh.ai.want.clone() else { return };
+        let pause = match task {
+            "command" => 1400,
+            "request" => 250,
+            _ => 400,
+        };
+        if sh.ai.asking || sh.ai.asked(task, &text) || (!sh.ai.now && since.elapsed() < Duration::from_millis(pause)) {
+            return;
+        }
+        sh.ai.now = false;
+        sh.ai.asking = true;
+        (task, text.clone(), recent(&sh, 10))
+    };
+    let shared = shared.clone();
+    let repaint = repaint.clone();
+    std::thread::spawn(move || {
+        let q = if task == "inline" { text.clone() } else { text.trim_start_matches('#').trim().to_string() };
+        let r = crate::ai::ask(task, &q, &recent_cmds);
+        let mut sh = shared.lock().unwrap();
+        sh.ai.asking = false;
+        let a = match r {
+            Ok(a) => a,
+            Err(e) => {
+                sh.ai.note = format!("AI: {e}");
+                String::new()
+            }
+        };
+        sh.ai.answers.push(((task, text), a));
+        if sh.ai.answers.len() > 50 {
+            sh.ai.answers.remove(0);
+        }
+        repaint.request_repaint();
+    });
+}
+
+// ---- suggestions ------------------------------------------------------------------
+
+struct TesshHinter {
+    shared: SharedRef,
+}
+
+impl Hinter for TesshHinter {
+    fn handle(&mut self, line: &str, pos: usize, _history: &dyn History, use_ansi_coloring: bool, _cwd: &str) -> String {
+        let mut sh = self.shared.lock().unwrap();
+        sh.hint.clear();
+        sh.hint_for = line.to_string();
+        if pos < line.len() || line.contains('\n') || line.trim().len() < 2 {
+            sh.ai.want = None;
+            return String::new();
+        }
+        let shown;
+        if line.starts_with('#') {
+            // "# what I want": the request finished, then the command.
+            let mut s = String::new();
+            if let Some(a) = sh.ai.answer("request", line).filter(|a| a.len() > line.len() && a.starts_with(line)) {
+                s = a[line.len()..].to_string();
+                sh.hint = s.clone();
+            }
+            if let Some(c) = sh.ai.answer("command", line).filter(|c| !c.is_empty()) {
+                s.push_str(&format!("  → {c}"));
+            }
+            sh.ai.want = if !sh.ai.command_ready {
+                None
+            } else if sh.ai.inline_ready && !sh.ai.asked("request", line) {
+                Some(("request", line.to_string(), Instant::now()))
+            } else if !sh.ai.asked("command", line) {
+                Some(("command", line.to_string(), sh.ai.want.as_ref().filter(|w| w.1 == line).map(|w| w.2).unwrap_or_else(Instant::now)))
+            } else {
+                None
+            };
+            shown = s;
+        } else {
+            let from_history = sh.history.iter().rev().find(|h| h.len() > line.len() && h.starts_with(line)).map(|h| h[line.len()..].to_string());
+            match from_history {
+                Some(h) => {
+                    sh.ai.want = None;
+                    sh.hint = h;
+                }
+                None => {
+                    if let Some(a) = sh.ai.answer("inline", line).filter(|a| a.len() > line.len() && a.starts_with(line)) {
+                        sh.hint = a[line.len()..].to_string();
+                        sh.ai.want = None;
+                    } else if sh.ai.inline_ready && !sh.ai.asked("inline", line) {
+                        let since = sh.ai.want.as_ref().filter(|w| w.1 == line).map(|w| w.2).unwrap_or_else(Instant::now);
+                        sh.ai.want = Some(("inline", line.to_string(), since));
+                    } else {
+                        sh.ai.want = None;
+                    }
+                }
+            }
+            shown = sh.hint.clone();
+        }
+        if shown.is_empty() {
+            return String::new();
+        }
+        if use_ansi_coloring {
+            Style::new().fg(Color::DarkGray).paint(shown).to_string()
+        } else {
+            shown
+        }
+    }
+
+    fn complete_hint(&self) -> String {
+        self.shared.lock().unwrap().hint.clone()
+    }
+
+    fn next_hint_token(&self) -> String {
+        let h = self.shared.lock().unwrap().hint.clone();
+        let t = h.trim_start();
+        let lead = h.len() - t.len();
+        let end = t.find(char::is_whitespace).unwrap_or(t.len());
+        h[..lead + end].to_string()
+    }
+}
+
+// ---- the line under the input: syntax check, AI notes -------------------------------
+
+struct TesshStatus {
+    shared: SharedRef,
+    cache: (String, String),
+}
+
+impl StatusLine for TesshStatus {
+    fn status(&mut self, line: &str, _pos: usize, _columns: u16, ansi: bool) -> String {
+        let paint = |st: Style, s: String| if ansi { st.paint(s).to_string() } else { s };
+        if line.trim().is_empty() {
+            return String::new();
+        }
+        {
+            let sh = self.shared.lock().unwrap();
+            if !sh.ai.note.is_empty() && sh.hint_for == line {
+                return paint(Style::new().fg(Color::DarkGray), sh.ai.note.clone());
+            }
+            if line.starts_with('#') && !line.contains('\n') {
+                if !sh.ai.command_ready {
+                    return String::new();
+                }
+                let s = if sh.ai.asking { "asking the AI…" } else if sh.ai.answer("command", line).is_some_and(|c| !c.is_empty()) { "→ or Ctrl+Space takes the command; Enter asks again" } else { "Enter: the AI writes the command, for you to check" };
+                return paint(Style::new().fg(Color::DarkGray), s.into());
+            }
+        }
+        if self.cache.0 != line {
+            let msg = if incomplete(line) {
+                String::new()
+            } else {
+                Python::attach(|py| runner::check(py, line, "<input>")).into_iter().next().map(|(l, c, _, m)| if line.contains('\n') { format!("✗ line {l}:{}: {m}", c + 1) } else { format!("✗ {m}") }).unwrap_or_default()
+            };
+            self.cache = (line.to_string(), msg);
+        }
+        if self.cache.1.is_empty() {
+            return String::new();
+        }
+        paint(Style::new().fg(Color::Red), self.cache.1.clone())
+    }
+}
+
+// ---- completion -------------------------------------------------------------------
+
+struct TesshCompleter {
     ns: Py<PyDict>,
 }
 
-impl Helper for TesshHelper {}
-impl Validator for TesshHelper {}
-impl Hinter for TesshHelper {
-    type Hint = String;
-}
-
-impl Completer for TesshHelper {
-    type Candidate = Pair;
-
-    fn complete(&self, line: &str, pos: usize, _ctx: &rustyline::Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
-        let before = &line[..pos];
-        let start = before.rfind(|c: char| " \t\n()[]{}\"'`;$".contains(c)).map(|i| i + 1).unwrap_or(0);
-        let word = &before[start..];
-        let head = before[..start].trim_end();
-        let first = head.is_empty() || head.ends_with(['|', ';', '(', '\n']) || head.ends_with("&&") || head.ends_with("||");
-        let names = Python::attach(|py| completions(py, self.ns.bind(py), word, first, &before[..start]));
-        let quoted = before[..start].ends_with(['\'', '"']);
-        Ok((start, names.into_iter().map(|n| Pair { display: n.clone(), replacement: if quoted { n } else { quote_path(&n) } }).collect()))
+impl Completer for TesshCompleter {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        let (start, end, items) = Python::attach(|py| complete_items(py, self.ns.bind(py), line, pos));
+        let s: Vec<Suggestion> = items
+            .into_iter()
+            .map(|it| {
+                let mut desc = it.detail.clone();
+                if !it.doc.is_empty() {
+                    if !desc.is_empty() {
+                        desc.push_str("\n\n");
+                    }
+                    desc.push_str(&it.doc);
+                }
+                Suggestion {
+                    display_override: (it.label != it.insert).then(|| it.label.clone()),
+                    value: it.insert,
+                    description: (!desc.is_empty()).then_some(desc),
+                    span: Span::new(start, end),
+                    append_whitespace: false,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        CompletionResult::fresh(s)
     }
 }
 
-/// Completions for Tessera's input editor (`tessh --complete`): text and a
-/// UTF-16 cursor in, {"start", "end" (UTF-16), "items": [{insert, label,
-/// kind, detail}]} out, as Tessera's shell completer answers.
+// ---- Enter, Tab, Backspace and the rest that look at the text -----------------------
+
+struct TesshValidator {
+    shared: SharedRef,
+}
+
+impl Validator for TesshValidator {
+    fn validate(&self, line: &str) -> ValidationResult {
+        let macros = self.shared.lock().unwrap().macros.clone();
+        let lines: Vec<&str> = line.split('\n').collect();
+        if needs_more(&lines, &macros) {
+            ValidationResult::Incomplete
+        } else {
+            ValidationResult::Complete
+        }
+    }
+}
+
+struct TesshHook {
+    shared: SharedRef,
+}
+
+fn edit(cmds: Vec<EditCommand>) -> Option<ReedlineEvent> {
+    Some(ReedlineEvent::Edit(cmds))
+}
+
+impl TesshHook {
+    fn macros(&self) -> Vec<String> {
+        self.shared.lock().unwrap().macros.clone()
+    }
+
+    /// A new line at the cursor, indented for what's before it.
+    fn newline(&self, ctx: &EditHookContext<'_>) -> Option<ReedlineEvent> {
+        let before: Vec<&str> = ctx.buffer[..ctx.cursor].split('\n').collect();
+        let ind = next_indent(&before, &self.macros());
+        edit(vec![EditCommand::InsertNewline, EditCommand::InsertString(" ".repeat(ind))])
+    }
+
+    fn enter(&self, ctx: &EditHookContext<'_>) -> Option<ReedlineEvent> {
+        let buf = ctx.buffer;
+        // "# what I want": the AI writes the command (the main loop asks).
+        if buf.starts_with('#') && !buf.contains('\n') && buf.trim_start_matches('#').trim().len() > 1 && self.shared.lock().unwrap().ai.command_ready {
+            return Some(ReedlineEvent::ExecuteHostCommand("tessh:ai".into()));
+        }
+        // (In the middle of the input: a new line there.)
+        if ctx.cursor < buf.trim_end_matches(' ').len() {
+            return self.newline(ctx);
+        }
+        let macros = self.macros();
+        let mut lines: Vec<String> = buf.split('\n').map(String::from).collect();
+        let n = lines.len();
+        // (An else, elif, except or finally deeper than its if or try goes
+        // back to it.)
+        let mut replaced = false;
+        if n > 1 {
+            let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let fixed = fix_indent(&refs[..n - 1], refs[n - 1]);
+            if fixed != lines[n - 1] {
+                lines[n - 1] = fixed;
+                replaced = true;
+            }
+        }
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        if needs_more(&refs, &macros) {
+            let ind = next_indent(&refs, &macros);
+            if replaced {
+                return edit(vec![EditCommand::Clear, EditCommand::InsertString(format!("{}\n{}", lines.join("\n"), " ".repeat(ind)))]);
+            }
+            return edit(vec![EditCommand::MoveToEnd { select: false }, EditCommand::InsertNewline, EditCommand::InsertString(" ".repeat(ind))]);
+        }
+        if replaced {
+            return Some(ReedlineEvent::Multiple(vec![ReedlineEvent::Edit(vec![EditCommand::Clear, EditCommand::InsertString(lines.join("\n"))]), ReedlineEvent::Submit]));
+        }
+        Some(ReedlineEvent::Submit)
+    }
+
+    /// The text before the cursor on its line, when it's only spaces.
+    fn in_indent<'a>(ctx: &EditHookContext<'a>) -> Option<&'a str> {
+        let line = ctx.buffer[..ctx.cursor].rsplit('\n').next().unwrap_or("");
+        line.chars().all(|c| c == ' ').then_some(line)
+    }
+
+    fn outdent(ctx: &EditHookContext<'_>) -> Option<ReedlineEvent> {
+        let start = ctx.buffer[..ctx.cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let n = indent_of(&ctx.buffer[start..]).min(2);
+        if n == 0 {
+            return Some(ReedlineEvent::None);
+        }
+        let mut cmds = vec![EditCommand::MoveToPosition { position: start, select: false }];
+        cmds.extend(std::iter::repeat_n(EditCommand::Delete, n));
+        cmds.push(EditCommand::MoveToPosition { position: ctx.cursor.saturating_sub(n).max(start), select: false });
+        edit(cmds)
+    }
+}
+
+impl EditHook for TesshHook {
+    fn edit(&mut self, event: &ReedlineEvent, ctx: &EditHookContext<'_>) -> Option<ReedlineEvent> {
+        match event {
+            ReedlineEvent::Enter | ReedlineEvent::SubmitOrNewline if !ctx.menu_active => self.enter(ctx),
+            ReedlineEvent::ExecuteHostCommand(c) => match c.as_str() {
+                "tessh:newline" => self.newline(ctx),
+                "tessh:background" => {
+                    let t = ctx.buffer.trim_end();
+                    if t.is_empty() {
+                        return Some(ReedlineEvent::None);
+                    }
+                    let mut cmds = vec![EditCommand::MoveToEnd { select: false }];
+                    if !t.ends_with('&') {
+                        cmds.push(EditCommand::InsertString(" &".into()));
+                    }
+                    Some(ReedlineEvent::Multiple(vec![ReedlineEvent::Edit(cmds), ReedlineEvent::Submit]))
+                }
+                "tessh:accept" => {
+                    let mut sh = self.shared.lock().unwrap();
+                    if let Some(c) = sh.ai.answer("command", ctx.buffer).filter(|c| !c.is_empty()).map(String::from) {
+                        return edit(vec![EditCommand::Clear, EditCommand::InsertString(c)]);
+                    }
+                    if !sh.hint.is_empty() && sh.hint_for == ctx.buffer {
+                        return Some(ReedlineEvent::HistoryHintComplete);
+                    }
+                    // (Nothing to take: ask the AI now.)
+                    if sh.ai.inline_ready && ctx.cursor == ctx.buffer.len() && !ctx.buffer.trim().is_empty() {
+                        let task = if ctx.buffer.starts_with('#') { "command" } else { "inline" };
+                        sh.ai.answers.retain(|((t, q), _)| !(*t == task && q == ctx.buffer));
+                        sh.ai.want = Some((task, ctx.buffer.to_string(), Instant::now()));
+                        sh.ai.now = true;
+                    }
+                    Some(ReedlineEvent::None)
+                }
+                "tessh:nothing" => Some(ReedlineEvent::None),
+                _ => None,
+            },
+            ReedlineEvent::Edit(cmds) if !ctx.menu_active && cmds.len() == 1 => match &cmds[0] {
+                EditCommand::InsertNewline => self.newline(ctx),
+                EditCommand::Backspace => {
+                    // (In a line's indentation: back a level, two spaces.)
+                    let line = Self::in_indent(ctx).filter(|l| !l.is_empty())?;
+                    let k = if line.len() % 2 == 0 { 2 } else { 1 };
+                    edit(std::iter::repeat_n(EditCommand::Backspace, k).collect())
+                }
+                _ => None,
+            },
+            // Tab in the indentation indents; elsewhere it completes.
+            ReedlineEvent::UntilFound(v) if !ctx.menu_active && matches!(v.first(), Some(ReedlineEvent::Menu(m)) if m == "completion") => {
+                let ind = Self::in_indent(ctx)?;
+                if ctx.cursor == 0 && ctx.buffer.is_empty() {
+                    return None;
+                }
+                edit(vec![EditCommand::InsertString(" ".repeat(2 - ind.len() % 2))])
+            }
+            // Shift+Tab outdents (in the completion list, it goes back).
+            ReedlineEvent::MenuPrevious if !ctx.menu_active => Self::outdent(ctx),
+            // → at the end takes a "# request"'s command.
+            ReedlineEvent::UntilFound(v) if matches!(v.first(), Some(ReedlineEvent::HistoryHintComplete)) && ctx.cursor == ctx.buffer.len() => {
+                let sh = self.shared.lock().unwrap();
+                let c = sh.ai.answer("command", ctx.buffer).filter(|c| !c.is_empty() && sh.hint.is_empty())?;
+                edit(vec![EditCommand::Clear, EditCommand::InsertString(c.to_string())])
+            }
+            _ => None,
+        }
+    }
+}
+
+// ---- keys -------------------------------------------------------------------------
+
+fn host(c: &str) -> ReedlineEvent {
+    ReedlineEvent::ExecuteHostCommand(c.into())
+}
+
+fn add_tessh_keys(kb: &mut Keybindings) {
+    use KeyCode as K;
+    use KeyModifiers as M;
+    kb.add_binding(M::NONE, K::Enter, ReedlineEvent::Enter);
+    // A new line: Alt+Enter and Ctrl+J in any terminal; Shift+Enter where
+    // the terminal tells it from Enter.
+    for (m, k) in [(M::ALT, K::Enter), (M::SHIFT, K::Enter), (M::CONTROL, K::Char('j'))] {
+        kb.add_binding(m, k, host("tessh:newline"));
+    }
+    // In the background: Alt+&; Ctrl+Enter where the terminal tells it.
+    for (m, k) in [(M::ALT, K::Char('&')), (M::ALT | M::SHIFT, K::Char('&')), (M::CONTROL, K::Enter)] {
+        kb.add_binding(m, k, host("tessh:background"));
+    }
+    // The suggestion, or ask the AI for one (left Shift's tap in Tessera).
+    kb.add_binding(M::CONTROL, K::Char(' '), host("tessh:accept"));
+    kb.add_binding(M::NONE, K::End, ReedlineEvent::UntilFound(vec![ReedlineEvent::HistoryHintComplete, ReedlineEvent::Edit(vec![EditCommand::MoveToLineEnd { select: false }])]));
+    kb.add_binding(M::NONE, K::Tab, ReedlineEvent::UntilFound(vec![ReedlineEvent::Menu("completion".into()), ReedlineEvent::MenuNext]));
+    kb.add_binding(M::SHIFT, K::BackTab, ReedlineEvent::MenuPrevious);
+    kb.add_binding(M::NONE, K::BackTab, ReedlineEvent::MenuPrevious);
+    kb.add_binding(M::NONE, K::Backspace, ReedlineEvent::Edit(vec![EditCommand::Backspace]));
+    // Help for the word at the cursor (or the keys, on an empty line).
+    kb.add_binding(M::NONE, K::F(1), host("tessh:help"));
+    kb.add_binding(M::ALT, K::Char('h'), host("tessh:help"));
+    kb.add_binding(M::CONTROL | M::ALT, K::Char('j'), host("tessh:jobs"));
+    // A whole history entry at a time (↑/↓ go line by line in one).
+    kb.add_binding(M::NONE, K::PageUp, ReedlineEvent::PreviousHistory);
+    kb.add_binding(M::NONE, K::PageDown, ReedlineEvent::NextHistory);
+}
+
+/// The edit mode (Emacs or vi keys), with lone taps of Shift and Ctrl seen
+/// where the terminal reports them (the kitty keyboard protocol).
+struct TapMode {
+    inner: Box<dyn EditMode>,
+    pending: Option<(ModifierKeyCode, Instant)>,
+}
+
+impl EditMode for TapMode {
+    fn parse_event(&mut self, event: ReedlineRawEvent) -> ReedlineEvent {
+        let ev: Event = event.into();
+        if let Event::Key(k) = &ev {
+            if let CKeyCode::Modifier(m) = k.code {
+                match k.kind {
+                    KeyEventKind::Release => {
+                        let tap = self.pending.take().filter(|(p, at)| *p == m && at.elapsed() < Duration::from_millis(450));
+                        return match tap.map(|t| t.0) {
+                            Some(ModifierKeyCode::RightShift) => host("tessh:newline"),
+                            Some(ModifierKeyCode::LeftShift) => host("tessh:accept"),
+                            Some(ModifierKeyCode::RightControl) => host("tessh:background"),
+                            _ => ReedlineEvent::None,
+                        };
+                    }
+                    _ => {
+                        if self.pending.as_ref().is_none_or(|(p, _)| *p != m) {
+                            self.pending = Some((m, Instant::now()));
+                        }
+                        return ReedlineEvent::None;
+                    }
+                }
+            }
+        }
+        self.pending = None;
+        match ReedlineRawEvent::try_from(ev) {
+            Ok(raw) => self.inner.parse_event(raw),
+            Err(_) => ReedlineEvent::None,
+        }
+    }
+
+    fn edit_mode(&self) -> PromptEditMode {
+        self.inner.edit_mode()
+    }
+
+    fn handle_mode_specific_event(&mut self, event: ReedlineEvent) -> reedline::EventStatus {
+        self.inner.handle_mode_specific_event(event)
+    }
+}
+
+fn edit_mode() -> Box<dyn EditMode> {
+    let vi = std::env::var("TESSH_KEYS").is_ok_and(|k| k.eq_ignore_ascii_case("vi"));
+    let inner: Box<dyn EditMode> = if vi {
+        let mut ins = default_vi_insert_keybindings();
+        add_tessh_keys(&mut ins);
+        let mut normal = default_vi_normal_keybindings();
+        normal.add_binding(KeyModifiers::NONE, KeyCode::Enter, ReedlineEvent::Enter);
+        Box::new(Vi::new(ins, normal, default_vi_visual_keybindings()))
+    } else {
+        let mut kb = default_emacs_keybindings();
+        add_tessh_keys(&mut kb);
+        Box::new(Emacs::new(kb))
+    };
+    Box::new(TapMode { inner, pending: None })
+}
+
+/// The kitty keyboard protocol's flags tessh asks for: every key as an
+/// escape code, with releases, so a lone Shift or Ctrl can be seen.
+fn kitty_flags() -> crossterm::event::KeyboardEnhancementFlags {
+    use crossterm::event::KeyboardEnhancementFlags as F;
+    F::DISAMBIGUATE_ESCAPE_CODES | F::REPORT_EVENT_TYPES | F::REPORT_ALTERNATE_KEYS | F::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+}
+
+// ---- the prompt -------------------------------------------------------------------
+
+struct TesshPrompt {
+    cwd: String,
+    status: i32,
+}
+
+impl Prompt for TesshPrompt {
+    fn render_prompt_left(&self) -> Cow<'_, str> {
+        Cow::Owned(Color::Blue.bold().paint(&self.cwd).to_string())
+    }
+    fn render_prompt_right(&self) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+    fn render_prompt_indicator(&self, mode: PromptEditMode) -> Cow<'_, str> {
+        let color = if self.status == 0 { Color::Green } else { Color::Red };
+        let mark = match mode {
+            PromptEditMode::Vi(reedline::PromptViMode::Normal) => " ❮ ",
+            _ => " ❯ ",
+        };
+        Cow::Owned(color.paint(mark).to_string())
+    }
+    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
+        Cow::Owned(Style::new().fg(Color::DarkGray).paint("· ").to_string())
+    }
+    fn render_prompt_history_search_indicator(&self, search: PromptHistorySearch) -> Cow<'_, str> {
+        let prefix = match search.status {
+            PromptHistorySearchStatus::Passing => "",
+            PromptHistorySearchStatus::Failing => "failing ",
+        };
+        Cow::Owned(format!("({prefix}history: {}) ", search.term))
+    }
+}
+
+/// The folder for the prompt: ~ for home.
+fn short_cwd() -> String {
+    let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    match std::env::var("HOME") {
+        Ok(h) if !h.is_empty() && (cwd == h || cwd.starts_with(&format!("{h}/"))) => format!("~{}", &cwd[h.len()..]),
+        _ => cwd,
+    }
+}
+
+// ---- history ----------------------------------------------------------------------
+
+/// The history file, in reedline's format; one in rustyline's (an older
+/// tessh) is converted.
+fn history_file(data: &std::path::Path) -> std::path::PathBuf {
+    let f = data.join("history");
+    if let Ok(t) = std::fs::read_to_string(&f) {
+        if let Some(rest) = t.strip_prefix("#V2\n") {
+            let mut out = String::new();
+            for l in rest.lines() {
+                let mut s = String::new();
+                let mut it = l.chars();
+                while let Some(c) = it.next() {
+                    if c == '\\' {
+                        match it.next() {
+                            Some('n') => s.push('\n'),
+                            Some(o) => s.push(o),
+                            None => {}
+                        }
+                    } else {
+                        s.push(c);
+                    }
+                }
+                out.push_str(&s.replace('\n', "<\\n>"));
+                out.push('\n');
+            }
+            let _ = std::fs::write(&f, out);
+        }
+    }
+    f
+}
+
+fn read_history(f: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(f).unwrap_or_default().lines().filter(|l| !l.contains("<\\n>") && !l.trim().is_empty()).map(String::from).collect()
+}
+
+/// The keys, for F1 on an empty line and `help keys`.
+pub fn keys_help() -> String {
+    let mut s = String::from("# Keys\n\nAs Tessera's editor, with these for the keys a terminal can't send:\n\n| In Tessera | Does | Here | With the kitty keyboard protocol |\n|---|---|---|---|\n");
+    for (k, what, alt, kitty) in KEYS {
+        s.push_str(&format!("| {k} | {what} | {alt} | {kitty} |\n"));
+    }
+    s.push_str(
+        "\nThe rest:\n\n\
+         - **Enter** runs what's complete. In a block (def, if, for, …) or open brackets it starts a new line, indented; \
+         Enter on a blank line ends the block and runs it.\n\
+         - **Tab** completes (each name's help beside it); in a line's indentation it indents. **Shift+Tab** outdents.\n\
+         - **↑ ↓** go line by line, then through history; **PgUp PgDn** a whole entry at a time. **Ctrl+R** searches history.\n\
+         - **→** or **End** at the end takes the grey suggestion (history first, then the AI); **Alt+F** one word of it.\n\
+         - **# what you want**, then Enter: the AI writes the command for you to check.\n\
+         - **F1** or **Alt+H**: help for the word at the cursor. **Ctrl+Alt+J**: background jobs.\n\
+         - Emacs keys (Ctrl+A, Ctrl+E, Ctrl+K, Ctrl+W, Ctrl+Y, Alt+B, Alt+F, …); `TESSH_KEYS=vi` for vi's.\n",
+    );
+    s
+}
+
 /// A value's kind, said plainly.
 fn type_word(v: &Bound<'_, PyAny>) -> String {
     let t = v.get_type().name().map(|t| t.to_string()).unwrap_or_default();
@@ -286,6 +901,20 @@ fn doc_for(py: Python<'_>, name: &str, v: Option<&Bound<'_, PyAny>>) -> String {
     out
 }
 
+/// A completion: what goes in, what the list shows, its kind ("command",
+/// "value", "dir", "file", "variable", "option", "subcommand"), a word on
+/// what it is, and its help.
+pub struct Item {
+    pub insert: String,
+    pub label: String,
+    pub kind: &'static str,
+    pub detail: String,
+    pub doc: String,
+}
+
+/// Completions for Tessera's input editor (`tessh --complete`): text and a
+/// UTF-16 cursor in, {"start", "end" (UTF-16), "items": [{insert, label,
+/// kind, detail, doc}]} out, as Tessera's shell completer answers.
 pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor16: usize) -> serde_json::Value {
     let mut pos = text.len();
     let mut n16 = 0;
@@ -296,14 +925,22 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
         }
         n16 += c.len_utf16();
     }
+    let (start, end, items) = complete_items(py, ns, text, pos);
+    let u16_of = |b: usize| text[..b].encode_utf16().count();
+    let items: Vec<serde_json::Value> = items.into_iter().map(|i| serde_json::json!({"insert": i.insert, "label": i.label, "kind": i.kind, "detail": i.detail, "doc": i.doc})).collect();
+    serde_json::json!({"start": u16_of(start), "end": u16_of(end), "items": items})
+}
+
+/// Completions at byte offset `pos`: the byte range they replace, and them.
+pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: usize) -> (usize, usize, Vec<Item>) {
+    let pos = pos.min(text.len());
     let before = &text[..pos];
     let start = before.rfind(|c: char| " \t\n()[]{}\"'`;$".contains(c)).map(|i| i + 1).unwrap_or(0);
     let word = &before[start..];
     let head = before[..start].trim_end();
     let first = head.is_empty() || head.ends_with(['|', ';', '(', '\n']) || head.ends_with("&&") || head.ends_with("||");
     let var = before[..start].ends_with('$');
-    let u16_of = |b: usize| text[..b].encode_utf16().count();
-    let mut items: Vec<serde_json::Value> = vec![];
+    let mut items: Vec<Item> = vec![];
     // (obj.attr: what the object has, from a name tessh knows or a module
     // already loaded.)
     if let Some((root, part)) = word.rsplit_once('.').filter(|(r, _)| !r.is_empty() && r.split('.').all(crate::reader::is_ident)) {
@@ -322,11 +959,11 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
                     let callable = v.as_ref().is_some_and(|v| v.is_callable());
                     let detail = v.as_ref().map(type_word).unwrap_or_default();
                     let doc = v.as_ref().map(|v| doc_for(py, &n, Some(v))).unwrap_or_default();
-                    items.push(serde_json::json!({"insert": format!("{root}.{n}"), "label": n, "kind": if callable { "command" } else { "value" }, "detail": detail, "doc": doc}));
+                    items.push(Item { insert: format!("{root}.{n}"), label: n, kind: if callable { "command" } else { "value" }, detail, doc });
                 }
             }
         }
-        return serde_json::json!({"start": u16_of(start), "end": u16_of(pos), "items": items});
+        return (start, pos, items);
     }
     let builtins = py.import("builtins").ok();
     for n in completions(py, ns, word, first, &before[..start]) {
@@ -354,9 +991,9 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
         let insert = if (kind == "dir" || kind == "file") && !before[..start].ends_with(['\'', '"']) { quote_path(&n) } else { n.clone() };
         // (Shown as it'll go in, quotes and all.)
         let label = if kind == "dir" || kind == "file" { insert.clone() } else { n.clone() };
-        items.push(serde_json::json!({"insert": insert, "label": label, "kind": kind, "detail": detail, "doc": doc}));
+        items.push(Item { insert, label, kind, detail, doc });
     }
-    serde_json::json!({"start": u16_of(start), "end": u16_of(pos), "items": items})
+    (start, pos, items)
 }
 
 pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bool, before: &str) -> Vec<String> {
@@ -426,119 +1063,6 @@ pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bo
     out
 }
 
-impl Highlighter for TesshHelper {
-    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        Cow::Owned(highlight(line))
-    }
-
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> Cow<'b, str> {
-        Cow::Borrowed(prompt)
-    }
-
-    fn highlight_char(&self, _line: &str, _pos: usize, _kind: CmdKind) -> bool {
-        true
-    }
-}
-
-/// Colors for a line as it's typed: strings, $variables, numbers, comments,
-/// keywords, operators and the head of each line.
-pub fn highlight(line: &str) -> String {
-    let mut out = String::with_capacity(line.len() * 2);
-    let chars: Vec<char> = line.chars().collect();
-    let mut i = 0;
-    let mut at_head = true;
-    let paint = |out: &mut String, color: &str, s: &str| {
-        out.push_str(color);
-        out.push_str(s);
-        out.push_str("\x1b[0m");
-    };
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\n' {
-            out.push(c);
-            at_head = true;
-            i += 1;
-            continue;
-        }
-        if c == ' ' || c == '\t' {
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '#' && (i == 0 || " \t\n([{".contains(chars[i - 1])) {
-            let j = chars[i..].iter().position(|&x| x == '\n').map(|k| i + k).unwrap_or(chars.len());
-            paint(&mut out, "\x1b[2;3m", &chars[i..j].iter().collect::<String>());
-            i = j;
-            continue;
-        }
-        if c == '"' || c == '\'' {
-            let mut j = i + 1;
-            while j < chars.len() && chars[j] != c {
-                if chars[j] == '\\' && c == '"' {
-                    j += 1;
-                }
-                j += 1;
-            }
-            let j = (j + 1).min(chars.len());
-            paint(&mut out, "\x1b[32m", &chars[i..j].iter().collect::<String>());
-            i = j;
-            at_head = false;
-            continue;
-        }
-        if "()[]{};,".contains(c) {
-            out.push(c);
-            if c == '(' || c == ';' {
-                at_head = true;
-            }
-            i += 1;
-            continue;
-        }
-        // A word.
-        let mut j = i;
-        while j < chars.len() && !" \t\n()[]{};\"'".contains(chars[j]) {
-            j += 1;
-        }
-        let w: String = chars[i..j].iter().collect();
-        let color = if w.starts_with('$') {
-            "\x1b[36m"
-        } else if crate::reader::is_number(&w) {
-            "\x1b[35m"
-        } else if crate::compiler::is_special(&w) || ["and", "or", "not", "in", "is", "then", "as", "True", "False", "None"].contains(&w.as_str()) {
-            "\x1b[1;35m"
-        } else if w.chars().all(|c| crate::reader::OPCHARS.contains(c)) {
-            "\x1b[33m"
-        } else if at_head {
-            "\x1b[1;34m"
-        } else if w.starts_with('-') {
-            "\x1b[33m"
-        } else {
-            ""
-        };
-        if color.is_empty() {
-            out.push_str(&w);
-        } else {
-            paint(&mut out, color, &w);
-        }
-        at_head = w.chars().all(|c| "|&;".contains(c)) && !w.is_empty() && w != "&";
-        i = j;
-    }
-    out
-}
-
-struct Prompt {
-    raw: String,
-    styled: String,
-}
-
-impl rustyline::Prompt for Prompt {
-    fn raw(&self) -> &str {
-        &self.raw
-    }
-    fn styled(&self) -> &str {
-        &self.styled
-    }
-}
-
 fn env_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into())).join("tessera-env")
 }
@@ -581,6 +1105,22 @@ fn hostname() -> String {
     String::from_utf8_lossy(&buf[..buf.iter().position(|b| *b == 0).unwrap_or(0)]).to_string()
 }
 
+// ---- the loop ---------------------------------------------------------------------
+
+/// The word at (or just before) a byte offset.
+fn word_at(text: &str, pos: usize) -> &str {
+    let pos = pos.min(text.len());
+    let stop = |c: char| " \t\n()[]{}\"'`;$|&<>=,".contains(c);
+    let start = text[..pos].rfind(stop).map(|i| i + 1).unwrap_or(0);
+    let end = text[pos..].find(stop).map(|i| pos + i).unwrap_or(text.len());
+    &text[start..end]
+}
+
+fn print_md(md: &str) {
+    let color = unsafe { libc::isatty(1) } == 1 && std::env::var_os("NO_COLOR").is_none();
+    println!("{}", crate::help::terminal(md, color).trim_end());
+}
+
 pub fn run() -> i32 {
     unsafe {
         libc::prctl(libc::PR_SET_NAME, c"tessh".as_ptr() as libc::c_ulong, 0, 0, 0);
@@ -596,24 +1136,66 @@ pub fn run() -> i32 {
             return 1;
         }
     };
-    let macros = Arc::new(Mutex::new(Vec::<String>::new()));
-    let config = rustyline::Config::builder().indent_size(2).auto_add_history(false).history_ignore_space(true).max_history_size(10000).map(|b| b.build()).unwrap_or_default();
-    let mut rl: Editor<TesshHelper, rustyline::history::DefaultHistory> = match Editor::with_config(config) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("tessh: {e}");
-            return 1;
-        }
-    };
-    rl.set_helper(Some(TesshHelper { ns: Python::attach(|py| ns.clone_ref(py)) }));
-    rl.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::NONE), EventHandler::Conditional(Box::new(EnterHandler { macros: macros.clone() })));
-    rl.bind_sequence(KeyEvent(KeyCode::Backspace, Modifiers::NONE), EventHandler::Conditional(Box::new(BackspaceHandler)));
-    // (Alt+Enter: a new line whatever the input is.)
-    rl.bind_sequence(KeyEvent(KeyCode::Enter, Modifiers::ALT), EventHandler::Simple(Cmd::Newline));
     let data = std::env::var("XDG_DATA_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share")).join("tessh");
     let _ = std::fs::create_dir_all(&data);
-    let hist = data.join("history");
-    let _ = rl.load_history(&hist);
+    let hist = history_file(&data);
+    let shared: SharedRef = Arc::new(Mutex::new(Shared { history: read_history(&hist), ..Default::default() }));
+    // (Whether an AI is set up: found in the background, so the prompt
+    // doesn't wait on a look for a local model server.)
+    {
+        let shared = shared.clone();
+        std::thread::spawn(move || {
+            let inline = crate::ai::ready("inline");
+            let command = crate::ai::ready("command");
+            let mut sh = shared.lock().unwrap();
+            sh.ai.inline_ready = inline;
+            sh.ai.command_ready = command;
+        });
+    }
+    let history = match FileBackedHistory::with_file(10000, hist.clone()) {
+        Ok(h) => Box::new(h) as Box<dyn History>,
+        Err(e) => {
+            eprintln!("tessh: history: {e}");
+            Box::new(FileBackedHistory::new(10000).expect("history"))
+        }
+    };
+    let completion_menu = IdeMenu::default()
+        .with_name("completion")
+        .with_marker(" ❯ ")
+        .with_default_border()
+        .with_description_mode(DescriptionMode::PreferRight)
+        .with_min_description_width(30)
+        .with_max_description_width(72)
+        .with_max_description_height(16)
+        .with_max_completion_height(12)
+        .with_description_text_style(Style::new().fg(Color::LightGray))
+        .with_selected_text_style(Style::new().reverse());
+    let history_menu = ColumnarMenu::default().with_name("history_menu").with_marker(" ❯ ");
+    let mut rl = Reedline::create()
+        .with_history(history)
+        .with_history_exclusion_prefix(Some(" ".into()))
+        .with_highlighter(Box::new(TesshHighlighter))
+        .with_hinter(Box::new(TesshHinter { shared: shared.clone() }))
+        .with_completer(Box::new(TesshCompleter { ns: Python::attach(|py| ns.clone_ref(py)) }))
+        .with_validator(Box::new(TesshValidator { shared: shared.clone() }))
+        .with_edit_hook(Box::new(TesshHook { shared: shared.clone() }))
+        .with_status_line(Box::new(TesshStatus { shared: shared.clone(), cache: Default::default() }))
+        .with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)))
+        .with_menu(ReedlineMenu::HistoryMenu(Box::new(history_menu)))
+        .with_edit_mode(edit_mode())
+        .with_partial_completions(true)
+        .with_quick_completions(false)
+        .use_bracketed_paste(true)
+        .with_semantic_markers(Some(reedline::Osc133Markers::boxed()));
+    let repaint = rl.repaint_signal();
+    {
+        let shared = shared.clone();
+        rl = rl.with_poll_interval(Duration::from_millis(50)).with_idle_callback(Box::new(move || ai_tick(&shared, &repaint)));
+    }
+    // (The kitty keyboard protocol, where the terminal has it: lone taps of
+    // Shift and Ctrl, Shift+Enter, Ctrl+Enter. TESSH_KITTY_KEYS=0: not.)
+    let tty = unsafe { libc::isatty(0) == 1 && libc::isatty(1) == 1 };
+    let kitty = tty && std::env::var("TESSH_KITTY_KEYS").map(|v| v != "0").unwrap_or(true) && reedline::kitty_protocol_available();
     let config_dir = std::env::var("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"));
     let rc = config_dir.join("tessh/rc.tsh");
     if rc.is_file() {
@@ -625,30 +1207,94 @@ pub fn run() -> i32 {
     }
     let host = hostname();
     let mut code = 0;
+    // (What a host command leaves to come back to: the text and the cursor.)
+    let mut keep: Option<(String, usize)> = None;
     loop {
         Python::attach(|py| {
             apply_handover(py);
-            *macros.lock().unwrap() = runner::macro_names(ns.bind(py));
+            shared.lock().unwrap().macros = runner::macro_names(ns.bind(py));
         });
         write_env();
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
         osc(&format!("7;file://{host}{cwd}"));
-        let status = runtime::STATUS.load(Ordering::SeqCst);
-        let mark = if status == 0 { "\x1b[32m❯\x1b[0m" } else { "\x1b[31m❯\x1b[0m" };
-        let tty = unsafe { libc::isatty(1) } == 1;
-        let prompt = Prompt {
-            raw: format!("{cwd} ❯ "),
-            styled: if tty { format!("\x1b]133;A\x07\x1b[1;34m{cwd}\x1b[0m {mark} \x1b]133;B\x07") } else { format!("{cwd} > ") },
-        };
-        let text = match rl.readline(&prompt) {
-            Ok(t) => t,
-            Err(ReadlineError::Interrupted) => continue,
-            Err(ReadlineError::Eof) => {
-                if std::env::var_os("TESSH_DEBUG").is_some() {
-                    eprintln!("tessh: end of input");
+        let prompt = TesshPrompt { cwd: short_cwd(), status: runtime::STATUS.load(Ordering::SeqCst) };
+        if let Some((text, pos)) = keep.take() {
+            rl.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(text), EditCommand::MoveToPosition { position: pos, select: false }]);
+        }
+        shared.lock().unwrap().ai.note.clear();
+        if kitty {
+            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::PushKeyboardEnhancementFlags(kitty_flags()));
+        }
+        let sig = rl.read_line(&prompt);
+        if kitty {
+            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::PopKeyboardEnhancementFlags);
+        }
+        let text = match sig {
+            Ok(Signal::Success(t)) => t,
+            Ok(Signal::CtrlC(_)) | Ok(Signal::ExternalBreak(_)) => continue,
+            Ok(Signal::CtrlD) => break,
+            Ok(Signal::HostCommand(c)) => {
+                let buf = rl.current_buffer_contents().to_string();
+                let pos = rl.current_insertion_point();
+                match c.as_str() {
+                    "tessh:ai" => {
+                        let req = buf.trim_start_matches('#').trim().to_string();
+                        let recent_cmds = recent(&shared.lock().unwrap(), 10);
+                        eprint!("{}", Style::new().fg(Color::DarkGray).paint("  asking the AI…"));
+                        let _ = std::io::stderr().flush();
+                        let r = crate::ai::ask("command", &req, &recent_cmds);
+                        eprint!("\r\x1b[K");
+                        match r {
+                            Ok(cmd) if !cmd.is_empty() => {
+                                let n = cmd.len();
+                                keep = Some((cmd, n));
+                            }
+                            Ok(_) => {
+                                eprintln!("tessh: the AI had no command for that");
+                                keep = Some((buf, pos));
+                            }
+                            Err(e) => {
+                                eprintln!("tessh: AI: {e}");
+                                keep = Some((buf, pos));
+                            }
+                        }
+                    }
+                    "tessh:help" => {
+                        let w = word_at(&buf, pos);
+                        println!();
+                        if w.is_empty() {
+                            print_md(&keys_help());
+                        } else {
+                            let doc = Python::attach(|py| {
+                                let v = ns.bind(py).get_item(w).ok().flatten().or_else(|| py.import("builtins").ok().and_then(|b| b.getattr(w).ok()));
+                                doc_for(py, w, v.as_ref())
+                            });
+                            if doc.trim().is_empty() {
+                                println!("tessh: no help for {w}");
+                            } else if doc.starts_with('#') || doc.contains("\n## ") || doc.contains("\n# ") {
+                                // (The guide's part about it: Markdown.)
+                                print_md(&doc);
+                            } else {
+                                // (A signature and docstring: as written, the first line bold.)
+                                let (first, rest) = doc.split_once('\n').unwrap_or((&doc, ""));
+                                println!("{}\n{}", Style::new().bold().paint(first), rest.trim_end());
+                            }
+                        }
+                        keep = Some((buf, pos));
+                    }
+                    "tessh:jobs" => {
+                        Python::attach(|py| {
+                            if let Err(e) = runner::run_source(py, "jobs", ns.bind(py), "<keys>", true) {
+                                runner::report(py, e, "<keys>");
+                            }
+                        });
+                        keep = Some((buf, pos));
+                    }
+                    _ => keep = Some((buf, pos)),
                 }
-                break;
+                continue;
             }
+            Ok(_) => continue,
             Err(e) => {
                 eprintln!("tessh: {e}");
                 code = 1;
@@ -659,7 +1305,12 @@ pub fn run() -> i32 {
         if text.trim().is_empty() {
             continue;
         }
-        let _ = rl.add_history_entry(text.as_str());
+        if !text.contains('\n') && !text.starts_with(' ') {
+            let mut sh = shared.lock().unwrap();
+            sh.history.retain(|h| *h != text);
+            sh.history.push(text.clone());
+        }
+        let _ = rl.sync_history();
         use base64::Engine;
         let b64 = base64::engine::general_purpose::STANDARD;
         // (What it runs with: user, line, environment, NUL-separated.)
@@ -701,7 +1352,7 @@ pub fn run() -> i32 {
         }
         osc(&format!("133;D;{}", runtime::STATUS.load(Ordering::SeqCst)));
     }
-    let _ = rl.save_history(&hist);
+    let _ = rl.sync_history();
     code
 }
 
@@ -734,9 +1385,55 @@ mod tests {
     #[test]
     fn highlights() {
         let h = highlight("ls -la $x \"s\" # c");
-        assert!(h.contains("\x1b[1;34mls"), "{h:?}");
-        assert!(h.contains("\x1b[36m$x"), "{h:?}");
-        assert!(h.contains("\x1b[32m\"s\""), "{h:?}");
+        assert!(h.contains("ls"), "{h:?}");
+        assert!(h.contains("\x1b["), "{h:?}");
+        assert_eq!(strip(&h), "ls -la $x \"s\" # c");
+    }
+
+    fn strip(s: &str) -> String {
+        let mut out = String::new();
+        let mut esc = false;
+        for c in s.chars() {
+            if esc {
+                if c == 'm' {
+                    esc = false;
+                }
+            } else if c == '\x1b' {
+                esc = true;
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn ctx(buffer: &str) -> EditHookContext<'_> {
+        EditHookContext { buffer, cursor: buffer.len(), menu_active: false }
+    }
+
+    #[test]
+    fn enter_runs_or_goes_on() {
+        let mut h = TesshHook { shared: Default::default() };
+        assert_eq!(h.edit(&ReedlineEvent::Enter, &ctx("ls -la")), Some(ReedlineEvent::Submit));
+        assert_eq!(
+            h.edit(&ReedlineEvent::Enter, &ctx("def f x")),
+            Some(ReedlineEvent::Edit(vec![EditCommand::MoveToEnd { select: false }, EditCommand::InsertNewline, EditCommand::InsertString("  ".into())]))
+        );
+        // (A blank line ends the block: double Enter.)
+        assert_eq!(h.edit(&ReedlineEvent::Enter, &ctx("def f x\n  print hi\n  ")), Some(ReedlineEvent::Submit));
+        // (else goes back to its if, and opens a block of its own.)
+        assert_eq!(h.edit(&ReedlineEvent::Enter, &ctx("if $x\n  a\n  else")), Some(ReedlineEvent::Edit(vec![EditCommand::Clear, EditCommand::InsertString("if $x\n  a\nelse\n  ".into())])));
+        // (In a menu, Enter is the menu's.)
+        assert_eq!(h.edit(&ReedlineEvent::Enter, &EditHookContext { buffer: "ls", cursor: 2, menu_active: true }), None);
+        // (Backspace in indentation takes a level.)
+        assert_eq!(h.edit(&ReedlineEvent::Edit(vec![EditCommand::Backspace]), &ctx("if $x\n    ")), Some(ReedlineEvent::Edit(vec![EditCommand::Backspace, EditCommand::Backspace])));
+        assert_eq!(h.edit(&ReedlineEvent::Edit(vec![EditCommand::Backspace]), &ctx("ls x")), None);
+    }
+
+    #[test]
+    fn words() {
+        assert_eq!(word_at("print $x.y", 10), "x.y");
+        assert_eq!(word_at("ls -la", 1), "ls");
     }
 }
 

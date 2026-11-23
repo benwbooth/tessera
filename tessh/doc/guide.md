@@ -2097,22 +2097,101 @@ print (requests.get "https://example.com").status_code
 ```
 
 ## The REPL
-<!-- help: repl interactive keys prompt history rc tab completion -->
+<!-- help: repl interactive prompt history rc tab completion editor -->
 
-`tessh` alone starts the REPL.
+`tessh` alone starts the REPL: an editor for commands that works in any
+terminal (xterm, kitty, foot, tmux, ssh, the Linux console), with what
+Tessera's input editor has.
 
-- A line runs as soon as it's complete. Open brackets and strings carry on to
-  the next line.
-- After a line that opens a block (`def`, `if`, `for`, `x = if …`, a macro)
-  Enter indents the next line, and a blank line runs the block.
-- An `else`, `elif`, `except` or `finally` typed too deep moves back to its
-  `if` or `try` on Enter; Enter again goes on.
-- Backspace in the leading spaces removes a whole level. Alt+Enter always
-  adds a line.
-- Tab completes names, programs and paths. History is kept in
+- Enter runs what's complete. After a line that opens a block (`def`, `if`,
+  `for`, `x = if …`, a macro) or with brackets or a string open, Enter starts
+  a new line, indented for it; Enter on a blank line ends the block and runs
+  it, as in IPython. An `else`, `elif`, `except` or `finally` typed too deep
+  goes back to its `if` or `try`.
+- Alt+Enter (or Ctrl+J) adds a line anywhere. Tab in a line's indentation
+  indents, Shift+Tab outdents, and Backspace there takes a whole level.
+- Tab completes names, programs, paths (quoted where they need it) and `$`
+  variables, in a list with each one's help beside it.
+- Colors are tree-sitter's, as in Tessera. The line under the input says
+  what's wrong as you type (`✗ unmatched ')'`), the check `tessh --check`
+  makes.
+- Grey text after the cursor is the newest command from history that starts
+  with what's typed, or else the AI's guess (`help ai`): → or End takes it,
+  Alt+F one word of it, Ctrl+Space takes it or asks the AI for one.
+- ↑ and ↓ go line by line, then through history; PgUp and PgDn a whole entry
+  at a time; Ctrl+R searches it. History is kept in
   `~/.local/share/tessh/history`, and `~/.config/tessh/rc.tsh` runs first.
+- F1 (or Alt+H) shows help for the word at the cursor, or the keys on an
+  empty line. Ctrl+Alt+J lists background jobs.
 - Ctrl+C interrupts, Ctrl+Z stops a program (`fg` brings it back), Ctrl+D
-  exits.
+  exits. Emacs keys by default; `TESSH_KEYS=vi` for vi's.
+
+## Keys a terminal can't send
+<!-- help: tap shift ctrl kitty alt+enter ctrl+enter shift+enter alternatives -->
+
+Tessera's editor has keys on a tap of left or right Shift or Ctrl alone, and
+on Shift+Enter and Ctrl+Enter, which most terminals send as nothing or as
+plain Enter. Here they have keys every terminal sends:
+
+| In Tessera | Does | Here |
+|---|---|---|
+| Right Shift (tap), Shift+Enter | New line | Alt+Enter or Ctrl+J |
+| Left Shift (tap) | Take the grey suggestion; with none, ask the AI | → or End takes it; Ctrl+Space takes it or asks |
+| Right Ctrl (tap), Ctrl+Enter | Run in the background (a trailing `&`) | Alt+& |
+| Left Ctrl (tap) | Switch between the editor and the terminal | Not needed: the editor is the terminal here, and what's typed while a command runs waits for the prompt |
+
+Where the terminal speaks the kitty keyboard protocol (kitty, foot, WezTerm,
+Ghostty, Alacritty, iTerm2) the real keys work as well: the taps, Shift+Enter
+and Ctrl+Enter. `TESSH_KITTY_KEYS=0` leaves the protocol off. `help keys`
+(or `tessh --keys`) lists every key.
+
+## The AI
+<!-- help: ai # request suggestions ollama model llm -->
+
+`# what you want`, then Enter: the AI writes the command, and it waits in
+the editor for you to check and run (or change). As you type a `#` request,
+grey text finishes it, and after a pause `→ the command` shows; → takes it.
+On other lines the AI's guess is the grey text when history has none.
+
+tessh uses Tessera's AI settings when there are any (its providers, keys and
+models: the suggestion model for grey text, the chat model for requests).
+Without them, `TESSH_AI_MODEL=provider/model` picks one (`ollama/qwen3.5:4b`,
+`anthropic/claude-…`, `openai/…`, with the key in `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY` and so on), or else a local Ollama is used if one is
+running. `TESSH_AI=0` turns it off.
+
+## The guide in a terminal
+<!-- help: guide-cli --guide manual docs -->
+
+`help guide` (or `tessh --guide`) prints this whole guide, drawn for the
+terminal: headings, wrapped text, tables and highlighted examples.
+`tessh --guide pipes` prints one part, as `help pipes` does.
+
+## A tessh for any Linux
+<!-- help: static standalone install uv python version --python portable -->
+
+`nix build github:benwbooth/tessera#tessh-static` (or
+`scripts/tessh-static.sh`) makes `tessh` as one file that runs on any
+x86-64 Linux with nothing else installed: NixOS, a bare container, a
+server over ssh. It carries uv, musl's program loader and tessh itself
+(built against Python's stable ABI). The first time it runs it gets a CPython
+with uv (python-build-standalone's musl build: a 30 MB download, 93 MB
+unpacked) and keeps
+it under `~/.cache/tessh` and uv's folder.
+
+- Which Python: `tessh --python 3.14`, `TESSH_PYTHON=3.14`, or a line in
+  `~/.config/tessh/python`; otherwise the newest one uv offers (3.12 or
+  later), looked at once a day, so a new CPython in uv is taken up. A uv on
+  `PATH` is used when it's newer than the one inside.
+- `need numpy` and `--with` install with uv, as everywhere: C extensions
+  (musllinux wheels: numpy, pandas, lxml) load as in any Python, since a
+  real loader runs tessh. A package with no musllinux wheel is built from
+  source, which needs a C compiler.
+- Where uv can't tell the system's C library (a system with no dynamic
+  loader at all, like a static busybox), tessh fetches the same CPython
+  build directly.
+- `python3` beside it in `~/.cache/tessh/rt-*/py/*/bin` is that Python, for
+  programs that want one.
 
 ## Scripts and checks
 <!-- help: scripts script running run check --check --py -c shebang -->
@@ -2123,6 +2202,7 @@ tessh -c 'code'           run a string
 tessh --check [file]      check without running; line:col: message per problem
 tessh --check --json      the same as JSON
 tessh --py file.tsh       print the Python it compiles to
+tessh --guide [topic]     the guide, or a part of it, for the terminal
 tessh --kernel -f conn    the Jupyter kernel
 ```
 

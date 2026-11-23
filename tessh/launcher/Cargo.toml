@@ -1,0 +1,19 @@
+[package]
+name = "tessh-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "The static tessh: unpacks tessh and musl's loader, links in the CPython uv installs, and runs it"
+license = "MIT"
+
+[[bin]]
+name = "tessh"
+path = "src/main.rs"
+
+[dependencies]
+ruzstd = "0.8"
+tar = { version = "0.4", default-features = false }
+serde_json = "1"
+# (Python straight from python-build-standalone, where uv can't install it:
+# a system with no dynamic loader at all, where uv can't tell its libc.)
+ureq = "3"
+flate2 = "1"

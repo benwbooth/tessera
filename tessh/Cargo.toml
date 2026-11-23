@@ -9,10 +9,22 @@ license = "MIT"
 name = "tessh"
 path = "src/main.rs"
 
+[features]
+# The standalone build (flake: tessh-static): Python's stable ABI, so the
+# one binary runs on whichever CPython uv provides (3.12 on), and acting as
+# that Python's `python3` for uv and sys.executable.
+standalone = ["pyo3/abi3-py312"]
+
 [dependencies]
 chumsky = "1.0.0-alpha.8"
 pyo3 = { version = "0.30.1", features = ["auto-initialize"] }
-rustyline = "19"
+# The terminal editor: reedline, with two small changes (vendor/README.md).
+reedline = { path = "vendor/reedline" }
+crossterm = "0.29"
+nu-ansi-term = "0.50"
+unicode-width = "0.2"
+# Highlighting, as Tessera's.
+tree-sitter-tessh = { path = "../tree-sitter-tessh" }
 zeromq = { version = "0.7", default-features = false, features = ["tokio-runtime", "tcp-transport"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 toml = "1"

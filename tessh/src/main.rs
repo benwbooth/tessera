@@ -7,6 +7,7 @@
 //!     tessh --py FILE            print the Python it compiles to
 //!     tessh --kernel -f CONN     the Jupyter kernel
 
+mod ai;
 mod compiler;
 mod deps;
 mod forms;
@@ -17,6 +18,8 @@ mod reader;
 mod repl;
 mod runner;
 mod runtime;
+#[cfg(feature = "standalone")]
+mod standalone;
 
 #[cfg(test)]
 mod tests;
@@ -30,6 +33,7 @@ tessh -c CODE [ARGS…]      run CODE
 tessh --check [FILE]       check without running (stdin without FILE); --json for JSON
 tessh --py FILE            print the Python it compiles to
 tessh --kernel -f CONN     the Jupyter kernel
+tessh --guide [TOPIC]      the guide (or a topic of it), drawn for the terminal; --keys: the editor's keys
 tessh --complete [DIR]     completions for {\"text\", \"cursor\"} on stdin, in DIR (Tessera's editor)
   --with PKG[,PKG…]        first: PyPI packages to have (uv installs them once), as `need` does";
 
@@ -42,6 +46,12 @@ fn exit_code(py: Python<'_>, e: &PyErr) -> Option<i32> {
 }
 
 fn main() {
+    // (The standalone build: as python3, or Python pointed at uv's.)
+    #[cfg(feature = "standalone")]
+    {
+        standalone::python_main();
+        standalone::prepare();
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = run(args);
     // (Embedded Python never finalizes: run its atexit work, flush its output.)
@@ -96,6 +106,13 @@ fn run(args: Vec<String>) -> i32 {
     match a {
         "-h" | "--help" => {
             println!("{USAGE}");
+            return 0;
+        }
+        "--guide" | "--keys" => {
+            let md = if a == "--keys" { Some(repl::keys_help()) } else { help::lookup(&args[1..].join(" ")).or_else(|| (args.len() == 1).then(help::guide)) };
+            let md = if args.len() == 1 && a == "--guide" { help::guide() } else { md.unwrap_or_else(|| format!("No topic {:?} in the guide: `tessh --guide` has it all.", args[1..].join(" "))) };
+            let color = unsafe { libc::isatty(1) } == 1 && std::env::var_os("NO_COLOR").is_none();
+            print!("{}", help::terminal(&md, color));
             return 0;
         }
         "-V" | "--version" => {

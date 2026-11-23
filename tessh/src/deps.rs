@@ -35,6 +35,10 @@ fn cache_dir() -> std::path::PathBuf {
 }
 
 fn uv_command() -> Option<Vec<String>> {
+    // (The standalone tessh has its own beside it.)
+    if let Some(uv) = std::fs::read_link("/proc/self/exe").ok().and_then(|e| e.parent().map(|d| d.join("uv"))).filter(|u| u.is_file()) {
+        return Some(vec![uv.to_string_lossy().to_string()]);
+    }
     if let Some(uv) = crate::runtime::which("uv") {
         return Some(vec![uv]);
     }

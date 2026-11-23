@@ -12,3 +12,4 @@ shots/
 *.sqlite
 *.sqlite3
 target/
+/dist/

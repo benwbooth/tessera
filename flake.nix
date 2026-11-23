@@ -103,6 +103,92 @@
               platforms = pkgs.lib.platforms.unix;
             };
           };
+          # tessh alone, as one static file that runs on any x86-64 Linux
+          # (NixOS and bare containers too): `nix build .#tessh-static`, or
+          # scripts/tessh-static.sh for a release copy. tessh is built for
+          # musl against Python's stable ABI (the stable-ABI symbols of a
+          # python-build-standalone CPython 3.12, the oldest it takes), and
+          # carried inside tessh/launcher with musl's loader; the launcher
+          # links in the CPython uv installs (any 3.12+) when it starts.
+          standalone = pkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") (
+            let
+              cross = pkgs.pkgsCross.musl64;
+              pbs = pkgs.fetchurl {
+                url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.12.16%2B20261123-x86_64-unknown-linux-musl-install_only_stripped.tar.gz";
+                hash = "sha256-dpPyfF8VNrbEt1EIrm04iLf4T6HUMAAfoPDMmy/Arzs=";
+              };
+              # uv, carried along (its own static build): Python, and packages.
+              uvStatic = pkgs.fetchurl {
+                url = "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-unknown-linux-musl.tar.gz";
+                hash = "sha256-WMz18XkrilqI0BvJEOoTGos9tKMZoXrV+tdeCEWj4nE=";
+              };
+              # (Linked as libpython3.so, the name the launcher gives
+              # whichever version's library it links in.)
+              pyLink = pkgs.runCommand "tessh-python-abi3-link" { nativeBuildInputs = [ pkgs.patchelf ]; } ''
+                tar xzf ${pbs}
+                mkdir -p $out/lib
+                cp python/lib/libpython3.12.so.1.0 $out/lib/libpython3.so
+                chmod u+w $out/lib/libpython3.so
+                patchelf --set-soname libpython3.so $out/lib/libpython3.so
+              '';
+              pyo3Config = pkgs.writeText "pyo3-abi3.txt" ''
+                implementation=CPython
+                version=3.12
+                shared=true
+                abi3=true
+                lib_name=python3
+                lib_dir=${pyLink}/lib
+                pointer_width=64
+                suppress_build_script_link_lines=false
+              '';
+              tesshMusl = cross.rustPlatform.buildRustPackage {
+                pname = "tessh-musl";
+                version = (pkgs.lib.importTOML ./tessh/Cargo.toml).package.version;
+                inherit src;
+                cargoLock.lockFile = ./Cargo.lock;
+                cargoBuildFlags = [ "-p" "tessh" "--features" "standalone" ];
+                doCheck = false;
+                # (Its loader is a placeholder the launcher fills in, and it
+                # finds libpython beside itself: leave both be.)
+                dontPatchELF = true;
+                env.PYO3_CONFIG_FILE = "${pyo3Config}";
+              };
+              launcher = pkgs.pkgsStatic.rustPlatform.buildRustPackage {
+                pname = "tessh-launcher";
+                version = (pkgs.lib.importTOML ./tessh/launcher/Cargo.toml).package.version;
+                inherit src;
+                cargoLock.lockFile = ./Cargo.lock;
+                cargoBuildFlags = [ "-p" "tessh-launcher" ];
+                doCheck = false;
+              };
+              payload = pkgs.runCommand "tessh-payload" { nativeBuildInputs = [ pkgs.zstd pkgs.binutils ]; } ''
+                mkdir -p root/bin root/lib $out
+                cp ${tesshMusl}/bin/tessh root/bin/tessh
+                cp ${cross.stdenv.cc.libc}/lib/libc.so root/lib/ld-musl-x86_64.so.1
+                tar xzf ${uvStatic} --strip-components=1 -C root/bin uv-x86_64-unknown-linux-musl/uv
+                # (What else it needs: libgcc_s, for unwinding.)
+                for n in $(readelf -d root/bin/tessh | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p'); do
+                  case $n in libc.so|libpython3.so) ;; *)
+                    f=$(find -L ${cross.stdenv.cc.cc.lib}/ ${cross.stdenv.cc.libc}/lib -name "$n" | head -1)
+                    [ -n "$f" ] || { echo "no $n"; exit 1; }
+                    cp -L "$f" root/lib/ ;;
+                  esac
+                done
+                chmod -R u+w,a+rX root
+                chmod 755 root/bin/* root/lib/*
+                tar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name -C root -cf - . | zstd -19 -q > $out/payload.tar.zst
+              '';
+            in
+            {
+              tessh-static = pkgs.runCommand "tessh-static-${tesshMusl.version}" { nativeBuildInputs = [ pkgs.coreutils ]; meta.mainProgram = "tessh"; } ''
+                mkdir -p $out/bin
+                off=$(stat -c%s ${launcher}/bin/tessh)
+                cat ${launcher}/bin/tessh ${payload}/payload.tar.zst > $out/bin/tessh
+                hash=$(sha256sum ${payload}/payload.tar.zst | cut -c1-16)
+                printf '%-63s\n' "TESSH-PAYLOAD $(printf %020d $off) $hash" >> $out/bin/tessh
+                chmod 755 $out/bin/tessh
+              '';
+            });
           tessera = pkgs.rustPlatform.buildRustPackage {
             pname = "tessera";
             version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
@@ -146,7 +232,7 @@
             };
           };
         in
-        { default = tessera; inherit tessera tessh; tesserad-static = tesseradStatic; });
+        { default = tessera; inherit tessera tessh; tesserad-static = tesseradStatic; } // standalone);
 
       apps = forAll (pkgs: {
         default = { type = "app"; program = "${self.packages.${pkgs.system}.default}/bin/tessera"; };
