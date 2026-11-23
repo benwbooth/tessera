@@ -361,17 +361,16 @@ There's no ftp server here, and no `cruft`, so the tessh version shows what
 it would send: `rot13` (with `tr`) stands in for the decryption, and a
 function named `ftp` stands in for the program and prints the session it's
 given. A Python function of a program's name is called instead of it; take
-the function away (or write `\ftp`) and the real ftp runs. The heredoc's
-word is `EndOfSession` here: tessh stops a heredoc word at a `-`.
+the function away (or write `\ftp`) and the real ftp runs. The heredoc
+goes to the function as it would to the program, and so to the `cat` in it.
 
 ```tessh
-import sys
 # (Made up: a file to send, and the password "secret", "encrypted" with rot13.)
 echo "the report" >report.txt
 echo frperg >password_encrypted.file
 def ftp *args                # (A stand-in for ftp: it shows what it's sent.)
   print "[ftp $(' '.join $args)]"
-  print (sys.stdin.read) end=""
+  cat
 
 #  Note that this is still rather insecure,
 #+ since the decrypted password is sent in the clear.
@@ -396,14 +395,14 @@ Directory = YYY              # Change above to actual server name & folder.
 Password = tr a-zA-Z n-za-mN-ZA-M <$pword   # Decrypt password.
 # (The original uses the author's own "cruft" one-time-pad package.)
 
-ftp -n $Server <<EndOfSession
+ftp -n $Server <<End-Of-Session
 user $Username $Password
 binary
 bell
 cd $Directory
 put $Filename
 bye
-EndOfSession
+End-Of-Session
 # -n option to "ftp" disables auto-logon.
 # Note that "bell" rings 'bell' after each file transfer.
 
@@ -902,13 +901,13 @@ if (len $args) != $ARGS      # Require two command-line params.
 
 [day month year] = Parse_Date $args[0]
 check_date $day $month $year # See if valid date.
-first_index = day_index $day $month $year
+date1 = day_index $day $month $year
 
 [day month year] = Parse_Date $args[1]
 check_date $day $month $year
-second_index = day_index $day $month $year
+date2 = day_index $day $month $year
 
-diff = abs ($first_index - $second_index)   # Make sure it's positive.
+diff = abs ($date1 - $date2)   # Make sure it's positive.
 print $diff
 
 # (Python's datetime agrees.)
@@ -4939,7 +4938,7 @@ It runs as root from the hotplug system, with the event in the environment
 The environment variables come from `$env.get`, the lock files are Paths,
 and the `find | xargs grep -l` and `echo | awk` helpers become Python: a
 glob over `/proc/scsi`, and a regex split. A program named in a variable,
-`$DEVLABEL`, runs with `command`. `grep -q` stays: its exit status is the
+`$DEVLABEL`, runs as it does in bash. `grep -q` stays: its exit status is the
 test.
 
 ```tessh no-run
@@ -4986,7 +4985,7 @@ if $ACTION == add and $DEVICE and ((Path $DEVICE).is_file)
     scsiDev = scsiDevFromScsiUsb $procEntry
     #  Some bug with usb-storage?
     #  Partitions are not in /proc/partitions until they are accessed somehow.
-    command /sbin/fdisk -l $scsiDev >/dev/null
+    /sbin/fdisk -l $scsiDev >/dev/null
     ##
     #  Most devices have partitioning info, so the data would be on
     #+ /dev/sd?1. However, some stupider ones don't have any partitioning
@@ -5004,10 +5003,10 @@ if $ACTION == add and $DEVICE and ((Path $DEVICE).is_file)
     # This checks if we already have this UUID defined with devlabel.
     # If not, it then adds the device to the list.
     #
-    prodid = command $DEVLABEL printid -d $part
+    prodid = $DEVLABEL printid -d $part
     if not (grep -q $prodid $DEVLABELCONFIG)
       # cross our fingers and hope it works
-      command $DEVLABEL add -d $part -s $SYMLINKDEV 2>/dev/null
+      $DEVLABEL add -d $part -s $SYMLINKDEV 2>/dev/null
     ##
     # Check if the mount point exists and create if it doesn't.
     #
@@ -5442,7 +5441,8 @@ exit 0
 The bash names every program by its full path and gets the file's date by
 cutting it out of `ls -lgo --time-style=+%Y%m%d | column -t`. In tessh the
 date comes from the file's `st_mtime` with `time.strftime`, the tests are
-`os.access` and `Path.is_file`, and only `mv` and `bzip2` are left to run.
+`os.access` and `Path.is_file`, and only `mv` and `bzip2` are left to run,
+still named in variables: `$MV …` runs the program `$MV` names, as in bash.
 It works here on a made-up log folder with the dates set by `touch`, and,
 as chapter 2's cleanup script does, takes "root" to be whoever runs it.
 
@@ -5482,6 +5482,10 @@ LOG_DAYS = [4 3 2 1]
 LOG_DIR = ./log/httpd        # (/var/log/httpd in the original)
 LOG_FILES = [access_log error_log]
 
+# Program locations (/bin/mv and /usr/bin/bzip2 on RedHat; here, on PATH)
+MV = mv
+BZ2 = bzip2
+
 ROOT_UID = (os.getuid)       # (0, root, in the original: here, you)
 
 # Are we root?
@@ -5500,8 +5504,8 @@ for logday in $LOG_DAYS
     MYFILE = $LOG_DIR / "$logfile.$logday"
     if (os.access $MYFILE $os.W_OK)
       DTS = time.strftime "%Y%m%d" (time.localtime ($MYFILE.stat).st_mtime)
-      mv $MYFILE $BKP_DIR/$logfile.$DTS
-      bzip2 $BKP_DIR/$logfile.$DTS
+      $MV $MYFILE $BKP_DIR/$logfile.$DTS
+      $BZ2 $BKP_DIR/$logfile.$DTS
     elif ($MYFILE.is_file)
       # Only spew an error if the file exists (ergo non-writable).
       print "ERROR: $MYFILE not writable. Skipping."
