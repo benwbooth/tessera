@@ -1047,7 +1047,7 @@ void TerminalItem::keyPressEvent(QKeyEvent* e)
         }
     }
     const QByteArray text = e->text().toUtf8();
-    if (m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), false, e->nativeVirtualKey())) {
+    if (m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), false, e->nativeVirtualKey(), e->nativeScanCode())) {
         e->accept();
         forwardKey(e, false);
         if (m_hasSelection && !(e->modifiers() & (Qt::ControlModifier | Qt::MetaModifier))
@@ -1063,11 +1063,16 @@ void TerminalItem::keyPressEvent(QKeyEvent* e)
     }
 }
 
+bool TerminalItem::reportsAllKeys() const
+{
+    return m_session && m_session->reports_all_keys();
+}
+
 void TerminalItem::keyReleaseEvent(QKeyEvent* e)
 {
     if (!m_session || m_exited) return QQuickItem::keyReleaseEvent(e);
     const QByteArray text = e->text().toUtf8();
-    m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), true, e->nativeVirtualKey());
+    m_session->key_event(e->key(), uint32_t(e->modifiers()), rs(text), true, e->nativeVirtualKey(), e->nativeScanCode());
     forwardKey(e, true);
     e->accept();
 }
@@ -1084,7 +1089,7 @@ void TerminalItem::receiveKey(int key, int mods, const QString& text, bool relea
 {
     if (!m_session || m_exited) return;
     const QByteArray t = text.toUtf8();
-    m_session->key_event(key, uint32_t(mods), rs(t), release, 0);
+    m_session->key_event(key, uint32_t(mods), rs(t), release, 0, 0);
 }
 
 void TerminalItem::receiveText(const QString& text)

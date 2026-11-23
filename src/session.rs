@@ -73,6 +73,9 @@ pub struct Session {
     autotick: AutoscrollTickEvent<'static>,
     selecting: bool,
     buttons: u8,
+    /// The last pointer-motion report, so the same cell isn't sent again
+    /// (Qt repeats hover events while the pointer rests).
+    last_motion: Vec<u8>,
     outbox: Rc<RefCell<Vec<u8>>>,
     title_changed: Rc<Cell<bool>>,
     pwd_changed: Rc<Cell<bool>>,
@@ -308,6 +311,7 @@ pub fn session_open(
         autotick: AutoscrollTickEvent::new().map_err(e)?,
         selecting: false,
         buttons: 0,
+        last_motion: Vec::new(),
         outbox,
         title_changed,
         pwd_changed,
@@ -925,7 +929,7 @@ impl Session {
         write_blocking(stream, T_RESIZE, &payload);
     }
 
-    pub fn key_event(&mut self, qt_key: i32, qt_mods: u32, text: &str, release: bool, _native_vk: u32) -> bool {
+    pub fn key_event(&mut self, qt_key: i32, qt_mods: u32, text: &str, release: bool, native_vk: u32, native_scan: u32) -> bool {
         let printable = !text.is_empty() && text.chars().all(|c| !c.is_control());
         let Some((k, ucp)) = keymap::key(qt_key, qt_mods) else {
             if printable && !release {
@@ -934,7 +938,10 @@ impl Session {
             }
             return false;
         };
-        let mods = keymap::mods(qt_mods);
+        // A modifier key itself: which side, and its own bit set while it's
+        // down (the kitty protocol: a Shift press is "shift held", its
+        // release isn't; Qt's modifiers lag one event behind).
+        let (k, mods) = keymap::modifier_key(k, keymap::mods(qt_mods), release, native_vk, native_scan);
         let mut consumed = key::Mods::empty();
         if printable && mods.contains(key::Mods::SHIFT) {
             consumed |= key::Mods::SHIFT;
@@ -1071,6 +1078,14 @@ impl Session {
             for &a in actions {
                 self.mouse_ev.set_action(a).set_button(btn);
                 let _ = self.mouse_enc.encode_to_vec(&self.mouse_ev, &mut out);
+            }
+            if action == 2 {
+                if out == self.last_motion {
+                    return false;
+                }
+                self.last_motion = out.clone();
+            } else {
+                self.last_motion.clear();
             }
             self.write_input(&out);
             return false;
@@ -1735,6 +1750,10 @@ impl Session {
         }
         self.mark == b'C'
             && (self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false) || self.term.mode(Mode::FOCUS_EVENT).unwrap_or(false))
+    }
+
+    pub fn reports_all_keys(&self) -> bool {
+        self.term.kitty_keyboard_flags().is_ok_and(|f| f.contains(key::KittyKeyFlags::REPORT_ALL))
     }
 
     pub fn wants_mouse(&self, qt_mods: u32) -> bool {

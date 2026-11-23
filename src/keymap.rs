@@ -25,6 +25,31 @@ pub fn mods(qt: u32) -> Mods {
     m
 }
 
+/// A modifier key's side and modifier bits. Qt reports Shift, Ctrl, Alt and
+/// Meta without a side; the native key tells: XKB keysyms (Shift_R 0xffe2,
+/// Control_R 0xffe4, Alt_R 0xffea, Super_R 0xffec, Meta_R 0xffe8), evdev
+/// codes + 8 (62, 105, 108, 134) or Windows scan codes (0x36, 0x11d,
+/// 0x138, 0x15c). Its own bit is set on the press and cleared on release.
+pub fn modifier_key(k: Key, mut mods: Mods, release: bool, vk: u32, scan: u32) -> (Key, Mods) {
+    let (left, right, bit, side) = match k {
+        Key::ShiftLeft | Key::ShiftRight => (Key::ShiftLeft, Key::ShiftRight, Mods::SHIFT, Mods::SHIFT_SIDE),
+        Key::ControlLeft | Key::ControlRight => (Key::ControlLeft, Key::ControlRight, Mods::CTRL, Mods::CTRL_SIDE),
+        Key::AltLeft | Key::AltRight => (Key::AltLeft, Key::AltRight, Mods::ALT, Mods::ALT_SIDE),
+        Key::MetaLeft | Key::MetaRight => (Key::MetaLeft, Key::MetaRight, Mods::SUPER, Mods::SUPER_SIDE),
+        _ => return (k, mods),
+    };
+    let is_right = k == right
+        || matches!(vk, 0xffe2 | 0xffe4 | 0xffe8 | 0xffea | 0xffec | 0xfe03)
+        || (vk < 0xfe00 && matches!(scan, 62 | 105 | 108 | 134 | 0x36 | 0x11d | 0x138 | 0x15c));
+    if release {
+        mods.remove(bit | side);
+    } else {
+        mods.insert(bit);
+        mods.set(side, is_right);
+    }
+    (if is_right { right } else { left }, mods)
+}
+
 /// The physical key and its unshifted codepoint (US layout) for a Qt key.
 pub fn key(qt_key: i32, qt_mods: u32) -> Option<(Key, char)> {
     let keypad = qt_mods & QT_KEYPAD != 0;
@@ -105,6 +130,9 @@ pub fn key(qt_key: i32, qt_mods: u32) -> Option<(Key, char)> {
         0x0100_0021 => (Key::ControlLeft, '\0'),
         0x0100_0022 => (Key::MetaLeft, '\0'),
         0x0100_0023 => (Key::AltLeft, '\0'),
+        0x0100_1103 => (Key::AltRight, '\0'),
+        0x0100_0053 => (Key::MetaLeft, '\0'),
+        0x0100_0054 => (Key::MetaRight, '\0'),
         0x0100_0024 => (Key::CapsLock, '\0'),
         0x0100_0025 => (Key::NumLock, '\0'),
         0x0100_0026 => (Key::ScrollLock, '\0'),

@@ -155,7 +155,11 @@ pub mod ffi {
             text: &str,
             release: bool,
             native_vk: u32,
+            native_scan: u32,
         ) -> bool;
+        /// Whether the program asked for every key, lone modifiers too (the
+        /// kitty keyboard protocol's report-all flag).
+        fn reports_all_keys(self: &Session) -> bool;
         fn paste(self: &mut Session, text: &str);
         fn send_text(self: &mut Session, text: &str);
         fn scroll_lines(self: &mut Session, delta: i32);

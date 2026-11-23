@@ -153,6 +153,9 @@ public:
     Q_INVOKABLE void paste();
     Q_INVOKABLE void sendText(const QString& text);
     Q_INVOKABLE void killSession();
+    // The program asked for every key, lone modifier taps too (kitty
+    // keyboard protocol): the window's own Ctrl-tap action leaves them be.
+    Q_INVOKABLE bool reportsAllKeys() const;
     Q_INVOKABLE void scrollToBottom();
     Q_INVOKABLE void scrollLines(int n);
     Q_INVOKABLE void selectAll();

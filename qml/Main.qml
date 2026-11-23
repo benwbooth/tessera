@@ -107,6 +107,9 @@ ApplicationWindow {
     // run does nothing; left Ctrl switches between the editor and the terminal.
     function ctrlTapped(right) {
         const p = activePane
+        // (A program in the terminal reading lone modifier keys itself,
+        // tessh say: the tap was its.)
+        if (p && p.view.activeFocus && p.view.reportsAllKeys()) return
         if (right) { if (p && p.editorOn && p.compose.editing && p.compose.text.trim() !== "") p.compose.submitBackground(); return }
         toggleEditor()
     }
