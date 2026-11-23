@@ -70,6 +70,7 @@ Item {
     signal keptChanged2(var choices)    // (to the notebook, to keep)
     property var mine: ({})
     Component.onCompleted: {
+        colsKey = JSON.stringify(colsNow); tableCols = colsNow
         mine = kept ? Object.assign({}, kept) : Object.assign({}, saved, { view: undefined })
         // (ls -t, -S, -r ...: the command's order, not the last one picked.)
         if (!kept && (flagSort !== "" || flagReverse || flagFoldersFirst)) mine = Object.assign({}, mine, { sort: undefined, desc: undefined, folders_first: undefined })
@@ -227,19 +228,22 @@ Item {
         return k
     }
     // What's drawn: the entries, an open folder's after it a level in.
-    readonly property var rows: {
-        const out = []
+    // (With them, the open folders that have come, and how deep:
+    // [[path, depth]], found in the same walk.)
+    readonly property var walked: {
+        const out = [], folders = []
         const sk = sortedKids, kd = kids   // (again when they change)
         const add = (list, depth) => {
             for (const e of list) {
                 out.push({ e: e, depth: depth })
                 if (out.length >= 200000) return
-                if (e.dir && isOpen(e.path) && kd[e.path]) add(kidsOf(e.path), depth + 1)
+                if (e.dir && isOpen(e.path) && kd[e.path]) { folders.push([e.path, depth + 1]); add(kidsOf(e.path), depth + 1) }
             }
         }
         add(entries, 0)
-        return out
+        return { rows: out, folders: folders }
     }
+    readonly property var rows: walked.rows
     // ---- what's on screen: only those rows are made (a big ls -R, a
     // folder of thousands, scroll without making them all) ----
     // viewTop/viewBottom: the part of this view that shows, in its own
@@ -314,16 +318,13 @@ Item {
         stats[key] = st
         return st
     }
-    // The open folders that have come, and how deep: [[path, depth]].
-    readonly property var openFolders: {
-        const out = [], kd = kids
-        const walk = (list, depth) => {
-            for (const e of list) if (e.dir && isOpen(e.path) && kd[e.path]) { out.push([e.path, depth + 1]); walk(kidsOf(e.path), depth + 1) }
-        }
-        if (view === "details") walk(entries, 0)
-        return out
-    }
-    readonly property var tableCols: {
+    readonly property var openFolders: view === "details" ? walked.folders : []
+    // (Kept as it was while it comes out the same: a folder read as the
+    // tree fills in redoes this, and every row's cells were made again.)
+    property var tableCols: []
+    onColsNowChanged: { const j = JSON.stringify(colsNow); if (j !== colsKey) { colsKey = j; tableCols = colsNow } }
+    property string colsKey: "[]"
+    readonly property var colsNow: {
         if (view !== "details") return []
         // Each column's natural width (in characters): its widest cell.
         const nat = { name: 8, size: 4, date: lsOpts.fullTime ? 19 : 24, mode: 11, nlink: 5, user: 5, group: 5, ino: 5, blocks: 6 }
@@ -836,7 +837,7 @@ Item {
                     elide: Text.ElideRight
                     font.family: fb.fontFamily
                     font.pointSize: fb.pointSize
-                    font.bold: ent.e.dir || ent.e.exec
+                    font.bold: !!(ent.e.dir || ent.e.exec)
                     font.underline: eh.hovered
                 }
                 // the table's other columns
