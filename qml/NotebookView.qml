@@ -4004,6 +4004,18 @@ FocusScope {
         onViewRequested: (p) => nb.viewRequested(p)
         onFileCardRequested: (p) => nb.addFileCard(p)
         onListedChanged: if (listed && card) { card.listed = true; if (card.debug) console.log("ls card: read " + dir) }
+        // (The part of it that shows, from the card, as the card or the
+        // notebook scrolls: only those rows are made.)
+        readonly property int tick: card ? card.viewTick : 0
+        function updateView() {
+            if (!card) return
+            const r = card.viewOf(this)
+            viewTop = r[0]; viewBottom = r[1]
+        }
+        onTickChanged: updateView()
+        onYChanged: updateView()
+        onHeightChanged: updateView()
+        Component.onCompleted: updateView()
     }
     Component {
         id: filesView
@@ -4028,13 +4040,42 @@ FocusScope {
             MomentumWheel { flick: lsf }
             onContentYChanged: lsc.viewTick++
             onHeightChanged: lsc.viewTick++
+            // (Test hook: TESSERA_TEST_LS_SCROLL=steps scrolls an ls card down 300 px every 50 ms
+            // from 10 s, 60 times, and logs the frames meanwhile: how smooth it is.)
+            property var frameAt: []
+            Timer {
+                id: lsSteps
+                interval: 50; repeat: true
+                property int n: 0
+                running: false
+                onTriggered: {
+                    lsf.contentY = Math.min(Math.max(0, lsf.contentHeight - lsf.height), lsf.contentY + 300)
+                    if (++n >= 60) {
+                        stop()
+                        const t = lsf.frameAt, gaps = []
+                        for (let i = 1; i < t.length; ++i) gaps.push(t[i] - t[i - 1])
+                        gaps.sort((a, b) => a - b)
+                        console.log("ls scroll: " + t.length + " frames in " + (t.length ? t[t.length - 1] - t[0] : 0) + " ms; gap median " + (gaps[gaps.length >> 1] || 0) + " ms, p95 " + (gaps[Math.floor(gaps.length * 0.95)] || 0) + " ms, max " + (gaps[gaps.length - 1] || 0) + " ms; content " + Math.round(lsf.contentHeight) + " px")
+                        lsf.frameAt = []
+                    }
+                }
+            }
+            Timer {
+                interval: 10000
+                running: nb.controller !== null && nb.controller.testEnv("LS_SCROLL") === "steps"
+                onTriggered: { lsf.frameAt = []; lsSteps.n = 0; lsSteps.start() }
+            }
+            Connections {
+                target: lsSteps.running ? lsf.Window.window : null
+                function onFrameSwapped() { lsf.frameAt.push(Date.now()) }
+            }
             // (Test hook: TESSERA_TEST_LS_SCROLL scrolls an ls card to its end at 8 s; LS_DEBUG logs its size.)
             Timer {
                 interval: 8000
                 running: nb.controller !== null && (nb.controller.testEnv("LS_SCROLL") !== "" || lsc.debug)
                 onTriggered: {
                     if (lsc.debug) console.log("ls card: view " + lsf.height + " of " + lsf.contentHeight + " (column " + lsc.implicitHeight + ")")
-                    if (nb.controller.testEnv("LS_SCROLL") !== "") lsf.contentY = Math.max(0, lsf.contentHeight - lsf.height)
+                    if (nb.controller.testEnv("LS_SCROLL") === "end") lsf.contentY = Math.max(0, lsf.contentHeight - lsf.height)
                 }
             }
         Column {
@@ -4092,6 +4133,12 @@ FocusScope {
                 function onContentYChanged() { lsc.viewTick++ }
                 function onHeightChanged() { lsc.viewTick++ }
             }
+            // (What of an item shows: its top and bottom in its own
+            // coordinates, within the card's view and the notebook's.)
+            function viewOf(item) {
+                const p = item.mapToItem(lsf, 0, 0).y, q = item.mapToItem(list, 0, 0).y
+                return [Math.max(-p, -q), Math.min(lsf.height - p, list.height - q)]
+            }
             function nearView(item) {
                 if (!item || !item.visible) return false
                 // (Within a screen of what shows: the notebook's view, and the card's.)
@@ -4107,8 +4154,10 @@ FocusScope {
                 model: lsc.plan.groups
                 delegate: LsPane {
                     required property var modelData
+                    required property int index
                     card: lsc
                     width: lsc.width
+                    showBar: index === 0
                     startDir: nb.onHost(modelData.dir)
                     onlyNames: modelData.names
                     namePatterns: modelData.patterns
@@ -4133,7 +4182,8 @@ FocusScope {
                     onYChanged: Qt.callLater(check)
                     Component.onCompleted: Qt.callLater(check)
                     Text {
-                        visible: lsc.plan.headers
+                        // (-R of one folder in the table: a tree, no heading needed.)
+                        visible: lsc.plan.headers && !(lsc.plan.recursive && lsc.plan.single !== "" && secPane.view === "details")
                         topPadding: 6.001
                         text: lsc.label(modelData)
                         color: Theme.textDim
@@ -4142,11 +4192,19 @@ FocusScope {
                         renderType: Text.NativeRendering
                     }
                     LsPane {
+                        id: secPane
                         card: lsc
                         width: lsc.width
                         wanted: sec.reached
+                        // (One toolbar a card: the first pane's.)
+                        showBar: sec.index === 0 && lsc.plan.groups.length === 0
                         startDir: nb.onHost(modelData)
-                        onSubDirsChanged: if (lsc.plan.recursive) lsc.addAfter(modelData, subDirs.map(nb.localPath))
+                        // (ls -R: in the table, a tree with every folder open; in the
+                        // columns, a pane for each folder after its own, as ls has it.
+                        // Either way read as it comes near the view.)
+                        expandAll: !!lsc.plan.recursive && view === "details"
+                        onSubDirsChanged: if (lsc.plan.recursive && view !== "details") lsc.addAfter(modelData, subDirs.map(nb.localPath))
+                        onViewChanged: if (lsc.plan.recursive && view !== "details") lsc.addAfter(modelData, subDirs.map(nb.localPath))
                     }
                 }
             }

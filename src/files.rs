@@ -291,7 +291,11 @@ fn is_text(p: &Path, kind: &str, size: u64) -> bool {
 pub fn list(dir: &str, all: bool) -> String {
     let mut out: Vec<serde_json::Value> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {
-        for e in rd.flatten() {
+        let all_entries: Vec<std::fs::DirEntry> = rd.flatten().collect();
+        // (A folder of thousands: its folders' item counts left out — each is
+        // a folder read of its own; /nix/store would take a minute.)
+        let count_items = all_entries.len() <= 2000;
+        for e in all_entries {
             let name = e.file_name().to_string_lossy().to_string();
             let hidden = name.starts_with('.');
             if hidden && !all {
@@ -305,7 +309,7 @@ pub fn list(dir: &str, all: bool) -> String {
             let is_dir = md.is_dir();
             let mode = mode_of(&md);
             let exec = !is_dir && mode & 0o111 != 0;
-            let items = if is_dir { std::fs::read_dir(&p).map(|r| r.count() as i64).unwrap_or(-1) } else { -1 };
+            let items = if is_dir && count_items { std::fs::read_dir(&p).map(|r| r.count() as i64).unwrap_or(-1) } else { -1 };
             let target = if link { std::fs::read_link(&p).map(|t| t.to_string_lossy().to_string()).unwrap_or_default() } else { String::new() };
             let mtime = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
             let (ino, blocks, nlink, ctime, atime, special) = more_of(lmd.as_ref().filter(|_| link).unwrap_or(&md));
