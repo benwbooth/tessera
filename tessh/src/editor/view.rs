@@ -281,6 +281,24 @@ fn kind_glyph(kind: &str) -> (&'static str, Option<Col>) {
 fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec<(usize, usize, &'static str)>) -> Option<(Vec<Line>, usize)> {
     let cols = v.cols;
     let sel_bg = v.pal.accent_bg();
+    // vi's command line (ExLine), just above the editor, its choices above it.
+    if ed.keys == Keys::Vi && ed.cmd.visible() {
+        let w = cols.saturating_sub(2);
+        let mut lines: Vec<Line> = vec![];
+        for (i, (name, desc)) in ed.cmd.choices.iter().enumerate().take(8) {
+            let bg = if i == ed.cmd.pick { Some(sel_bg) } else { None };
+            let mut row = vec![Span::new(format!(" {name}"), Sty { bg, bold: true, ..Default::default() }), Span::new(format!("  {desc}"), v.pal.dimmed().with_bg(bg))];
+            let rw = super::width(&row);
+            row.push(Span::new(" ".repeat(w.saturating_sub(rw)), Sty { bg, ..Default::default() }));
+            lines.push(fit(row, w));
+        }
+        if ed.cmd.is_open() {
+            lines.push(vec![Span::new(format!("{}{}", ed.cmd.kind, ed.cmd.text), Sty::default())]);
+        } else if let Some((m, err)) = &ed.cmd.message {
+            lines.push(fit(vec![Span::new(m.clone(), if *err { Sty::fg(Col::Ansi(9)) } else { Sty::default() })], w));
+        }
+        return Some((boxed(lines, w, v), 0));
+    }
     if let Some(m) = &ed.menu {
         let shown = ed.menu_shown();
         let w = (cols.saturating_sub(4)).min(60);
@@ -459,6 +477,8 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
     let width = cols.saturating_sub(text_x + 1).max(4);
     let cur_line = ed.t.line_of(ed.t.cursor);
     let sel = ed.t.selection();
+    // (vi's V-BLOCK: each line's part.)
+    let block: Vec<(usize, usize)> = if ed.keys == Keys::Vi && ed.vi.visual == Some(super::vi::BLOCK) { ed.vi.block_ranges(&ed.t) } else { vec![] };
     // (Indent levels per line, blank lines as deep as the shallower of the lines around.)
     let size = ind.size.max(1);
     let depth: Vec<usize> = {
@@ -521,6 +541,9 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
                 if p >= sa && p < sb {
                     st.bg = Some(v.pal.accent_bg());
                 }
+            }
+            if block.iter().any(|&(ba, bb)| p >= ba && p < bb) {
+                st.bg = Some(v.pal.accent_bg());
             }
             let cell = if ch == '\t' {
                 let w = tw - vcol % tw;
@@ -682,6 +705,11 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
             rows = pre;
             if let Some(c) = cursor.as_mut() {
                 c.0 += popup_rows;
+            }
+            // (vi's : line: the cursor in it.)
+            if ed.keys == Keys::Vi && ed.cmd.is_open() {
+                let n = ed.cmd.choices.len().min(8);
+                cursor = Some((1 + n, 1 + 1 + cols_of(&ed.cmd.text[..ed.cmd.cursor.min(ed.cmd.text.len())])));
             }
             // (History search: the cursor in its field.)
             if ed.comp.hist && ed.comp.open {

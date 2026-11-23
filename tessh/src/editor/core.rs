@@ -187,6 +187,10 @@ pub struct Ed {
     /// background): a key right after it cancels it (keyd sends a Ctrl tap
     /// just before a tapped Enter).
     pub pending_tap: Option<(char, Instant)>,
+    /// vi's modes, the : commands and their line (ViKeys, ExCommands, ExLine).
+    pub vi: super::vi::Vi,
+    pub ex: super::ex::Ex,
+    pub cmd: super::vi::CmdLine,
 }
 
 const CONT: &[&str] = &["else", "elif", "except", "except*", "finally"];
@@ -276,6 +280,13 @@ impl Ed {
             pressed: None,
             menu_x: None,
             pending_tap: None,
+            vi: {
+                let mut v = super::vi::Vi::new();
+                v.clip_set = Some(Box::new(|s: &str| super::term::Term::copy(s)));
+                v
+            },
+            ex: super::ex::Ex::new(),
+            cmd: super::vi::CmdLine::new(),
         }
     }
 
@@ -686,6 +697,13 @@ impl Ed {
     /// Enter: runs what's complete; else a new line (tessh's rules: open
     /// brackets, or a block until a blank line, as IPython does).
     fn enter(&mut self) {
+        // (A terminal that reports Shift and Ctrl taps, and Shift+Enter: Enter
+        // runs it, as in Tessera; new lines are right Shift's. Else tessh's
+        // rule, below, so blocks can be written without those keys.)
+        if self.kitty {
+            self.submit(false);
+            return;
+        }
         if self.t.cursor < self.t.text.trim_end_matches(' ').len() {
             self.newline();
             return;
@@ -728,6 +746,17 @@ impl Ed {
             self.hist_key(&k, h);
             return;
         }
+        if self.keys == Keys::Vi && self.cmd.is_open() {
+            let ind = self.indent();
+            let before = self.t.text.clone();
+            let out = self.cmd.key(&k, &mut self.t, &ind, &mut self.vi, &mut self.ex);
+            self.vi_out(out);
+            if self.t.text != before {
+                self.changed();
+            }
+            return;
+        }
+        self.cmd.dismiss();
         if !matches!(k.code, KeyCode::Up | KeyCode::Down) {
             self.from_history = false;
         }
@@ -740,7 +769,7 @@ impl Ed {
         let done = self.dispatch(&k, ctrl, alt, shift, plain, h);
         if !done {
             if let KeyCode::Char(c) = k.code {
-                if !ctrl && !alt {
+                if !ctrl && !alt && !self.vi_normal() {
                     self.type_char(c);
                 }
             }
@@ -866,14 +895,36 @@ impl Ed {
     }
 
     pub fn vi_normal(&self) -> bool {
-        false
+        self.keys == Keys::Vi && self.vi.normal
     }
     fn vi_key(&mut self, k: &KeyEvent, _h: &mut dyn Hooks) -> bool {
-        // (vi.rs, when it's in: until then insert mode's Emacs keys.)
-        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let alt = k.modifiers.contains(KeyModifiers::ALT);
-        let shift = k.modifiers.contains(KeyModifiers::SHIFT);
-        self.emacs_key(k, ctrl, alt, shift)
+        let ind = self.indent();
+        let out = self.vi.key(k, &mut self.t, &ind, &mut self.ex);
+        if out == super::vi::ViOut::None {
+            // (Insert mode keeps the readline keys.)
+            if self.vi.normal {
+                return false;
+            }
+            let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+            let alt = k.modifiers.contains(KeyModifiers::ALT);
+            let shift = k.modifiers.contains(KeyModifiers::SHIFT);
+            return self.emacs_key(k, ctrl, alt, shift);
+        }
+        self.vi_out(out);
+        true
+    }
+    /// What vi or its command line asks for.
+    fn vi_out(&mut self, out: super::vi::ViOut) {
+        use super::vi::ViOut;
+        match out {
+            ViOut::HistoryStep(d) => self.history_step(d),
+            ViOut::Submit => self.submit(false),
+            ViOut::Clear => self.set_text(""),
+            ViOut::None | ViOut::Handled => {}
+            o => {
+                self.cmd.apply(&o, &self.ex);
+            }
+        }
     }
 
     fn common_key(&mut self, k: &KeyEvent, ctrl: bool, alt: bool, shift: bool, _h: &mut dyn Hooks) -> bool {
@@ -1577,27 +1628,6 @@ impl Ed {
             }
             _ => self.submit_background(),
         }
-    }
-
-    /// A key from the keyboard itself (/dev/input): Shift and Ctrl taps; any
-    /// other key spoils a tap in progress.
-    pub fn evdev(&mut self, code: u16, down: bool, h: &mut dyn Hooks) {
-        use super::evdev::*;
-        let m = match code {
-            LEFT_SHIFT => ModifierKeyCode::LeftShift,
-            RIGHT_SHIFT => ModifierKeyCode::RightShift,
-            LEFT_CTRL => ModifierKeyCode::LeftControl,
-            RIGHT_CTRL => ModifierKeyCode::RightControl,
-            _ => {
-                if down {
-                    self.shift_side = 0;
-                    self.ctrl_side = 0;
-                    self.pending_tap = None;
-                }
-                return;
-            }
-        };
-        self.modifier(m, if down { KeyEventKind::Press } else { KeyEventKind::Release }, h);
     }
 
     pub fn tick(&mut self, h: &mut dyn Hooks, tooltip_for: fn(&Ed, &Hit) -> String, hit_at: impl Fn(u16, u16) -> Option<Hit>) {
