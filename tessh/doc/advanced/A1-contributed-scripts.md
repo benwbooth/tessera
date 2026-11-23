@@ -4546,3 +4546,233 @@ Other examples . . .
 Back to normal?
 
 ```
+
+## More on hash functions
+<!-- help: abs-ha ha.sh pseudo-hash indirect-expansion parallel-arrays keys values -->
+
+Oliver Beckstein's pseudo-hash, from a different angle: each hash is two
+arrays, `_NAME_keys` and `_NAME_values`, at the same index, with
+`_NAME_ptr` the last one used; a lookup searches the keys in order. The
+array names are made up at run time, so every access goes through `eval`
+and `${!name}`.
+
+### Example A-22. More on hash functions (`ha.sh`)
+
+```bash
+#!/bin/bash
+# $Id: ha.sh,v 1.2 2005/04/21 23:24:26 oliver Exp $
+# Copyright 2005 Oliver Beckstein
+# Released under the GNU Public License
+# Author of script granted permission for inclusion in ABS Guide.
+# (Thank you!)
+
+#----------------------------------------------------------------
+# pseudo hash based on indirect parameter expansion
+# API: access through functions:
+# 
+# create the hash:
+#  
+#      newhash Lovers
+#
+# add entries (note single quotes for spaces)
+#    
+#      addhash Lovers Tristan Isolde
+#      addhash Lovers 'Romeo Montague' 'Juliet Capulet'
+#
+# access value by key
+#
+#      gethash Lovers Tristan   ---->  Isolde
+#
+# show all keys
+#
+#      keyshash Lovers         ----> 'Tristan'  'Romeo Montague'
+#
+#
+# Convention: instead of perls' foo{bar} = boing' syntax,
+# use
+#       '_foo_bar=boing' (two underscores, no spaces)
+#
+# 1) store key   in _NAME_keys[]
+# 2) store value in _NAME_values[] using the same integer index
+# The integer index for the last entry is _NAME_ptr
+#
+# NOTE: No error or sanity checks, just bare bones.
+
+
+function _inihash () {
+    # private function
+    # call at the beginning of each procedure
+    # defines: _keys _values _ptr
+    #
+    # Usage: _inihash NAME
+    local name=$1
+    _keys=_${name}_keys
+    _values=_${name}_values
+    _ptr=_${name}_ptr
+}
+
+function newhash () {
+    # Usage: newhash NAME
+    #        NAME should not contain spaces or dots.
+    #        Actually: it must be a legal name for a Bash variable.
+    # We rely on Bash automatically recognising arrays.
+    local name=$1 
+    local _keys _values _ptr
+    _inihash ${name}
+    eval ${_ptr}=0
+}
+
+
+function addhash () {
+    # Usage: addhash NAME KEY 'VALUE with spaces'
+    #        arguments with spaces need to be quoted with single quotes ''
+    local name=$1 k="$2" v="$3" 
+    local _keys _values _ptr
+    _inihash ${name}
+
+    #echo "DEBUG(addhash): ${_ptr}=${!_ptr}"
+
+    eval let ${_ptr}=${_ptr}+1
+    eval "$_keys[${!_ptr}]=\"${k}\""
+    eval "$_values[${!_ptr}]=\"${v}\""
+}
+
+function gethash () {
+    #  Usage: gethash NAME KEY
+    #         Returns boing
+    #         ERR=0 if entry found, 1 otherwise
+    #  That's not a proper hash --
+    #+ we simply linearly search through the keys.
+    local name=$1 key="$2" 
+    local _keys _values _ptr 
+    local k v i found h
+    _inihash ${name}
+    
+    # _ptr holds the highest index in the hash
+    found=0
+
+    for i in $(seq 1 ${!_ptr}); do
+	h="\${${_keys}[${i}]}"  #  Safer to do it in two steps,
+	eval k=${h}             #+ especially when quoting for spaces.
+	if [ "${k}" = "${key}" ]; then found=1; break; fi
+    done;
+
+    [ ${found} = 0 ] && return 1;
+    # else: i is the index that matches the key
+    h="\${${_values}[${i}]}"
+    eval echo "${h}"
+    return 0;	
+}
+
+function keyshash () {
+    # Usage: keyshash NAME
+    # Returns list of all keys defined for hash name.
+    local name=$1 key="$2" 
+    local _keys _values _ptr 
+    local k i h
+    _inihash ${name}
+    
+    # _ptr holds the highest index in the hash
+    for i in $(seq 1 ${!_ptr}); do
+	h="\${${_keys}[${i}]}"   #  Safer to do it in two steps,
+	eval k=${h}              #+ especially when quoting for spaces.
+	echo -n "'${k}' "
+    done;
+}
+
+
+# -----------------------------------------------------------------------
+
+# Now, let's test it.
+# (Per comments at the beginning of the script.)
+newhash Lovers
+addhash Lovers Tristan Isolde
+addhash Lovers 'Romeo Montague' 'Juliet Capulet'
+
+# Output results.
+echo
+gethash Lovers Tristan      # Isolde
+echo
+keyshash Lovers             # 'Tristan' 'Romeo Montague'
+echo; echo
+
+
+exit 0
+
+# Exercise:
+# --------
+
+# Add error checks to the functions.
+```
+
+In tessh each hash is a pair of lists kept in a dict by its name, so no
+names are made up and nothing is `eval`ed; the API is the same, barewords
+and all. `gethash` still searches, as the original does on purpose
+("that's not a proper hash"); it returns `None` for a key that isn't
+there, where the bash returns 1. The exercise, error checks, comes partly
+free: an unknown hash name is a `KeyError`. (`keyshash` leaves a blank after
+the last key, as the bash does.)
+
+```tessh
+# Copyright 2005 Oliver Beckstein
+# Released under the GNU Public License
+# Author of script granted permission for inclusion in ABS Guide.
+# (Thank you!)
+
+#----------------------------------------------------------------
+# pseudo hash: two lists, keys and values, at the same index
+# API: access through functions:
+#   newhash Lovers                                  create the hash
+#   addhash Lovers Tristan Isolde                   add entries
+#   addhash Lovers 'Romeo Montague' 'Juliet Capulet'
+#   gethash Lovers Tristan     ---->  Isolde        access value by key
+#   keyshash Lovers            ----> 'Tristan'  'Romeo Montague'
+# NOTE: No error or sanity checks, just bare bones.
+
+hashes = {}                  # NAME -> [keys values]
+
+def newhash name             # Usage: newhash NAME
+  $hashes[$name] = [[] []]
+
+def addhash name k v         # Usage: addhash NAME KEY 'VALUE with spaces'
+  [keys values] = $hashes[$name]
+  keys.append $k
+  values.append $v
+
+def gethash name key         # Usage: gethash NAME KEY
+  # That's not a proper hash -- we simply linearly search through the keys.
+  [keys values] = $hashes[$name]
+  for [k v] in (zip $keys $values)
+    if $k == $key
+      return $v
+  None                       # (Not found.)
+
+def keyshash name            # Usage: keyshash NAME
+  [keys values] = $hashes[$name]    # Returns list of all keys defined.
+  for k in $keys
+    print "'$k'" end=" "
+
+# -----------------------------------------------------------------------
+
+# Now, let's test it.
+newhash Lovers
+addhash Lovers Tristan Isolde
+addhash Lovers 'Romeo Montague' 'Juliet Capulet'
+
+# Output results.
+print
+print (gethash Lovers Tristan)      # Isolde
+print
+keyshash Lovers             # 'Tristan' 'Romeo Montague'
+print ; print
+
+exit 0
+```
+
+```output
+
+Isolde
+
+'Tristan' 'Romeo Montague' 
+
+```
