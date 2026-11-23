@@ -8741,3 +8741,434 @@ now in music
 1 music            S1 -
 0 projects/beta    S0 -
 ```
+
+## Setting up a PnP sound card
+<!-- help: abs-soundcard-on soundcard-on sysfs pnp modprobe device-files -->
+
+Mkarcher's `soundcard-on.sh` gets the sound chip of old ThinkPads
+working: it finds the chip's two Plug and Play devices in `/sys`,
+switches them on by writing to their `resources` files, reads back the
+ports, interrupt and DMA channels they were given, and loads the driver
+with those settings. It needs root and that hardware.
+
+### Example A-34. A soundcard setup script (`soundcard-on.sh`)
+
+```bash no-run
+#!/bin/bash
+# soundcard-on.sh
+
+#  Script author: Mkarcher
+#  http://www.thinkwiki.org/wiki  ...
+#  /Script_for_configuring_the_CS4239_sound_chip_in_PnP_mode
+#  ABS Guide author made minor changes and added comments.
+#  Couldn't contact script author to ask for permission to use, but ...
+#+ the script was released under the FDL,
+#+ so its use here should be both legal and ethical.
+
+#  Sound-via-pnp-script for Thinkpad 600E
+#+ and possibly other computers with onboard CS4239/CS4610
+#+ that do not work with the PCI driver
+#+ and are not recognized by the PnP code of snd-cs4236.
+#  Also for some 770-series Thinkpads, such as the 770x.
+#  Run as root user, of course.
+#
+#  These are old and very obsolete laptop computers,
+#+ but this particular script is very instructive,
+#+ as it shows how to set up and hack device files.
+
+
+
+#  Search for sound card pnp device:
+
+for dev in /sys/bus/pnp/devices/*
+do
+  grep CSC0100 $dev/id > /dev/null && WSSDEV=$dev
+  grep CSC0110 $dev/id > /dev/null && CTLDEV=$dev
+done
+# On 770x:
+# WSSDEV = /sys/bus/pnp/devices/00:07
+# CTLDEV = /sys/bus/pnp/devices/00:06
+# These are symbolic links to /sys/devices/pnp0/ ...
+
+
+#  Activate devices:
+#  Thinkpad boots with devices disabled unless "fast boot" is turned off
+#+ (in BIOS).
+
+echo activate > $WSSDEV/resources
+echo activate > $CTLDEV/resources
+
+
+# Parse resource settings.
+
+{ read # Discard "state = active" (see below).
+  read bla port1
+  read bla port2
+  read bla port3
+  read bla irq
+  read bla dma1
+  read bla dma2
+ # The "bla's" are labels in the first field: "io," "state," etc.
+ # These are discarded.
+
+ #  Hack: with PnPBIOS: ports are: port1: WSS, port2:
+ #+ OPL, port3: sb (unneeded)
+ #       with ACPI-PnP:ports are: port1: OPL, port2: sb, port3: WSS
+ #  (ACPI bios seems to be wrong here, the PnP-card-code in snd-cs4236.c
+ #+  uses the PnPBIOS port order)
+ #  Detect port order using the fixed OPL port as reference.
+  if [ ${port2%%-*} = 0x388 ]
+ #            ^^^^  Strip out everything following hyphen in port address.
+ #                  So, if port1 is 0x530-0x537
+ #+                 we're left with 0x530 -- the start address of the port.
+ then
+   # PnPBIOS: usual order
+   port=${port1%%-*}
+   oplport=${port2%%-*}
+ else
+   # ACPI: mixed-up order
+   port=${port3%%-*}
+   oplport=${port1%%-*}
+ fi
+ } < $WSSDEV/resources
+# To see what's going on here:
+# ---------------------------
+#   cat /sys/devices/pnp0/00:07/resources
+#
+#   state = active
+#   io 0x530-0x537
+#   io 0x388-0x38b
+#   io 0x220-0x233
+#   irq 5
+#   dma 1
+#   dma 0
+#   ^^^   "bla" labels in first field (discarded). 
+
+
+{ read # Discard first line, as above.
+  read bla port1
+  cport=${port1%%-*}
+  #            ^^^^
+  # Just want _start_ address of port.
+} < $CTLDEV/resources
+
+
+# Load the module:
+
+modprobe --ignore-install snd-cs4236 port=$port cport=$cport\
+fm_port=$oplport irq=$irq dma1=$dma1 dma2=$dma2 isapnp=0 index=0
+# See the modprobe manpage.
+
+exit $?
+```
+
+The `/sys` files are Paths in tessh: `.read_text` to look for the chip's
+ID and to read the settings, `.write_text` to activate. The `{ read …;
+read bla port1; … } < file` block, which reads one line per variable and
+throws away the labels, is a function that takes the second word of each
+line, unpacked into the same names; `${port1%%-*}` is
+`.partition "-"`. One fix: in the bash, `cport=$cport\` has no space
+before the line break, so `cport` and `fm_port` reach `modprobe` as one
+word.
+
+```tessh no-run
+#!/usr/bin/env tessh
+# soundcard-on.tsh (ported from soundcard-on.sh)
+
+#  Script author: Mkarcher
+#  http://www.thinkwiki.org/wiki  ...
+#  /Script_for_configuring_the_CS4239_sound_chip_in_PnP_mode
+#  ABS Guide author made minor changes and added comments.
+#  Couldn't contact script author to ask for permission to use, but ...
+#+ the script was released under the FDL,
+#+ so its use here should be both legal and ethical.
+
+#  Sound-via-pnp-script for Thinkpad 600E
+#+ and possibly other computers with onboard CS4239/CS4610
+#+ that do not work with the PCI driver
+#+ and are not recognized by the PnP code of snd-cs4236.
+#  Also for some 770-series Thinkpads, such as the 770x.
+#  Run as root user, of course.
+#
+#  These are old and very obsolete laptop computers,
+#+ but this particular script is very instructive,
+#+ as it shows how to set up and hack device files.
+
+#  Search for sound card pnp device:
+WSSDEV = None ; CTLDEV = None
+for dev in /sys/bus/pnp/devices/*
+  id = ($dev / id).read_text
+  if "CSC0100" in $id
+    WSSDEV = $dev
+  if "CSC0110" in $id
+    CTLDEV = $dev
+# On 770x:
+# WSSDEV = /sys/bus/pnp/devices/00:07
+# CTLDEV = /sys/bus/pnp/devices/00:06
+# These are symbolic links to /sys/devices/pnp0/ ...
+
+#  Activate devices:
+#  Thinkpad boots with devices disabled unless "fast boot" is turned off
+#+ (in BIOS).
+($WSSDEV / resources).write_text "activate\n"
+($CTLDEV / resources).write_text "activate\n"
+
+# Parse resource settings.
+# A device's settings: the second word of each line after the first
+# ("state = active"); the first words are labels: "io", "irq", "dma".
+def settings dev = [($line.split)[1] for line in ((($dev / resources).read_text).splitlines)[1:]]
+
+# The start of a port range: 0x530-0x537 -> 0x530
+def start ports = ($ports.partition "-")[0]
+
+[port1 port2 port3 irq dma1 dma2] = (settings $WSSDEV)[:6]
+#  Hack: with PnPBIOS: ports are: port1: WSS, port2:
+#+ OPL, port3: sb (unneeded)
+#       with ACPI-PnP:ports are: port1: OPL, port2: sb, port3: WSS
+#  (ACPI bios seems to be wrong here, the PnP-card-code in snd-cs4236.c
+#+  uses the PnPBIOS port order)
+#  Detect port order using the fixed OPL port as reference.
+if (start $port2) == "0x388"       # (Quoted: 0x388 bare is a number.)
+  # PnPBIOS: usual order
+  port = start $port1
+  oplport = start $port2
+else
+  # ACPI: mixed-up order
+  port = start $port3
+  oplport = start $port1
+# To see what's going on here:
+# ---------------------------
+#   cat /sys/devices/pnp0/00:07/resources
+#
+#   state = active
+#   io 0x530-0x537
+#   io 0x388-0x38b
+#   io 0x220-0x233
+#   irq 5
+#   dma 1
+#   dma 0
+#   ^^^   labels in first field (discarded).
+
+cport = start (settings $CTLDEV)[0]
+# Just want _start_ address of port.
+
+# Load the module:
+modprobe --ignore-install snd-cs4236 port=$port cport=$cport \
+  fm_port=$oplport irq=$irq dma1=$dma1 dma2=$dma2 isapnp=0 index=0
+# See the modprobe manpage.
+
+exit $?
+```
+
+The parsing, on made-up `resources` files in both port orders:
+
+```bash
+# (Made-up resources files of the two PnP devices, as PnPBIOS and as
+#+ ACPI list them; the modprobe command is shown, not run.)
+mkdir -p pnpbios acpi ctl
+printf 'state = active\nio 0x530-0x537\nio 0x388-0x38b\nio 0x220-0x233\nirq 5\ndma 1\ndma 0\n' >pnpbios/resources
+printf 'state = active\nio 0x388-0x38b\nio 0x220-0x233\nio 0x530-0x537\nirq 5\ndma 1\ndma 0\n' >acpi/resources
+printf 'state = active\nio 0x538-0x53f\n' >ctl/resources
+CTLDEV=ctl
+
+for WSSDEV in pnpbios acpi
+do
+{ read # Discard "state = active" (see below).
+  read bla port1
+  read bla port2
+  read bla port3
+  read bla irq
+  read bla dma1
+  read bla dma2
+ #  Detect port order using the fixed OPL port as reference.
+  if [ ${port2%%-*} = 0x388 ]
+ then
+   # PnPBIOS: usual order
+   port=${port1%%-*}
+   oplport=${port2%%-*}
+ else
+   # ACPI: mixed-up order
+   port=${port3%%-*}
+   oplport=${port1%%-*}
+ fi
+ } < $WSSDEV/resources
+
+{ read # Discard first line, as above.
+  read bla port1
+  cport=${port1%%-*}
+} < $CTLDEV/resources
+
+echo modprobe --ignore-install snd-cs4236 port=$port cport=$cport \
+fm_port=$oplport irq=$irq dma1=$dma1 dma2=$dma2 isapnp=0 index=0
+done
+```
+
+```tessh
+# (Made-up resources files of the two PnP devices, as PnPBIOS and as
+# ACPI list them; the modprobe command is shown, not run.)
+mkdir -p pnpbios acpi ctl
+printf 'state = active\nio 0x530-0x537\nio 0x388-0x38b\nio 0x220-0x233\nirq 5\ndma 1\ndma 0\n' >pnpbios/resources
+printf 'state = active\nio 0x388-0x38b\nio 0x220-0x233\nio 0x530-0x537\nirq 5\ndma 1\ndma 0\n' >acpi/resources
+printf 'state = active\nio 0x538-0x53f\n' >ctl/resources
+CTLDEV = Path ctl
+
+# A device's settings: the second word of each line after the first
+# ("state = active"); the first words are labels: "io", "irq", "dma".
+def settings dev = [($line.split)[1] for line in ((($dev / resources).read_text).splitlines)[1:]]
+
+# The start of a port range: 0x530-0x537 -> 0x530
+def start ports = ($ports.partition "-")[0]
+
+for WSSDEV in [(Path pnpbios) (Path acpi)]
+  [port1 port2 port3 irq dma1 dma2] = settings $WSSDEV
+  # Detect port order using the fixed OPL port as reference.
+  if (start $port2) == "0x388"         # (Quoted: 0x388 bare is a number.)
+    [port oplport] = [(start $port1) (start $port2)]   # PnPBIOS: usual order
+  else
+    [port oplport] = [(start $port3) (start $port1)]   # ACPI: mixed-up order
+  cport = start (settings $CTLDEV)[0]
+
+  echo modprobe --ignore-install snd-cs4236 port=$port cport=$cport \
+    fm_port=$oplport irq=$irq dma1=$dma1 dma2=$dma2 isapnp=0 index=0
+```
+
+```output
+modprobe --ignore-install snd-cs4236 port=0x530 cport=0x538 fm_port=0x388 irq=5 dma1=1 dma2=0 isapnp=0 index=0
+modprobe --ignore-install snd-cs4236 port=0x530 cport=0x538 fm_port=0x388 irq=5 dma1=1 dma2=0 isapnp=0 index=0
+```
+
+`0x388` is quoted in the tessh, since a bare `0x388` is the number 904
+and the port read from the file is text.
+
+## Finding split paragraphs
+<!-- help: abs-find-splitpara find-splitpara split-paragraphs text line-numbers -->
+
+`find-splitpara.sh` finds the places in a text where a paragraph was
+split by a stray blank line: a line that starts with a lower-case letter
+right after a blank one. It prints them with their line numbers. (The
+ABS Guide gives no author for it.)
+
+### Example A-35. Locating split paragraphs in a text file (`find-splitpara.sh`)
+
+```bash no-run
+#!/bin/bash
+# find-splitpara.sh
+#  Finds split paragraphs in a text file,
+#+ and tags the line numbers.
+
+
+ARGCOUNT=1       # Expect one arg.
+OFF=0            # Flag states.
+ON=1
+E_WRONGARGS=85
+
+file="$1"        # Target filename.
+lineno=1         # Line number. Start at 1.
+Flag=$OFF        # Blank line flag.
+
+if [ $# -ne "$ARGCOUNT" ]
+then
+  echo "Usage: `basename $0` FILENAME"
+  exit $E_WRONGARGS
+fi  
+
+file_read ()     # Scan file for pattern, then print line.
+{
+while read line
+do
+
+  if [[ "$line" =~ ^[a-z] && $Flag -eq $ON ]]
+     then  # Line begins with lowercase character, following blank line.
+     echo -n "$lineno::   "
+     echo "$line"
+  fi
+
+
+  if [[ "$line" =~ ^$ ]]
+     then       #  If blank line,
+     Flag=$ON   #+ set flag.
+  else
+     Flag=$OFF
+  fi
+
+  ((lineno++))
+
+done
+} < $file  # Redirect file into function's stdin.
+
+file_read
+
+
+exit $?
+
+
+# ----------------------------------------------------------------
+This is line one of an example paragraph, bla, bla, bla.
+This is line two, and line three should follow on next line, but
+
+there is a blank line separating the two parts of the paragraph.
+# ----------------------------------------------------------------
+
+Running this script on a file containing the above paragraph
+yields:
+
+4::   there is a blank line separating the two parts of the paragraph.
+
+
+There will be additional output for all the other split paragraphs
+in the target file.
+```
+
+In tessh the file is read with `for … in (enumerate $f 1)`, which numbers
+the lines, and the flag is a boolean that says whether the line before
+was blank. bash's `read` takes the spaces off the ends of each line, so
+the tessh `.strip`s it. Here it runs on a made-up text, the script's
+own example and more, as its sample argument.
+
+```tessh
+# find-splitpara.tsh
+#  Finds split paragraphs in a text file,
+#+ and tags the line numbers.
+
+# (A made-up text to try it on: the script's own example, and more.)
+cat >sample.txt <<'END'
+This is line one of an example paragraph, bla, bla, bla.
+This is line two, and line three should follow on next line, but
+
+there is a blank line separating the two parts of the paragraph.
+
+A paragraph of its own.
+
+  indented, and split too.
+Not split.
+
+and this one is.
+END
+
+ARGCOUNT = 1     # Expect one arg.
+E_WRONGARGS = 85
+
+args = $argv[1:] or [sample.txt]    # (sample argument, when none is given)
+if (len $args) != $ARGCOUNT
+  print "Usage: $((Path $argv[0]).name) FILENAME"
+  exit $E_WRONGARGS
+file = $args[0]  # Target filename.
+
+def file_read path    # Scan file for pattern, then print line.
+  after_blank = False                 # Blank line flag.
+  with (open $path) as f
+    for [lineno line] in (enumerate $f 1)
+      line = ($line.strip)            # (As read takes off the spaces.)
+      if $after_blank and $line =~ re'^[a-z]'
+        # Line begins with lowercase character, following blank line.
+        print "$lineno::   $line"
+      after_blank = $line == ""       # If blank line, set flag.
+
+file_read $file
+```
+
+```output
+4::   there is a blank line separating the two parts of the paragraph.
+8::   indented, and split too.
+11::   and this one is.
+```
