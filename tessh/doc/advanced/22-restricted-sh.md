@@ -77,6 +77,7 @@ your home, and has nothing to put where `set -r` was, so everything the
 original's second half tries works: that's the gap, shown.
 
 ```tessh
+#!/usr/bin/env tessh
 mkdir -p usr/local           # (A made-up /usr/local.)
 home = (pwd)                 # (And the current folder as home.)
 

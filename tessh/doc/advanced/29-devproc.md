@@ -46,6 +46,7 @@ an ordinary file that isn't there. Python's `socket` module does the same
 job, and says more about what went wrong when it fails.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import socket
 
 with (socket.create_connection ("time.nist.gov", 13) timeout=10) as s
@@ -106,6 +107,7 @@ just a status of 1. So it can run here, this version first opens a listener
 of its own on this machine and connects to that.
 
 ```tessh
+#!/usr/bin/env tessh
 import socket
 
 # (A listener of our own on this machine to try it on; the original
@@ -189,6 +191,7 @@ to a file; `aplay -r 8000 -f U8 music.raw` (or `pacat --format=u8
 --rate=8000 --channels=1`) plays it.
 
 ```tessh
+#!/usr/bin/env tessh
 # music: music without external files.
 # Author: Antonio Macchi
 
@@ -308,6 +311,7 @@ Python splits the NUL-separated arguments itself, which is what `xargs -0`
 was for. Here it looks at a small script it starts in the background.
 
 ```tessh
+#!/usr/bin/env tessh
 # get-commandline: get the command-line parameters of a process.
 OPTION = cmdline
 
@@ -458,6 +462,7 @@ takes the place of the `-r` test. With no argument it looks at process 1,
 whose `exe` only root may read.
 
 ```tessh
+#!/usr/bin/env tessh
 # pid-identifier: gives complete path name to process associated with pid.
 import os sys
 
@@ -571,6 +576,7 @@ lines are a row of names and a row of numbers, zipped here into a dict. The
 endless loop is cut to two rounds so it ends.
 
 ```tessh
+#!/usr/bin/env tessh
 # connect-stat: on-line connect status.
 
 PROCNAME = pppd        # ppp daemon

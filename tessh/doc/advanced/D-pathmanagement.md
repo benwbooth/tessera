@@ -102,6 +102,7 @@ or `$env.PATH = p_prepend ~/bin $env.PATH` for the real `PATH`. Between
 splitting and joining, a path is a list, and `p_filter` cleans a list.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 
 # Filter out empty items, multiple/trailing slashes, and duplicates.

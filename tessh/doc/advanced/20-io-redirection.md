@@ -260,6 +260,7 @@ from the file `exec` made its standard input. The last `read` is from the
 keyboard; that's answered here, since these examples can't use one.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # (A made-up data-file to try it on.)
 printf "This is line 1 of data-file.\nThis is line 2.\nAnd line 3.\n" >data-file
@@ -359,6 +360,7 @@ file. The end shows the file's headings, as its dates and sizes change from
 run to run.
 
 ```tessh
+#!/usr/bin/env tessh
 LOGFILE = logfile.txt
 
 def report
@@ -455,6 +457,7 @@ A function redirected both ways. (Just `tr a-z A-Z <$in >$out` would do,
 of course.)
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 E_FILE_ACCESS = 70
 E_WRONG_ARGS = 71
@@ -561,6 +564,7 @@ The first loop goes over what `cat` printed, the second over the open
 file; both count all 8 lines, as there's no subshell to lose the count in.
 
 ```tessh
+#!/usr/bin/env tessh
 # (The myfile.txt the original shows at its end.)
 printf "Line %d.\n" 1 2 3 4 5 6 7 8 >myfile.txt
 
@@ -689,6 +693,7 @@ The loop is in a function, and its call takes the redirection that bash
 puts after `done`. `count` is the function's own, given back at the end.
 
 ```tessh
+#!/usr/bin/env tessh
 # (names.data, Example 20-11, to read.)
 printf "%s\n" Aristotle Arrhenius Belisarius Capablanca Dickens Euler Goethe \
   Hegel Jonah Laplace Maroczy Purcell Schmidt Schopenhauer Semmelweiss Smith \
@@ -826,6 +831,7 @@ exit 0
 This form, `exec` around a plain loop, is `$sys.stdin` set around it.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # (names.data, Example 20-11, to read.)
 printf "%s\n" Aristotle Arrhenius Belisarius Capablanca Dickens Euler Goethe \
@@ -907,6 +913,7 @@ tessh has no `until`: it's `while not`. Here the loop reads the open file
 with `.readline`, as bash's `read` reads its redirected input.
 
 ```tessh
+#!/usr/bin/env tessh
 # (names.data, Example 20-11, to read.)
 printf "%s\n" Aristotle Arrhenius Belisarius Capablanca Dickens Euler Goethe \
   Hegel Jonah Laplace Maroczy Purcell Schmidt Schopenhauer Semmelweiss Smith \
@@ -986,6 +993,7 @@ The `for` loop over `seq` in a function, redirected, as the original
 redirects the loop.
 
 ```tessh
+#!/usr/bin/env tessh
 # (names.data, Example 20-11, to read.)
 printf "%s\n" Aristotle Arrhenius Belisarius Capablanca Dickens Euler Goethe \
   Hegel Jonah Laplace Maroczy Purcell Schmidt Schopenhauer Semmelweiss Smith \
@@ -1064,6 +1072,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # (names.data, Example 20-11, to read.)
 printf "%s\n" Aristotle Arrhenius Belisarius Capablanca Dickens Euler Goethe \
   Hegel Jonah Laplace Maroczy Purcell Schmidt Schopenhauer Semmelweiss Smith \
@@ -1130,6 +1139,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # (names.data, Example 20-11, to read.)
 printf "%s\n" Aristotle Arrhenius Belisarius Capablanca Dickens Euler Goethe \
   Hegel Jonah Laplace Maroczy Purcell Schmidt Schopenhauer Semmelweiss Smith \
@@ -1340,6 +1350,7 @@ root. `>&5` is written with the number: **bug:** tessh doesn't take a
 variable there (`>&$FD_DEBUG3` is passed to `echo` as a word).
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 
 ROOT_UID = (os.getuid)    # (0, root, in the original: here, you)

@@ -287,6 +287,7 @@ space in it stays whole (bash's `$( … )` would split it). What it finds
 depends on the system, so this doesn't run here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 directory = /usr/sbin
 permissions = "/4000"      # suid (GNU find spells "+4000" as "/4000" now)
 
@@ -336,6 +337,7 @@ is removed too (bash's unquoted `$badname` splits it). `find … -exec rm -f
 {} \;` is the same in tessh.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files to try it on.)
 touch good.txt plain 'a+b' 'semi;colon' 'what?' 'cost$5' 'two words' 'x<y'
 
@@ -412,6 +414,7 @@ exit 0
 contain this one). The answer is canned here, as stdin isn't usable.
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 # (A made-up file with a name that starts with a dash.)
 touch -- -dashing.txt
@@ -507,6 +510,7 @@ subshell group, so each line appends on its own (or open the file once
 lines, which change from run to run.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up /var/log/messages to try it on.)
 for i in (range 1 9)
   print "Nov 23 10:0$i host kernel: event $i" >>messages
@@ -574,6 +578,7 @@ stdout, where `xargs -t` printed each command on stderr. Skipping folders
 (the target among them) keeps `cp` from complaining about them.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files, and the folder to copy them to.)
 touch one.txt two.txt 'three with spaces.txt' ; mkdir backup
 
@@ -650,6 +655,7 @@ included, which is what makes the original dangerous; comparing the whole
 command line is exact.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A process to kill.)
 sleep 4242 &
 
@@ -729,6 +735,7 @@ line's end in tessh too, but a comment can't sit between the pieces, so
 the comments go above it. (Example 16-12 does the counting in Python.)
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up text to try it on.)
 cat >sample.txt <<'END'
 The quick brown fox jumps over the lazy dog.
@@ -893,6 +900,7 @@ from 1 in `expr`, hence the `+ 1` for `index` and the `[1:7]` slice for
 text from the match object.
 
 ```tessh
+#!/usr/bin/env tessh
 # Demonstrating what replaces 'expr'
 # ==================================
 
@@ -1081,6 +1089,7 @@ pattern's `.match` method) is too. `.group 1` is the parenthesized part, and
 the ends of the match are the length.
 
 ```tessh
+#!/usr/bin/env tessh
 print
 print "String operations using regexes instead of \"expr \$string : \""
 print "==================================================="
@@ -1172,6 +1181,7 @@ name, Python's `tempfile` makes one that's really unique (and creates it
 safely), which a time in seconds isn't.
 
 ```tessh
+#!/usr/bin/env tessh
 import datetime
 now = (datetime.datetime.now)
 
@@ -1282,6 +1292,7 @@ one subtraction, a `timedelta`, and halving it is `/ 2`. The exercise
 (`diff` with parameters instead of globals) is done too.
 
 ```tessh
+#!/usr/bin/env tessh
 # date-calc.tsh
 # After Nathan Coulter's date-calc.sh.
 from datetime import datetime timedelta
@@ -1561,6 +1572,7 @@ as `uniq -c` does. (Arun Giridhar's alphabetical order for ties is `key=(fn
 Guide's `testfile`.
 
 ```tessh
+#!/usr/bin/env tessh
 from collections import Counter
 # (The ABS Guide's testfile.)
 printf "%s\n" "This line occurs only once." "This line occurs twice." \
@@ -1645,6 +1657,7 @@ trouble it. A folder is skipped (`head` on one is an error), and it runs on
 a few made-up files.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files to try it on.)
 printf '#!/bin/bash\necho hi\n' > hello.sh
 printf '#!/usr/bin/env tessh\nprint hi\n' > hi.tsh
@@ -1765,6 +1778,7 @@ Stéphane Chazelas' pipeline runs as is in tessh. The Python way reads the
 same four bytes and makes them a number, with no text to cut up.
 
 ```tessh
+#!/usr/bin/env tessh
 # rnd.tsh: Outputs a 10-digit random number
 head -c4 /dev/urandom | od -N4 -tu4 | sed -ne '1s/.* //p'
 
@@ -1806,6 +1820,7 @@ systems that log to the journal; `journalctl -n 10` is the modern `tail`
 of the log).
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up /var/log/messages.)
 for i in (range 1 13)
   print "Nov 23 10:${i:02d} host kernel: event $i" >>messages
@@ -1911,6 +1926,7 @@ looped over, and the options are a list, one argument per item. It runs on
 a made-up `mail` folder (`~/mail/*` in the original).
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up mail folder.)
 mkdir mail
 cat >mail/inbox <<'END'
@@ -1994,6 +2010,7 @@ kept when it matches. bash's `sed -n /"$1"/p` breaks on a pattern with a `/`
 in it; `re.compile` doesn't care.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 # (Made-up files to search.)
 printf 'This is a file containing information about Linux.\nNothing here.\n' > osinfo.txt
@@ -2113,6 +2130,7 @@ It runs on a made-up word list here. The one line is the same `grep`; in
 Python it's `re.fullmatch`, which anchors both ends itself.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 # (A made-up word list, one word per line.)
 printf "%s\n" welcome wellington window winning workingman workingmen \
@@ -2254,6 +2272,7 @@ made-up excerpt in the same format. Exercise 1 (any case) is
 `$word.capitalize`.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up excerpt of the dictionary, in its format.)
 cat >webster1913-dict.txt <<'END'
 Abandon \A*ban"don\, v. t.
@@ -2363,6 +2382,7 @@ no `/usr/share/dict/words` here, so `look` gets a made-up sorted word list
 as its second argument.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up dictionary, sorted, and data file.)
 printf "%s\n" apple banana cherry date end > words
 printf "%s\n" banana kumquat cherry xyzzy end > words.data
@@ -2495,6 +2515,7 @@ exit 0
 (upper *or* lower) is a `match` on a second argument.
 
 ```tessh
+#!/usr/bin/env tessh
 printf 'Hello, World.\nSmall letters, big letters.\n' > sample.txt   # (made up)
 
 E_BADARGS = 85
@@ -2577,6 +2598,7 @@ stripping of newlines. In tessh the name is a Path and `.lower` a method:
 nothing is split or stripped.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files to rename.)
 touch README.TXT Notes.md 'My Letter.DOC' already.lower
 
@@ -2635,6 +2657,7 @@ taken out and written back without any program, and `cat -A` shows the line
 ends.
 
 ```tessh
+#!/usr/bin/env tessh
 printf 'line one\r\nline two\r\n' > dos.txt     # (A made-up DOS file.)
 
 E_WRONGARGS = 85
@@ -2694,6 +2717,7 @@ stdin isn't usable here, it's given a made-up file. Python knows rot13 as a
 codec.
 
 ```tessh
+#!/usr/bin/env tessh
 import codecs
 printf 'Hello, world.\n' > secret.txt          # (made up)
 
@@ -2762,6 +2786,7 @@ swaps its two strings. That gives the exercise, encrypting or decrypting by
 a `-d` option. The quote is fed from a string, as stdin isn't usable here.
 
 ```tessh
+#!/usr/bin/env tessh
 import string
 key = ETAOINSHRDLUBCFGJMQPVWZYXK
 # The "key" is nothing more than a scrambled alphabet.
@@ -2808,6 +2833,7 @@ echo $x | tr "a-z" 'oh, turtleneck Phrase Jar!'
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 x = wftedskaebjgdBstbdbsmnjgz
 echo $x | tr "a-z" 'oh, turtleneck Phrase Jar!'
 ```
@@ -2841,6 +2867,7 @@ Python's `textwrap.fill` wraps the same way. A made-up folder stands in for
 `/usr/local/bin`.
 
 ```tessh
+#!/usr/bin/env tessh
 import textwrap
 mkdir bin ; cd bin                              # (A made-up /usr/local/bin.)
 touch backup-home cleanup convert-images deploy fetch-mail mkthumbs \
@@ -2895,6 +2922,7 @@ first go in a list, which feeds the pipe one item per line. The owners and
 times change from system to system, hence the one run.
 
 ```tessh
+#!/usr/bin/env tessh
 touch one.txt two.txt three.txt          # (Something to list.)
 
 header = "PERMISSIONS LINKS OWNER GROUP SIZE MONTH DAY HH:MM PROG-NAME"
@@ -2943,12 +2971,13 @@ only work from the script's own folder). tessh has no `$LINENO`; Python's
 **Gap:** no `$LINENO`; `(inspect.currentframe).f_lineno` is the stand-in.
 
 ```tessh
+#!/usr/bin/env tessh
 # line-number.tsh
 import inspect
 
 # This script echoes itself twice to stdout with its lines numbered.
 
-print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 4, cat -n: 6
+print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 5, cat -n: 7
 
 nl $argv[0]
 
@@ -2962,41 +2991,43 @@ exit 0
 ```
 
 ```output
-     line number = 6
-     1	# line-number.tsh
-     2	import inspect
+     line number = 7
+     1	#!/usr/bin/env tessh
+     2	# line-number.tsh
+     3	import inspect
        
-     3	# This script echoes itself twice to stdout with its lines numbered.
-       
-     4	print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 4, cat -n: 6
-       
-     5	nl $argv[0]
-       
-     6	print ; print  # Now, let's try it with 'cat -n'
-       
-     7	cat -n $argv[0]
-     8	# The difference is that 'cat -n' numbers the blank lines.
-     9	# Note that 'nl -ba' will also do so.
-       
-    10	exit 0
-
-
-     1	# line-number.tsh
-     2	import inspect
-     3	
      4	# This script echoes itself twice to stdout with its lines numbered.
-     5	
-     6	print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 4, cat -n: 6
-     7	
-     8	nl $argv[0]
-     9	
-    10	print ; print  # Now, let's try it with 'cat -n'
-    11	
-    12	cat -n $argv[0]
-    13	# The difference is that 'cat -n' numbers the blank lines.
-    14	# Note that 'nl -ba' will also do so.
-    15	
-    16	exit 0
+       
+     5	print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 5, cat -n: 7
+       
+     6	nl $argv[0]
+       
+     7	print ; print  # Now, let's try it with 'cat -n'
+       
+     8	cat -n $argv[0]
+     9	# The difference is that 'cat -n' numbers the blank lines.
+    10	# Note that 'nl -ba' will also do so.
+       
+    11	exit 0
+
+
+     1	#!/usr/bin/env tessh
+     2	# line-number.tsh
+     3	import inspect
+     4	
+     5	# This script echoes itself twice to stdout with its lines numbered.
+     6	
+     7	print "     line number = $((inspect.currentframe).f_lineno)"  # nl: 5, cat -n: 7
+     8	
+     9	nl $argv[0]
+    10	
+    11	print ; print  # Now, let's try it with 'cat -n'
+    12	
+    13	cat -n $argv[0]
+    14	# The difference is that 'cat -n' numbers the blank lines.
+    15	# Note that 'nl -ba' will also do so.
+    16	
+    17	exit 0
 ```
 
 `pr` paginates (`pr -o 5 --width=65`, `-d` double-spaced). `gettext`,
@@ -3073,6 +3104,7 @@ It shows the page in `less`, which needs a terminal, so it doesn't run
 here (and `groff` isn't installed).
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # manview.tsh: Formats the source of a man page for viewing.
 
 E_WRONGARGS = 85

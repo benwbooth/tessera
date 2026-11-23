@@ -189,6 +189,7 @@ each program's result is checked with `.ok`, a failure raises, and the
 error code. (Writing 40 KB of zeros is `bytes`, no `dd` needed.)
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # Creating a swap file.
 import os sys
 
@@ -297,6 +298,7 @@ tmpfs -o size=2m tmpfs /mnt/ramdisk` does all of this in one step, and
 `/dev/shm` is usually a ready-made ramdisk.)
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # ramdisk: RAM that acts as if it were a filesystem.
 import getpass
 

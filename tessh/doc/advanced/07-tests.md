@@ -307,6 +307,7 @@ script uses `None`, "no value", for it. The tests are in a loop over the
 values, since each is the same `if`.
 
 ```tessh
+#!/usr/bin/env tessh
 #  Tip:
 #  If you're unsure how a certain condition might evaluate,
 #+ test it in an if-test.
@@ -424,6 +425,7 @@ at the start of a line (it's a list), and the plain Python test is the
 tessh way.
 
 ```tessh
+#!/usr/bin/env tessh
 import shutil
 arg1 = ($argv[1:2] or [""])[0]   # The first argument, or "".
 
@@ -656,6 +658,7 @@ dividing by zero is a `ZeroDivisionError`, caught here with `try`.
 (`(5 == 5)`, a comparison, is already `True` or `False`.)
 
 ```tessh
+#!/usr/bin/env tessh
 # Arithmetic tests: an expression's truth.
 
 def show label value
@@ -859,6 +862,7 @@ left out). Here a made-up tree
 of links, and sample arguments, stand in.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up tree with two broken links, and sample arguments.)
 mkdir -p "links/sub dir" ; touch links/file
 ln -s file links/good ; ln -s nowhere links/dead ; ln -s ../gone "links/sub dir/dead too"
@@ -991,6 +995,7 @@ In tessh `a` and `b` are numbers, and `!=` compares them as numbers; their
 strings compare as strings. There's no blurring: `4 == "4"` is false.
 
 ```tessh
+#!/usr/bin/env tessh
 a = 4
 b = 5
 
@@ -1119,6 +1124,7 @@ with Python's truth. Both give the right answer every time. (Unset, the
 variable would be an error; empty, `""`, stands in for it.)
 
 ```tessh
+#!/usr/bin/env tessh
 def check string1
   if test -n $string1         # One argument, never split or dropped.
     print "test: String \"string1\" is not null."
@@ -1200,6 +1206,7 @@ writes to standard error (`>&2` works too). A sample gzipped file stands
 in for the argument; `more` just copies when its output isn't a terminal.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # View gzipped files with 'more' filter.
 

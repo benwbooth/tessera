@@ -102,6 +102,7 @@ variable is text; `Glob` makes it a pattern to match. `xyz` shows the first
 lines of the script, `$argv[0]`.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up /usr/X11R6/bin to list.)
 mkdir -p bin ; touch bin/mkdirhier bin/mkfontdir bin/xterm
 
@@ -196,9 +197,9 @@ bin/mkdirhier
 bin/mkfontdir
 
 
+#!/usr/bin/env tessh
 # (A made-up /usr/X11R6/bin to list.)
 mkdir -p bin ; touch bin/mkdirhier bin/mkfontdir bin/xterm
-
 ```
 
 `unalias` removes an alias; `del` removes a function (any name, in fact).
@@ -226,6 +227,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 touch unalias.tsh        # (Something for ls to show.)
 
 def llm

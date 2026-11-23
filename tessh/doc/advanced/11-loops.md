@@ -46,6 +46,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # Listing the planets.
 
 for planet in [Mercury Venus Earth Mars Jupiter Saturn Uranus Neptune Pluto]
@@ -110,6 +111,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # Planets revisited.
 
 # Associate the name of each planet with its distance from the sun.
@@ -171,6 +173,7 @@ and `file` (what's in it) stands in for `whatis` (what a program is for),
 which depends on what's installed.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files to be curious about.)
 mkdir -p sbin ; printf "#!/bin/sh\necho hi\n" >sbin/accept ; echo text >sbin/pwck
 
@@ -220,6 +223,7 @@ Unquoted, `*txt` is a Glob: a value that stands for the matching files,
 read again each time it's looped over. (Quoted, `'*txt'` would be text.)
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files.)
 echo "first file" >a.txt ; echo "second file" >b.txt
 
@@ -285,6 +289,7 @@ itself. `ls -s` shows sizes here, where `ls -l` would show dates and an
 owner that change from run to run.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files.)
 touch apple jam xylophone .hidden ; echo data >kiwi
 
@@ -349,6 +354,7 @@ exit 0
 With the loop in a function, it's tried both ways.
 
 ```tessh
+#!/usr/bin/env tessh
 def show_args args
   for a in $args
     print "$a " end=""
@@ -387,6 +393,7 @@ A command's output is one string; `.split` makes the list, where bash
 splits it without being asked.
 
 ```tessh
+#!/usr/bin/env tessh
 NUMBERS = "9 7 3 8 37.53"
 
 for number in ((echo $NUMBERS).split)   # (or just $NUMBERS.split)
@@ -447,6 +454,7 @@ Bash sets `$IFS` to a newline to get one word per line; `.lines` says so
 directly.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up binary file.)
 printf '\000\001memory map\000\002\003junk\000\377memo pad\000' >data.bin
 
@@ -513,6 +521,7 @@ The same `awk`, on a made-up password file, with `enumerate` counting.
 reading the file yourself.)
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up /etc/passwd.)
 printf "%s\n" "root:x:0:0:root:/root:/bin/bash" "bin:x:1:1:bin:/bin:/sbin/nologin" "bozo:x:1000:100:Bozo:/home/bozo:/bin/bash" >passwd
 
@@ -561,6 +570,7 @@ searches a made-up folder rather than all of `/usr/bin`, and takes the
 folder and the string as arguments (the exercise).
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up bin folder.)
 mkdir -p bin
 printf '\177ELF\000Copyright Free Software Foundation, Inc.\000' >bin/cat
@@ -687,6 +697,7 @@ do
 Path is never split, so names with spaces or colons need no `$IFS` tricks.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up folder with links in it, one with a space in its name.)
 mkdir -p stuff/sub ; touch stuff/file
 ln -s file stuff/link ; ln -s ../file "stuff/sub/other link" ; ln -s /nowhere stuff/dangling
@@ -737,6 +748,7 @@ exit $?
 Redirecting a function call sends what it prints to the file.
 
 ```tessh
+#!/usr/bin/env tessh
 mkdir -p stuff ; touch stuff/file ; ln -s file stuff/link ; ln -s /nowhere stuff/dangling
 
 OUTFILE = symlinks.list            # save-file
@@ -831,6 +843,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # Multiple ways to count up to 10.
 
 print
@@ -934,6 +947,7 @@ so the loop that strings them together isn't needed. It needs `efax` and a
 modem, so it doesn't run here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 EXPECTED_ARGS = 2
 E_BADARGS = 85
 MODEM_PORT = /dev/ttyS2   # May be different on your machine.
@@ -986,6 +1000,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 var0 = 0
 LIMIT = 10
 
@@ -1025,6 +1040,7 @@ The answers are canned here (no one is typing), and `input` reads them.
 is just empty.
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 $sys.stdin = io.StringIO "hello\nworld\nend\n"   # (What someone types.)
 
@@ -1083,6 +1099,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 $sys.stdin = io.StringIO "first\nsecond\nend\n"   # (What someone types.)
 
@@ -1163,6 +1180,7 @@ tessh's arithmetic is always the C-like kind, so the two halves are the
 same loop.
 
 ```tessh
+#!/usr/bin/env tessh
 LIMIT = 10                 # 10 iterations.
 a = 1
 
@@ -1299,6 +1317,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 $sys.stdin = io.StringIO "carrots\nend\n"   # (What someone types.)
 
@@ -1375,6 +1394,7 @@ exit 0
 The loop variables are the counters here, so no separate ones are kept.
 
 ```tessh
+#!/usr/bin/env tessh
 # Nested "for" loops.
 
 for outer in (range 1 6)          # Beginning of outer loop.
@@ -1494,6 +1514,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 LIMIT = 19  # Upper limit
 
 print
@@ -1578,6 +1599,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 def groups
   for outerloop in (range 1 6)
     print "Group $outerloop:   " end=""
@@ -1643,6 +1665,7 @@ Nothing follows the inner loop in the outer one's body, so leaving the
 inner loop is going on with the outer one.
 
 ```tessh
+#!/usr/bin/env tessh
 for outer in [I II III IV V]            # outer loop
   print ; print "Group $outer: " end=""
 
@@ -1812,6 +1835,7 @@ exit 0
 With canned keys, and the exercise done: it goes on until `X`.
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 $sys.stdin = io.StringIO "q\nQ\n7\n!\nX\n"   # (The keys someone hits.)
 
@@ -1921,6 +1945,7 @@ exit 0
 Each `case` ends at the next one: no `;;`, and no falling through.
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 $sys.stdin = io.StringIO "j\n"     # (The answer someone types.)
 
@@ -2107,6 +2132,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 match (uname -m)    # The machine's architecture (arch isn't everywhere).
   case i386
     print "80386-based machine"
@@ -2172,6 +2198,7 @@ are what it returns. In a `match`, a `$name` captures, so comparing with a
 variable is a guard (or plainly `==`).
 
 ```tessh
+#!/usr/bin/env tessh
 def match_string *args
   # Exact string match.
   MATCH = 0
@@ -2320,6 +2347,7 @@ The same glob patterns, with `=~`, in functions that return `True` or
 `é`.) An argument that may be missing gets a default of `""`.
 
 ```tessh
+#!/usr/bin/env tessh
 def isalpha s=""        # Tests whether *first character* is alphabetic.
   $s =~ [a-zA-Z]*       # Begins with a letter? ("" doesn't.)
 
@@ -2439,6 +2467,7 @@ exit
 says so when it doesn't (the exercise). The answers are canned.
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 $sys.stdin = io.StringIO "peas\n2\n"     # (What someone types.)
 
@@ -2513,6 +2542,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 $sys.stdin = io.StringIO "6\n"           # (What someone types.)
 

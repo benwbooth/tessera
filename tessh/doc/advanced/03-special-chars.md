@@ -376,6 +376,7 @@ newline left on, so it's stripped). The answer to the closing question in
 tessh is `.split`: a line's fields are a list.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up /etc/fstab to try it on.)
 printf "UUID=4b1c / ext4 defaults 0 1\nUUID=9e0a /home btrfs subvol=home 0 2\n" >fstab
 
@@ -457,6 +458,7 @@ argument the script stops with its usage message, which is what it does
 here.
 
 ```tessh
+#!/usr/bin/env tessh
 SUCCESS = 0
 E_NOARGS = 65
 
@@ -808,6 +810,7 @@ the output is up to chance, as in bash. `fg` waits for the job, so the
 script doesn't end before it does (bash's `wait`; tessh has no `wait` yet).
 
 ```tessh
+#!/usr/bin/env tessh
 def first_loop
   for i in (range 1 11)        # First loop.
     print $i end=" "
@@ -909,6 +912,7 @@ file, so the blanks in names that Stephane Chazelas warns about do no harm.
 the archive name, if given.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files to back up, one of them old.)
 touch notes.txt "my essay.txt" ; touch -d "3 days ago" old.txt
 

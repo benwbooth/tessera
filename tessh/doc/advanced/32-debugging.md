@@ -43,6 +43,7 @@ over to tessh as it stands, `[$a -gt 27 ]` is a Python list, `[37, '-gt',
 anything:
 
 ```tessh no-check no-run
+#!/usr/bin/env tessh
 # This is a buggy script.
 # Where, oh where is the error?
 
@@ -101,6 +102,7 @@ its indented lines. Forget the indent and you get the tessh form of this
 mistake, which tessh reports at the loop, before running anything:
 
 ```tessh no-run no-check
+#!/usr/bin/env tessh
 # missing-indent: what will this script print? And why?
 
 for a in [1 2 3]
@@ -156,6 +158,7 @@ The same bug survives into tessh: a value is never split into words, so
 and fails. `print [$badname]` (the list shows the newline) finds it.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files, two with spaces in their names, to try it on.)
 touch "a b.txt" "c d.txt" plain.txt
 
@@ -394,6 +397,7 @@ tells it who called it, from which file and line, and the text of that
 line.
 
 ```tessh
+#!/usr/bin/env tessh
 # assert: exit with a message if a condition is false.
 import inspect
 
@@ -424,7 +428,7 @@ print "This statement echoes only if the \"assert\" does not fail."
 
 ```output
 Assertion failed:  "assert_ ($a < $b)"
-File "ex.tsh", line 23
+File "ex.tsh", line 24
 ```
 
 Python's own `assert` does all of this already, with the traceback for the
@@ -507,6 +511,7 @@ by running out of lines. It reads `a` and `b` then, not when it was
 registered.
 
 ```tessh
+#!/usr/bin/env tessh
 # Hunting variables with an exit handler.
 import atexit
 
@@ -669,6 +674,7 @@ need its own `rm`. To try it, the script watches a made-up log, and the
 logon "happens" on its third look.
 
 ```tessh
+#!/usr/bin/env tessh
 # logon: a quick 'n dirty script to check whether you are on-line yet.
 import os signal sys
 
@@ -772,6 +778,7 @@ sleeps up to n seconds and says whether it was set meanwhile. `finally`
 stops the bar however the work ends, Control-C included.
 
 ```tessh
+#!/usr/bin/env tessh
 # progress-bar2, after Graham Ewart's.
 import threading
 
@@ -862,6 +869,7 @@ rather than from `$LINENO`. Python, like bash, stops twice on a line with
 two statements.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 
 def vartrace frame event arg
@@ -885,11 +893,11 @@ VARIABLE-TRACE> $variable = ""
 VARIABLE-TRACE> $variable = ""
 VARIABLE-TRACE> $variable = "29"
 VARIABLE-TRACE> $variable = "29"
-  Just initialized $variable to 29 in line number 11.
+  Just initialized $variable to 29 in line number 12.
 VARIABLE-TRACE> $variable = "29"
 VARIABLE-TRACE> $variable = "87"
 VARIABLE-TRACE> $variable = "87"
-  Just multiplied $variable by 3 in line number 15.
+  Just multiplied $variable by 3 in line number 16.
 ```
 
 Besides debugging, `trap` has other uses, such as disabling keys in a
@@ -1073,6 +1081,7 @@ job, as in Vernia Damiano's version. The order of the lines depends on
 timing.
 
 ```tessh
+#!/usr/bin/env tessh
 # parent: running multiple processes on an SMP box,
 # after Tedman Eng's and Vernia Damiano's scripts.
 from concurrent.futures import ThreadPoolExecutor

@@ -46,6 +46,7 @@ form feeds as `^G` and `^L`. Octal escapes are the exception: **Gap:**
 octal numbers out with `0o`, Python's octal prefix.
 
 ```tessh
+#!/usr/bin/env tessh
 # String expansion: escapes in double-quoted strings.
 
 echo "Ringing bell 3 times \a \a \a" | cat -v
@@ -114,6 +115,7 @@ exit 0
 `${!a}` is `(globals)[$a]` in tessh, as in chapter 28.
 
 ```tessh
+#!/usr/bin/env tessh
 # Indirect variable referencing.
 
 a = letter_of_alphabet
@@ -229,6 +231,7 @@ instead: in tessh that would be a dict of dicts,
 holds: `\u2126` is Ω.
 
 ```tessh
+#!/usr/bin/env tessh
 # resistor-inventory: simple database / table-lookup application.
 
 # ============================================================== #
@@ -439,6 +442,7 @@ of 52 cards and four slices of 13 would do the whole job, and exercise 2's
 sorting is `sorted` with a `key`.
 
 ```tessh
+#!/usr/bin/env tessh
 # cards: deals four random hands from a deck of cards.
 import random
 
@@ -601,6 +605,7 @@ backwards, `chr` and `ord` give the in-between characters, and
 `itertools.product` concatenates sets.
 
 ```tessh
+#!/usr/bin/env tessh
 import string itertools
 
 for i in (range 1 11)
@@ -683,6 +688,7 @@ done
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 Array = [element-zero element-one element-two element-three]
 
 print $Array[0]                     # element-zero
@@ -722,6 +728,7 @@ fi
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 variable = "This is a fine mess."
 
 print $variable
@@ -760,6 +767,7 @@ the same trap bash 3.2 fell into; the `re` makes it a regex. `^…$` makes
 the whole input fit (bash's version also accepts "x123-45-6789y").
 
 ```tessh
+#!/usr/bin/env tessh
 for input in ["123-45-6789" "12-345-6789"]   # (sample inputs)
   if $input =~ re'^\d{3}-\d{2}-\d{4}$'
     print "$input: Social Security number."
@@ -883,6 +891,7 @@ A dict keeps its keys in the order they went in; bash lists them in
 whatever order its hash table has them.
 
 ```tessh
+#!/usr/bin/env tessh
 # fetch_address
 
 address = {}
@@ -968,6 +977,7 @@ The exercise is done too: the addresses come from a file, one per line,
 name and address separated by a tab, split with `.split "\t" 1`.
 
 ```tessh
+#!/usr/bin/env tessh
 # fetch_address-2: a more elaborate version of fetch_address.
 
 E_DB = 99    # Error code for missing entry.
@@ -1065,6 +1075,7 @@ and Python's string methods are the character classes. The `;&`
 fall-through is just the line after.
 
 ```tessh
+#!/usr/bin/env tessh
 def test_char c
   if ($c.isprintable)
     print "$c is a printable character."
@@ -1131,6 +1142,7 @@ kill $COPROC_PID                   #  No longer need the coprocess,
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import subprocess
 # (A made-up data file.)
 printf "line one\nline two\n" >mx_data.txt
@@ -1187,6 +1199,7 @@ echo
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import subprocess
 
 a = aaa ; b = bbb ; c = ccc
@@ -1244,6 +1257,7 @@ echo $cpname_PID
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import subprocess
 script = "for i in 0 1 2; do echo \"index = \$i\"; done; echo hi >myo; cat - >>myo"
 cpname = subprocess.Popen [sh -c $script] stdin=$subprocess.PIPE stdout=$subprocess.PIPE text=True
@@ -1281,6 +1295,7 @@ exit
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 Arr1 = (((Path $argv[0]).read_text).splitlines)
 print "$(len $Arr1) lines; the first: $Arr1[0]"
 
@@ -1291,10 +1306,10 @@ print $Arr2
 ```
 
 ```output
-7 lines; the first: Arr1 = (((Path $argv[0]).read_text).splitlines)
+8 lines; the first: #!/usr/bin/env tessh
 --
 
-['Arr1' '=' '(((Path' '$argv[0]).read_text).splitlines)']
+['#!/usr/bin/env' 'tessh']
 ```
 
 `read -t` takes fractions of a second and `read -i` fills in the edit
@@ -1319,6 +1334,7 @@ echo ${var,,}          # verymixedupvariable
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 var = veryMixedUpVariable
 print $var                                  # veryMixedUpVariable
 print (($var[:1].upper) + $var[1:])         # VeryMixedUpVariable
@@ -1395,6 +1411,7 @@ exit
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # filelist
 # (A made-up file tree.)
 mkdir -p allmyfiles/my_music allmyfiles/my_pictures
@@ -1459,6 +1476,7 @@ With the following argument(s): "arg1" "arg2"
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import shutil
 
 def run_or_complain cmd *args       # A wrapper doing the handler's job.
@@ -1519,6 +1537,7 @@ num_chars=61
 A file's `.read n` reads n characters.
 
 ```tessh
+#!/usr/bin/env tessh
 # Reads the first 64 characters of this script.
 
 num_chars = 64
@@ -1529,10 +1548,8 @@ print $var
 ```
 
 ```output
-# Reads the first 64 characters of this script.
-
-num_chars = 64
-
+#!/usr/bin/env tessh
+# Reads the first 64 characters of this scr
 ```
 
 ### Example 37-9. Using a here document to set a variable (`here-commsub.sh`)
@@ -1570,6 +1587,7 @@ assignment takes the command's output. (A triple-quoted string is the
 other way to write several lines into a variable.)
 
 ```tessh
+#!/usr/bin/env tessh
 multi_line_var = cat <<ENDxxx
 ------------------------------
 This is line 1 of the variable
@@ -1822,6 +1840,7 @@ loop is kept, though `$array[::-1]` (or `reversed`) is the list
 backwards in one step.
 
 ```tessh
+#!/usr/bin/env tessh
 # neg-array
 
 array = [zero one two three four five]   # Six-element list.
@@ -1900,6 +1919,7 @@ A slice is start and end, not start and length: `${stringZ:2:3}` is
 `$stringZ[2:5]`, and `${stringZ:3:-6}` is `$stringZ[3:-6]`.
 
 ```tessh
+#!/usr/bin/env tessh
 stringZ = abcABC123ABCabc
 
 print $stringZ                  # abcABC123ABCabc

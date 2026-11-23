@@ -85,6 +85,7 @@ should show; this lists the request's. To try it, the script first sets up a
 made-up request as a web server would.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 
 # (A made-up request, as the web server would set it up, to try it on.)
@@ -223,6 +224,7 @@ since the real list is different on every machine (and nobody's business).
 As in bash, a line ending in `|` goes on to the next.
 
 ```tessh
+#!/usr/bin/env tessh
 #  ip-addresses: list the IP addresses your computer is connected to.
 #  Inspired by Greg Bledsoe's ddos.sh script (GPL2, as this is).
 

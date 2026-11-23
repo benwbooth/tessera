@@ -251,6 +251,7 @@ available too. (`global` is a word of the language in Python, so the
 variable is `global_var`; the arrays are lists.)
 
 ```tessh
+#!/usr/bin/env tessh
 print
 
 for i in (echo "random input").lines
@@ -300,12 +301,12 @@ $global_var (using process substitution) = 3D: Available outside the loop.
 ##########
 
 OUTPUT = 
-35 lines
+36 lines
 
 --
 
 OUTPUT = 
-print  for i in (echo "random input").lines
+#!/usr/bin/env tessh print 
 ```
 
 ### Example 23-2. Redirecting the output of process substitution into a loop. (`psub.bash`)

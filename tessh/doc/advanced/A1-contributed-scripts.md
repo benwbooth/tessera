@@ -77,6 +77,7 @@ is one argument, so `sed $sedscript $file_name` needs no extra quotes. The
 argument checks are Python: `len $args`, and `Path.is_file` for `[ -f ]`.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up message to try it on.)
 print ">> Original text, quoted twice.\n  > An indented quote.\n\t\tTabbed in, and so long that it goes well past seventy characters, which is where fold cuts it.\nThe end." >message.txt
 
@@ -189,6 +190,7 @@ as `sed s/…/…/` did, but takes it literally: in the bash `rn . _` would
 match any character.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Some made-up files to try it on.)
 touch photo1.gif photo2.gif "holiday snap.gif" notes.txt
 
@@ -271,6 +273,7 @@ unquoted `echo $fname` squeezes runs of blanks into one, so `two  blanks`
 became `two_blanks`. tessh keeps every blank, and so every underscore.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Some made-up files to try it on.)
 touch "my file.txt" "two  blanks here" plain.txt
 
@@ -365,6 +368,7 @@ the function away (or write `\ftp`) and the real ftp runs. The heredoc
 goes to the function as it would to the program, and so to the `cat` in it.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made up: a file to send, and the password "secret", "encrypted" with rot13.)
 echo "the report" >report.txt
 echo frperg >password_encrypted.file
@@ -490,6 +494,7 @@ a `match`; the exercise's "also accept yes and Yes" is one more `|` in the
 pattern (and `.lower` would take `YES` too).
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # copy-cd.tsh: copying a data CD
 
 CDROM = /dev/cdrom                       # CD ROM device
@@ -619,6 +624,7 @@ the first argument or, here, 27 (the bash takes its own PID, which would
 make the output different every run).
 
 ```tessh
+#!/usr/bin/env tessh
 # collatz.tsh
 
 #  The notorious "hailstone" or Collatz series.
@@ -855,6 +861,7 @@ octal trap to strip zeros for. Python's `datetime` knows the calendar, so
 the last line checks Gauss' answer against it.
 
 ```tessh
+#!/usr/bin/env tessh
 import datetime
 # days-between.tsh:    Number of days between two dates.
 # Usage: days-between.tsh [M]M/[D]D/YYYY [M]M/[D]D/YYYY
@@ -981,6 +988,7 @@ The pipeline is the same in tessh, programs and all. A line can't end in
 argument, as bash's `$*` did.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up text to try it on.)
 print "The Cat sat on the mat.\nThe cat's hat, 2 times; the end!" >text.txt
 
@@ -1215,6 +1223,7 @@ leaves it in the global `value`. The script takes one name; here it's
 called on the names from its own comments.
 
 ```tessh
+#!/usr/bin/env tessh
 # soundex.tsh: Calculate "soundex" code for names
 
 # =======================================================
@@ -1750,6 +1759,7 @@ two seconds between generations only when it's on a terminal; here it
 isn't, so it doesn't. The rows are printed without trailing blanks.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys time
 # (The gen0 file of Example A-11, to start from.)
 cat <<'END' >gen0
@@ -2134,6 +2144,7 @@ Iterating the same iterator twice is the trick: the `for` loop eats the
 header and stops at the empty line, and the list takes what's left.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # (A made-up message to try it on.)
 print "From: bozo@example.com\nSubject: Lunch\n\nNoon, then?\n   \n-- Bozo" >mail.txt
@@ -2236,6 +2247,7 @@ exit 0
 the same password every time here; a real one wouldn't.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 random.seed 2002             # (So the output is always the same.)
 
@@ -2328,6 +2340,7 @@ string with a command for `ssh` inside it. The time comes from Python's
 `time.strftime`.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import time
 # Script by James R. Van Zandt, and used here with his permission.
 
@@ -2439,6 +2452,7 @@ and `*$primes` passes them on. The recursion goes a thousand calls deep,
 past Python's usual limit, hence `sys.setrecursionlimit`.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # primes.tsh: Generate prime numbers, without using arrays.
 # Script contributed by Stephane Chazelas.
@@ -2572,6 +2586,7 @@ it starts in; here that's only its name, as the full path changes on every
 run.
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 # (A made-up folder tree to try it on.)
 mkdir -p project/src/lib project/src/util project/docs "project/old stuff" project/tests/empty
@@ -2756,6 +2771,7 @@ blank line, where the bash returns 80 and tests `$?` in a subshell. The
 blank lines are printed without their trailing blanks.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys math
 # (A made-up folder of files to try it on; truncate makes them, empty.)
 mkdir -p archive/photos/2023 archive/photos/2024/summer archive/music archive/docs
@@ -3154,6 +3170,7 @@ their results. Python has most of them built in (`+`, `<`, `len`,
 is written out here.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 # string.tsh --- tessh emulation of string(3) library routines
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
@@ -3882,6 +3899,7 @@ code works on a made-up folder and lists what doesn't change (no inodes,
 owners or times).
 
 ```tessh
+#!/usr/bin/env tessh
 import os stat hashlib
 from dataclasses import dataclass
 # (A made-up folder to try it on: a copy, a hard link and a symbolic link.)
@@ -4442,6 +4460,7 @@ each color; elsewhere, as here, the script shows it as `^[`, the way
 `cat -v` would.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # hash-example.tsh: Colorizing text.
 # Author: Mariusz Gniazdowski <mariusz.gn-at-gmail.com>
@@ -4713,6 +4732,7 @@ free: an unknown hash name is a `KeyError`. (`keyshash` leaves a blank after
 the last key, as the bash does.)
 
 ```tessh
+#!/usr/bin/env tessh
 # Copyright 2005 Oliver Beckstein
 # Released under the GNU Public License
 # Author of script granted permission for inclusion in ABS Guide.
@@ -4942,6 +4962,7 @@ glob over `/proc/scsi`, and a regex split. A program named in a variable,
 test.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import re string
 # usb.tsh
 # Script for mounting and installing pen/keychain USB storage devices.
@@ -5229,6 +5250,7 @@ closing tag, so a line that starts with an underscore comes out wrong, as
 the last line shows, in bash too.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # (A made-up text to convert.)
 print "Chapter One\n\nIt was a _dark and stormy_ night.\n[image01.jpg]\n   A shot rang out.\n\n_Suddenly_, the snake_case villain fled." >story.txt
@@ -5447,6 +5469,7 @@ It works here on a made-up log folder with the dates set by `touch`, and,
 as chapter 2's cleanup script does, takes "root" to be whoever runs it.
 
 ```tessh
+#!/usr/bin/env tessh
 import os time
 # (A made-up /var/log/httpd and backup folder to try it on. One log is
 #  missing, and one can't be written.)
@@ -5726,6 +5749,7 @@ unset `${pw}` is empty in bash and an error in tessh, so `pw` is set to
 the empty string.
 
 ```tessh
+#!/usr/bin/env tessh
 # protect_literal.tsh
 
 '''
@@ -5942,6 +5966,7 @@ it happens to share, and `_upls` fills it in from the script's variables.
 hint bash doesn't; `safe_substitute` leaves it as it was.
 
 ```tessh
+#!/usr/bin/env tessh
 import string
 # unprotect_literal.tsh
 

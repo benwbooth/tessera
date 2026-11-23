@@ -9126,6 +9126,7 @@ the tessh `.strip`s it. Here it runs on a made-up text, the script's
 own example and more, as its sample argument.
 
 ```tessh
+#!/usr/bin/env tessh
 # find-splitpara.tsh
 #  Finds split paragraphs in a text file,
 #+ and tags the line numbers.
@@ -9262,6 +9263,7 @@ the script rather than from the input, and `DEBUG` is on. The bash,
 given the same line on its input with `DEBUG=1`, printed the same.
 
 ```tessh
+#!/usr/bin/env tessh
 import os random
 # insertion-sort.tsh: Insertion sort implementation in tessh
 #                     (ported from insertion-sort.bash: list slicing
@@ -9481,6 +9483,7 @@ list, and `arith_mean` gives back the mean and the count together. It
 runs on the script's own sample data.
 
 ```tessh
+#!/usr/bin/env tessh
 # sd.tsh: Standard Deviation
 
 #  The Standard Deviation indicates how consistent a set of data is.

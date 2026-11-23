@@ -110,6 +110,7 @@ exit 0
 `TypeError`, which takes the place of `expr`'s complaint.
 
 ```tessh
+#!/usr/bin/env tessh
 area = {}
 $area[11] = 23
 $area[13] = 37
@@ -247,6 +248,7 @@ The lines are a list, gone through with `for`. The bold (`tput bold`) is
 only for a terminal, so the tessh version asks whether output goes to one.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # Lines of the poem (single stanza).
 Line = [
@@ -369,6 +371,7 @@ In bash an array's name alone is its first element (`${array:1}`,
 `$array[0]`. `array2` skips index 2, so it's a dict.
 
 ```tessh
+#!/usr/bin/env tessh
 array = [zero one two three four five]
 # Element 0   1   2    3     4    5
 
@@ -576,6 +579,7 @@ And since a tessh function gives back a value, the replacement can be
 computed from what was matched, which is the ABS Guide's wish at the end.
 
 ```tessh
+#!/usr/bin/env tessh
 arrayZ = [one two three four five five]
 
 def show xs
@@ -732,6 +736,7 @@ exit 0
 the index (`range`, for bash's `seq 0 …`) isn't needed.
 
 ```tessh
+#!/usr/bin/env tessh
 script_contents = ((cat $argv[0]).split)   #  Stores contents of this script
                                          #+ ($argv[0]) in a list of words.
 
@@ -745,7 +750,7 @@ exit 0
 ```
 
 ```output
-script_contents -- = -- ((cat -- $argv[0]).split) -- # -- Stores -- contents -- of -- this -- script -- #+ -- ($argv[0]) -- in -- a -- list -- of -- words. -- for -- element -- in -- $script_contents -- print -- $element -- end="" -- # -- List -- each -- field -- of -- this -- script -- on -- a -- single -- line. -- print -- " -- -- -- " -- end="" -- # -- Use -- " -- -- -- " -- as -- a -- field -- separator. -- print -- exit -- 0 -- 
+#!/usr/bin/env -- tessh -- script_contents -- = -- ((cat -- $argv[0]).split) -- # -- Stores -- contents -- of -- this -- script -- #+ -- ($argv[0]) -- in -- a -- list -- of -- words. -- for -- element -- in -- $script_contents -- print -- $element -- end="" -- # -- List -- each -- field -- of -- this -- script -- on -- a -- single -- line. -- print -- " -- -- -- " -- end="" -- # -- Use -- " -- -- -- " -- as -- a -- field -- separator. -- print -- exit -- 0 -- 
 ```
 
 `unset` deletes an element of an array, or the whole array; in tessh `del`
@@ -824,6 +829,7 @@ string, split with `.split`. A list's `del` closes the gap, where bash
 leaves a hole.
 
 ```tessh
+#!/usr/bin/env tessh
 print "Enter your favorite colors (separated from each other by a space)."
 
 colors = ("red green blue yellow".split)  # (read -a colors: answered here)
@@ -1049,6 +1055,7 @@ bash's `#` and `/` take shell patterns (`new?`, `*new`, `new*`); here
 they're regexes or plain text, as each one means.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 # An empty array is not the same as an array with empty elements.
 
@@ -1354,6 +1361,7 @@ echo $element_count          # 8
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 printf "1 a b c\n2 d e fg\n" >sample_file    # (The sample_file.)
 filename = sample_file
 
@@ -1472,6 +1480,7 @@ copying the list and joining it into one string (what bash's
 microseconds.
 
 ```tessh
+#!/usr/bin/env tessh
 import time
 bigOne = (list /dev/*)  # All the files in /dev . . .
 print
@@ -1585,6 +1594,7 @@ the names in `(globals)`, so a function can copy by name directly. (The
 usual tessh is simpler still: `after = $before + [Really Rocks]`.)
 
 ```tessh
+#!/usr/bin/env tessh
 #  How-To "Pass by Name & Return by Name"
 
 def CopyArray src dst     # Copy the list named src to the one named dst.
@@ -1799,6 +1809,7 @@ bash; in tessh it could hold the list itself, but the string is kept here
 to follow the original (`.split` gets the list back).
 
 ```tessh
+#!/usr/bin/env tessh
 array1 = [zero1 one1 two1]
 # Subscript packed: a list.
 array2 = {0: zero2 2: two2 3: three2}
@@ -2020,6 +2031,7 @@ original starts with `clear`, left out here; and `sorted $Countries` is
 the one-word way.)
 
 ```tessh
+#!/usr/bin/env tessh
 def exchange i j
   # Swaps two members of the array.
   [$Countries[$i] $Countries[$j]] = [$Countries[$j] $Countries[$i]]
@@ -2175,6 +2187,7 @@ Its output is a date, so the tessh version doesn't run here. A tessh list
 holds lists, so a real nested one is just written: `[[a b] [c d]]`.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 AnArray = (ls --inode --ignore-backups --almost-all --directory --full-time \
   --color=none --time=status --sort=time -l (pwd)).split
 
@@ -2283,6 +2296,7 @@ reference is `(globals)[$TEST1]`. The function is `print_array2`, since
 `print` is tessh's.
 
 ```tessh
+#!/usr/bin/env tessh
 ARRAY1 = {VAR1_1: value11 VAR1_2: value12 VAR1_3: value13}
 
 ARRAY2 = {
@@ -2487,6 +2501,7 @@ below the original's `exit` is a faster version; it's after this example,
 in tessh.
 
 ```tessh
+#!/usr/bin/env tessh
 # Sieve of Eratosthenes
 # Ancient algorithm for finding prime numbers.
 
@@ -2635,6 +2650,7 @@ crossing out is a slice assignment. (Run here with 1000, the limit the
 original's comment checks against.)
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 args = $argv[1:] or ["1000"]    # (sample arguments, when none are given)
 if not $args
@@ -2798,6 +2814,7 @@ ABS Guide's "limitation on function return range" doesn't apply). A list
 is a stack by itself: `.append` pushes and `.pop` pops.
 
 ```tessh
+#!/usr/bin/env tessh
 BP = 100            #  Base Pointer of stack array.
                     #  Begin at element 100.
 
@@ -2974,6 +2991,7 @@ In tessh the formula goes in as it's written. `Q` is a list with a dummy
 element at 0, so the indexes are the terms' numbers.
 
 ```tessh
+#!/usr/bin/env tessh
 # Douglas Hofstadter's notorious "Q-series":
 
 # Q(1) = Q(2) = 1
@@ -3168,6 +3186,7 @@ to tilt it the same way. A list of rows, `[[A B C D E] [F G H I J] …]`, is
 the natural tessh two-dimensional array, read as `$alpha[row][column]`.
 
 ```tessh
+#!/usr/bin/env tessh
 Rows = 5
 Columns = 5
 # 5 X 5 Array.

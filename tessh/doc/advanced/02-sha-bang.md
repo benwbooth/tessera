@@ -69,6 +69,7 @@ it. `exit` with no status exits 0 in tessh; bash's bare `exit` passes on the
 status of the command before it.
 
 ```tessh
+#!/usr/bin/env tessh
 mkdir -p log ; echo old >log/messages ; echo old >log/wtmp
 
 # Cleanup, version 2
@@ -183,6 +184,7 @@ for `$#`, and `$argv[1]` for `$1` (`$argv[0]` is the script, as `$0` is).
 `if` takes an indented block, with no `then` or `fi`.
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 # (A made-up /var/log, its message log 100 lines long, to try it on.)
 mkdir -p log ; seq 100 >log/messages ; echo logins >log/wtmp

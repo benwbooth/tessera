@@ -79,6 +79,7 @@ chapter 2), and a tessh function standing in for the real `passwd`: a
 function as a pipe stage gets what's piped in as its last argument.
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 # (A made-up /etc/passwd, and a stand-in for the passwd program, to try it on.)
 print "root:x:0:0:root:/root:/bin/bash\nbozo:x:1000:100:Bozo:/home/bozo:/bin/bash" >passwd
@@ -169,6 +170,7 @@ exit 0
 ```
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # erase.tsh: Using "stty" to set an erase character when reading input.
 
 name = input "What is your name? "   #  Try to backspace
@@ -222,6 +224,7 @@ exit 0
 Python way (bash's `read -sp`), and puts the echo back by itself.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # secret-pw.tsh: secret password
 
 print
@@ -278,6 +281,7 @@ The same commands; `finally` puts the settings back however the script
 ends.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # keypress.tsh: Detect a user keypress ("hot keys").
 
 print
@@ -399,6 +403,7 @@ killed later, so it's started with Python's `subprocess.Popen`, whose
 process ID: see chapter 15's gap).
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import os subprocess signal
 ## Duplicate DaveG's ident-scan thingie using netcat. Oooh, he'll be p*ssed.
 ## Args: target port [port port port ...]
@@ -479,6 +484,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import stat
 # fileinfo2.tsh
 FILENAME = ./testfile.txt
@@ -587,6 +593,7 @@ exit 0
 takes the list of IDs.
 
 ```tessh
+#!/usr/bin/env tessh
 # kill-process.tsh
 
 NOPROCESS = 2
@@ -656,6 +663,7 @@ exit 0
 ```
 
 ```tessh no-run
+#!/usr/bin/env tessh
 SERVER = $env.get "HOST" localhost     # localhost.localdomain (127.0.0.1).
 PORT_NUMBER = 25                       # SMTP port.
 
@@ -844,6 +852,7 @@ Not to be run anywhere but on a new disk, as root. Note the original's
 not `/dev/hdb1`. `${NEWDISK}1` (in bash or tessh) is what it means.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import os
 
 # Adding a second hard drive to system.
@@ -973,6 +982,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 # (A made-up file to scramble.)
 print "Meet me at the old oak tree." >secret.txt
@@ -1178,6 +1188,7 @@ The first script needs X and a laptop screen. Its nest of `if`s is a
 `match` in tessh, and `bc`'s arithmetic is Python's.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # backlight.tsh
 
 OUTPUT = xrandr | grep LV | awk '{print $1}'   # Get display name!
@@ -1347,6 +1358,7 @@ folder. A glob is a list of `Path`s, so `.name` gives the subsystem's name
 word with a `/` in it, like `./etc/rc.d/init.d/$subsys`, runs that program.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up lock files and start-up scripts to try it on.)
 mkdir -p var/lock/subsys/olddir etc/rc.d/init.d
 touch var/lock/subsys/atd var/lock/subsys/network var/lock/subsys/sshd

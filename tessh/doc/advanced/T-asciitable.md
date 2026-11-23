@@ -70,6 +70,7 @@ unprintable characters, so `cat -v` shows the start of it. (The file is
 byte for byte the one the bash script writes.)
 
 ```tessh
+#!/usr/bin/env tessh
 MAXNUM = 256
 COLUMNS = 5
 
@@ -169,6 +170,7 @@ The names of the control characters are a list, so a code's name is
 `help` and `code` print parts of the script itself, as the original does.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 arg = (.lower ($argv[1:2] or [""])[0])
 
@@ -291,6 +293,7 @@ to it with `-v` instead of being spliced into its text, and `$Obase` by
 the environment, as in the original.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 arg = (.lower ($argv[1:2] or [""])[0])
 

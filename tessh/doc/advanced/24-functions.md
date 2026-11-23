@@ -81,6 +81,7 @@ own in tessh unless it says `global`, so `i` and `REPEATS` don't leak out
 of `fun` as they do in bash.
 
 ```tessh
+#!/usr/bin/env tessh
 JUST_A_SECOND = 0.1     # (1 in the original)
 
 def funky
@@ -393,6 +394,7 @@ default of `None` does: an empty string is a value. (`$uninitialized_param`
 would be a `NameError` in tessh, so an empty string stands in for it.)
 
 ```tessh
+#!/usr/bin/env tessh
 DEFAULT = default                             # Default param value.
 
 def func2 p1=None p2=""
@@ -516,6 +518,7 @@ Second call to function: command-line arg passed explicitly.
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 args = $argv[1:] or [arg1]    # (sample arguments, when none are given)
 
 def func arg=""
@@ -582,6 +585,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 def echo_var x
   print $x
 
@@ -651,6 +655,7 @@ bash's unquoted `$Junk` loses the trailing space of the new value; tessh
 passes a value as it is, so the space shows.
 
 ```tessh
+#!/usr/bin/env tessh
 def dereference name
   y = "\$$name"   # Name of variable (not value!).
   print $y        # $Junk
@@ -726,6 +731,7 @@ original's passing of the name. (The variable is `entry`, not `var`:
 `var` is one of tessh's own names.)
 
 ```tessh
+#!/usr/bin/env tessh
 ITERATIONS = 3  # How many times to get input.
 
 def my_read name
@@ -835,6 +841,7 @@ had to fit in 0-255; in tessh any value will do, and `None` is the usual
 "no answer". Here they're kept as they were.
 
 ```tessh
+#!/usr/bin/env tessh
 E_PARAM_ERR = 250    # If less than 2 params passed to function.
 EQUAL = 251          # Return value if both params equal.
 
@@ -994,6 +1001,7 @@ nine calls are needed: a loop over the pairs is the answer in the
 comment.)
 
 ```tessh
+#!/usr/bin/env tessh
 LIMIT = 200
 E_ARG_ERR = 65
 E_OUT_OF_RANGE = 66
@@ -1089,6 +1097,7 @@ tessh has no such limit on a function's value; the limit is a program's
 exit status, as the last lines show.
 
 ```tessh
+#!/usr/bin/env tessh
 def return_test n   # Returns whatever passed to it.
   return $n
 
@@ -1247,6 +1256,7 @@ In tessh the function returns the value: what bash does with `echo` and
 `$(…)` is what a tessh function does anyway.
 
 ```tessh
+#!/usr/bin/env tessh
 EQUAL = 0             # Return value if both params equal.
 E_PARAM_ERR = -99999  # Not enough params passed to function.
 
@@ -1389,6 +1399,7 @@ Here on a made-up password file. Each line goes through `grep` and `awk`,
 as in the original, with the line written into the pipe as its first stage.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # (A made-up /etc/passwd to try it on.)
 cat <<END >passwd
@@ -1522,6 +1533,7 @@ Reading a name that isn't set is a `NameError` in tessh, so the outside
 reads go through `(globals).get`, which gives a default.
 
 ```tessh
+#!/usr/bin/env tessh
 def func
   loc_var = 23           # Local: assigned in the function.
   print
@@ -1593,6 +1605,7 @@ Within function2, $func1var = 20.
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 def function1
   func1var = 20
 
@@ -1641,6 +1654,7 @@ echo "global_var = $global_var"  # global_var = 37
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 def func
   global global_var
   global_var = 37  #  Not there at all
@@ -1703,6 +1717,7 @@ each call's own, and the loops would go on at every level, printing
 hundreds of lines; to do what the original does, it's declared `global`.
 
 ```tessh
+#!/usr/bin/env tessh
 RECURSIONS = 9   # How many times to recurse.
 r_count = 0      # Must be global. Why?
 
@@ -1767,6 +1782,7 @@ exit $?
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 RECURSIONS = 10
 r_count = 0
 sp = " "
@@ -1838,6 +1854,7 @@ exit 0  # This script will not exit normally.
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 def recursive_function a b
   if $a < $b
     recursive_function ($a + 1) $b
@@ -1917,6 +1934,7 @@ The bash factorial gives its answer back as a status, so it can't go past
 the limit is kept, raised to 20, to keep the check.
 
 ```tessh
+#!/usr/bin/env tessh
 MAX_ARG = 20
 E_WRONG_ARGS = 85
 E_RANGE_ERR = 86
@@ -2008,6 +2026,7 @@ tessh one returns it, and is quick. (`functools.cache` would make it
 quicker still: see the guide's Functions section.)
 
 ```tessh
+#!/usr/bin/env tessh
 # ----------algorithm--------------
 # Fibo(0) = 0
 # Fibo(1) = 1
@@ -2150,6 +2169,7 @@ esac
 `dohanoi` says `global`.
 
 ```tessh
+#!/usr/bin/env tessh
 #
 # The Towers Of Hanoi
 # Copyright (C) 2000 Amit Singh. All Rights Reserved.

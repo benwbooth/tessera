@@ -237,6 +237,7 @@ comes of the ends. With a separator every one counts, the last one too, so
 Python finds eight fields in `:a::b:c:::` where bash finds seven.
 
 ```tessh
+#!/usr/bin/env tessh
 var1 = "a+b+c"
 var2 = "d-e-f"
 var3 = "g,h,i"
@@ -386,6 +387,7 @@ is bash's `trap`. No background timer, so no `$!` to kill: `signal.alarm 0`
 turns the alarm off.
 
 ```tessh
+#!/usr/bin/env tessh
 import signal subprocess
 
 TIMER_INTERRUPT = 14
@@ -474,6 +476,7 @@ argument, so there's no `eval`. It needs a terminal to type at, so it
 doesn't run here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import os sys termios operator
 
 INTERVAL = 5                # timeout interval
@@ -541,6 +544,7 @@ writes to plays the user who types nothing; for a real one, give it `0`,
 the standard input.
 
 ```tessh
+#!/usr/bin/env tessh
 import os select
 
 TIMELIMIT = 1         # 1 second (4 in the original)
@@ -604,6 +608,7 @@ fi
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import os pwd
 
 ROOT_UID = 0   # Root has UID 0.
@@ -702,6 +707,7 @@ splits arguments that have spaces in them; the tessh version says so,
 joining and splitting again.
 
 ```tessh
+#!/usr/bin/env tessh
 E_BADARGS = 85
 
 args = $argv[1:] or [one "two three" four]   # (sample arguments, when none are given)
@@ -772,6 +778,7 @@ echo "$@"    # 3 4 5
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 args = $argv[1:] or [1 2 3 4 5]   # (sample arguments, when none are given)
 
 echo $args    # 1 2 3 4 5
@@ -935,6 +942,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 args = ["First one" second "third:one" "" "Fifth: :one"]
 # The script's arguments (bash's set -- …), as a list.
 
@@ -1121,6 +1129,7 @@ Joining with the empty string is `"".join`; passing the list's items as
 separate arguments is `*$args`. Neither depends on a version.
 
 ```tessh
+#!/usr/bin/env tessh
 def mecho a="" b="" c=""     # Echo the first three arguments.
   print "$a,$b,$c"
 
@@ -1211,6 +1220,7 @@ echo $_              #  :
 has the command as a list, and takes it from there.
 
 ```tessh
+#!/usr/bin/env tessh
 print (Path $argv[0]).name   # (The script, where bash's first $_ is the shell.)
 
 cmd = [du]
@@ -1266,6 +1276,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import io sys
 # (The answers someone would type.)
 $sys.stdin = io.StringIO "broccoli\nmango\n"
@@ -1334,6 +1345,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import time
 
 TIME_LIMIT = 3      # (10 in the original)
@@ -1416,6 +1428,7 @@ exit $result
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up project folder, with a dotfile in it, to try it on.)
 mkdir -p GreatAmericanNovel/drafts
 touch GreatAmericanNovel/ch1 GreatAmericanNovel/ch2 GreatAmericanNovel/.notes
@@ -1581,6 +1594,7 @@ catch, and assigning to a frozen dataclass's field raises
 `FrozenInstanceError`, which ends the script unless caught.
 
 ```tessh
+#!/usr/bin/env tessh
 import inspect
 from dataclasses import dataclass FrozenInstanceError
 
@@ -1836,6 +1850,7 @@ script keeps its shape; `random.randrange` and `random.randint` (in the
 comments) do the range arithmetic for you, without the slight bias of `%`.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 random.seed 21                         # (Same numbers each run.)
 
@@ -1983,6 +1998,7 @@ exit 0
 item, so the counting isn't needed.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 random.seed 52                 # (Same card each run.)
 
@@ -2149,6 +2165,7 @@ The slots are a dict from slot number to count; `match` is the `case`.
 Functions that change the script's `POS` and `Slots` say `global`.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 
 PASSES = 500          #  Number of particle interactions / marbles.
@@ -2468,6 +2485,7 @@ does it. The answers are counted in a dict, so no displacement is needed
 to keep the subscripts positive.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 random.seed 2003                 # (Same counts each run.)
 
@@ -2658,6 +2676,7 @@ Six counters become one dict, so `update_count` is one line and needs no
 `case`; `collections.Counter` would do the counting too.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 random.seed 600        # (Bash reseeds with the PID; this is the same each run.)
 
@@ -2779,6 +2798,7 @@ themselves. That last part prints different numbers each run, so it's a
 block of its own.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 
 MAXCOUNT = 10       # How many numbers to generate (25 in the original).
@@ -2884,6 +2904,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 
 AWKSCRIPT = ' { srand(); print rand() } '

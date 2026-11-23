@@ -192,6 +192,7 @@ The differences:
   variables). Afterwards it's not there at all.
 
 ```tessh
+#!/usr/bin/env tessh
 # Variables: assignment and substitution
 
 a = 375
@@ -376,6 +377,7 @@ tessh needs no `let`: arithmetic is everywhere. `read` is Python's
 `input`; here a canned answer stands in for what you'd type.
 
 ```tessh
+#!/usr/bin/env tessh
 # Naked variables
 
 print
@@ -460,6 +462,7 @@ newline (with `.lines` and `.code` besides). Joining it into one line is a split
 and the time, so the output is the same every run.)
 
 ```tessh
+#!/usr/bin/env tessh
 # (Two made-up files to list.)
 touch -d 2026-01-01 notes.txt todo.txt
 
@@ -596,6 +599,7 @@ script shows them with `try`; a real script would just convert with
 `int` where it means a number.
 
 ```tessh
+#!/usr/bin/env tessh
 a = 2334                 # Integer.
 a += 1
 print "a = $a "          # a = 2335
@@ -771,6 +775,7 @@ The tests are on the list's length, so a missing argument is never an
 line stands in when the script gets no arguments.
 
 ```tessh
+#!/usr/bin/env tessh
 MINPARAMS = 10
 
 # (A sample command line, when there are no arguments.)
@@ -872,6 +877,7 @@ exit $?
 network, so here, without an argument, it stops at the usage message.
 
 ```tessh
+#!/usr/bin/env tessh
 E_NOARGS = 75
 name = (Path $argv[0]).name
 
@@ -943,6 +949,7 @@ exit
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # Using pop to step through all the arguments.
 args = $argv[1:] or [a b c def 83 barndoor]   # (sample arguments)
 
@@ -973,6 +980,7 @@ echo "$1"
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 args = [1 2 3 4 5]
 args = $args[3:]   # Shift 3 positions.
 print $args[0]

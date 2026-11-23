@@ -99,6 +99,7 @@ lookup is an ordinary expression, and it reads the variable's value at the
 moment it runs, so a changed `table_cell_3` shows through `t` at once.
 
 ```tessh
+#!/usr/bin/env tessh
 # ind-ref.sh: Indirect variable referencing.
 # Accessing the contents of the contents of a variable.
 
@@ -226,6 +227,7 @@ The name is an f-string, the capitalizing is `$arch[0].upper`, and
 back `True` or `False` rather than an exit status.
 
 ```tessh
+#!/usr/bin/env tessh
 # ---------------------------------------------
 # This could be "sourced" from a separate file.
 isdnMyProviderRemoteNet = "172.16.0.100"
@@ -313,6 +315,7 @@ and `$column_number` is filled in. (`awk -v col=$column_number` and
 nothing is pasted into awk's code.)
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up data file, and sample arguments when none are given.)
 printf "a 1 10\nb 2 20\nc 3 30\n" >data.txt
 args = $argv[1:] or [data.txt 3]

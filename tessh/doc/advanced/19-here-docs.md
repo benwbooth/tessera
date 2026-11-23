@@ -36,6 +36,7 @@ The same heredoc in tessh, with `cat` standing in for `wall` so that the
 message doesn't go to every terminal on the machine. A bare `exit` exits 0.
 
 ```tessh
+#!/usr/bin/env tessh
 cat <<zzz23EndOfMessagezzz23     # (wall in the original)
 E-mail your noontime orders for pizza to the system administrator.
     (Add an extra dollar for anchovy or mushroom topping.)
@@ -99,6 +100,7 @@ literal escape (`^[`) is `\x1b` in a tessh string; in a heredoc, which is
 taken as written, it has to be typed as the character itself, as in bash.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 E_BADARGS = 85
 
 if (len $argv) < 2 or not $argv[1]
@@ -148,6 +150,7 @@ done
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files to try it on.)
 print "Mr. Smith wrote to Ms. Smith." >a.txt
 print "Nobody here." >b.txt
@@ -225,6 +228,7 @@ that's a triple-quoted string, which can hold `"` as it is. Code after
 `exit` must still be correct tessh, since the whole file is compiled first.
 
 ```tessh
+#!/usr/bin/env tessh
 cat <<End-of-message
 -------------------------------------
 This is line 1 of the message.
@@ -297,6 +301,7 @@ lines of a heredoc are text, so the tabs in them are allowed even though
 tessh's own indentation must be spaces.
 
 ```tessh
+#!/usr/bin/env tessh
 #  The - option to a here document <<-
 #+ suppresses leading tabs in the body of the document,
 #+ but *not* spaces.
@@ -368,6 +373,7 @@ exit
 lines, comment and blank lines included, are text.
 
 ```tessh
+#!/usr/bin/env tessh
 # Try it with no command-line parameters,   tessh scriptname
 # Try it with one command-line parameter,   tessh scriptname Mortimer
 # Try it with one two-word quoted command-line parameter,
@@ -460,6 +466,7 @@ attribute of `$Filename`, in a heredoc as in a string. (Python's `ftplib`
 does the same job without a heredoc.)
 
 ```tessh no-run
+#!/usr/bin/env tessh
 E_ARGERROR = 85
 
 if (len $argv) < 2 or not $argv[1]
@@ -564,6 +571,7 @@ The second heredoc is written with tessh's substitutions, `$(ls -l)` and
 limit string, `<<\Endofmessage`, isn't understood.
 
 ```tessh
+#!/usr/bin/env tessh
 NAME = "John Doe"
 RESPONDENT = "the author of this fine script"
 
@@ -685,6 +693,7 @@ it wrote. bash's `( cat <<'EOF' … ) > $OUTFILE` needs no subshell in tessh:
 the heredoc and the `>` go on the same command.
 
 ```tessh
+#!/usr/bin/env tessh
 OUTFILE = generated.sh         # Name of the file to generate.
 
 # -----------------------------------------------------------
@@ -811,6 +820,7 @@ one, as `read` does. The bash function sets global variables; the tessh one
 gives back the six values, and the caller unpacks them.
 
 ```tessh
+#!/usr/bin/env tessh
 def GetPersonalData
   [(input) for _ in (range 6)]
 # This certainly appears to be an interactive function, but . . .
@@ -873,6 +883,7 @@ one. (`HOSTNAME` is a bash variable, not an environment one, so it isn't
 there in tessh; `HOME` and `PATH` are.)
 
 ```tessh
+#!/usr/bin/env tessh
 try
   : <<TESTVARIABLES
 $HOME$PATH$NO_SUCH_VARIABLE  # Error if one of the variables is not set.
@@ -977,6 +988,7 @@ line and the block indented under it, and what's dropped must still be
 correct tessh.
 
 ```tessh
+#!/usr/bin/env tessh
 : <<'COMMENTBLOCK'
 echo "This line will not echo."
 This is a comment line missing the "#" prefix.
@@ -1079,6 +1091,7 @@ has no such group, so the heading and the listing are put together as text,
 and a value first in a pipe is written to the next stage.
 
 ```tessh
+#!/usr/bin/env tessh
 DOC_REQUEST = 70
 args = $argv[1:] or ["-h"]          # (sample arguments, when none are given)
 
@@ -1357,6 +1370,7 @@ up). `cat -` reads the here string, then the file. Note `${file}.new`: a
 glued `.new` after `$file` would be an attribute.
 
 ```tessh
+#!/usr/bin/env tessh
 E_NOSUCHFILE = 85
 print "The first line of the file." >notes.txt   # (A made-up file.)
 
@@ -1480,6 +1494,7 @@ pattern is now passed to it. Also `match` is a word of the language in
 tessh, so the counter is `matched`.
 
 ```tessh
+#!/usr/bin/env tessh
 E_MISSING_ARG = 87
 # (A made-up mailbox to try it on.)
 cat <<'END' >scam_mail

@@ -47,6 +47,7 @@ but a script that depends on it depends on what you typed, so it's for
 your own use at the REPL:
 
 ```tessh no-run
+#!/usr/bin/env tessh
 hist = (Path ~/.local/share/tessh/history).read_text
 print *($hist.splitlines)[-5:] sep="\n"    # The last five entries.
 ```

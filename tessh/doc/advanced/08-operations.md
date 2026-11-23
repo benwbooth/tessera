@@ -144,6 +144,7 @@ an argument that isn't a whole number is a `ValueError`. (`math.gcd`
 does the whole job.) Sample arguments stand in when there are none.
 
 ```tessh
+#!/usr/bin/env tessh
 import math
 ARGS = 2
 E_BADARGS = 85
@@ -264,6 +265,7 @@ tessh has one obvious way, `n += 1`, and no `++`. The other ten ways here
 are the ones Python and tessh offer, for the fun of it, as in the original.
 
 ```tessh
+#!/usr/bin/env tessh
 import operator
 # Counting to 11 in 11 different ways.
 
@@ -478,6 +480,7 @@ Bash's two ways (`&&` between tests, `-a` inside one) are one in tessh:
 `and` and `or` (spelled `&&` and `||` if you like), between any tests.
 
 ```tessh
+#!/usr/bin/env tessh
 a = 24
 b = 47
 
@@ -664,6 +667,7 @@ bash's digits (for bases up to 36 a letter's case doesn't matter, so `int`
 does it). A digit out of range is a `ValueError`, caught to show it.
 
 ```tessh
+#!/usr/bin/env tessh
 import string
 # Representation of numbers in different bases.
 
@@ -828,6 +832,7 @@ False` is the conditional expression in tessh: `print` gives `None`, which
 is false, so `x && print a || print b` would print both.
 
 ```tessh
+#!/usr/bin/env tessh
 print
 
 a = 23        # Setting a value: spaces are fine.

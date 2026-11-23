@@ -72,6 +72,7 @@ The same programs and heredocs work in tessh. Python's `.` doesn't match a
 newline unless the RE has the `s` flag:
 
 ```tessh
+#!/usr/bin/env tessh
 sed -e 'N;s/.*/[&]/' <<EOF
 line1
 line2

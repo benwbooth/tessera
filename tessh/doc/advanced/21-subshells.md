@@ -145,6 +145,7 @@ of the script's variables, so `global` lets it change its own copy, and
 nothing comes back. `level` stands in for `$BASH_SUBSHELL`.
 
 ```tessh
+#!/usr/bin/env tessh
 import os sys
 
 level = 0       # (bash's $BASH_SUBSHELL)
@@ -288,6 +289,7 @@ home's path `/` the file name. (When a block has to change folders and come
 back, `pushd` and `popd` do it.)
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up /etc/passwd and home folders, to try it on.)
 mkdir -p home/ann home/bob home/cy
 print "echo hello from ann" >home/ann/.bashrc

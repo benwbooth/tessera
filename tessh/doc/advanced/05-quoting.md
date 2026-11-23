@@ -273,6 +273,7 @@ quotes nest in it as in bash. The closing comparison of two files' sizes
 is a comparison of two numbers.
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 print
 
@@ -469,6 +470,7 @@ ones. Where the original prints control characters, the tessh version
 sends them through `cat -v`, which shows them as `^K`, `^G` and so on.
 
 ```tessh
+#!/usr/bin/env tessh
 # Escaping a newline.
 # ------------------
 
@@ -681,6 +683,7 @@ needs a terminal, so here a canned list of keys stands in for it, and the
 menu is shown once rather than redrawn for each key.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys os select termios tty
 
 def read_key

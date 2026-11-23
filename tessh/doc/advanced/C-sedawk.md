@@ -200,6 +200,7 @@ handed over by `-v`; the counting is also shown in Python, with
 there are none.
 
 ```tessh
+#!/usr/bin/env tessh
 from collections import Counter
 import sys
 E_PARAMERR = 85

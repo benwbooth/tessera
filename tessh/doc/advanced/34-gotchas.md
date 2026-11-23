@@ -160,6 +160,7 @@ it compares numbers. The gotcha comes back with text: as text, "105"
 comes before "5". Mixing the two is a `TypeError`, which at least says so.
 
 ```tessh
+#!/usr/bin/env tessh
 # bad-op: comparing numbers, and comparing text.
 
 print
@@ -348,6 +349,7 @@ own copies of the names it lists, and they're gone after it. (A function
 does the same for every name assigned in it.)
 
 ```tessh
+#!/usr/bin/env tessh
 # Variables in a block of their own.
 
 outer_variable = outer
@@ -509,6 +511,7 @@ used as a pipe stage, which gets the text as its argument and whose names
 are its own.
 
 ```tessh
+#!/usr/bin/env tessh
 #  badread: assigning variables from a command's output.
 
 a = aaa

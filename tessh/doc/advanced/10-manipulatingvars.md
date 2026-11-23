@@ -82,6 +82,7 @@ A `for` over the input gives its lines with their newlines, which
 exercise 2 is `re'[.?!"]$'`.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # (A made-up single-spaced text, standing in for the standard input.)
 printf "%s\n" "It was a dark and stormy night; the rain fell in torrents," "except at occasional intervals." "Then the wind swept up the streets." "The end." > story.txt
@@ -273,6 +274,7 @@ The same pipeline, then a slice. Given `my-password` it prints what the
 ABS Guide says. (For a string that's really random, `secrets.token_hex 4`.)
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 
 args = $argv[1:] or [my-password]    # (a sample argument, when none is given)
@@ -590,6 +592,7 @@ run is a value, as in bash; `env` runs it (see the gap below). `macptopbm` isn't
 (a copy) in its place on made-up files.
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up "MacPaint" files to try it on.)
 mkdir -p pics ; echo one >pics/a.mac ; echo two >pics/b.mac
 
@@ -683,6 +686,7 @@ exit $?
 replaced. It needs `mplayer`, `oggenc` and a file, so it doesn't run here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 E_NOARGS = 85
 
 if (len $argv) < 2 or not $argv[1]    # Must specify a filename to convert.
@@ -756,6 +760,7 @@ the first `=` (bash's `%%=*` and `##*=` cut at the first and the last,
 which differ when the value has an `=` in it).
 
 ```tessh
+#!/usr/bin/env tessh
 def getopt_simple *params
   print "getopt_simple()"
   print "Parameters are '$(" ".join $params)'"
@@ -925,6 +930,7 @@ splicing it into the program's quotes. `str.find` is the Python way,
 counting from 0.
 
 ```tessh
+#!/usr/bin/env tessh
 String = 23skidoo1
 #        012345678    tessh (Python)
 #        123456789    awk
@@ -1068,6 +1074,7 @@ exit 0
 function, so the output doesn't depend on who runs it.)
 
 ```tessh
+#!/usr/bin/env tessh
 def whoami = "bozo"    # (In place of the whoami program.)
 
 def default value fallback
@@ -1323,6 +1330,7 @@ environment one, so it's `socket.gethostname` in tessh; here the
 environment is made up so the output doesn't depend on the machine.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 
 # (A made-up environment, the same everywhere.)
@@ -1403,6 +1411,7 @@ exit 0  # Will exit here only if command-line parameter present.
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 
 if (len $argv) < 2
@@ -1461,6 +1470,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 E_NO_ARGS = 65
 
 args = $argv[1:] or [one two three]   # (sample arguments, when none are given)
@@ -1611,6 +1621,7 @@ exit 0
 With the two functions from 10.1:
 
 ```tessh
+#!/usr/bin/env tessh
 from fnmatch import fnmatchcase
 
 def strip_front s pat longest=False    # ${s#pat}, or ${s##pat} if longest
@@ -1716,6 +1727,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # (Made-up files to try it on.)
 touch a.gif b.gif c.png
 
@@ -1819,6 +1831,7 @@ exit 0
 comments warn of.
 
 ```tessh
+#!/usr/bin/env tessh
 var1 = abcd-1234-defg
 print "var1 = $var1"
 
@@ -1922,6 +1935,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 v0 = abc1234zip1234abc     # Original variable.
 print "v0 = $v0"           # abc1234zip1234abc
 print

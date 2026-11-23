@@ -38,6 +38,7 @@ variables between lines. (Python's `eval` and `exec` take Python, and `py`
 takes Python written in the script.) The REPL itself is the real thing.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import os
 TESSH = os.readlink /proc/self/exe   # (the tessh running this script)
 MY_PROMPT = '$ '
@@ -167,6 +168,7 @@ There's no quoting to remember for the file name: a value is one argument
 whatever is in it. The argument check the comments suggest is included.
 
 ```tessh
+#!/usr/bin/env tessh
 # This simple script removes blank lines from a file.
 # (A made-up file, and a sample argument when none is given.)
 printf "one\n\ntwo\n\n\nthree\n" >"my file.txt"
@@ -238,6 +240,7 @@ Unpacking the arguments into three names checks their number at the same
 time (a `match` would do it too).
 
 ```tessh
+#!/usr/bin/env tessh
 #  subst: substitutes one pattern for another in a file,
 #  i.e., "subst Smith Jones letter.txt". Jones replaces Smith.
 # (A made-up letter, and sample arguments when none are given.)
@@ -311,6 +314,7 @@ the program's status instead. (The log's date and user are cut off when
 it's shown here, so the output stays the same from run to run.)
 
 ```tessh
+#!/usr/bin/env tessh
 #  logging-wrapper: performs an operation and logs it.
 import datetime getpass
 
@@ -389,6 +393,7 @@ Python's format specs do what `awk`'s `printf` did (`:3d`, `:2x`), and
 last line is character 127, DEL, which shows as nothing.)
 
 ```tessh
+#!/usr/bin/env tessh
 # pr-ascii: prints a table of ASCII characters.
 
 START = 33   # Range of printable ASCII characters (decimal).
@@ -572,6 +577,7 @@ as an awk variable, and the awk program stays in single quotes, untouched.
 (Chapter 28 has the version that pastes it into the program.)
 
 ```tessh
+#!/usr/bin/env tessh
 # Adds up a specified column (of numbers) in the target file.
 # Floating-point (decimal) numbers okay, because awk can handle them.
 # (A made-up data file, and sample arguments when none are given.)
@@ -626,6 +632,7 @@ exit 0
 `perl -e` works from tessh the same way.
 
 ```tessh
+#!/usr/bin/env tessh
 # Shell commands may precede the Perl script.
 print "This precedes the embedded Perl script within \"$((Path $argv[0]).name)\"."
 print "==============================================================="
@@ -739,6 +746,7 @@ exit 0
 is `input` now.) The key press is canned here.
 
 ```tessh
+#!/usr/bin/env tessh
 # Shell commands may precede the Python.
 print "This precedes the embedded Python script within \"$((Path $argv[0]).name).\""
 print "==============================================================="
@@ -793,6 +801,7 @@ which also escapes what a URL can't hold. As in Example 36-7, the text
 after `exit` must still be tessh, so the spoken lines are a comment.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import urllib.parse
 
 def speak text
@@ -923,6 +932,7 @@ seeds `random` with it; leave the seed out for a different run each time.
 Run by tessh, the script needs no execute permission.
 
 ```tessh script
+#!/usr/bin/env tessh
 # recurse: can a script recursively call itself?
 import os random
 
@@ -1009,6 +1019,7 @@ than one word, it runs itself on all but the first and greps that output
 for the first, as the original does.
 
 ```tessh script
+#!/usr/bin/env tessh
 # pb: phone book, by Rick Boivie.
 import os
 
@@ -1108,6 +1119,7 @@ grpusr=… sudo $0 $*` prefix carries over (sudo passes them on only if its
 policy allows). The user's ids come from `os.getuid` and `os.getgid`.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # usrmnt, by Anthony Richardson: mount a device, rerunning itself with sudo.
 import os
 
@@ -1258,6 +1270,7 @@ is off. The `case` is a `match`, with `.lower` so one pattern takes both
 cases. The answer is canned, as the script can't read the terminal here.
 
 ```tessh
+#!/usr/bin/env tessh
 # ex30a: "colorized" crude address database.
 import os sys
 
@@ -1495,6 +1508,7 @@ and a file too, and colors only on a terminal. The checks raise
 exercise, text in the box, is the optional last argument.
 
 ```tessh
+#!/usr/bin/env tessh
 # Draw-box: drawing a box using ASCII characters, after Stefano Palmeri's.
 import shutil sys
 
@@ -1641,6 +1655,7 @@ defaults; `or` gives the default for an empty argument too, as `${1:-…}`
 does. Both exercises are done: `bold=True` and `background=`.
 
 ```tessh
+#!/usr/bin/env tessh
 # color-echo: echoing text messages in color.
 import sys
 
@@ -2093,6 +2108,7 @@ drawing happens only on a terminal, 80 by 20 at least; anywhere else the
 script prints the odds and the result.
 
 ```tessh
+#!/usr/bin/env tessh
 # horserace: very simple horserace simulation, after Stefano Palmeri's.
 import random shutil sys time
 
@@ -2634,6 +2650,7 @@ only makes sense on a terminal, so elsewhere the script prints every
 twenty-fifth bar on a line of its own.
 
 ```tessh
+#!/usr/bin/env tessh
 # progress-bar, by Dotan Barak.
 import sys time
 
@@ -2709,6 +2726,7 @@ error. A string that nothing uses is the tessh way (or `#_`, which drops
 the indented block under it):
 
 ```tessh
+#!/usr/bin/env tessh
 """
 Comment block --
 =================================
@@ -2759,6 +2777,7 @@ In tessh, `int` either converts the text or raises `ValueError`, and the
 `try` is the test:
 
 ```tessh
+#!/usr/bin/env tessh
 E_BADINPUT = 85
 arg = if (len $argv) > 1 then $argv[1] else "17"   # (sample argument)
 
@@ -2818,6 +2837,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # multiplication
 
 def multiply *factors           # Multiplies params passed,
@@ -2919,6 +2939,7 @@ them (the bash version breaks if the function echoes anything else). The
 two numbers are canned here.
 
 ```tessh
+#!/usr/bin/env tessh
 # sum-product: a function may return more than one value.
 
 def sum_and_product a b   # Calculates both sum and product of passed args.
@@ -3040,6 +3061,7 @@ points out, break the bash version). `*$list` in a `print` lists its
 elements as `${array[@]}` does.
 
 ```tessh
+#!/usr/bin/env tessh
 # array-function: passing a list to a function and returning one.
 
 def pass_array passed_array      # A local name, as in bash.
@@ -3102,6 +3124,7 @@ umask 022   # Files that the script creates will have 755 permission.
 ```
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import os
 $env.PATH = "/bin:/usr/bin:/usr/local/bin"
 os.umask 0o022   # Files the script creates will have 755 permission.
@@ -3166,6 +3189,7 @@ output starts the same pipe of `grep`s. The letter set comes from the
 command line, as the first exercise asks.
 
 ```tessh
+#!/usr/bin/env tessh
 # agram: playing games with anagrams.
 from collections import Counter
 
@@ -3374,6 +3398,7 @@ own screen output thrown away) gives the value without the temp file and
 stdout instead, so it's simpler still.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # dialog: using zenity widgets.
 
 E_INPUT = 85
@@ -3542,6 +3567,7 @@ Command substitution test: PASS
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # test-suite: a partial tessh test suite, after the ABS Guide's.
 
 default_option = FAIL       # Tests below will fail unless . . .

@@ -112,6 +112,7 @@ stands in for the data file; `less` copies it when its output isn't a
 terminal, which is what happens here, with no argument.
 
 ```tessh
+#!/usr/bin/env tessh
 # Conversion of VIEWDATA.BAT to tessh.
 
 # (A made-up book list to try it on.)

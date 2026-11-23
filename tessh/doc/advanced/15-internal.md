@@ -59,6 +59,7 @@ running now, and `env` runs a program named by a value. This one stops at
 three instances instead of waiting for Ctrl+C.
 
 ```tessh script
+#!/usr/bin/env tessh
 import os
 # spawn.tsh
 
@@ -105,6 +106,7 @@ This line uses the "echo" builtin.
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 print "This line uses Python's \"print\"."
 /bin/echo "This line uses the /bin/echo system command."
 ```
@@ -201,6 +203,7 @@ always be changed. `printf` as a value (`Pi12 = printf …`) is bash's
 `$(printf …)`, sprintf included.
 
 ```tessh
+#!/usr/bin/env tessh
 # printf demo
 
 PI = 3.14159265358979     # (A constant: see the gap below.)
@@ -337,6 +340,7 @@ the last one gets what's left. In tessh, split the line and unpack it.
 variables empty. The original's `echo =n` is a typo for `echo -n`.)
 
 ```tessh
+#!/usr/bin/env tessh
 import sys io
 sys.stdin = io.StringIO "23\nfirst second\n"   # (Canned answers.)
 
@@ -517,6 +521,7 @@ the next line". Python's `readline` takes lines as they are, which is
 `read -r`; a small function does the joining.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys io
 sys.stdin = io.StringIO "first line \\\nsecond line\nfirst line \\\n"   # (Canned answers.)
 
@@ -748,6 +753,7 @@ Rather than one `grep` per key, the codes go in a list and a loop tests
 them with `in`.
 
 ```tessh
+#!/usr/bin/env tessh
 # arrow-detect.tsh: Detects the arrow keys, and a few more.
 
 # --------------------------------------------
@@ -879,6 +885,7 @@ separator is the argument to `.split`. (The users come from a made-up
 `passwd` file, not the real `/etc/passwd`.)
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up data file and /etc/passwd to try it on.)
 print "This is line one of the data file.\nAnd this is line two." >data-file
 print "root:x:0:0:root:/root:/bin/bash\nbozo:x:1000:100:Bozo Bozeman:/home/bozo:/bin/bash" >passwd
@@ -1029,6 +1036,7 @@ script.) `read` without `-r` also eats the backslashes in the script's
 lines, `\n` becoming `n`; `.lines` keeps them.
 
 ```tessh
+#!/usr/bin/env tessh
 # readpipe.tsh
 
 last = "(null)"
@@ -1044,6 +1052,7 @@ exit 0
 ```
 
 ```output
+{#!/usr/bin/env tessh}
 {# readpipe.tsh}
 {}
 {last = "(null)"}
@@ -1107,6 +1116,7 @@ The same commands, with the folder stack shown by `dirs` (`pushd` and
 same wherever it runs.
 
 ```tessh
+#!/usr/bin/env tessh
 dir1 = /usr/local
 dir2 = /var/spool
 cd /                 # (To start somewhere fixed.)
@@ -1205,6 +1215,7 @@ exit
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 print
 
 a = 11              # Same as 'let a=11'
@@ -1326,6 +1337,7 @@ command printed, write them to a file and `source` it. Splitting a version
 number into two names is `.split` and unpacking.
 
 ```tessh
+#!/usr/bin/env tessh
 # Exercising "eval" ...
 
 y = ls -l           #  (A value, eval or not.)
@@ -1428,6 +1440,7 @@ by index. A missing array is a missing item, `None` from `.get` (and here
 `""`, as bash prints nothing).
 
 ```tessh
+#!/usr/bin/env tessh
 # arr-choice.tsh
 
 #  Passing arguments to a function to select
@@ -1503,6 +1516,7 @@ Command-line parameter $5 = fifth
 `$argv` is a list, so the indirect `\$$param` is `$argv[$param]`.
 
 ```tessh
+#!/usr/bin/env tessh
 # echo-params.tsh
 
 args = $argv[1:] or [first second third fourth fifth]   # (sample arguments, when none are given)
@@ -1570,6 +1584,7 @@ here. The process IDs come from `ps` and `awk`, as a list: no `eval`, since
 `kill` takes the list as its arguments.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import os
 # Killing ppp to force a log-off.
 # Script should be run as root user.
@@ -1620,6 +1635,7 @@ module's `globals` dict. (A function that returns the scrambled text,
 `var = rot13 $var`, is the plainer way.)
 
 ```tessh
+#!/usr/bin/env tessh
 # A version of "rot13" setting a variable by name.
 
 def setvar_rot_13 varname varvalue    # "rot13" scrambling
@@ -1691,6 +1707,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # ex34.tsh
 # Script "set-test"
 
@@ -1829,6 +1846,7 @@ last `:` that bash's word splitting drops, so the empty ones are filtered
 out.
 
 ```tessh
+#!/usr/bin/env tessh
 # revposparams.tsh: Reverse positional parameters.
 
 params = ["a b" c "d e"]
@@ -1930,6 +1948,7 @@ two `shift`s. A missing parameter is `""` in bash; in Python indexing past
 the end is an error, so the empty case takes defaults.
 
 ```tessh
+#!/usr/bin/env tessh
 variable = "one two three four five"
 
 params = ($variable.split)
@@ -2005,6 +2024,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 # unset.tsh: Deleting a variable.
 
 variable = hello                     #  Initialized.
@@ -2078,6 +2098,7 @@ exit 0
 is in single quotes, so tessh leaves its `$` alone.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up file of numbers to try it on.)
 print "1 10 100\n2 20 200\n3 30 300" >numbers
 
@@ -2220,6 +2241,7 @@ The script's body is a function here, run with the sample command lines
 from the original's comments.
 
 ```tessh
+#!/usr/bin/env tessh
 import getopt
 # ex33.tsh: Exercising getopt
 
@@ -2476,6 +2498,7 @@ the same variables. `pass_count` isn't there the first time, so it's read
 with `.get`.
 
 ```tessh
+#!/usr/bin/env tessh
 # self-source.tsh: a script sourcing itself "recursively."
 # From "Stupid Script Tricks," Volume II.
 
@@ -2533,6 +2556,7 @@ when the output is a file or a pipe, and the new program won't write it out,
 so flush it first.
 
 ```tessh
+#!/usr/bin/env tessh
 import os sys inspect
 
 sys.stdout.flush
@@ -2547,7 +2571,7 @@ exit 99
 ```
 
 ```output
-Exiting "ex.tsh" at line 4.
+Exiting "ex.tsh" at line 5.
 ```
 
 **Gap:** no `exec` builtin: `os.execvp` replaces the process (after a
@@ -2587,6 +2611,7 @@ shows the process ID is the same each time by keeping the first one in the
 environment, which `exec` hands on.
 
 ```tessh script
+#!/usr/bin/env tessh
 import os sys
 # self-exec.tsh
 
@@ -2657,6 +2682,7 @@ caller 0     # Has no effect because it's not inside a function.
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 import inspect
 
 def caller
@@ -2672,7 +2698,7 @@ function1    # Line 12 of script.
 ```
 
 ```output
-12 <module> ex.tsh
+13 <module> ex.tsh
 ```
 
 ## Commands
@@ -2780,6 +2806,7 @@ exit 0
 `wait`.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import os
 
 ROOT_UID = 0   # Only users with UID 0 have root privileges.
@@ -2857,6 +2884,7 @@ exit 0   # Normal exit? No!
 signal exits with 128 plus the signal's number: 143 for TERM.
 
 ```tessh
+#!/usr/bin/env tessh
 import os signal
 # self-destruct.tsh
 

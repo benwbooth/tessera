@@ -103,6 +103,7 @@ without `pipefail`, and `cpio` is the one that fails when anything does.
 `cpio -v` lists the files on stderr; here the copy is listed after.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up tree to copy.)
 mkdir -p notes/2026/nov ; echo a > notes/todo ; echo b > notes/2026/nov/23
 
@@ -168,6 +169,7 @@ among running processes), and the exercise checks the file with `file`.
 It needs an rpm and `rpm2cpio`, so it doesn't run here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # de-rpm.tsh: Unpack an 'rpm' archive
 import tempfile
 
@@ -285,6 +287,7 @@ anywhere, is easy with a Python regex: `s` lets `.` match newlines, and
 `*?` stops at the first `*/`, and `m` lets `^` match at each line.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 cat >hello.c <<'END'
 /* hello.c: says hello */
@@ -377,6 +380,7 @@ what `whatis` wants. It needs a `whatis` database (there's none here) and
 the folder, so it doesn't run.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 DIRECTORY = /usr/X11R6/bin
 # Try also /bin, /usr/bin, /usr/local/bin, etc.
 
@@ -475,6 +479,7 @@ ones, and the word list is read once into a set instead of `grep`ped once
 per word. It runs on a made-up binary file and word list.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up binary file and word list.)
 printf '\x00\x01ELF\x02hello world\x00\xff\xfeqzx the\x03PRINTER_status\x00ok\n' > data.bin
 printf "%s\n" hello printer status the world > words
@@ -562,6 +567,7 @@ exit 0
 test. Python's `filecmp.cmp f1 f2 shallow=False` does the same comparison.
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 printf 'one\ntwo\n' > a.txt ; printf 'one\ntwo\n' > b.txt ; printf 'one\n2\n' > c.txt
 
@@ -625,6 +631,7 @@ A path written bare is a Path, so `.name` and `.parent` are `basename` and
 version sets `HOME` to bozo's first, as `~` follows `$env.HOME`.)
 
 ```tessh
+#!/usr/bin/env tessh
 $env.HOME = /home/bozo          # (So the output doesn't show yours.)
 
 address = /home/bozo/daily-journal.txt
@@ -685,6 +692,7 @@ in order, and `rm` too. `csplit` prints the size of each piece, and `cmp`
 shows the copy is exact.
 
 ```tessh
+#!/usr/bin/env tessh
 # splitcopy.tsh
 #  A script that splits itself into chunks,
 #+ then reassembles the chunks into an exact copy
@@ -708,8 +716,8 @@ exit $?
 ```
 
 ```output
-110
-458
+81
+508
 ex.tsh.copy is an exact copy.
 ```
 
@@ -845,6 +853,7 @@ with `read record[n]` and cuts the name out with `awk`. `clear` is left out
 after one file has been changed.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up folder to watch.)
 mkdir data ; echo alpha > data/a ; echo beta > data/b ; echo gamma > data/c
 
@@ -958,6 +967,7 @@ the job, and make the made-up encoded file to try it on. The test for
 counting `grep`'s words.
 
 ```tessh
+#!/usr/bin/env tessh
 import binascii
 # (A made-up uuencoded file, made with binascii.b2a_uu, and a plain one.)
 data = b"Hello from a uuencoded file.\n"
@@ -1168,6 +1178,7 @@ per line; captured, `.lines` is the list, and the quotes come off with
 `.strip`.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # spam-lookup.tsh: Look up abuse contact to report a spammer.
 
 ARGCOUNT = 1
@@ -1344,6 +1355,7 @@ are a list (exercise 3), the `dig` time-out is an option (exercise 4), and
 the argument is checked (exercise 1). It needs DNS, so it doesn't run here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # is-spammer.tsh: Identifying spam domains
 # After Michael Zick's is-spammer.sh.
 # Uses an external program: 'dig'
@@ -1452,6 +1464,7 @@ Yahoo's old URL long gone). `urllib.request.urlretrieve` would do it without
 `wget`. It needs the network.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # quote-fetch.tsh: Download a stock quote.
 
 E_NOPARAMS = 86
@@ -1707,6 +1720,7 @@ files, as bash's `trap … EXIT` does. It needs the mirror, so it doesn't run
 here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # fc4upd.tsh
 # After Frank Wang's fc4upd.sh.
 #  Download Fedora Core 4 update from mirror site using rsync.
@@ -1898,6 +1912,7 @@ output": `$env.get` with a default does it. It needs an `ssh` server, so it
 doesn't run here.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # remote.tsh: Using ssh.
 # After Michael Zick's remote.bash.
 import getpass socket
@@ -1961,6 +1976,7 @@ It sends mail, so it doesn't run here. The script reads itself from
 rather than a `whoami` process.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # self-mailer.tsh: Self-mailing script
 import getpass datetime
 
@@ -2081,6 +2097,7 @@ itself. That also leaves out 1, which the original counts as prime. The
 ceiling is 100 to keep the output short.
 
 ```tessh
+#!/usr/bin/env tessh
 CEILING = 100       # 1 to 100 (10000 in the original)
 
 # One factor run for all the numbers: "n: factor factor ...".
@@ -2214,6 +2231,7 @@ Wang's closed form gives the same sum. Exercise 1, commas in the principal,
 is a `.replace`.
 
 ```tessh
+#!/usr/bin/env tessh
 print
 print "Given the principal, interest rate, and term of a mortgage,"
 print "calculate the monthly payment."
@@ -2380,6 +2398,7 @@ argument list, and the numbers come from sample arguments rather than
 stdin.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 
 NOARGS = 85
@@ -2517,6 +2536,7 @@ result to a `scale`, so the second answer has all its digits (`bc` says
 function returns its float, where bash has to echo it and capture the text.
 
 ```tessh
+#!/usr/bin/env tessh
 import math
 from decimal import Decimal
 
@@ -2708,6 +2728,7 @@ integer square root that `bc` with `scale = 0` gives; the rest of the
 arithmetic is floating point, so no `bc` at all.
 
 ```tessh
+#!/usr/bin/env tessh
 # cannon.tsh: Approximating PI by firing cannonballs.
 # After Mendel Cooper's cannon.sh: a very simple "Monte Carlo" simulation.
 import math random
@@ -2838,6 +2859,7 @@ exit
 argument, is `int` in a `try`.
 
 ```tessh
+#!/usr/bin/env tessh
 E_NOARGS = 85    # Command-line arg missing.
 E_BADARG = 86
 
@@ -2912,6 +2934,7 @@ the `factor` program does it in one call, as in Example 16-46). The
 exercise, rejecting a non-integer, is `str.isdigit`.
 
 ```tessh
+#!/usr/bin/env tessh
 MIN = 2       # Will not work for number smaller than this.
 E_NOARGS = 85
 E_TOOSMALL = 86
@@ -2993,6 +3016,7 @@ The `awk` program runs as it is, with the numbers piped in. The exercise
 asks for `bc`; in tessh it's Python, with `%3.7f` as a format spec.
 
 ```tessh
+#!/usr/bin/env tessh
 import math
 ARGS = 2              # Script needs sides of triangle passed.
 E_BADARGS = 85        # Wrong number of arguments.
@@ -3102,6 +3126,7 @@ stops *before* its end and its step comes last. `(seq 80).lines` would
 work too, as text.
 
 ```tessh
+#!/usr/bin/env tessh
 # Using "range" (where bash uses "seq")
 
 print
@@ -3247,6 +3272,7 @@ file and then the letters, so `[FILE *letters] = $args` takes them apart
 where bash `shift`s through them.
 
 ```tessh
+#!/usr/bin/env tessh
 printf 'GNU is Not Unix, and Linux is not GNU.\n' > foobar.txt   # (made up)
 
 MINARGS = 2          # Script requires at least two arguments.
@@ -3362,6 +3388,7 @@ stderr. (Python's `argparse` is the tessh way to take options; chapter 15
 compares it with `getopts`.)
 
 ```tessh
+#!/usr/bin/env tessh
 E_OPTERR = 65
 
 def main args
@@ -3522,6 +3549,7 @@ exit $?
 ```
 
 ```tessh no-run
+#!/usr/bin/env tessh
 mkfifo pipe1 pipe2
 
 cut -d' ' -f1 <pipe1 | tr "a-z" "A-Z" >pipe2 &
@@ -3559,6 +3587,7 @@ The copy goes in the current folder (the bash writes it next to the
 script), and `cmp` shows it's the same.
 
 ```tessh
+#!/usr/bin/env tessh
 # self-copy.tsh
 # This script copies itself.
 
@@ -3709,6 +3738,7 @@ The same in tessh, with `try`/`finally` so the terminal's settings come
 back even when the script is interrupted. It needs a terminal to type in.
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # dd-keypress.tsh: Capture keystrokes without needing to press ENTER.
 
 keypresses = 4                    # Number of keypresses to capture.
@@ -3824,6 +3854,7 @@ It must run as root and writes to a device, so it doesn't run here.
 folder) is a Glob, and the key press is `input` (which waits for Enter).
 
 ```tessh no-run
+#!/usr/bin/env tessh
 # rp.sdcard.tsh
 # Preparing an SD card with a bootable image for the Raspberry Pi.
 import os
@@ -3962,6 +3993,7 @@ so the passes show only their numbers. (`shred -u file` does all this in
 one command.)
 
 ```tessh
+#!/usr/bin/env tessh
 import os
 print "Top secret. Burn after reading." >secret.txt   # (made up)
 
@@ -4076,6 +4108,7 @@ Python's `secrets.token_hex 16` makes the same kind of cookie without a
 program (and `tempfile`, in 16.5, makes the file itself).
 
 ```tessh
+#!/usr/bin/env tessh
 import secrets
 
 BASE_STR = (mcookie)  # 32-character magic cookie.
@@ -4139,6 +4172,7 @@ quantity from the command line, and a clear error for a unit it doesn't
 know.
 
 ```tessh
+#!/usr/bin/env tessh
 METERS_PER = {meters: 1 miles: 1609.344 feet: 0.3048 kilometers: 1000}
 
 def convert_units unit1 unit2   # Takes as arguments the units to convert.
@@ -4194,6 +4228,7 @@ expression in tessh: `len`, a slice for `substr`, `re.sub` for `regexp`
 own macros, `defmacro`, work on tessh code as it compiles, not on text.)
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 # Strings
 string = abcdA01

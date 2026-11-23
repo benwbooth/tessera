@@ -55,6 +55,7 @@ Bash's options, and where tessh stands on each:
 A few of these, tried:
 
 ```tessh
+#!/usr/bin/env tessh
 mkdir -p sub/deep ; touch a.py sub/b.py sub/deep/c.py
 
 echo x{a,b}y                       # No brace expansion: stays as written.

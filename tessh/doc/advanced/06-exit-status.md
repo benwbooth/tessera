@@ -53,6 +53,7 @@ standard error), and the script goes on. Capturing a command gives its
 status as `.code`, which is often easier than `$?`.
 
 ```tessh
+#!/usr/bin/env tessh
 echo hello
 print $?    # Exit status 0 returned because command executed successfully.
 

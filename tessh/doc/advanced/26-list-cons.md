@@ -66,6 +66,7 @@ original does with `[`, so that each `echo` prints as it goes. Note the
 with a comment, in tessh or in bash.
 
 ```tessh
+#!/usr/bin/env tessh
 def main args
   a1 = if (len $args) > 0 then $args[0] else ""
   a2 = if (len $args) > 1 then $args[1] else ""
@@ -137,6 +138,7 @@ The `test` is given the number of arguments, `(len $argv) - 1`. Run here
 without arguments, the usage message is what it prints.
 
 ```tessh
+#!/usr/bin/env tessh
 ARGS = 1        # Number of arguments expected.
 E_BADARGS = 85  # Exit value if incorrect number of args passed.
 
@@ -213,6 +215,7 @@ when it's there, once when it isn't. `($f.is_file)` is a Python value
 in the lists, and `rm` a program.
 
 ```tessh
+#!/usr/bin/env tessh
 E_BADARGS = 85
 touch doomed.txt                # (A made-up file to delete.)
 

@@ -57,6 +57,7 @@ The same loop in tessh, then the compact version the exercise asks for:
 conditions.
 
 ```tessh
+#!/usr/bin/env tessh
 MAX = 10000
 
 for nr in (range 1 $MAX)
@@ -97,6 +98,7 @@ exit 0
 here a made-up folder stands in for `/usr/bin`.
 
 ```tessh
+#!/usr/bin/env tessh
 # (A made-up folder with two shell scripts and a text file.)
 mkdir -p bin ; print "#!/bin/sh\necho a" >bin/a ; print "#!/bin/bash\necho b" >bin/b ; print text >bin/c
 
@@ -138,6 +140,7 @@ from `os.path.getmtime`, and the names from a Glob; made-up files with
 set times show it.
 
 ```tessh
+#!/usr/bin/env tessh
 import os datetime
 # (A scratch folder with made-up files, their times set.)
 touch -d "2014-03-10 12:00:00" notes.txt ; touch -d "2014-03-11 08:30:15" "my essay.txt"

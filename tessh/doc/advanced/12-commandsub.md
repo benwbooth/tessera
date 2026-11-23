@@ -272,6 +272,7 @@ byte, so its length is `wc -c`'s. (A command's captured output is text,
 so `cat` of a binary file would be decoded, and is the wrong tool.)
 
 ```tessh
+#!/usr/bin/env tessh
 exit 99  ### Comment out this line if you dare.
 
 dangerous_variable = (Path /boot/vmlinuz).read_bytes   # The kernel, as bytes.
@@ -317,6 +318,7 @@ exit 0
 ```
 
 ```tessh
+#!/usr/bin/env tessh
 variable1 = "".join [(str $i) for i in [1 2 3 4 5]]
 print "variable1 = $variable1"  # variable1 = 12345
 
@@ -351,6 +353,7 @@ echo $greeting
 ```
 
 ```tessh no-run
+#!/usr/bin/env tessh
 greeting = ./hello     # (A C program that prints "Hello, world.")
 print $greeting
 ```
@@ -429,6 +432,7 @@ with the given letters, printed one per line as `anagram` does. The
 nesting is the same; `.lines` makes the list that bash's `( … )` makes.
 
 ```tessh
+#!/usr/bin/env tessh
 from collections import Counter
 
 # (A made-up word list.)

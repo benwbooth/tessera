@@ -263,6 +263,7 @@ which wraps at 256, so a 300-character description passes the 250 check;
 a tessh function gives back the number itself.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # pad.sh: PAD (xml) file creator, by Mendel Cooper (public domain).
 # (Canned answers stand in for the keyboard: a field not in here is left empty.)
@@ -682,6 +683,7 @@ same. Here the page is simply `cat`ed. Writing the `.TH` line is one `print`
 to the file opened for appending, not five `echo -n >>`s.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # maned.sh: a rudimentary man page editor, by Mendel Cooper (GPL3).
 # (Canned answers stand in for the keyboard, in the order they're asked.)
@@ -1040,6 +1042,7 @@ are left out when the output isn't a terminal. Interactively, the guess is
 `petal = input ""` and "Hit ENTER" is `input ""` again.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys random
 # petals.sh: Petals Around the Rose.
 # Version 0.1 Created by Serghey Rodin; 0.2 modded by the ABS Guide author.
@@ -1794,6 +1797,7 @@ bash's `read -t 10` gives up on a word after ten seconds. In tessh,
 `select` waits for input with a timeout:
 
 ```tessh no-run
+#!/usr/bin/env tessh
 import sys select
 def get_word
   print "Next word: " end="" flush=True
@@ -2396,6 +2400,7 @@ As in bash, `$RANDOM % ROWS` never picks row 5, so the bot only plays rows
 only when the output is a terminal.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys random
 # nim.sh: Game of Nim. Author: Mendel Cooper, 15 July 2008. License: GPL3.
 
@@ -2727,6 +2732,7 @@ arithmetic `bc` did is Python's floats. (Minutes show as `1:09.75`, where
 the original's `bc` gives `1:9.75`.)
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # sw.sh: a command-line stopwatch.
 # Author: Pádraig Brady, http://www.pixelbeat.org/scripts/sw
@@ -2924,6 +2930,7 @@ after the lines numbered in `P` and `PP`, lists here where bash had five
 variables.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys time
 #  homework.sh: All-purpose homework assignment solution.
 #  Author: M. Leo Cooper. License: Public Domain.
@@ -3625,6 +3632,7 @@ h3 (the sample argument), from f5 (the start square that needs the
 patched rule), and stupidly from g6, which fails and exits.
 
 ```tessh
+#!/usr/bin/env tessh
 import random
 # ktour.sh: The Knight's Tour, a classic problem.
 # author: mendel cooper; reldate: 12 Jan 2009; license: public domain
@@ -3979,6 +3987,7 @@ the sums, is a few comprehensions: one value in the set means they agree.
 Here it builds the sample order 5 and then 3.
 
 ```tessh
+#!/usr/bin/env tessh
 # msquare.sh: Magic Square generator (odd-order squares only!)
 # Author: mendel cooper; reldate: 19 Jan. 2009; License: Public Domain
 # A C-program by the very talented Kwon Young Shin inspired this script.
@@ -4237,6 +4246,7 @@ half the time, in bash and here: only an even number of swaps can be
 undone by sliding.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys random
 # fifteen.sh: the classic "Fifteen Puzzle".
 # Author: Antonio Macchi. Lightly edited and commented by ABS Guide author.
@@ -4664,6 +4674,7 @@ for the caller to split. A row of the drawing is built with `" " * n` and
 line, for the sample 3 disks.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # The Towers Of Hanoi
 # Original script (hanoi.bash) copyright (C) 2000 Amit Singh.
@@ -5077,6 +5088,7 @@ simply follow one another below. `atexit` does what `trap … 0` did. With
 the sample 2 disks:
 
 ```tessh
+#!/usr/bin/env tessh
 import sys time atexit
 # The Towers Of Hanoi
 # Original script (hanoi.bash) copyright (C) 2000 Amit Singh.
@@ -5359,6 +5371,7 @@ loop and its test lines print what bash's do; `match` is the `case`, and
 whole job, usage and help included.)
 
 ```tessh
+#!/usr/bin/env tessh
 import getopt
 # UseGetOpt.sh
 # Author: Peggy Russell <prusselltechgroup@gmail.com>
@@ -5647,6 +5660,7 @@ script's options. tessh's REPL completes names, programs and paths, but
 has no way to tell it a command's options.
 
 ```tessh
+#!/usr/bin/env tessh
 import getopt
 #  UseGetOpt-2.sh
 #  Modified version of the script for illustrating tab-expansion
@@ -5791,6 +5805,7 @@ The numbers are plain arithmetic in tessh, no `bc` or `expr` per square.
 here, in a file, just the layout shows. The loops name the cube's axes.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys
 # show-all-colors.sh
 # Displays all 256 possible background colors, using ANSI escape sequences.
@@ -6052,6 +6067,7 @@ are 0, and the sample words are `sos abs`. A word plays letter by letter,
 as `${1:pos:len}` sliced it, by looping over the string.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys time
 # sam.sh, v. .01a: Still Another Morse (code training script)
 # With profuse apologies to Sam (F.B.) Morse.
@@ -6305,6 +6321,7 @@ against Python's own `base64` module, which is what a tessh script would
 use in practice (`base64.b64encode`, `base64.urlsafe_b64encode`).
 
 ```tessh
+#!/usr/bin/env tessh
 import sys string
 # base64.sh: Base64 encoding and decoding.
 # Copyright (c) 2011 vladz <vladz@devzero.fr>
@@ -6435,6 +6452,7 @@ Two made-up files to work on, and a fixed string where the original used
 your user name.
 
 ```tessh
+#!/usr/bin/env tessh
 #  Prepends a string at a specified line
 #+ in files with names ending in "sample"
 #+ in the current working directory.
@@ -6641,6 +6659,7 @@ encrypts a sample, decrypts the result and encrypts "password", which
 gives `vrgfotvo` as the original's notes say.
 
 ```tessh
+#!/usr/bin/env tessh
 import re
 # gronsfeld.bash: an implementation of the Gronsfeld Cipher.
 # License: GPL3. Reldate 06/23/11
@@ -6852,6 +6871,7 @@ kept: `$RANDOM % 75` never calls 75, and `number / 15` puts 15, 30, 45 and
 would give a whole game's calls, in order, without either.
 
 ```tessh
+#!/usr/bin/env tessh
 import sys random
 # bingo.sh: Bingo number generator
 # Reldate 20Aug12, License: Public Domain
@@ -8005,6 +8025,7 @@ function's name is a variable holding the function: bash's "is there a
 variable named `_simple`?" is yes in tessh.
 
 ```tessh
+#!/usr/bin/env tessh
 # Values have types: str, int, float, list, dict, None...
 VarEmpty = ''                     # Defined but empty (null contents).
 VarSomething = 'Literal'          # Defined and non-empty.
@@ -8685,6 +8706,7 @@ a list, which is always true. The `test` program is spelled out.) The
 times differ from run to run; this is one:
 
 ```tessh
+#!/usr/bin/env tessh
 import time
 from contextlib import contextmanager
 #  test-execution-time.sh
@@ -8880,6 +8902,7 @@ than reading the array (it needs `${array1[$i]}`), and
 `"${array3[@]}"i` glues an `i` to the last value. One run:
 
 ```tessh
+#!/usr/bin/env tessh
 import time random
 from contextlib import contextmanager
 #  assoc-arr-test.sh
