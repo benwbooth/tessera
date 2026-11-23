@@ -1324,6 +1324,9 @@ impl Ed {
         let quick = |at: Instant| at.elapsed() < Duration::from_millis(450);
         match (m, kind) {
             (ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift, KeyEventKind::Press) => {
+                // (keyd's overload: its layer's left Shift, then the tapped key;
+                // the later press replaces a tap still waiting.)
+                self.pending_tap = None;
                 self.shift_side = if m == ModifierKeyCode::LeftShift { 1 } else { 2 };
                 self.shift_at = Instant::now();
             }
@@ -1335,6 +1338,7 @@ impl Ed {
                 }
             }
             (ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl, KeyEventKind::Press) => {
+                self.pending_tap = None;
                 self.ctrl_side = if m == ModifierKeyCode::LeftControl { 1 } else { 2 };
                 self.ctrl_at = Instant::now();
             }

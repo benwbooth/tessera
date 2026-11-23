@@ -1220,13 +1220,27 @@ Rectangle {
             Keys.onReleased: (e) => {
                 if (e.key === Qt.Key_Control) box.ctrlDown = false
                 if (e.key === Qt.Key_Shift && shiftSide !== 0 && Date.now() - shiftAt < 450) {
-                    if (shiftSide === 2) box.newline()
-                    else if (!box.acceptGhost()) box.askGhostNow()
+                    // (A moment first: keyd's overload sends its Shift layer's
+                    // left Shift, then the tapped key, right Shift; the press
+                    // that follows replaces this one.)
+                    shiftTap.side = shiftSide
+                    shiftTap.restart()
                     e.accepted = true
                 }
                 if (e.key === Qt.Key_Shift) shiftSide = 0
             }
+            Timer {
+                id: shiftTap
+                property int side: 0
+                interval: 60
+                onTriggered: {
+                    if (side === 2) box.newline()
+                    else if (!box.acceptGhost()) box.askGhostNow()
+                }
+            }
             Keys.onPressed: (e) => {
+                // (Any key, another Shift too, takes the place of a tap waiting.)
+                shiftTap.stop()
                 if (e.key === Qt.Key_Control) box.ctrlDown = true
                 exLine.dismiss()
                 if (e.key !== Qt.Key_Up && e.key !== Qt.Key_Down) box.fromHistory = false

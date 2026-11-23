@@ -264,7 +264,7 @@ impl Editor {
                             self.ed.dirty = true;
                         }
                         let hit = if self.screen.in_popup(m.column, m.row) { Some(hit.unwrap_or_default()) } else { hit.filter(|x| *x != Hit::None || m.row >= self.screen.top) };
-                        if matches!(hit, Some(Hit::Chip(_)) | Some(Hit::Widget(_))) {
+                        if matches!(m.kind, crossterm::event::MouseEventKind::Down(_)) && matches!(hit, Some(Hit::Chip(_)) | Some(Hit::Widget(_))) {
                             self.ed.menu_x = Some(self.screen.run_start(m.column, m.row));
                         }
                         let keep = self.ed.mouse(m, hit, h);
