@@ -24,6 +24,19 @@ fn owner_of(m: &std::fs::Metadata) -> (u32, u32) {
 fn owner_of(_: &std::fs::Metadata) -> (u32, u32) {
     (0, 0)
 }
+/// What ls -i, -s, -l's link count, -c and -u show: inode, 1K blocks,
+/// links, change and access times; and what kind of special file it is.
+#[cfg(unix)]
+fn more_of(m: &std::fs::Metadata) -> (u64, u64, u64, i64, i64, &'static str) {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let t = m.file_type();
+    let kind = if t.is_fifo() { "fifo" } else if t.is_socket() { "socket" } else if t.is_char_device() { "char" } else if t.is_block_device() { "block" } else { "" };
+    (m.ino(), m.blocks().div_ceil(2), m.nlink(), m.ctime(), m.atime(), kind)
+}
+#[cfg(not(unix))]
+fn more_of(m: &std::fs::Metadata) -> (u64, u64, u64, i64, i64, &'static str) {
+    (0, m.len().div_ceil(1024), 1, 0, 0, "")
+}
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -295,7 +308,10 @@ pub fn list(dir: &str, all: bool) -> String {
             let items = if is_dir { std::fs::read_dir(&p).map(|r| r.count() as i64).unwrap_or(-1) } else { -1 };
             let target = if link { std::fs::read_link(&p).map(|t| t.to_string_lossy().to_string()).unwrap_or_default() } else { String::new() };
             let mtime = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+            let (ino, blocks, nlink, ctime, atime, special) = more_of(lmd.as_ref().filter(|_| link).unwrap_or(&md));
+            let (uid, gid) = owner_of(&md);
             out.push(json!({
+                "ino": ino, "blocks": blocks, "nlink": nlink, "ctime": ctime, "atime": atime, "special": special, "uid": uid, "gid": gid,
                 "name": name, "path": p.to_string_lossy(), "dir": is_dir, "link": link, "target": target, "exec": exec,
                 "hidden": hidden, "size": md.len(), "items": items, "mtime": mtime,
                 "mode": mode_string(lmd.as_ref().map(mode_of).unwrap_or(mode), is_dir, link),

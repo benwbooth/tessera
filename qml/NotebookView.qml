@@ -1768,7 +1768,8 @@ FocusScope {
     //           (ls a b, ls *.txt, ls -d x); their folders get panes of
     //           their own after them (unless -d)
     function lsPlan(args, base, home) {
-        const o = { all: false, long: false, sort: "", reverse: false, foldersFirst: false, selfOnly: false, recursive: false, ignore: [], operands: [] }
+        const o = { all: false, long: false, sort: "", reverse: false, foldersFirst: false, selfOnly: false, recursive: false, ignore: [], operands: [], opts: {} }
+        let human = false
         let opts = true
         const sortOf = { t: "date", S: "size", X: "type", U: "none", f: "none", v: "", c: "date", u: "date" }
         for (let i = 0; i < args.length; ++i) {
@@ -1785,8 +1786,22 @@ FocusScope {
                 else if (k === "--ignore-backups") o.ignore.push("~$")
                 else if (k === "--ignore" || k === "--hide") { const pat = v !== null ? v : (args[++i] || {}).text; if (pat) o.ignore.push(globRegex(pat)) }
                 else if (k === "--sort") { const m = { time: "date", size: "size", extension: "type", none: "none", name: "", version: "", width: "" }; if (v in m) o.sort = m[v] }
-                else if (k === "--format") o.long = v === "long" || v === "verbose"
-                else if (k === "--full-time") o.long = true
+                else if (k === "--format") { o.long = v === "long" || v === "verbose"; o.opts.commas = v === "commas" }
+                else if (k === "--full-time") { o.long = true; o.opts.fullTime = true }
+                else if (k === "--time-style" && v !== null) o.opts.fullTime = /iso/.test(v) && v !== "iso"
+                else if (k === "--time" && v !== null) o.opts.time = /^(ctime|status)$/.test(v) ? "ctime" : /^(atime|access|use)$/.test(v) ? "atime" : ""
+                else if (k === "--inode") o.opts.inode = true
+                else if (k === "--size") o.opts.blocks = true
+                else if (k === "--numeric-uid-gid") { o.long = true; o.opts.numeric = true }
+                else if (k === "--no-group") o.opts.noGroup = true
+                else if (k === "--human-readable" || k === "--si") human = true
+                else if (k === "--classify" || k === "-F") o.opts.classify = "F"
+                else if (k === "--file-type") o.opts.classify = "p"
+                else if (k === "--indicator-style" && v !== null) o.opts.classify = v === "classify" ? "F" : v === "none" ? "none" : "p"
+                else if (k === "--quote-name") o.opts.quote = "c"
+                else if (k === "--escape") o.opts.quote = "escape"
+                else if (k === "--literal") o.opts.quote = "literal"
+                else if (k === "--quoting-style" && v !== null) o.opts.quote = v === "c" || v === "c-maybe" ? "c" : v === "escape" ? "escape" : v.startsWith("shell") ? (v === "shell-always" ? "shell-always" : "shell") : "literal"
                 else if (["--width", "--tabsize", "--time", "--time-style", "--block-size", "--quoting-style", "--indicator-style"].indexOf(k) >= 0 && v === null) ++i
                 continue
             }
@@ -1794,8 +1809,23 @@ FocusScope {
                 for (let j = 1; j < a.length; ++j) {
                     const c = a[j]
                     if (c === "a" || c === "A") o.all = true
-                    else if ("lgon".indexOf(c) >= 0) o.long = true
-                    else if ("1Cxm".indexOf(c) >= 0) o.long = false
+                    else if ("lgon".indexOf(c) >= 0) {
+                        o.long = true
+                        if (c === "g") o.opts.noOwner = true
+                        if (c === "o") o.opts.noGroup = true
+                        if (c === "n") o.opts.numeric = true
+                    }
+                    else if ("1Cxm".indexOf(c) >= 0) { o.long = false; o.opts.commas = c === "m" }
+                    else if (c === "i") o.opts.inode = true
+                    else if (c === "s") o.opts.blocks = true
+                    else if (c === "G") o.opts.noGroup = true
+                    else if (c === "h") human = true
+                    else if (c === "F") o.opts.classify = "F"
+                    else if (c === "p") o.opts.classify = "p"
+                    else if (c === "Q") o.opts.quote = "c"
+                    else if (c === "b") o.opts.quote = "escape"
+                    else if (c === "N") o.opts.quote = "literal"
+                    else if (c === "c" || c === "u") { o.opts.time = c === "c" ? "ctime" : "atime"; if (/t/.test(a) || !/l/.test(a)) o.sort = "date" }
                     else if (c === "d") o.selfOnly = true
                     else if (c === "R") o.recursive = true
                     else if (c === "r") o.reverse = true
@@ -1811,6 +1841,8 @@ FocusScope {
             }
             o.operands.push(w)
         }
+        // (ls -l's sizes are exact unless -h.)
+        o.opts.bytes = o.long && !human
         const abs = (t) => {
             const p = t.replace(/^~(?=\/|$)/, home)
             return ((p.startsWith("/") ? p : base + "/" + p).replace(/\/+$/, "")) || "/"
@@ -3910,6 +3942,7 @@ FocusScope {
         flagReverse: !!plan.reverse
         flagFoldersFirst: !!plan.foldersFirst
         ignorePatterns: plan.ignore || []
+        lsOpts: plan.opts || ({})
         refresh: card && card.src.tick ? card.src.tick.length : 0
         kept: card ? (nb.fileViews[card.src.cid] || null) : null
         onKeptChanged2: (c) => { if (!card) return; const m = Object.assign({}, nb.fileViews); m[card.src.cid] = c; nb.fileViews = m; nb.touch() }

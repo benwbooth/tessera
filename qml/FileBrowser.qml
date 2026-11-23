@@ -27,6 +27,12 @@ Item {
     property var ignorePatterns: []
     property bool hideDirs: false
     property bool collapseEmpty: false  // (nothing left: no room taken, not even "(empty)")
+    // ls's ways of showing them (from the command; all optional):
+    // inode (-i), blocks (-s), numeric (-n), noOwner (-g), noGroup (-o, -G),
+    // time "mtime"/"ctime"/"atime" (-c, -u, --time), fullTime (--full-time),
+    // bytes (no -h: sizes exact), classify "F"/"p"/"slash" (-F, -p), quote
+    // "c"/"shell"/"escape"/"literal" (-Q, --quoting-style, -b, -N), commas (-m).
+    property var lsOpts: ({})
     function picked(x) {
         if (onlyNames.length === 0 && namePatterns.length === 0) return true
         if (onlyNames.indexOf(x.name) >= 0) return true
@@ -67,7 +73,7 @@ Item {
         if (!kept && (flagSort !== "" || flagReverse || flagFoldersFirst)) mine = Object.assign({}, mine, { sort: undefined, desc: undefined, folders_first: undefined })
         list()
     }
-    readonly property string view: mine.view ? mine.view : flagLong ? "details" : (saved.view || "list")
+    readonly property string view: lsOpts.commas ? "commas" : mine.view ? mine.view : flagLong ? "details" : (saved.view || "list")
     readonly property string sortBy: mine.sort || flagSort || "name"
     // (As ls has it: by time and by size the newest and largest first, -r the other way.)
     readonly property bool desc: mine.sort ? !!mine.desc : (flagSort === "date" || flagSort === "size") !== flagReverse
@@ -164,8 +170,31 @@ Item {
         return Qt.formatDateTime(d, "ddd MMM d HH:mm:ss yyyy").replace(/ (\d) /, "  $1 ")
     }
     function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    // A name as ls -Q / --quoting-style would print it.
+    function quoted(n) {
+        const q = lsOpts.quote || ""
+        if (q === "c") return '"' + n.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\t/g, "\\t") + '"'
+        if (q === "escape") return n.replace(/\\/g, "\\\\").replace(/ /g, "\\ ").replace(/\n/g, "\\n").replace(/\t/g, "\\t")
+        if (q === "shell" || q === "shell-always") return q === "shell" && /^[A-Za-z0-9_.\/+,:@%=-]+$/.test(n) ? n : "'" + n.replace(/'/g, "'\\''") + "'"
+        return n
+    }
+    // ls -F's mark after a name (dir /, program *, link @, fifo |, socket =); -p: / only.
+    function mark(e) {
+        const c = lsOpts.classify || "slash"
+        if (e.dir) return "/"
+        if (c !== "F") return ""
+        return e.link ? "@" : e.special === "fifo" ? "|" : e.special === "socket" ? "=" : e.exec ? "*" : ""
+    }
+    // -i and -s: the inode and block count before the name.
+    function prefix(e) {
+        let p = ""
+        if (lsOpts.inode) p += pad(e.ino !== undefined ? e.ino : "?", longW.ino, true) + " "
+        if (lsOpts.blocks) p += pad(e.blocks !== undefined ? e.blocks : "?", longW.blocks, true) + " "
+        return p
+    }
+    function plainName(e) { return quoted(e.name) + mark(e) }
     function label(e) {
-        return "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + icon(e) + "</span> " + esc(e.name) + (e.dir ? "/" : "")
+        return "<span style=\"font-family:'Symbols Nerd Font Mono'\">" + icon(e) + "</span> " + esc(plainName(e))
     }
     FontMetrics { id: fm; font.family: fb.fontFamily; font.pointSize: fb.pointSize }
     readonly property real cw: fm.averageCharacterWidth > 0 ? fm.averageCharacterWidth : 8
@@ -174,7 +203,7 @@ Item {
     // ---- ls's column layout: as many columns as fit, filled going down ----
     readonly property var grid: {
         const n = entries.length
-        const w = entries.map(e => (e.name.length + 3 + (e.dir ? 1 : 0)) * cw)
+        const w = entries.map(e => (plainName(e).length + prefix(e).length + 3) * cw)
         const avail = Math.max(cw * 10, width - 8)
         let best = { cols: 1, rows: n, widths: [Math.max(0, ...w)] }
         for (let cols = 2; cols <= n; cols++) {
@@ -191,15 +220,32 @@ Item {
     // `ls -l`'s columns, padded to their widest.
     readonly property var longW: {
         const m = (f) => Math.max(1, ...entries.map(f))
-        return { user: m(e => e.user.length), group: m(e => e.group.length), size: m(e => sizeText(e).length) }
+        return { user: m(e => owner(e).length), group: m(e => groupOf(e).length), size: m(e => sizeText(e).length),
+                 ino: m(e => String(e.ino !== undefined ? e.ino : "?").length), blocks: m(e => String(e.blocks !== undefined ? e.blocks : "?").length),
+                 nlink: m(e => String(e.nlink !== undefined ? e.nlink : 1).length) }
     }
-    function sizeText(e) { return e.dir ? (e.items >= 0 ? e.items + (e.items === 1 ? " item" : " items") : "") : human(e.size) }
+    function sizeText(e) {
+        if (lsOpts.bytes) return String(e.size)
+        return e.dir ? (e.items >= 0 ? e.items + (e.items === 1 ? " item" : " items") : "") : human(e.size)
+    }
+    function owner(e) { return lsOpts.numeric && e.uid !== undefined ? String(e.uid) : e.user }
+    function groupOf(e) { return lsOpts.numeric && e.gid !== undefined ? String(e.gid) : e.group }
+    function timeOf(e) { const t = lsOpts.time === "ctime" ? e.ctime : lsOpts.time === "atime" ? e.atime : e.mtime; return t !== undefined ? t : e.mtime }
+    function stamp(t) { return lsOpts.fullTime ? Qt.formatDateTime(new Date(t * 1000), "yyyy-MM-dd HH:mm:ss") : when(t) }
+    // ls -l's line before the name: [inode] [blocks] mode links owner group size time.
+    function longLine(e) {
+        let l = prefix(e) + e.mode + " " + pad(e.nlink !== undefined ? e.nlink : 1, longW.nlink, true)
+        if (!lsOpts.noOwner) l += " " + pad(owner(e), longW.user)
+        if (!lsOpts.noGroup) l += " " + pad(groupOf(e), longW.group)
+        return l + " " + pad(sizeText(e), longW.size, true) + " " + stamp(timeOf(e))
+    }
     function pad(s, n, right) { s = String(s); while (s.length < n) s = right ? " " + s : s + " "; return s }
 
     readonly property real tileW: Math.max(96, cw * 14)
     readonly property int tileCols: Math.max(1, Math.floor((width - 8) / (tileW + 8)))
     readonly property real headerH: (back.length > 0 || dir !== startDir) ? row + 6 : 0
     readonly property real bodyH: entries.length === 0 ? row
+                                : view === "commas" ? commasText.implicitHeight
                                 : view === "details" ? entries.length * row
                                 : view === "tiles" ? Math.ceil(entries.length / tileCols) * (tileW + 24)
                                 : grid.rows * row
@@ -343,8 +389,21 @@ Item {
             font.family: fb.fontFamily
             font.pointSize: fb.pointSize
         }
+        // ls -m: the names in a line, commas between, wrapped.
+        Text {
+            id: commasText
+            visible: fb.view === "commas"
+            width: parent.width
+            topPadding: 0.001
+            wrapMode: Text.Wrap
+            textFormat: Text.StyledText
+            text: fb.view !== "commas" ? "" : fb.entries.map(e => "<font color='" + fb.tint(e) + "'>" + fb.esc(fb.prefix(e) + fb.plainName(e)) + "</font>").join(", ")
+            color: Theme.text
+            font.family: fb.fontFamily
+            font.pointSize: fb.pointSize
+        }
         Repeater {
-            model: fb.entries
+            model: fb.view === "commas" ? [] : fb.entries
             delegate: Rectangle {
                 id: ent
                 required property var modelData
@@ -393,7 +452,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.verticalCenterOffset: 0.001
                     textFormat: Text.StyledText
-                    text: fb.label(ent.e)
+                    text: (fb.lsOpts.inode || fb.lsOpts.blocks ? "<font color='" + Theme.textDim + "'>" + fb.prefix(ent.e).replace(/ /g, "&nbsp;") + "</font>" : "") + fb.label(ent.e)
                     color: fb.tint(ent.e)
                     font.family: fb.fontFamily
                     font.pointSize: fb.pointSize
@@ -408,8 +467,7 @@ Item {
                     textFormat: Text.StyledText
                     // (Spaces kept: rich text would fold the columns' padding.)
                     // (StyledText colors by <font color>, not a span's style.)
-                    text: "<font color='" + Theme.textDim + "'>" + (ent.e.mode + " " + fb.esc(fb.pad(ent.e.user, fb.longW.user)) + " " + fb.esc(fb.pad(ent.e.group, fb.longW.group))
-                          + " " + fb.pad(fb.sizeText(ent.e), fb.longW.size, true) + " " + fb.when(ent.e.mtime)).replace(/ /g, "&nbsp;") + "</font> "
+                    text: "<font color='" + Theme.textDim + "'>" + fb.esc(fb.longLine(ent.e)).replace(/ /g, "&nbsp;") + "</font> "
                           + "<font color='" + fb.tint(ent.e) + "'>" + (ent.e.dir || ent.e.exec ? "<b>" : "") + (eh.hovered ? "<u>" : "") + fb.label(ent.e) + (eh.hovered ? "</u>" : "") + (ent.e.dir || ent.e.exec ? "</b>" : "") + "</font>"
                           + (ent.e.link ? "<font color='" + Theme.textDim + "'> ⇒ " + fb.esc(ent.e.target) + "</font>" : "")
                     color: Theme.text
