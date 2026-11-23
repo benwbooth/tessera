@@ -473,7 +473,7 @@ Item {
     readonly property real barH: showBar ? 26 : 0
     readonly property bool navigated: back.length > 0 || dir !== startDir
     readonly property real headerH: barH + (navigated ? row + 6 : 0)
-    readonly property real bodyH: entries.length === 0 ? row
+    readonly property real bodyH: entries.length === 0 ? (view === "details" ? 2 * row : row)
                                 : view === "commas" ? commasText.implicitHeight
                                 : lined ? (rows.length + (view === "details" ? 1 : 0)) * row
                                 : view === "tiles" ? Math.ceil(entries.length / tileCols) * (tileW + 24)
@@ -613,6 +613,7 @@ Item {
         TapHandler { onTapped: Qt.callLater(() => { if (Date.now() - fb.entryTapAt > 300) fb.selected = "" }) }
         Text {
             visible: fb.entries.length === 0
+            y: fb.view === "details" ? fb.row : 0   // (under the table's header)
             text: fb.listed && fb.raw.length === 0 && fb.dir !== "" ? "(empty)" : ""
             color: Theme.textDim
             font.family: fb.fontFamily
