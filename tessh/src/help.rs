@@ -330,6 +330,12 @@ pub fn terminal_at(md: &str, color: bool, width: usize) -> String {
                 out.push('\n');
                 continue;
             }
+            Some(lang) if lang.starts_with("bash") || lang.starts_with("sh") => {
+                out.push_str("  \x1b[2m│\x1b[0m ");
+                out.push_str(&crate::repl::highlight_bash(line));
+                out.push('\n');
+                continue;
+            }
             Some(_) => {
                 out.push_str("  \x1b[2m│ ");
                 out.push_str(line);

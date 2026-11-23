@@ -3472,6 +3472,8 @@ dependencies = [
  "sha2",
  "tokio",
  "toml",
+ "tree-sitter",
+ "tree-sitter-bash",
  "tree-sitter-tessh",
  "unicode-width 0.2.3",
  "uuid",

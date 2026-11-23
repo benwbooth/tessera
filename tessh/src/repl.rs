@@ -180,8 +180,12 @@ fn kind_style(kind: &str) -> Option<Style> {
 
 /// The text in runs of one kind each (later spans over earlier ones).
 fn runs(text: &str) -> Vec<(usize, usize, Option<&'static str>)> {
+    runs_of(text, tree_sitter_tessh::highlight::spans(text))
+}
+
+fn runs_of(text: &str, spans: Vec<(usize, usize, &'static str)>) -> Vec<(usize, usize, Option<&'static str>)> {
     let mut kinds: Vec<Option<&'static str>> = vec![None; text.len()];
-    for (s, e, k) in tree_sitter_tessh::highlight::spans(text) {
+    for (s, e, k) in spans {
         for x in kinds.iter_mut().take(e.min(text.len())).skip(s) {
             *x = Some(k);
         }
@@ -201,8 +205,50 @@ fn runs(text: &str) -> Vec<(usize, usize, Option<&'static str>)> {
 
 /// A text with ANSI colors, as the editor shows it (for help pages).
 pub fn highlight(text: &str) -> String {
+    paint(text, runs(text))
+}
+
+/// Bash code with ANSI colors in the same palette (the Advanced guide's
+/// "bash (original)" examples): tree-sitter-bash's highlight query, with
+/// its variables and expansions too.
+pub fn highlight_bash(text: &str) -> String {
+    use std::sync::OnceLock;
+    use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
+    static Q: OnceLock<Option<Query>> = OnceLock::new();
+    let lang: tree_sitter::Language = tree_sitter_bash::LANGUAGE.into();
+    let q = Q.get_or_init(|| {
+        let src = format!("{}\n(variable_name) @variable\n(simple_expansion) @variable\n(expansion) @variable\n", tree_sitter_bash::HIGHLIGHT_QUERY);
+        Query::new(&lang, &src).ok()
+    });
+    let mut p = Parser::new();
+    let (Some(q), Ok(())) = (q, p.set_language(&lang)) else { return text.to_string() };
+    let Some(tree) = p.parse(text, None) else { return text.to_string() };
+    let names = q.capture_names();
+    let mut spans = vec![];
+    let mut cursor = QueryCursor::new();
+    let mut caps = cursor.captures(q, tree.root_node(), text.as_bytes());
+    while let Some((m, i)) = caps.next() {
+        let c = m.captures()[*i];
+        let (s, e) = (c.node.start_byte(), c.node.end_byte().min(text.len()));
+        if e > s {
+            let k = match names[c.index as usize].split('.').next().unwrap_or("") {
+                "property" => "variable",
+                "embedded" => "variable",
+                k => k,
+            };
+            // (Only the kinds the palette knows: the names are 'static there.)
+            let k: &'static str = ["keyword", "string", "comment", "number", "constant", "operator", "function", "variable"].into_iter().find(|x| *x == k).unwrap_or("");
+            if !k.is_empty() {
+                spans.push((s, e, k));
+            }
+        }
+    }
+    paint(text, runs_of(text, spans))
+}
+
+fn paint(text: &str, runs: Vec<(usize, usize, Option<&'static str>)>) -> String {
     let mut out = String::with_capacity(text.len() * 2);
-    for (s, e, k) in runs(text) {
+    for (s, e, k) in runs {
         match k.and_then(kind_style) {
             Some(st) => out.push_str(&st.paint(&text[s..e]).to_string()),
             None => out.push_str(&text[s..e]),
