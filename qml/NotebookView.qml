@@ -4061,8 +4061,9 @@ FocusScope {
                 }
             }
             Timer {
+                // (10 s after the command's done: its output streaming in isn't part of it.)
                 interval: 10000
-                running: nb.controller !== null && nb.controller.testEnv("LS_SCROLL") === "steps"
+                running: nb.controller !== null && nb.controller.testEnv("LS_SCROLL") === "steps" && !lsf.src.running
                 onTriggered: { lsf.frameAt = []; lsSteps.n = 0; lsSteps.start() }
             }
             Connections {

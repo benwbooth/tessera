@@ -128,7 +128,7 @@ Item {
             listed = true
         })
     }
-    onRefreshChanged: { kids = ({}); asked = ({}); sortedKids = ({}); list() }   // (and the folders open in it read again)
+    onRefreshChanged: { kids = ({}); asked = ({}); sortedKids = ({}); stats = ({}); list() }   // (and the folders open in it read again)
     onDirChanged: list()
     onShowHiddenChanged: { kids = ({}); asked = ({}); sortedKids = ({}); list() }
     onControllerChanged: list()
@@ -199,8 +199,16 @@ Item {
         Async.call(controller, k => controller.listDir(k, path, showHidden), r => {
             let l = []
             try { l = JSON.parse(r) } catch (x) {}
-            const m = Object.assign({}, kids); m[path] = l; kids = m
+            // (Several arriving together: the tree redone once for them all.)
+            pendingKids[path] = l
+            if (!kidsFlush.running) kidsFlush.start()
         })
+    }
+    property var pendingKids: ({})
+    Timer {
+        id: kidsFlush
+        interval: 40
+        onTriggered: { const m = Object.assign({}, fb.kids, fb.pendingKids); fb.pendingKids = {}; fb.kids = m }
     }
     function toggleOpen(e) {
         const o = Object.assign({}, openDirs)
@@ -287,20 +295,44 @@ Item {
     // (While an edge is dragged: that column's width, before it's kept.)
     property string sizingCol: ""
     property real sizingW: 0
+    // (Each folder's widest cells, measured once when it comes: the table's
+    // widths from those, not from every row on every change.)
+    property var stats: ({})
+    readonly property string statsKey: JSON.stringify(lsOpts) + JSON.stringify(colShown)
+    onStatsKeyChanged: stats = ({})
+    onEntriesChanged: delete stats[""]
+    function statsOf(key, list) {
+        let st = stats[key]
+        if (st) return st
+        st = { name: 0, size: 0, user: 0, group: 0, nlink: 0, ino: 0, blocks: 0 }
+        const ks = ["size", "user", "group", "nlink", "ino", "blocks"].filter(k => colOn(k))
+        for (const e of list) {
+            const nl = plainName(e).length
+            if (nl > st.name) st.name = nl
+            for (const k of ks) { const v = cell(e, k).length; if (v > st[k]) st[k] = v }
+        }
+        stats[key] = st
+        return st
+    }
+    // The open folders that have come, and how deep: [[path, depth]].
+    readonly property var openFolders: {
+        const out = [], kd = kids
+        const walk = (list, depth) => {
+            for (const e of list) if (e.dir && isOpen(e.path) && kd[e.path]) { out.push([e.path, depth + 1]); walk(kidsOf(e.path), depth + 1) }
+        }
+        if (view === "details") walk(entries, 0)
+        return out
+    }
     readonly property var tableCols: {
         if (view !== "details") return []
         // Each column's natural width (in characters): its widest cell.
         const nat = { name: 8, size: 4, date: lsOpts.fullTime ? 19 : 24, mode: 11, nlink: 5, user: 5, group: 5, ino: 5, blocks: 6 }
-        for (const r of rows) {
-            const e = r.e
-            const nw = r.depth * 2 + 5 + plainName(e).length
-            if (nw > nat.name) nat.name = nw
-            for (const k of ["size", "user", "group", "nlink", "ino", "blocks"]) {
-                if (!colOn(k)) continue
-                const v = cell(e, k).length
-                if (v > nat[k]) nat[k] = v
-            }
+        const add = (st, depth) => {
+            nat.name = Math.max(nat.name, depth * 2 + 5 + st.name)
+            for (const k of ["size", "user", "group", "nlink", "ino", "blocks"]) if (st[k] > nat[k]) nat[k] = st[k]
         }
+        add(statsOf("", entries), 0)
+        for (const [path, depth] of openFolders) add(statsOf(path, kidsOf(path)), depth)
         let order = colOrder.filter(k => allCols.indexOf(k) >= 0)
         for (const k of allCols) if (order.indexOf(k) < 0) order.push(k)
         order = order.filter(k => colOn(k))
@@ -724,7 +756,10 @@ Item {
                 id: ent
                 required property int index
                 readonly property int col: fb.lined ? 0 : Math.floor(index / fb.slotLines)
-                readonly property int line: fb.firstLine + (fb.lined ? index : index % fb.slotLines)
+                // (Each slot keeps its line till that line leaves the window:
+                // a line's scroll refills one slot, not all of them.)
+                readonly property int k: fb.lined ? index : index % fb.slotLines
+                readonly property int line: fb.firstLine + (((k - fb.firstLine) % fb.slotLines) + fb.slotLines) % fb.slotLines
                 readonly property int i: fb.lined ? line : col * Math.max(1, fb.grid.rows) + line
                 readonly property bool has: fb.lined ? line < fb.rows.length : line < fb.grid.rows && i < fb.entries.length
                 readonly property var e: !has ? fb.blank : fb.lined ? fb.rows[line].e : fb.entries[i]
