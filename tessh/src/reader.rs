@@ -202,11 +202,13 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
             just('x').ignore_then(hexn(2)).map(Some),
             just('u').ignore_then(hexn(4)).map(Some),
             just('U').ignore_then(hexn(8)).map(Some),
+            // (\033, \0, \101: octal, up to three digits, as Python and bash's $'…' have it.)
+            one_of("01234567").repeated().at_least(1).at_most(3).to_slice().map(|o: &str| char::from_u32(u32::from_str_radix(o, 8).unwrap_or(0))),
             any().map(|c: char| Some(escape_char(c).map(|x| x.to_string()).unwrap_or_else(|| format!("\\{c}")).chars().collect::<String>())).map(|s| s.and_then(|s| if s.chars().count() == 1 { s.chars().next() } else { None }).or(None)),
         )))
         .boxed();
     // (Escapes that aren't escapes keep their backslash.)
-    let escape_text = just('\\').ignore_then(any()).try_map(|c: char, _| if escape_char(c).is_none() && !"xuU\n".contains(c) { Ok(format!("\\{c}")) } else { Err(Rich::custom(SimpleSpan::from(0..0), "")) });
+    let escape_text = just('\\').ignore_then(any()).try_map(|c: char, _| if escape_char(c).is_none() && !"xuU\n".contains(c) && !c.is_digit(8) { Ok(format!("\\{c}")) } else { Err(Rich::custom(SimpleSpan::from(0..0), "")) });
     let interp_in_string = choice((braced.clone(), with_postfix(dollar.clone()))).boxed();
     let dq = |triple: bool, raw: bool, interp: bool| {
         let q = if triple { "\"\"\"" } else { "\"" };

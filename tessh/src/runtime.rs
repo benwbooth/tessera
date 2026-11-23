@@ -2681,12 +2681,26 @@ pub fn which(n: &str) -> Option<String> {
 }
 
 /// Make a function a command function: its arguments are read as words.
+/// Given words instead (`command ls -l`, `command *$argv_list`), it runs
+/// that program, passing over a function of that name, as bash's does.
 #[pyfunction]
-fn command(f: Bound<'_, PyAny>) -> PyResult<Bound<'_, PyAny>> {
-    // (Its words as a program's: a glob, the names it matches.)
-    let w = prelude(f.py())?.getattr("_words_as_program")?.call1((&f,))?;
-    w.setattr("_tessh_command", true)?;
-    Ok(w)
+#[pyo3(signature = (*args))]
+fn command<'py>(py: Python<'py>, args: Vec<Bound<'py, PyAny>>) -> PyResult<Bound<'py, PyAny>> {
+    if let [f] = &args[..] {
+        if f.is_callable() {
+            // (Its words as a program's: a glob, the names it matches.)
+            let w = prelude(py)?.getattr("_words_as_program")?.call1((f,))?;
+            w.setattr("_tessh_command", true)?;
+            return Ok(w);
+        }
+    }
+    let words = argv(py, &PyList::new(py, &args)?.into_any())?;
+    let Some((head, rest)) = words.split_first() else {
+        return Err(PyTypeError::new_err("command: which program? (or @command on a function)"));
+    };
+    let rest = PyList::new(py, rest)?;
+    let v = cmd(py, PyDict::new(py), PyString::new(py, head).into_any(), rest.into_any(), PyList::empty(py).into_any(), "attach", true)?;
+    Ok(v.into_bound(py))
 }
 
 pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {

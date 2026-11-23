@@ -38,10 +38,11 @@ exit $?   # 0! Why?
 
 Bash prints only `./ex74.sh: line 9: [37: command not found` and exits 0:
 `[$a` glued together is the command `[37`, which doesn't exist. Carried
-over to tessh as it stands, the script runs and prints `37`, which is
-worse, because it looks right:
+over to tessh as it stands, `[$a -gt 27 ]` is a Python list, `[37, '-gt',
+27]`, and a list with anything in it is true. tessh says so before running
+anything:
 
-```tessh
+```tessh no-check no-run
 # This is a buggy script.
 # Where, oh where is the error?
 
@@ -51,35 +52,24 @@ if [$a -gt 27 ]
   echo $a
 ```
 
-```output
-37
-```
-
-In tessh `[$a -gt 27 ]` is a list, `[37, '-gt', 27]`, and a list with
-anything in it is true, so it would print `a` whatever it was. `tessh --py`
-shows what the line became:
-
 ```text
-$ tessh --py ex74.tsh
-a = 37
-if [a, '-gt', 27]:
-    __tessh__.cmd(globals(), 'echo', [a], [], 'attach', False)
+$ tessh ex74.tsh
+tessh: ex74.tsh:6:4: a list as the condition is always true (unless empty): for bash's [ … ] test, write `test …` or the test in Python
 ```
 
 The test in tessh is a Python comparison:
 
 ```tessh
 for a in [37 5]
-  if [$a -gt 27 ]        # A list: always true.
-    print "the list says $a is more than 27"
   if $a > 27             # The comparison.
     print "> says $a is more than 27"
+  if test $a -gt 27      # Or the test program, as bash's [ ] is.
+    print "test says $a is more than 27"
 ```
 
 ```output
-the list says 37 is more than 27
 > says 37 is more than 27
-the list says 5 is more than 27
+test says 37 is more than 27
 ```
 
 ### Example 32-2. Missing keyword (`missing-keyword.sh`)

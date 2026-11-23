@@ -432,6 +432,23 @@ fn unquote_expression() {
     assert_eq!(get::<i64>(&ns, "r"), 3);
 }
 
+/// `command prog args` runs the program, past a function of its name;
+/// `@command` still makes a command function.
+#[test]
+fn command_runs_a_program() {
+    let (ns, out) = run("def echo *w\n  print python\ncommand echo hi\nstep = [echo there]\nr = command *$step\nok = $r.ok");
+    assert_eq!(out, "hi\nthere\n");
+    assert!(get::<bool>(&ns, "ok"));
+}
+
+/// Octal escapes, as Python's: "\033" is ESC, "\0" NUL, "\101" A.
+#[test]
+fn octal_escapes() {
+    let (ns, _) = run("a = \"\\033[1m\"\nb = \"\\101\\0x\"");
+    assert_eq!(get::<String>(&ns, "a"), "\x1b[1m");
+    assert_eq!(get::<String>(&ns, "b"), "A\0x");
+}
+
 /// `if [ -n "" ]` (bash's test) is a list, always true: an error that says so.
 #[test]
 fn bracket_test_condition_is_an_error() {
