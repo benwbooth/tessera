@@ -597,13 +597,17 @@ fn guide_examples() {
 }
 
 /// Every tessh example in the Advanced guide (doc/advanced/*.md, the ABS
-/// Guide ported) runs and prints its `output` block, as in the guide's
-/// test. Each runs in a fresh folder as the script `ex.tsh`; an `exit` ends
-/// it. (Its checker with the prebuilt tessh, and --bless, is the porting
-/// notes' check-examples.py.)
+/// Guide ported) runs and prints its `output` block. Each runs as the
+/// script `ex.tsh` (its own file, as `$argv[0]`) in a fresh folder, in a
+/// child process of its own, so what one changes (sys.stdin, signals, the
+/// descriptors) can't reach the next; an `exit` ends it. (`tessh no-run`:
+/// checked only; `tessh script`: it runs tessh itself, /proc/self/exe, so
+/// only the porting notes' check-examples.py, with the built tessh, runs it.)
 #[test]
 fn advanced_guide_examples() {
-    use crate::runner::{check, new_namespace, run_source, tests::capture_fd1, tests::LOCK, TesshError};
+    use crate::runner::{check, new_namespace, run_source, tests::LOCK, TesshError};
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
     // (The list names every chapter file.)
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/doc/advanced");
     let mut on_disk: Vec<String> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.ends_with(".md")).collect();
@@ -624,7 +628,7 @@ fn advanced_guide_examples() {
     let mut failed = Vec::new();
     let mut count = 0;
     Python::attach(|py| {
-        let home = std::env::current_dir().unwrap();
+        let tmp = std::env::temp_dir();
         for (file, text) in crate::help::ADVANCED {
             let lines: Vec<&str> = text.lines().collect();
             let mut i = 0;
@@ -666,28 +670,65 @@ fn advanced_guide_examples() {
                         continue;
                     }
                 }
-                if info.contains("no-run") {
+                if info.contains("no-run") || info.contains("script") {
                     continue;
                 }
-                let d = std::env::temp_dir().join(format!("tessh-advanced-{}-{count}", std::process::id()));
-                let _ = std::fs::remove_dir_all(&d);
-                std::fs::create_dir_all(&d).unwrap();
-                std::env::set_current_dir(&d).unwrap();
-                let ns = new_namespace(py, "__main__", vec!["ex.tsh".to_string()]).unwrap();
-                let mut err = None;
-                let out = capture_fd1(py, || {
-                    if let Err(e) = run_source(py, &code, &ns, "<advanced>", false) {
-                        err = match e {
-                            TesshError::Py(e) if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) => None,
-                            TesshError::Py(e) => Some(format!("{}", e.value(py))),
-                            e => Some(format!("{:?}", e.position())),
-                        };
+                // (The script in a folder of its own, run in another: a glob
+                // there doesn't see it.)
+                let src = tmp.join(format!("tessh-advanced-src-{}-{count}", std::process::id()));
+                let work = tmp.join(format!("tessh-advanced-{}-{count}", std::process::id()));
+                for d in [&src, &work] {
+                    let _ = std::fs::remove_dir_all(d);
+                    std::fs::create_dir_all(d).unwrap();
+                }
+                let script = src.join("ex.tsh");
+                std::fs::write(&script, &code).unwrap();
+                let script = script.to_string_lossy().to_string();
+                let (mut out_r, out_w) = std::io::pipe().unwrap();
+                let (mut err_r, err_w) = std::io::pipe().unwrap();
+                let _ = py.import("sys").and_then(|s| s.getattr("stdout")).and_then(|o| o.call_method0("flush"));
+                let pid: i32 = py.import("os").unwrap().call_method0("fork").unwrap().extract().unwrap();
+                if pid == 0 {
+                    // (The child: the example, then out, whatever it did.)
+                    unsafe {
+                        libc::alarm(120);
+                        libc::dup2(out_w.as_raw_fd(), 1);
+                        let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+                        libc::dup2(null, 0);
                     }
-                });
-                std::env::set_current_dir(&home).unwrap();
-                let _ = std::fs::remove_dir_all(&d);
-                if let Some(e) = err {
-                    failed.push(format!("{file}:{line}: error: {e}\n{code}--- printed:\n{out}"));
+                    drop(out_r);
+                    drop(err_r);
+                    let _ = std::env::set_current_dir(&work);
+                    let msg = match new_namespace(py, "__main__", vec![script.clone()]) {
+                        Ok(ns) => match run_source(py, &code, &ns, &script, false) {
+                            Ok(_) => None,
+                            Err(TesshError::Py(e)) if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) => None,
+                            Err(TesshError::Py(e)) => Some(format!("{}", e.value(py))),
+                            Err(e) => Some(format!("{:?}", e.position())),
+                        },
+                        Err(e) => Some(format!("{}", e.value(py))),
+                    };
+                    let _ = py.import("sys").and_then(|s| s.getattr("stdout")).and_then(|o| o.call_method0("flush"));
+                    let mut err_w = err_w;
+                    if let Some(m) = &msg {
+                        let _ = err_w.write_all(m.as_bytes());
+                    }
+                    drop(err_w);
+                    unsafe { libc::_exit(if msg.is_some() { 1 } else { 0 }) };
+                }
+                drop(out_w);
+                drop(err_w);
+                let mut out = String::new();
+                let _ = out_r.read_to_string(&mut out);
+                let mut err = String::new();
+                let _ = err_r.read_to_string(&mut err);
+                let mut st = 0;
+                unsafe { libc::waitpid(pid, &mut st, 0) };
+                for d in [&src, &work] {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+                if !err.is_empty() || !libc::WIFEXITED(st) {
+                    failed.push(format!("{file}:{line}: error: {err} (status {st})\n{code}--- printed:\n{out}"));
                 } else if let Some(w) = want {
                     if addr(&out) != w {
                         failed.push(format!("{file}:{line}: printed\n{out}--- not\n{w}"));
@@ -696,7 +737,7 @@ fn advanced_guide_examples() {
             }
         }
     });
-    assert!(count > 5, "{count} examples");
+    assert!(count > 300, "{count} examples");
     assert!(failed.is_empty(), "{} of {} examples:\n\n{}", failed.len(), count, failed.join("\n\n"));
 }
 

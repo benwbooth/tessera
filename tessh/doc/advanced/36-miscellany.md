@@ -922,7 +922,7 @@ To make a run repeatable, each instance passes its depth to the next and
 seeds `random` with it; leave the seed out for a different run each time.
 Run by tessh, the script needs no execute permission.
 
-```tessh
+```tessh script
 # recurse: can a script recursively call itself?
 import os random
 
@@ -1008,7 +1008,7 @@ be tessh), so the script writes its sample phone book first. With more
 than one word, it runs itself on all but the first and greps that output
 for the first, as the original does.
 
-```tessh
+```tessh script
 # pb: phone book, by Rick Boivie.
 import os
 

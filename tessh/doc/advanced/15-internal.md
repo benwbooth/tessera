@@ -58,7 +58,7 @@ A tessh script runs again as `tessh script`; `/proc/self/exe` is the tessh
 running now, and `env` runs a program named by a value. This one stops at
 three instances instead of waiting for Ctrl+C.
 
-```tessh
+```tessh script
 import os
 # spawn.tsh
 
@@ -2586,7 +2586,7 @@ The original goes on until Ctrl+C; this one stops after its third run. It
 shows the process ID is the same each time by keeping the first one in the
 environment, which `exec` hands on.
 
-```tessh
+```tessh script
 import os sys
 # self-exec.tsh
 

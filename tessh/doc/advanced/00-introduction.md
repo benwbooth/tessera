@@ -34,7 +34,9 @@ Each example is three blocks:
 - **bash**: the original script, as the ABS Guide has it (its file name is
   in the heading).
 - **tessh**: the same script in tessh. It runs: the guide's test runs every
-  one in a scratch folder and checks what it prints.
+  one as a script, `ex.tsh`, in a scratch folder and checks what it prints.
+  (A few run tessh itself again, through `/proc/self/exe`; they're marked
+  `tessh script` and checked with the tessh program instead.)
 - **output**: what the tessh version printed. Where bash printed something
   else, an `output bash` block after the bash version shows bash's.
 
