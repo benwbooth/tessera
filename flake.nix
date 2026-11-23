@@ -153,6 +153,54 @@
                 dontPatchELF = true;
                 env.PYO3_CONFIG_FILE = "${pyo3Config}";
               };
+              # The glibc build, for systems with glibc (the launcher picks):
+              # linked against glibc 2.17 by zig, so it runs on any
+              # distribution of the last decade, with uv's glibc CPython.
+              pbsGnu = pkgs.fetchurl {
+                url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.12.16%2B20261123-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz";
+                hash = "sha256-yFgR01lx0GYSWFoFfbO3GAY3jfbqhHYnX7Fqpcn+VqA=";
+              };
+              pyLinkGnu = pkgs.runCommand "tessh-python-abi3-link-gnu" { nativeBuildInputs = [ pkgs.patchelf ]; } ''
+                tar xzf ${pbsGnu}
+                mkdir -p $out/lib
+                cp python/lib/libpython3.12.so.1.0 $out/lib/libpython3.so
+                chmod u+w $out/lib/libpython3.so
+                patchelf --set-soname libpython3.so $out/lib/libpython3.so
+              '';
+              pyo3ConfigGnu = pkgs.writeText "pyo3-abi3-gnu.txt" ''
+                implementation=CPython
+                version=3.12
+                shared=true
+                abi3=true
+                lib_name=python3
+                lib_dir=${pyLinkGnu}/lib
+                pointer_width=64
+                suppress_build_script_link_lines=false
+              '';
+              tesshGnu = pkgs.rustPlatform.buildRustPackage {
+                pname = "tessh-gnu";
+                version = (pkgs.lib.importTOML ./tessh/Cargo.toml).package.version;
+                inherit src;
+                cargoLock.lockFile = ./Cargo.lock;
+                nativeBuildInputs = [ pkgs.cargo-zigbuild pkgs.zig_0_15 ];
+                dontUseZigBuild = true;
+                dontUseZigInstall = true;
+                dontUseZigCheck = true;
+                doCheck = false;
+                buildPhase = ''
+                  runHook preBuild
+                  export HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR/cache ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig
+                  cargo zigbuild --release --offline -p tessh --features standalone --target x86_64-unknown-linux-gnu.2.17
+                  runHook postBuild
+                '';
+                installPhase = ''
+                  install -Dm755 target/x86_64-unknown-linux-gnu/release/tessh $out/bin/tessh
+                '';
+                # (The system's loader, libpython beside it: leave both be.)
+                dontPatchELF = true;
+                dontAutoPatchelf = true;
+                env.PYO3_CONFIG_FILE = "${pyo3ConfigGnu}";
+              };
               launcher = pkgs.pkgsStatic.rustPlatform.buildRustPackage {
                 pname = "tessh-launcher";
                 version = (pkgs.lib.importTOML ./tessh/launcher/Cargo.toml).package.version;
@@ -164,6 +212,7 @@
               payload = pkgs.runCommand "tessh-payload" { nativeBuildInputs = [ pkgs.zstd pkgs.binutils ]; } ''
                 mkdir -p root/bin root/lib $out
                 cp ${tesshMusl}/bin/tessh root/bin/tessh
+                cp ${tesshGnu}/bin/tessh root/bin/tessh-gnu
                 cp ${cross.stdenv.cc.libc}/lib/libc.so root/lib/ld-musl-x86_64.so.1
                 tar xzf ${uvStatic} --strip-components=1 -C root/bin uv-x86_64-unknown-linux-musl/uv
                 # (What else it needs: libgcc_s, for unwinding.)

@@ -14,6 +14,13 @@
 //! lib. A real loader runs it, so C extensions (musllinux wheels: numpy,
 //! pandas) load as in any Python.
 //!
+//! Two builds of tessh come along: for musl (above: runs anywhere) and for
+//! glibc. Where the system has glibc's loader (any usual distribution;
+//! NixOS with nix-ld), the glibc one runs, with uv's glibc CPython: the
+//! Python and wheels the system's own uv uses. It's tried once (tessh
+//! --version) and, if it doesn't start, musl from then on (the choice is
+//! kept in rt-<hash>/libc). TESSH_LIBC=gnu or =musl picks one.
+//!
 //! The file is this program, then the payload (a zstd-compressed tar), then
 //! a 64-byte trailer: `TESSH-PAYLOAD <offset, 20 digits> <hash>`.
 
@@ -123,6 +130,55 @@ fn unpack(exe: &Path, off: u64, len: u64, rt: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Libc {
+    Gnu,
+    Musl,
+}
+
+impl Libc {
+    fn suffix(self) -> &'static str {
+        match self {
+            Libc::Gnu => "gnu",
+            Libc::Musl => "musl",
+        }
+    }
+    /// This libc's tessh in the unpacked payload.
+    fn tessh(self, rt: &Path) -> PathBuf {
+        rt.join(match self {
+            Libc::Gnu => "bin/tessh-gnu",
+            Libc::Musl => "bin/tessh",
+        })
+    }
+}
+
+/// glibc's program loader, where the system has one.
+fn gnu_loader() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "/lib/ld-linux-aarch64.so.1",
+        _ => "/lib64/ld-linux-x86-64.so.2",
+    }
+}
+
+/// Which tessh to run: TESSH_LIBC, else the one found to work here before,
+/// else glibc's where the system has its loader.
+fn pick_libc(rt: &Path) -> (Libc, bool) {
+    match std::env::var("TESSH_LIBC").as_deref() {
+        Ok("musl") => return (Libc::Musl, true),
+        Ok("gnu") | Ok("glibc") => return (Libc::Gnu, true),
+        _ => {}
+    }
+    if !Libc::Gnu.tessh(rt).is_file() {
+        return (Libc::Musl, true);
+    }
+    match fs::read_to_string(rt.join("libc")).as_deref().map(str::trim) {
+        Ok("musl") => (Libc::Musl, true),
+        Ok("gnu") => (Libc::Gnu, true),
+        _ if Path::new(gnu_loader()).exists() => (Libc::Gnu, false),
+        _ => (Libc::Musl, true),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Py {
     name: String,
@@ -133,8 +189,8 @@ struct Py {
 
 /// `cpython-3.14.6-linux-x86_64-musl` → (3, 14, 6), not a pre-release.
 /// (Free-threaded and debug builds aren't stable-ABI ones: left out.)
-fn parse_name(name: &str) -> Option<((u32, u32, u32), bool)> {
-    let v = name.strip_prefix("cpython-")?.strip_suffix(&format!("-linux-{}-musl", std::env::consts::ARCH))?;
+fn parse_name(name: &str, libc: Libc) -> Option<((u32, u32, u32), bool)> {
+    let v = name.strip_prefix("cpython-")?.strip_suffix(&format!("-linux-{}-{}", std::env::consts::ARCH, libc.suffix()))?;
     if v.contains('+') {
         return None;
     }
@@ -182,13 +238,13 @@ fn uv_python_dirs() -> Vec<PathBuf> {
     v
 }
 
-fn installed(dirs: &[PathBuf]) -> Vec<Py> {
+fn installed(dirs: &[PathBuf], libc: Libc) -> Vec<Py> {
     let mut out = vec![];
     for d in dirs {
         let Ok(rd) = fs::read_dir(d) else { continue };
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            if let Some((version, pre)) = parse_name(&name) {
+            if let Some((version, pre)) = parse_name(&name, libc) {
                 let dir = e.path();
                 if dir.join("lib").is_dir() {
                     out.push(Py { name, dir, version, pre });
@@ -223,7 +279,7 @@ fn find_uv(rt: &Path) -> Option<PathBuf> {
 
 /// Installs the CPython wanted with uv, when uv offers one newer than
 /// `have` (or there's none yet); then the folders to look in.
-fn install(rt: &Path, want: &[u32], want_text: &str, have: Option<&Py>) -> Option<Vec<PathBuf>> {
+fn install(rt: &Path, libc: Libc, want: &[u32], want_text: &str, have: Option<&Py>) -> Option<Vec<PathBuf>> {
     let Some(uv) = find_uv(rt) else {
         if have.is_some() {
             return None;
@@ -231,7 +287,7 @@ fn install(rt: &Path, want: &[u32], want_text: &str, have: Option<&Py>) -> Optio
         die("tessh gets its Python from uv, and uv isn't installed. Install it (one static file) with\n\n    curl -LsSf https://astral.sh/uv/install.sh | sh\n\nor see https://docs.astral.sh/uv/ , then run tessh again.");
     };
     let arch = std::env::consts::ARCH;
-    let request = format!("cpython-{}-linux-{arch}-musl", if want_text.is_empty() { "3".to_string() } else { want_text.to_string() });
+    let request = format!("cpython-{}-linux-{arch}-{}", if want_text.is_empty() { "3".to_string() } else { want_text.to_string() }, libc.suffix());
     // (uv's own list of what it can install: no network needed.)
     let out = Command::new(&uv).args(["python", "list", "--only-downloads", "--all-platforms", "--output-format", "json", &request]).output();
     let list: Vec<serde_json::Value> = out.ok().filter(|o| o.status.success()).and_then(|o| serde_json::from_slice(&o.stdout).ok()).unwrap_or_default();
@@ -239,7 +295,7 @@ fn install(rt: &Path, want: &[u32], want_text: &str, have: Option<&Py>) -> Optio
         .iter()
         .filter_map(|x| {
             let name = x["key"].as_str()?.to_string();
-            let (version, pre) = parse_name(&name)?;
+            let (version, pre) = parse_name(&name, libc)?;
             Some(Py { name, dir: PathBuf::new(), version, pre })
         })
         .collect();
@@ -249,7 +305,7 @@ fn install(rt: &Path, want: &[u32], want_text: &str, have: Option<&Py>) -> Optio
         None if have.is_some() => return None,
         None => {
             let what = if want_text.is_empty() { format!("3.{MIN_MINOR} or later") } else { want_text.to_string() };
-            die(&format!("uv ({}) has no musl build of CPython {what} to offer. A newer uv may: `uv self update`.", uv.display()));
+            die(&format!("uv ({}) has no {} build of CPython {what} to offer. A newer uv may: `uv self update`.", uv.display(), libc.suffix()));
         }
     };
     if have.is_some_and(|h| (h.version, !h.pre) >= (pick.version, !pick.pre)) {
@@ -308,8 +364,7 @@ fn fetch_python(url: &str, dest: &Path) -> Result<(), String> {
 
 /// With no version asked for, whether to see (once a day) if uv offers a
 /// newer CPython than the newest one installed.
-fn check_due(base: &Path) -> bool {
-    let f = base.join("python-checked");
+fn check_due(f: &Path) -> bool {
     let age = fs::metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
     age.is_none_or(|a| a.as_secs() > 24 * 3600)
 }
@@ -319,7 +374,7 @@ fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
 }
 
 /// `rt/py/<name>`: tessh with this Python linked in beside it.
-fn version_dir(rt: &Path, py: &Py) -> std::io::Result<PathBuf> {
+fn version_dir(rt: &Path, py: &Py, libc: Libc) -> std::io::Result<PathBuf> {
     let vdir = rt.join("py").join(&py.name);
     if vdir.join(".done").exists() && fs::metadata(vdir.join("lib/libpython3.so")).is_ok() {
         return Ok(vdir);
@@ -342,8 +397,8 @@ fn version_dir(rt: &Path, py: &Py) -> std::io::Result<PathBuf> {
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(tmp.join("bin"))?;
     fs::create_dir_all(tmp.join("lib"))?;
-    if fs::hard_link(rt.join("bin/tessh"), tmp.join("bin/tessh")).is_err() {
-        fs::copy(rt.join("bin/tessh"), tmp.join("bin/tessh"))?;
+    if fs::hard_link(libc.tessh(rt), tmp.join("bin/tessh")).is_err() {
+        fs::copy(libc.tessh(rt), tmp.join("bin/tessh"))?;
     }
     for n in ["python", "python3", &stdlib] {
         symlink(Path::new("tessh"), &tmp.join("bin").join(n))?;
@@ -357,8 +412,11 @@ fn version_dir(rt: &Path, py: &Py) -> std::io::Result<PathBuf> {
     if py.dir.join("include").is_dir() {
         symlink(&py.dir.join("include"), &tmp.join("include"))?;
     }
-    for e in fs::read_dir(rt.join("lib"))?.flatten() {
-        symlink(&e.path(), &tmp.join("lib").join(e.file_name()))?;
+    // (musl's loader and libgcc_s, for the musl build; the glibc one has the system's.)
+    if libc == Libc::Musl {
+        for e in fs::read_dir(rt.join("lib"))?.flatten() {
+            symlink(&e.path(), &tmp.join("lib").join(e.file_name()))?;
+        }
     }
     fs::write(tmp.join(".done"), b"")?;
     let _ = fs::remove_dir_all(&vdir);
@@ -366,6 +424,27 @@ fn version_dir(rt: &Path, py: &Py) -> std::io::Result<PathBuf> {
         let _ = fs::remove_dir_all(&tmp);
     }
     Ok(vdir)
+}
+
+/// This libc's tessh with the Python wanted (installed with uv when needed).
+fn python_for(rt: &Path, libc: Libc, want: &[u32], want_text: &str) -> PathBuf {
+    let have = best(installed(&uv_python_dirs(), libc), want);
+    let checked = cache_base().join(format!("python-checked-{}", libc.suffix()));
+    let due = want_text.is_empty() && check_due(&checked);
+    let py = match have {
+        Some(p) if !due => p,
+        have => {
+            let dirs = install(rt, libc, want, want_text, have.as_ref());
+            if due {
+                let _ = fs::write(&checked, b"");
+            }
+            match dirs {
+                Some(d) => best(installed(&d, libc), want).or(have).unwrap_or_else(|| die("uv installed Python, but tessh can't find where")),
+                None => have.unwrap_or_else(|| die("no Python")),
+            }
+        }
+    };
+    version_dir(rt, &py, libc).unwrap_or_else(|e| die(&format!("couldn't set up Python {}: {e}", py.name)))
 }
 
 fn config_want() -> Option<String> {
@@ -403,22 +482,21 @@ fn main() {
     if let Err(e) = unpack(&exe, off, len, &rt) {
         die(&format!("couldn't unpack into {}: {e}", rt.display()));
     }
-    let have = best(installed(&uv_python_dirs()), &want);
-    let due = want_text.is_empty() && check_due(&cache_base());
-    let py = match have {
-        Some(p) if !due => p,
-        have => {
-            let dirs = install(&rt, &want, &want_text, have.as_ref());
-            if due {
-                let _ = fs::write(cache_base().join("python-checked"), b"");
-            }
-            match dirs {
-                Some(d) => best(installed(&d), &want).or(have).unwrap_or_else(|| die("uv installed Python, but tessh can't find where")),
-                None => have.unwrap_or_else(|| die("no Python")),
-            }
+    let (mut libc, mut settled) = pick_libc(&rt);
+    let vdir = loop {
+        let vdir = python_for(&rt, libc, &want, &want_text);
+        if settled {
+            break vdir;
         }
+        // (glibc's tessh, the first time: does it start here? If not, musl's.)
+        let ok = Command::new(vdir.join("bin/tessh")).arg("--version").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
+        let _ = fs::write(rt.join("libc"), if ok { "gnu" } else { "musl" });
+        if ok {
+            break vdir;
+        }
+        libc = Libc::Musl;
+        settled = true;
     };
-    let vdir = version_dir(&rt, &py).unwrap_or_else(|e| die(&format!("couldn't set up Python {}: {e}", py.name)));
     let err = Command::new(vdir.join("bin/tessh")).arg0(&args[0]).args(&args[1..]).exec();
     die(&format!("couldn't run {}: {err}", vdir.join("bin/tessh").display()));
 }
@@ -428,17 +506,18 @@ mod tests {
     use super::*;
 
     fn py(name: &str) -> Py {
-        let (version, pre) = parse_name(name).unwrap();
+        let (version, pre) = parse_name(name, Libc::Musl).unwrap();
         Py { name: name.into(), dir: PathBuf::new(), version, pre }
     }
 
     #[test]
     fn names() {
         let a = std::env::consts::ARCH;
-        assert_eq!(parse_name(&format!("cpython-3.14.6-linux-{a}-musl")), Some(((3, 14, 6), false)));
-        assert_eq!(parse_name(&format!("cpython-3.15.0b2-linux-{a}-musl")), Some(((3, 15, 0), true)));
-        assert_eq!(parse_name(&format!("cpython-3.14.6+freethreaded-linux-{a}-musl")), None);
-        assert_eq!(parse_name(&format!("cpython-3.14.6-linux-{a}-gnu")), None);
+        assert_eq!(parse_name(&format!("cpython-3.14.6-linux-{a}-musl"), Libc::Musl), Some(((3, 14, 6), false)));
+        assert_eq!(parse_name(&format!("cpython-3.14.6-linux-{a}-gnu"), Libc::Gnu), Some(((3, 14, 6), false)));
+        assert_eq!(parse_name(&format!("cpython-3.14.6-linux-{a}-gnu"), Libc::Musl), None);
+        assert_eq!(parse_name(&format!("cpython-3.15.0b2-linux-{a}-musl"), Libc::Musl), Some(((3, 15, 0), true)));
+        assert_eq!(parse_name(&format!("cpython-3.14.6+freethreaded-linux-{a}-musl"), Libc::Musl), None);
     }
 
     #[test]

@@ -5,7 +5,8 @@
 // The standalone build (feature "standalone", for musl: tessh/launcher)
 // instead gets a long placeholder for its program loader, which the
 // launcher overwrites with the path of the musl loader it unpacks, and finds
-// libpython3.so (uv's CPython, linked in by the launcher) beside itself.
+// libpython3.so (uv's CPython, linked in by the launcher) beside itself;
+// built for glibc (its other half), the system's loader instead.
 const INTERP_PLACEHOLDER_LEN: usize = 240;
 
 fn main() {
@@ -14,6 +15,12 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_STANDALONE").is_some() && musl {
         let placeholder = format!("/TESSH-INTERP-{}", "X".repeat(INTERP_PLACEHOLDER_LEN - 14));
         println!("cargo:rustc-link-arg-bins=-Wl,--dynamic-linker={placeholder}");
+        println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN/../lib");
+        return;
+    }
+    // (The standalone glibc build, picked by the launcher where the system
+    // has glibc: the system's loader, libpython3.so beside it.)
+    if std::env::var_os("CARGO_FEATURE_STANDALONE").is_some() {
         println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN/../lib");
         return;
     }
