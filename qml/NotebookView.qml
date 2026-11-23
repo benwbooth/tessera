@@ -1168,6 +1168,9 @@ FocusScope {
         c.cwd = path.replace(/\/[^\/]*$/, "") || "/"
         c.started = Date.now()
         c.ended = c.started
+        // (Unseen until its lines are counted, up to 1 s: the list moves
+        // once, to it drawn, not to an empty card that then fills.)
+        hideUntilReady(c.cid, 1000)
         cells.append(c)
         current = cells.count - 1
         touch()
@@ -1419,7 +1422,7 @@ FocusScope {
     property string unseenCid: ""
     property real unseenRoom: 0         // (its height and the gap before it)
     Timer { id: unseenCap; interval: 250; onTriggered: nb.showUnseen() }
-    function hideUntilReady(cid) { unseenCid = cid; unseenRoom = 0; unseenCap.restart() }
+    function hideUntilReady(cid, cap) { unseenCid = cid; unseenRoom = 0; unseenCap.interval = cap || 250; unseenCap.restart() }
     function showUnseen() {
         if (unseenCid === "") return
         unseenCid = ""; unseenRoom = 0; unseenCap.stop()
@@ -3043,9 +3046,16 @@ FocusScope {
             function checkReady() {
                 if (nb.unseenCid !== cid || running) return
                 if (kind === "files" && !(loader.item && loader.item.listed)) return
+                if (viewPath !== "" && !(loader.item && (loader.item.lines > 0 || loader.item.counted || loader.item.mdText))) return
                 nb.reveal(cid)
             }
-            Connections { target: loader.item; ignoreUnknownSignals: true; function onListedChanged() { cell.checkReady() } }
+            Connections {
+                target: loader.item; ignoreUnknownSignals: true
+                function onListedChanged() { cell.checkReady() }
+                function onLinesChanged() { cell.checkReady() }
+                function onCountedChanged() { cell.checkReady() }
+                function onMdTextChanged() { cell.checkReady() }
+            }
             Timer { id: slowTimer; interval: 400; onTriggered: cell.slowRun = cell.running }
             required property bool failed
             required property double started
