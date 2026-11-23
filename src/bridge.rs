@@ -351,6 +351,10 @@ pub mod ffi {
         /// the background: the tree-sitter name, "" when it can't say.
         #[qinvokable]
         fn detect_content(self: &Controller, reply: &QString, text: &QString);
+        /// A help text's Markdown as Qt rich text, code highlighted
+        /// (<span class="t-KIND">; manual::doc_html).
+        #[qinvokable]
+        fn doc_html(self: &Controller, text: &QString, lang: &QString) -> QString;
         /// The same for a file on this computer (its start and end).
         #[qinvokable]
         fn detect_file(self: &Controller, reply: &QString, path: &QString);
@@ -1869,6 +1873,10 @@ impl ffi::Controller {
     fn detect_content(&self, reply: &ffi::QString, text: &ffi::QString) {
         let text = text.to_string();
         self.answer_on(reply, Some("detect"), move || crate::detect::language_of(text.as_bytes()))
+    }
+
+    fn doc_html(&self, text: &ffi::QString, lang: &ffi::QString) -> ffi::QString {
+        qs(&crate::manual::doc_html(&text.to_string(), &lang.to_string()))
     }
 
     fn detect_file(&self, reply: &ffi::QString, path: &ffi::QString) {

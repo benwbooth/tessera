@@ -219,3 +219,41 @@ mod tests {
 
 }
 
+
+/// A short piece of Markdown (a guide's part in the completion help) as
+/// HTML for Qt's rich text: code blocks highlighted, each piece a
+/// `<span class="t-KIND">` (the window colors them), in `code_lang` when a
+/// block doesn't say.
+pub fn doc_html(md: &str, code_lang: &str) -> String {
+    use pulldown_cmark::{html, CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+    let mut out = String::new();
+    let mut code: Option<(String, String)> = None;
+    let mut plain: Vec<Event> = vec![];
+    let flush = |plain: &mut Vec<Event>, out: &mut String| {
+        html::push_html(out, plain.drain(..));
+    };
+    for ev in Parser::new_ext(md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH) {
+        match (&mut code, ev) {
+            (None, Event::Start(Tag::CodeBlock(kind))) => {
+                flush(&mut plain, &mut out);
+                let lang = match kind {
+                    CodeBlockKind::Fenced(l) => l.split(|c: char| c == ',' || c.is_whitespace()).next().unwrap_or("").to_string(),
+                    CodeBlockKind::Indented => String::new(),
+                };
+                code = Some((if lang.is_empty() || lang == "text" { code_lang.to_string() } else { lang }, String::new()));
+            }
+            (Some((_, body)), Event::Text(t)) => body.push_str(&t),
+            (Some(_), Event::End(TagEnd::CodeBlock)) => {
+                let (lang, body) = code.take().unwrap();
+                let body = body.strip_suffix('\n').unwrap_or(&body);
+                out.push_str("<pre>");
+                out.push_str(&crate::syntax::highlight_html(&crate::snippets::normalize(&lang), body));
+                out.push_str("</pre>");
+            }
+            (Some(_), _) => {}
+            (None, ev) => plain.push(ev),
+        }
+    }
+    flush(&mut plain, &mut out);
+    out
+}

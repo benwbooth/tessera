@@ -813,6 +813,19 @@ Rectangle {
         const w = t.slice(a, b)
         return /\w/.test(w) ? w : ""
     }
+    // Help Markdown as rich text, its code's kinds in the editor's colors
+    // (kept: the list redraws as the choice moves).
+    property var docRichCache: ({})
+    function docRich(md) {
+        const key = box.lang + "\u0000" + md
+        if (docRichCache[key] !== undefined) return docRichCache[key]
+        let h = controller ? controller.docHtml(md, box.lang) : ""
+        h = h.replace(/class="t-([a-z]+)[^"]*"/g, (m, k) => { const c = hl.colors[k]; return c ? "style=\"color:" + c + "\"" : "" })
+        h = "<style>pre { background-color: " + Theme.mix(Theme.bg, Theme.fg, 0.06) + " } code { color: " + box.ansi(3, "#e5c07b") + " }</style>" + h
+        if (Object.keys(docRichCache).length > 200) docRichCache = ({})
+        docRichCache[key] = h
+        return h
+    }
     function docFetchable(i) { return !!i && (i.kind === "command" && box.lang !== "tessh" ? true : (i.doc || "") === "") && ["command", "option", "opt", "subcommand"].indexOf(i.kind) >= 0 && i.detail !== "keyword" && i.detail !== "help topic" }
     function docKind(i) { return i.kind === "command" && (i.doc || "") !== "" ? "man" : i.kind }
     function docLine() { return edit.text.slice(0, comp.start) }
@@ -2121,7 +2134,11 @@ Rectangle {
                 TextEdit {
                     id: docText
                     width: docFlick.width - 12
-                    text: docBox.text
+                    // (Markdown help (a guide's part): drawn as such, its code
+                    // highlighted as the editor highlights; the rest as it is.)
+                    readonly property bool md: /```|^#{1,6} /m.test(docBox.text)
+                    text: md ? box.docRich(docBox.text) : docBox.text
+                    textFormat: md ? TextEdit.RichText : TextEdit.PlainText
                     readOnly: true
                     selectByMouse: true
                     wrapMode: Text.Wrap
@@ -2130,7 +2147,6 @@ Rectangle {
                     // (The code font: signatures, examples and man pages line up.)
                     font.family: edit.font.family
                     font.pixelSize: 12
-                    textFormat: TextEdit.PlainText
                     renderType: Text.NativeRendering
                 }
             }
