@@ -293,6 +293,7 @@ FocusScope {
             if (i < 0) return
             if (e.type === "count") cells.setProperty(i, "count", e.count)
             else if (e.type === "clear") {
+                nb.flushOutput(e.cell)
                 if (e.wait) cells.setProperty(i, "clearPending", true)
                 else cells.setProperty(i, "outputs", "[]")
             } else if (e.type === "output") addOutput(i, e.output)
@@ -322,7 +323,36 @@ FocusScope {
             }
         }
     }
+    // Output as it comes, in batches: a chatty program sends thousands of
+    // chunks, and each one used to read and write the card's whole output
+    // again (and lay it all out again): a long ls -R took gigabytes and
+    // crawled. Stream text waits here (cid -> [outputs]) a moment, then goes
+    // in at once.
+    property var outPending: ({})
+    Timer { id: outFlush; interval: 120; onTriggered: nb.flushOutputs() }
     function addOutput(i, out) {
+        const c0 = cells.get(i)
+        if (out.output_type === "stream" && c0 && !(c0.jobTty && c0.job > 0)) {
+            const p = outPending[c0.cid] || (outPending[c0.cid] = [])
+            const l = p[p.length - 1]
+            if (l && l.name === out.name) l.text += out.text
+            else p.push({ output_type: "stream", name: out.name, text: out.text })
+            if (!outFlush.running) outFlush.start()
+            return
+        }
+        if (c0) flushOutput(c0.cid)
+        addOutputNow(i, out)
+    }
+    function flushOutputs() { for (const cid in outPending) flushOutput(cid) }
+    function flushOutput(cid) {
+        const p = outPending[cid]
+        if (!p) return
+        delete outPending[cid]
+        const i = indexOf(cid)
+        if (i < 0) return
+        for (const o of p) addOutputNow(i, o)
+    }
+    function addOutputNow(i, out) {
         let outs = []
         try { outs = JSON.parse(cells.get(i).outputs) } catch (x) {}
         if (cells.get(i).clearPending) { outs = []; cells.setProperty(i, "clearPending", false) }
@@ -616,6 +646,7 @@ FocusScope {
         if (c.viewPath !== "") { fileRev++; return }
         if (c.tid > 0) retire(c.tid)
         cells.setProperty(i, "tid", 0)
+        delete outPending[c.cid]
         cells.setProperty(i, "outputs", "[]")
         cells.setProperty(i, "execs", "[]")
         cells.setProperty(i, "job", 0)
@@ -2515,6 +2546,19 @@ FocusScope {
     function tightText(t) { return tight("<span style=\"white-space:pre-wrap\">" + t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</span>") }
     function palette(html) { return html.replace(/var\(--vt-palette-(\d+)\)/g, (m, n) => paletteColor(parseInt(n))) }
     function colored(text) { return controller ? tight(palette(controller.ansiHtml(text))) : "" }
+    // A long output's last lines only: all of it as rich text took a layout
+    // of every line (gigabytes for an ls -R of a big tree). The rest is
+    // still the card's: Copy and Save have it.
+    readonly property int outTailLines: 2000
+    function tailColored(text) {
+        let at = text.length, n = 0
+        while (n < outTailLines && at > 0) { at = text.lastIndexOf("\n", at - 1); if (at < 0) break; n++ }
+        if (at <= 0) return colored(text)
+        let earlier = 0
+        for (let k = text.indexOf("\n"); k >= 0 && k < at; k = text.indexOf("\n", k + 1)) earlier++
+        return "<span style='color:" + Theme.textDim + "'>\u22ef " + (earlier + 1).toLocaleString() + " earlier lines not shown (Copy has them all)</span><br>"
+             + colored(text.substring(at + 1))
+    }
     function seconds(ms) { ms = Math.max(0, ms); return ms < 1000 ? ms + " ms" : ms < 60000 ? (ms / 1000).toFixed(1) + " s" : Math.floor(ms / 60000) + " m " + Math.round((ms % 60000) / 1000) + " s" }
     function htmlPage(body) {
         const c = (x) => String(x)
@@ -4902,7 +4946,7 @@ FocusScope {
                     text: {
                         const o = tbox.o
                         if (!o) return ""
-                        if (o.output_type === "stream") return nb.colored((o.text || "").replace(/\n$/, ""))
+                        if (o.output_type === "stream") return nb.tailColored((o.text || "").replace(/\n$/, ""))
                         if (o.output_type === "error") return nb.colored((o.traceback || []).join("\n") || (o.ename + ": " + o.evalue))
                         const d = o.data || {}
                         const t = d["text/plain"] !== undefined ? d["text/plain"]
