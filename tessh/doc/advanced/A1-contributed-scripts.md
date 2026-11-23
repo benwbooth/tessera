@@ -4059,3 +4059,490 @@ Contents of array FILE_LOC:
 	Element 12: 6667ed287e901fbf
 	Element 13: 9123683e
 ```
+
+## Library of hash functions
+<!-- help: abs-hash-lib hash-lib hash.lib hashes associative-arrays dict eval library -->
+
+Mariusz Gniazdowski's library emulates hashes (associative arrays, which
+bash 3 didn't have) with one global variable per key, named
+`__hash__<hash>_<key>`, read and written with `eval`. Its comments list the
+limits that brings: global only, keys must be valid in variable names,
+and names can collide.
+
+### Example A-20. Library of hash functions (`Hash.lib`)
+
+```bash no-run
+# Hash:
+# Hash function library
+# Author: Mariusz Gniazdowski <mariusz.gn-at-gmail.com>
+# Date: 2005-04-07
+
+# Functions making emulating hashes in Bash a little less painful.
+
+
+#    Limitations:
+#  * Only global variables are supported.
+#  * Each hash instance generates one global variable per value.
+#  * Variable names collisions are possible
+#+   if you define variable like __hash__hashname_key
+#  * Keys must use chars that can be part of a Bash variable name
+#+   (no dashes, periods, etc.).
+#  * The hash is created as a variable:
+#    ... hashname_keyname
+#    So if somone will create hashes like:
+#      myhash_ + mykey = myhash__mykey
+#      myhash + _mykey = myhash__mykey
+#    Then there will be a collision.
+#    (This should not pose a major problem.)
+
+
+Hash_config_varname_prefix=__hash__
+
+
+# Emulates:  hash[key]=value
+#
+# Params:
+# 1 - hash
+# 2 - key
+# 3 - value
+function hash_set {
+	eval "${Hash_config_varname_prefix}${1}_${2}=\"${3}\""
+}
+
+
+# Emulates:  value=hash[key]
+#
+# Params:
+# 1 - hash
+# 2 - key
+# 3 - value (name of global variable to set)
+function hash_get_into {
+	eval "$3=\"\$${Hash_config_varname_prefix}${1}_${2}\""
+}
+
+
+# Emulates:  echo hash[key]
+#
+# Params:
+# 1 - hash
+# 2 - key
+# 3 - echo params (like -n, for example)
+function hash_echo {
+	eval "echo $3 \"\$${Hash_config_varname_prefix}${1}_${2}\""
+}
+
+
+# Emulates:  hash1[key1]=hash2[key2]
+#
+# Params:
+# 1 - hash1
+# 2 - key1
+# 3 - hash2
+# 4 - key2
+function hash_copy {
+eval "${Hash_config_varname_prefix}${1}_${2}\
+=\"\$${Hash_config_varname_prefix}${3}_${4}\""
+}
+
+
+# Emulates:  hash[keyN-1]=hash[key2]=...hash[key1]
+#
+# Copies first key to rest of keys.
+#
+# Params:
+# 1 - hash1
+# 2 - key1
+# 3 - key2
+# . . .
+# N - keyN
+function hash_dup {
+  local hashName="$1" keyName="$2"
+  shift 2
+  until [ ${#} -le 0 ]; do
+    eval "${Hash_config_varname_prefix}${hashName}_${1}\
+=\"\$${Hash_config_varname_prefix}${hashName}_${keyName}\""
+  shift;
+  done;
+}
+
+
+# Emulates:  unset hash[key]
+#
+# Params:
+# 1 - hash
+# 2 - key
+function hash_unset {
+	eval "unset ${Hash_config_varname_prefix}${1}_${2}"
+}
+
+
+# Emulates something similar to:  ref=&hash[key]
+#
+# The reference is name of the variable in which value is held.
+#
+# Params:
+# 1 - hash
+# 2 - key
+# 3 - ref - Name of global variable to set.
+function hash_get_ref_into {
+	eval "$3=\"${Hash_config_varname_prefix}${1}_${2}\""
+}
+
+
+# Emulates something similar to:  echo &hash[key]
+#
+# That reference is name of variable in which value is held.
+#
+# Params:
+# 1 - hash
+# 2 - key
+# 3 - echo params (like -n for example)
+function hash_echo_ref {
+	eval "echo $3 \"${Hash_config_varname_prefix}${1}_${2}\""
+}
+
+
+
+# Emulates something similar to:  $$hash[key](param1, param2, ...)
+#
+# Params:
+# 1 - hash
+# 2 - key
+# 3,4, ... - Function parameters
+function hash_call {
+  local hash key
+  hash=$1
+  key=$2
+  shift 2
+  eval "eval \"\$${Hash_config_varname_prefix}${hash}_${key} \\\"\\\$@\\\"\""
+}
+
+
+# Emulates something similar to:  isset(hash[key]) or hash[key]==NULL
+#
+# Params:
+# 1 - hash
+# 2 - key
+# Returns:
+# 0 - there is such key
+# 1 - there is no such key
+function hash_is_set {
+  eval "if [[ \"\${${Hash_config_varname_prefix}${1}_${2}-a}\" = \"a\" && 
+  \"\${${Hash_config_varname_prefix}${1}_${2}-b}\" = \"b\" ]]
+    then return 1; else return 0; fi"
+}
+
+
+# Emulates something similar to:
+#   foreach($hash as $key => $value) { fun($key,$value); }
+#
+# It is possible to write different variations of this function.
+# Here we use a function call to make it as "generic" as possible.
+#
+# Params:
+# 1 - hash
+# 2 - function name
+function hash_foreach {
+  local keyname oldIFS="$IFS"
+  IFS=' '
+  for i in $(eval "echo \${!${Hash_config_varname_prefix}${1}_*}"); do
+    keyname=$(eval "echo \${i##${Hash_config_varname_prefix}${1}_}")
+    eval "$2 $keyname \"\$$i\""
+  done
+IFS="$oldIFS"
+}
+
+#  NOTE: In lines 103 and 116, ampersand changed.
+#  But, it doesn't matter, because these are comment lines anyhow.
+```
+
+A Python dict is a hash, so in tessh the library is a thin layer over
+dicts, one per hash name, and none of those limits apply. A function is a
+value, so `hash_call` stores and calls the function itself, not its name.
+Two functions change shape: `hash_get_into` set a variable named by its
+third argument, which in tessh is just `value = hash_get hash key`, and a
+"reference" to an entry is the dict and the key. The library is followed
+here by a short test of each function; saved as `Hash.tsh`,
+`from Hash import *` would load it as `. Hash.lib` does.
+
+```tessh
+# Hash:
+# Hash function library
+# Author: Mariusz Gniazdowski <mariusz.gn-at-gmail.com>
+# Date: 2005-04-07
+
+# Functions making emulating hashes in Bash a little less painful.
+# (In tessh each hash is a Python dict, kept by its name in "hashes", so
+#  none of the original's limits on names and keys apply.)
+
+hashes = {}                  # Every hash, by its name.
+
+def table hash               # The dict of the hash named hash.
+  hashes.setdefault $hash {}
+
+# Emulates:  hash[key]=value
+def hash_set hash key value
+  (table $hash)[$key] = $value
+
+# Emulates:  value=hash[key]  (hash_get_into: write "value = hash_get hash key")
+def hash_get hash key
+  (table $hash)[$key]
+
+# Emulates:  echo hash[key]  (echo_params: like -n, for example)
+def hash_echo hash key *echo_params
+  echo *$echo_params (hash_get $hash $key)
+
+# Emulates:  hash1[key1]=hash2[key2]
+def hash_copy hash1 key1 hash2 key2
+  (table $hash1)[$key1] = (table $hash2)[$key2]
+
+# Emulates:  hash[keyN-1]=hash[key2]=...hash[key1]
+# Copies first key to rest of keys.
+def hash_dup hash key *keys
+  for k in $keys
+    (table $hash)[$k] = (table $hash)[$key]
+
+# Emulates:  unset hash[key]
+def hash_unset hash key
+  (table $hash).pop $key None
+
+# Emulates something similar to:  ref=&hash[key]
+# The reference is the dict and the key in it.
+def hash_get_ref hash key
+  ((table $hash), $key)
+
+# Emulates something similar to:  echo &hash[key]
+# That reference is the name the value is held under.
+def hash_echo_ref hash key *echo_params
+  echo *$echo_params "hashes[$hash][$key]"
+
+# Emulates something similar to:  $$hash[key](param1, param2, ...)
+def hash_call hash key *params
+  (hash_get $hash $key) *$params
+
+# Emulates something similar to:  isset(hash[key]) or hash[key]==NULL
+def hash_is_set hash key
+  $key in (table $hash)
+
+# Emulates something similar to:
+#   foreach($hash as $key => $value) { fun($key,$value); }
+# (In sorted order of the keys, as bash lists its variables.)
+def hash_foreach hash fun
+  for key in (sorted (table $hash))
+    fun $key (table $hash)[$key]
+
+# (A short test of each function.)
+hash_set fruit apple red
+hash_set fruit banana yellow
+hash_copy fruit cherry fruit apple
+hash_dup fruit banana lemon corn
+hash_echo fruit cherry
+hash_echo fruit lemon -n ; echo " (no newline before this)"
+print (hash_get fruit lemon) (hash_is_set fruit apple) (hash_is_set fruit kiwi)
+hash_unset fruit apple
+print (hash_is_set fruit apple)
+hash_echo_ref fruit corn
+[d k] = hash_get_ref fruit corn
+$d[$k] = gold
+hash_set fruit shout $str.upper
+print (hash_call fruit shout "called by name")
+hash_unset fruit shout
+hash_foreach fruit (fn [k v] (print "$k is $v"))
+```
+
+```output
+red
+yellow (no newline before this)
+yellow True False
+False
+hashes[fruit][corn]
+CALLED BY NAME
+banana is yellow
+cherry is red
+corn is gold
+lemon is yellow
+```
+
+## Colorizing text using hash functions
+<!-- help: abs-hash-example hash-example colors ansi escape-codes colorize dict -->
+
+The library's example, by the same author: a hash of terminal color codes,
+each tried on a line of text, then some overwritten with yellow, then some
+deleted.
+
+### Example A-21. Colorizing text using hash functions (`hash-example.sh`)
+
+```bash no-run
+#!/bin/bash
+# hash-example.sh: Colorizing text.
+# Author: Mariusz Gniazdowski <mariusz.gn-at-gmail.com>
+
+. Hash.lib      # Load the library of functions.
+
+hash_set colors red          "\033[0;31m"
+hash_set colors blue         "\033[0;34m"
+hash_set colors light_blue   "\033[1;34m"
+hash_set colors light_red    "\033[1;31m"
+hash_set colors cyan         "\033[0;36m"
+hash_set colors light_green  "\033[1;32m"
+hash_set colors light_gray   "\033[0;37m"
+hash_set colors green        "\033[0;32m"
+hash_set colors yellow       "\033[1;33m"
+hash_set colors light_purple "\033[1;35m"
+hash_set colors purple       "\033[0;35m"
+hash_set colors reset_color  "\033[0;00m"
+
+
+# $1 - keyname
+# $2 - value
+try_colors() {
+	echo -en "$2"
+	echo "This line is $1."
+}
+hash_foreach colors try_colors
+hash_echo colors reset_color -en
+
+echo -e '\nLet us overwrite some colors with yellow.\n'
+# It's hard to read yellow text on some terminals.
+hash_dup colors yellow   red light_green blue green light_gray cyan
+hash_foreach colors try_colors
+hash_echo colors reset_color -en
+
+echo -e '\nLet us delete them and try colors once more . . .\n'
+
+for i in red light_green blue green light_gray cyan; do
+	hash_unset colors $i
+done
+hash_foreach colors try_colors
+hash_echo colors reset_color -en
+
+hash_set other txt "Other examples . . ."
+hash_echo other txt
+hash_get_into other txt text
+echo $text
+
+hash_set other my_fun try_colors
+hash_call other my_fun   purple "`hash_echo colors purple`"
+hash_echo colors reset_color -en
+
+echo; echo "Back to normal?"; echo
+
+exit $?
+
+#  On some terminals, the "light" colors print in bold,
+#  and end up looking darker than the normal ones.
+#  Why is this?
+```
+
+Here the tessh version needs no library at all: the hash is a dict
+literal, `$colors[$key] = …` is `hash_set` and `hash_dup`, `del` is
+`hash_unset`, and the stored function is called straight from the dict.
+Bash lists the `__hash__colors_*` variables in sorted order, so
+`foreach` sorts the keys too. On a terminal the escape character starts
+each color; elsewhere, as here, the script shows it as `^[`, the way
+`cat -v` would.
+
+```tessh
+import sys
+# hash-example.tsh: Colorizing text.
+# Author: Mariusz Gniazdowski <mariusz.gn-at-gmail.com>
+
+ESC = if (sys.stdout.isatty) then "\033" else "^["   # (^[ when not on a terminal)
+
+colors = {
+  red:          "${ESC}[0;31m"
+  blue:         "${ESC}[0;34m"
+  light_blue:   "${ESC}[1;34m"
+  light_red:    "${ESC}[1;31m"
+  cyan:         "${ESC}[0;36m"
+  light_green:  "${ESC}[1;32m"
+  light_gray:   "${ESC}[0;37m"
+  green:        "${ESC}[0;32m"
+  yellow:       "${ESC}[1;33m"
+  light_purple: "${ESC}[1;35m"
+  purple:       "${ESC}[0;35m"
+  reset_color:  "${ESC}[0;00m"
+}
+
+def try_colors name value    # The key's name, and its value.
+  print "${value}This line is $name."
+
+def foreach hash fun         # fun key value, for each key in sorted order.
+  for key in (sorted $hash)
+    fun $key $hash[$key]
+
+foreach $colors $try_colors
+print $colors[reset_color] end=""
+
+print "\nLet us overwrite some colors with yellow.\n"
+# It's hard to read yellow text on some terminals.
+for key in [red light_green blue green light_gray cyan]
+  $colors[$key] = $colors[yellow]
+foreach $colors $try_colors
+print $colors[reset_color] end=""
+
+print "\nLet us delete them and try colors once more . . .\n"
+for i in [red light_green blue green light_gray cyan]
+  del $colors[$i]
+foreach $colors $try_colors
+print $colors[reset_color] end=""
+
+other = {txt: "Other examples . . ."}
+print $other[txt]
+text = $other[txt]
+print $text
+
+$other[my_fun] = $try_colors
+$other[my_fun] purple $colors[purple]
+print $colors[reset_color] end=""
+
+print ; print "Back to normal?" ; print
+
+#  On some terminals, the "light" colors print in bold,
+#  and end up looking darker than the normal ones.
+```
+
+```output
+^[[0;34mThis line is blue.
+^[[0;36mThis line is cyan.
+^[[0;32mThis line is green.
+^[[1;34mThis line is light_blue.
+^[[0;37mThis line is light_gray.
+^[[1;32mThis line is light_green.
+^[[1;35mThis line is light_purple.
+^[[1;31mThis line is light_red.
+^[[0;35mThis line is purple.
+^[[0;31mThis line is red.
+^[[0;00mThis line is reset_color.
+^[[1;33mThis line is yellow.
+^[[0;00m
+Let us overwrite some colors with yellow.
+
+^[[1;33mThis line is blue.
+^[[1;33mThis line is cyan.
+^[[1;33mThis line is green.
+^[[1;34mThis line is light_blue.
+^[[1;33mThis line is light_gray.
+^[[1;33mThis line is light_green.
+^[[1;35mThis line is light_purple.
+^[[1;31mThis line is light_red.
+^[[0;35mThis line is purple.
+^[[1;33mThis line is red.
+^[[0;00mThis line is reset_color.
+^[[1;33mThis line is yellow.
+^[[0;00m
+Let us delete them and try colors once more . . .
+
+^[[1;34mThis line is light_blue.
+^[[1;35mThis line is light_purple.
+^[[1;31mThis line is light_red.
+^[[0;35mThis line is purple.
+^[[0;00mThis line is reset_color.
+^[[1;33mThis line is yellow.
+^[[0;00mOther examples . . .
+Other examples . . .
+^[[0;35mThis line is purple.
+^[[0;00m
+Back to normal?
+
+```
