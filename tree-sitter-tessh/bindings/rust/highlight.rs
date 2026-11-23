@@ -75,15 +75,39 @@ fn group_end(b: &[u8], from: usize, end: usize, close: u8) -> Option<usize> {
     None
 }
 
+/// Whether the heredoc body starting at `s` (its first newline) fills in
+/// `$`: its end word, on the line before, isn't quoted (<<END, not <<'END').
+fn heredoc_interpolates(text: &str, s: usize) -> bool {
+    let line = &text[text[..s].rfind('\n').map_or(0, |i| i + 1)..s];
+    let mut k = 0;
+    let mut last = None;
+    while let Some(i) = line[k..].find("<<") {
+        let at = k + i;
+        if !line[at + 2..].starts_with('<') && (at == 0 || !line[..at].ends_with('<')) {
+            last = Some(at + 2);
+        }
+        k = at + 2;
+    }
+    match last {
+        Some(a) => !line[a..].trim_start_matches('-').starts_with(['\'', '"']),
+        None => false,
+    }
+}
+
 /// A tessh string's spans. Double quotes (no prefix) interpolate: `$name`,
 /// `$name.attr[i]`, `$(form)` and `${expr!r:spec}` are code there, their
-/// `$(` `)` `${` `}` marked (embedded), and escapes are escapes.
+/// `$(` `)` `${` `}` marked (embedded), and escapes are escapes. So does a
+/// heredoc's body (<<END, not <<'END'), where a backslash is only special
+/// before `$`, `` ` `` and itself, as in bash.
 fn tessh_string(text: &str, s: usize, e: usize) -> Vec<(usize, usize, &'static str)> {
     let t = &text[s..e];
+    let heredoc = t.starts_with('\n');
     let q = if t.len() >= 6 && t.starts_with("\"\"\"") && t.ends_with("\"\"\"") {
         3
     } else if t.len() >= 2 && t.starts_with('"') && t.ends_with('"') {
         1
+    } else if heredoc && heredoc_interpolates(text, s) {
+        0
     } else {
         return vec![(s, e, "string")];
     };
@@ -102,7 +126,10 @@ fn tessh_string(text: &str, s: usize, e: usize) -> Vec<(usize, usize, &'static s
     while i < end {
         let start = i;
         let mut code: Vec<(usize, usize, &'static str)> = vec![];
-        if b[i] == b'\\' {
+        if b[i] == b'\\' && heredoc && !matches!(b.get(i + 1), Some(b'$' | b'`' | b'\\')) {
+            i += 1;
+            continue;
+        } else if b[i] == b'\\' {
             let n = text[i + 1..].chars().next().map_or(0, |c| c.len_utf8());
             i = (i + 1 + n).min(end);
             code.push((start, i, "escape"));
