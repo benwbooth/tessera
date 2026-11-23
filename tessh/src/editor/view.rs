@@ -116,7 +116,6 @@ pub fn chips(ed: &Ed, v: &ViewIn) -> Vec<Span> {
     }
     add(chip("▴ Folders", "folders", v));
     add(chip("↺ History", "history", v));
-    add(chip("tessh", "lang", v));
     add(chip("Guide", "guide", v));
     let ind = ed.indent();
     let mode = match ind.mode {

@@ -286,10 +286,14 @@ fn table(rows: &[Vec<String>], width: usize) -> String {
 /// wrapped to the terminal, tables boxed, tessh code highlighted as the
 /// editor does it, other code dim. Plain (color false): as it is.
 pub fn terminal(md: &str, color: bool) -> String {
+    terminal_at(md, color, width())
+}
+
+/// Markdown for a terminal, `width` columns wide.
+pub fn terminal_at(md: &str, color: bool, width: usize) -> String {
     if !color {
         return md.to_string();
     }
-    let width = width();
     let mut out = String::new();
     let mut fence: Option<String> = None;
     let mut para: Vec<String> = vec![];
