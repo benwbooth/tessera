@@ -127,16 +127,18 @@ class Failed:
 # ---- before each prompt -----------------------------------------------------
 
 def direnv_hook():
-    """direnv, as `eval "$(direnv hook bash)"` has it: before each prompt
-    (and notebook cell), the environment of the folder's .envrc, or what it
-    set taken back on leaving. Nothing when direnv isn't installed.
-    TESSH_DIRENV=0, or prompt_hooks.remove(direnv_hook), turns it off."""
+    """direnv, as `eval "$(direnv hook bash)"` has it, when you want it:
+    `prompt_hooks.append $direnv_hook` (in ~/.config/tessh/rc.tsh). Then
+    before each prompt (and notebook cell), the environment of the folder's
+    .envrc, or what it set taken back on leaving. Nothing when direnv isn't
+    installed; TESSH_DIRENV=0 turns it off."""
     import __tessh__
     __tessh__.direnv_export()
 
 # The functions run before each prompt (and each notebook cell), in order:
-# bash's PROMPT_COMMAND. @before_prompt adds one.
-prompt_hooks = [direnv_hook]
+# bash's PROMPT_COMMAND. @before_prompt adds one; none to start with
+# (direnv's is there to add).
+prompt_hooks = []
 
 def before_prompt(f):
     """@before_prompt on a def: run it before each prompt (and each notebook
