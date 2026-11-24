@@ -40,11 +40,17 @@ fn main() {
             .filter(|s| !s.is_empty())
     };
     if let (Some(headers), Some(version)) = (query("QT_INSTALL_HEADERS"), query("QT_VERSION")) {
+        // (macOS's Qt keeps them in its frameworks: QtGui.framework/Headers/<version>.)
+        let libs = query("QT_INSTALL_LIBS").unwrap_or_default();
         for module in ["QtCore", "QtGui"] {
-            let dir = std::path::Path::new(&headers).join(module).join(&version);
-            if dir.exists() {
-                private_includes.push(dir.clone());
-                private_includes.push(dir.join(module));
+            for dir in [
+                std::path::Path::new(&headers).join(module).join(&version),
+                std::path::Path::new(&libs).join(format!("{module}.framework")).join("Headers").join(&version),
+            ] {
+                if dir.exists() {
+                    private_includes.push(dir.clone());
+                    private_includes.push(dir.join(module));
+                }
             }
         }
     }

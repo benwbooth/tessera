@@ -159,7 +159,8 @@ jobs:
         run: |
           $env:QMAKE = Join-Path $env:QT_ROOT_DIR 'bin\qmake.exe'
           & $env:QMAKE -query QT_VERSION
-          cargo build --release --locked
+          # (The app and tesserad: tessh is Unix-only, and not in the package.)
+          cargo build --release --locked -p tessera -p tesserad
       - name: Gather Qt and the C++ runtime next to tessera.exe
         shell: pwsh
         run: |
@@ -237,7 +238,8 @@ jobs:
         run: |
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
           "$QMAKE" -query QT_VERSION
-          cargo build --release --locked
+          # (The app and tesserad: tessh has its own job and its own file.)
+          cargo build --release --locked -p tessera -p tesserad
       - name: App bundle
         run: |
           app=dist/Tessera.app
