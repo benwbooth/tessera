@@ -15,6 +15,16 @@ QtObject {
         a = Qt.color(a); b = Qt.color(b)
         return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1)
     }
+    // A browser view's page drawn afresh, all of it, with no layout: an
+    // invisible layer over it has its opacity changed and back (Almanac's
+    // black-pane nudge). For a window shown again by the desktop.
+    function redrawWeb(view) {
+        if (!view || !view.visible) return
+        view.runJavaScript("(function(){if(!document.body)return;var k=document.getElementById('tessera-kick');"
+            + "if(!k){k=document.createElement('div');k.id='tessera-kick';k.style.cssText='position:fixed;left:0;top:0;right:0;bottom:0;pointer-events:none;background:rgba(0,0,0,0.002);opacity:1;will-change:opacity;z-index:2147483647';document.body.appendChild(k)}"
+            + "k.style.opacity='0.999';requestAnimationFrame(function(){k.style.opacity='1'})})()")
+        view.update()
+    }
     function luma(c) { c = Qt.color(c); return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b }
 
     readonly property color bg: term.background

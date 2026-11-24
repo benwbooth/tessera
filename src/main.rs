@@ -159,6 +159,27 @@ fn main() {
         std::env::set_var("QT_WAYLAND_ENABLE_XX_SESSION_MANAGER", "1");
     }
     let session = if wayland { std::fs::read_to_string(&session_file).unwrap_or_default().trim().to_string() } else { String::new() };
+    // Browser views (the guide, Markdown and HTML cards) could come back
+    // black after the window was hidden or covered, until clicked (as
+    // Almanac's message pane): Chromium stops drawing a page in a window it
+    // thinks is in the background and, on Wayland, doesn't always start
+    // again; and its GPU surface shared with Qt could be lost while the
+    // window was hidden. Keep it drawing, and composite pages on the CPU,
+    // handed to Qt as pictures (Qt Quick's own drawing stays on the GPU).
+    {
+        let flags = std::env::var("QTWEBENGINE_CHROMIUM_FLAGS").unwrap_or_default();
+        let mut add: Vec<String> = ["--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-background-timer-throttling", "--disable-gpu-compositing"]
+            .iter()
+            .filter(|f| !flags.contains(*f))
+            .map(|f| f.to_string())
+            .collect();
+        if !flags.contains("CalculateNativeWinOcclusion") {
+            add.push("--disable-features=CalculateNativeWinOcclusion".into());
+        }
+        if !add.is_empty() {
+            std::env::set_var("QTWEBENGINE_CHROMIUM_FLAGS", format!("{flags} {}", add.join(" ")).trim());
+        }
+    }
     bridge::ffi::tessera_webengine_initialize();
     // (Its own Qt's plugins, looked in first: bootstrap.h.)
     if let Some(p) = option_env!("TESSERA_QT_PLUGINS").filter(|p| std::path::Path::new(p).is_dir()) {

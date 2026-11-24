@@ -271,6 +271,15 @@ Rectangle {
             id: web
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // (Shown again by the desktop, or the window back in use: the page
+            // drawn afresh, now and once more shortly after; Theme.redrawWeb.)
+            Connections {
+                target: web.Window.window
+                ignoreUnknownSignals: true
+                function onReexposed() { Theme.redrawWeb(web); webKick.restart() }
+                function onActiveChanged() { if (web.Window.window && web.Window.window.active) { Theme.redrawWeb(web); webKick.restart() } }
+            }
+            Timer { id: webKick; interval: 400; onTriggered: Theme.redrawWeb(web) }
             backgroundColor: Theme.bg
             settings.pluginsEnabled: false
             settings.localContentCanAccessFileUrls: false

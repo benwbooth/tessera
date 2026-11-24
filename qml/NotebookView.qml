@@ -4873,6 +4873,15 @@ FocusScope {
         WebEngineView {
             id: web
             readonly property var src: parent
+            // (Shown again by the desktop, or the window back in use: the page
+            // drawn afresh, now and once more shortly after; Theme.redrawWeb.)
+            Connections {
+                target: web.Window.window
+                ignoreUnknownSignals: true
+                function onReexposed() { Theme.redrawWeb(web); webKick.restart() }
+                function onActiveChanged() { if (web.Window.window && web.Window.window.active) { Theme.redrawWeb(web); webKick.restart() } }
+            }
+            Timer { id: webKick; interval: 400; onTriggered: Theme.redrawWeb(web) }
             implicitHeight: 360
             backgroundColor: "white"
             // Pages may not reach local files or run plugins.
@@ -4894,6 +4903,15 @@ FocusScope {
         WebEngineView {
             id: mp
             property string md: ""
+            // (Shown again by the desktop, or the window back in use: the page
+            // drawn afresh, now and once more shortly after; Theme.redrawWeb.)
+            Connections {
+                target: mp.Window.window
+                ignoreUnknownSignals: true
+                function onReexposed() { Theme.redrawWeb(mp); mpKick.restart() }
+                function onActiveChanged() { if (mp.Window.window && mp.Window.window.active) { Theme.redrawWeb(mp); mpKick.restart() } }
+            }
+            Timer { id: mpKick; interval: 400; onTriggered: Theme.redrawWeb(mp) }
             property string html: ""
             property string baseDir: ""
             // (A file's page: links resolve from the file itself, so #part
@@ -5164,6 +5182,15 @@ FocusScope {
         WebEngineView {
             id: web
             readonly property var o: parent ? parent.out : ({})
+            // (Shown again by the desktop, or the window back in use: the page
+            // drawn afresh, now and once more shortly after; Theme.redrawWeb.)
+            Connections {
+                target: web.Window.window
+                ignoreUnknownSignals: true
+                function onReexposed() { Theme.redrawWeb(web); webKick.restart() }
+                function onActiveChanged() { if (web.Window.window && web.Window.window.active) { Theme.redrawWeb(web); webKick.restart() } }
+            }
+            Timer { id: webKick; interval: 400; onTriggered: Theme.redrawWeb(web) }
             implicitHeight: 60
             height: implicitHeight
             backgroundColor: Theme.bg
