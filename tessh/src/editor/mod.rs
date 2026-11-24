@@ -79,6 +79,10 @@ pub enum Hit {
     Widget(String),
     /// A popup list's scrollbar: above the thumb (true) or below it (a click pages).
     Scroll(bool),
+    /// Its arrows (▲ true, ▼ false: a click moves a row) and its thumb
+    /// (dragged, the list follows): the list's length and rows shown.
+    ScrollArrow(bool, usize),
+    Thumb(usize, usize),
     /// The ls listing above the prompt (an entry, a heading, a button…).
     Ls(ls::LsHit),
 }

@@ -187,6 +187,13 @@ pub struct Ed {
     /// What the mouse was over when it went down (a click acts on release
     /// only where it went down, as buttons do).
     pub pressed: Option<Hit>,
+    /// A popup list's scrollbar thumb being dragged: the row it was taken
+    /// at, the list's top then, its length and rows shown.
+    pub bar_drag: Option<(u16, usize, usize, usize)>,
+    /// The rows the open popup list shows (the view sets it as it draws).
+    pub list_room: std::cell::Cell<usize>,
+    /// The row at its top as last drawn (what the wheel and arrows go from).
+    pub list_top: std::cell::Cell<usize>,
     /// Where a button's list opens (the column clicked).
     pub menu_x: Option<usize>,
     /// A tap waiting out its moment ('n' new line, 'g' suggestion, 'b'
@@ -291,6 +298,9 @@ impl Ed {
             done: None,
             dirty: true,
             pressed: None,
+            bar_drag: None,
+            list_room: std::cell::Cell::new(14),
+            list_top: std::cell::Cell::new(0),
             menu_x: None,
             pending_tap: None,
             vi: {
@@ -1603,12 +1613,11 @@ impl Ed {
                         self.comp.doc_scroll = if up { self.comp.doc_scroll.saturating_sub(3) } else { self.comp.doc_scroll + 3 };
                         true
                     }
-                    Some(Hit::Row(_)) => {
-                        if let Some(m) = self.menu.as_mut() {
-                            m.top = if up { m.top.saturating_sub(3) } else { m.top + 3 };
-                        } else {
-                            self.comp.top = if up { self.comp.top.saturating_sub(3) } else { self.comp.top + 3 };
-                        }
+                    // (Over a list or its scrollbar: the list, its pick kept
+                    // among the rows shown, so it gets to the end.)
+                    Some(Hit::Row(_) | Hit::Scroll(_) | Hit::Thumb(..) | Hit::ScrollArrow(..)) => {
+                        let top = self.list_top.get();
+                        self.list_to(if up { top.saturating_sub(3) } else { top + 3 }, self.list_room.get());
                         true
                     }
                     // (Elsewhere: the terminal's own scrolling.)
@@ -1648,6 +1657,11 @@ impl Ed {
                         self.refresh_ghost();
                         true
                     }
+                    Some(Hit::Thumb(n, room)) => {
+                        let top = self.list_top.get();
+                        self.bar_drag = Some((e.row, top.min(n.saturating_sub(room)), n, room));
+                        true
+                    }
                     None => {
                         // (Above the editor: the terminal selects there.)
                         self.close_comp();
@@ -1656,6 +1670,17 @@ impl Ed {
                     }
                     _ => true,
                 }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.bar_drag.is_some() => {
+                // (The thumb follows the pointer, and the list the thumb.)
+                let (r0, top0, n, room) = self.bar_drag.unwrap();
+                let track = if room >= 4 { room - 2 } else { room };
+                let (_, size) = super::view::thumb_of(n, room, top0);
+                let span = n.saturating_sub(room);
+                let d = e.row as isize - r0 as isize;
+                let moved = d * span as isize / (track.saturating_sub(size)).max(1) as isize;
+                self.list_to((top0 as isize + moved).clamp(0, span as isize) as usize, room);
+                true
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if let (Some((anchor, n)), Some(Hit::Text(p))) = (self.drag, hit) {
@@ -1671,6 +1696,10 @@ impl Ed {
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.drag = None;
+                if self.bar_drag.take().is_some() {
+                    self.pressed = None;
+                    return true;
+                }
                 // (A selection made: copied, as terminals do.)
                 if let Some((a, b)) = self.t.selection() {
                     super::term::Term::copy(&self.t.text[a..b]);
@@ -1699,6 +1728,32 @@ impl Ed {
                 true
             }
             _ => true,
+        }
+    }
+
+    /// A popup list (a menu, or the history or completion list) scrolled so
+    /// row `top` is its first of `room`, its pick kept among those shown.
+    fn list_to(&mut self, top: usize, room: usize) {
+        if self.menu.is_some() {
+            let shown = self.menu_shown();
+            let m = self.menu.as_mut().unwrap();
+            let top = top.min(shown.len().saturating_sub(room));
+            m.top = top;
+            let p = shown.iter().position(|&i| i == m.sel).unwrap_or(0);
+            if p < top {
+                m.sel = shown[top];
+            } else if p >= top + room {
+                m.sel = shown[(top + room - 1).min(shown.len() - 1)];
+            }
+        } else if self.comp.open {
+            let n = self.comp.items.len();
+            let top = top.min(n.saturating_sub(room));
+            self.comp.top = top;
+            if self.comp.index < top {
+                self.comp.index = top;
+            } else if self.comp.index >= top + room {
+                self.comp.index = (top + room - 1).min(n.saturating_sub(1));
+            }
         }
     }
 
@@ -1742,6 +1797,10 @@ impl Ed {
                     self.comp.index = if up { self.comp.index.saturating_sub(page) } else { (self.comp.index + page).min(n.saturating_sub(1)) };
                     self.comp.top = if up { self.comp.top.saturating_sub(page) } else { self.comp.top + page };
                 }
+            }
+            Hit::ScrollArrow(up, room) => {
+                let top = self.list_top.get();
+                self.list_to(if up { top.saturating_sub(1) } else { top + 1 }, room);
             }
             Hit::Path(p) => self.done = Some(Outcome::Host(format!("run:cd {}", crate::repl::quote_path(&p)))),
             Hit::Widget(w) => {

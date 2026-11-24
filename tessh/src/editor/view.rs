@@ -345,10 +345,12 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
             lines.push(vec![Span::new(" ⌕ ", v.pal.dimmed()), q]);
         }
         let room = 14usize;
+        ed.list_room.set(room);
         let top = m.top.min(shown.len().saturating_sub(room));
         let sel_at = shown.iter().position(|&i| i == m.sel).unwrap_or(0);
         let top = if sel_at < top { sel_at } else if sel_at >= top + room { sel_at + 1 - room } else { top };
-        let bar = scrollbar(shown.len(), room, top);
+        ed.list_top.set(top);
+        let bar = scrollbar(shown.len(), room, top, v.pal.mix(0.10));
         for (k, &i) in shown.iter().skip(top).take(room).enumerate() {
             let it = &m.items[i];
             let mut st = if it.section { v.pal.dimmed().bold() } else if it.enabled { Sty::default() } else { v.pal.dimmed() };
@@ -388,8 +390,10 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         search.push(Span::new(count, v.pal.dimmed()));
         let mut lines = vec![search, vec![Span::new("─".repeat(w), Sty { fg: Some(Col::Ansi(8)), ..Default::default() })]];
         let room = 14usize.min(v.rows.saturating_sub(12)).max(3);
+        ed.list_room.set(room);
         let top = if ed.comp.index < ed.comp.top { ed.comp.index } else if ed.comp.index >= ed.comp.top + room { ed.comp.index + 1 - room } else { ed.comp.top.min(n.saturating_sub(room)) };
-        let bar = scrollbar(n, room, top);
+        ed.list_top.set(top);
+        let bar = scrollbar(n, room, top, v.pal.mix(0.10));
         let iw = if bar.is_empty() { w } else { w - 1 };
         for (k, (i, it)) in ed.comp.items.iter().enumerate().skip(top).take(room).enumerate() {
             let on = i == ed.comp.index;
@@ -475,20 +479,40 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
     None
 }
 
-/// A list's scrollbar, a cell a row: the thumb where the rows shown are
-/// ("┃"), the track ("│"); none when everything shows.
-fn scrollbar(n: usize, room: usize, top: usize) -> Vec<Span> {
+/// A list's scrollbar, a cell a row, as the full-screen viewer's: ↑ and ↓
+/// at its ends (a click moves a row), the track (░ on a shaded column, a
+/// click pages) and the thumb (█) where the rows shown are, which drags;
+/// none when everything shows. (Arrows every font has: ▲▼ came out wider
+/// than a cell in some.)
+fn scrollbar(n: usize, room: usize, top: usize, shade: Option<Col>) -> Vec<Span> {
     if n <= room || room == 0 {
         return vec![];
     }
-    let thumb = (room * room).div_ceil(n).max(1);
-    let at = ((top * room) / n).min(room - thumb);
-    (0..room)
-        .map(|k| {
-            let on = k >= at && k < at + thumb;
-            Span::new(if on { "┃" } else { "│" }, Sty::fg(Col::Ansi(if on { 7 } else { 8 }))).hit(Hit::Scroll(k < at))
-        })
-        .collect()
+    let arrows = room >= 4;
+    let track = if arrows { room - 2 } else { room };
+    let (at, size) = thumb_of(n, room, top);
+    let mut out = vec![];
+    if arrows {
+        out.push(Span::new("↑", Sty { fg: Some(Col::Ansi(7)), bg: shade, ..Default::default() }).hit(Hit::ScrollArrow(true, room)));
+    }
+    for k in 0..track {
+        let on = k >= at && k < at + size;
+        out.push(if on { Span::new("█", Sty { fg: Some(Col::Ansi(7)), bg: shade, ..Default::default() }).hit(Hit::Thumb(n, room)) } else { Span::new("░", Sty { fg: Some(Col::Ansi(8)), bg: shade, ..Default::default() }).hit(Hit::Scroll(k < at)) });
+    }
+    if arrows {
+        out.push(Span::new("↓", Sty { fg: Some(Col::Ansi(7)), bg: shade, ..Default::default() }).hit(Hit::ScrollArrow(false, room)));
+    }
+    out
+}
+
+/// A scrollbar's thumb for `n` rows, `room` shown from `top`: where it
+/// starts on the track and how long it is (the track is `room` less the
+/// arrows).
+pub fn thumb_of(n: usize, room: usize, top: usize) -> (usize, usize) {
+    let track = if room >= 4 { room - 2 } else { room };
+    let size = (track * room).div_ceil(n.max(1)).clamp(1, track.max(1));
+    let at = (top.min(n.saturating_sub(room)) * (track - size)) / n.saturating_sub(room).max(1);
+    (at, size)
 }
 
 /// A text colored by highlight spans.
