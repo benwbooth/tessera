@@ -1253,7 +1253,74 @@ print $Registry.names
 ## Errors
 <!-- help: errors error exceptions exception try except finally raise assert traceback -->
 
-`try` is an expression too.
+Commands fail as in bash, with an exit status: a program (`mkdir`, `ls`,
+`grep`) and tessh's builtins (`cd`, `pushd`, `popd`, `export`, `which`…)
+alike. `||` runs what's after it when the command fails, `&&` when it
+worked, `if cmd` tests it, and `$?` holds it. A failing builtin's message
+goes to standard error, so `2>/dev/null` hides it.
+
+```tessh
+cd /no/such/folder 2>/dev/null || print "no such folder, status" $?
+mkdir /proc/nope 2>/dev/null || print "mkdir failed too"
+if not (cd /no/such/folder 2>/dev/null)
+  print "still here"
+```
+
+```output
+no such folder, status 1
+mkdir failed too
+still here
+```
+
+A builtin that fails on a line of its own, where nothing checks it, stops
+the script with its error, the way a Python error does. Bash would go on
+in the wrong folder, and a `cd build` that failed before `rm -rf *` is how
+whole home folders go. A program on a line of its own that fails doesn't
+stop the script, as in bash.
+
+Python code fails with an exception. Put `?` after a parenthesized
+expression to turn one into a value: `(expr)?` is the expression's value
+when it works, and a `Failed` (false, with the exception as `.error`) when
+it raises, with `$?` 1. So `||` gives a fallback, as it does for a command.
+A `NameError` still raises: a misspelled name is a bug, not a failure.
+
+```tessh
+n = (int "42")? || 0
+m = (int "forty-two")? || 0
+print $n $m
+r = (open /no/such/file)?
+if not $r
+  print "couldn't open:" $r.error.strerror
+```
+
+```output
+42 0
+couldn't open: No such file or directory
+```
+
+`||?` and `&&?` save the parentheses: they're `||` and `&&` with an
+exception on their left counted as a failure. `a ||? b` is `(a)? || b`, and
+`a &&? b` is `(a)? && b`.
+
+```tessh
+import json
+port = int ($env.get PORT "") ||? 8080
+print $port
+json.loads '{"a": 1}' &&? print "valid JSON"
+json.loads "{oops" &&? print never
+```
+
+```output
+8080
+valid JSON
+```
+
+As with `or`, a value that works but is false (`0`, `""`, `[]`) also takes
+the fallback. To tell those apart, keep the value with `(expr)?` and test
+`isinstance $r $Failed`.
+
+For more than a fallback, `try` catches exceptions by class. It's an
+expression too.
 
 ```tessh
 r = try

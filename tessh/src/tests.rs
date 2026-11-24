@@ -951,3 +951,45 @@ fn regexes_and_matching() {
     let (_, out) = run("s = \"Build 42\"\nm = $s =~ re'(\\d+)'\nprint ($m.group 1) (($s =~ re'^build'i) != None) ($s =~ re'^build') ($s !~ re'x')\nf = ./a.py\nprint ($f =~ *.py) ($f =~ *.rs) ($s =~ '42') ($s =~ '42$')\nprint re'a\\d'ms (\"a\\nb\" =~ re'^b'm != None)");
     assert_eq!(out, "42 True None True\nTrue False True False\nre'a\\d'ms True\n");
 }
+
+#[test]
+fn builtins_give_a_status_when_checked() {
+    let (ns, out) = run("cd /no/such/folder 2>/dev/null || print fallback\nbad = (cd /no/such/folder 2>/dev/null)\ncode = $bad.code\nok = if (cd /no/such/folder 2>/dev/null)\n  'yes'\nelse\n  'no'");
+    assert_eq!(out, "fallback\n");
+    assert_eq!(get::<i64>(&ns, "code"), 1);
+    assert_eq!(get::<String>(&ns, "ok"), "no");
+}
+
+#[test]
+fn unchecked_builtin_failure_stops_the_script() {
+    let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    Python::attach(|py| {
+        let ns = crate::runner::new_namespace(py, "__main__", vec![]).unwrap();
+        let r = crate::runner::run_source(py, "cd /no/such/folder\nafter = 1", &ns, "<test>", false);
+        assert!(r.is_err());
+        assert!(ns.get_item("after").unwrap().is_none());
+    });
+}
+
+#[test]
+fn question_mark_turns_an_exception_into_a_value() {
+    let (ns, _) = run("n = (int '42')? || 0\nm = (int 'x')? || 7\nr = (int 'x')?\nkind = (type $r.error).__name__\nfalse_ = not $r");
+    assert_eq!(get::<i64>(&ns, "n"), 42);
+    assert_eq!(get::<i64>(&ns, "m"), 7);
+    assert_eq!(get::<String>(&ns, "kind"), "ValueError");
+    assert!(get::<bool>(&ns, "false_"));
+    let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    Python::attach(|py| {
+        let ns = crate::runner::new_namespace(py, "__main__", vec![]).unwrap();
+        assert!(crate::runner::run_source(py, "r = (int $nosuchname)?", &ns, "<test>", false).is_err(), "a NameError still raises");
+    });
+}
+
+#[test]
+fn catching_or_and() {
+    let (ns, out) = run("n = int abc ||? 5\nm = int '3' ||? 5\nint abc &&? print never\nint '1' &&? print yes\nk = int abc ||? int def ||? 9");
+    assert_eq!(get::<i64>(&ns, "n"), 5);
+    assert_eq!(get::<i64>(&ns, "m"), 3);
+    assert_eq!(get::<i64>(&ns, "k"), 9);
+    assert_eq!(out, "yes\n");
+}

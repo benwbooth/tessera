@@ -28,9 +28,11 @@ source community.
 ## How to read it
 <!-- help: abs-conventions abs-how-to-read -->
 
-Each example has two versions. On Tessera's Guide page they're two tabs,
-**tessh** (shown first) and **bash (original)**; in `help` and in the
-Markdown the bash comes first, then the tessh.
+Each example has two versions. On Tessera's Guide page and in tessh's
+full-screen guide they're two tabs, **tessh** (shown first) and **bash
+(original)**, and switching one switches every example's (`t` does it by
+key in tessh's). In `help` and in the Markdown the bash comes first, then
+the tessh.
 
 - **bash**: the original script, as the ABS Guide has it (its file name is
   in the heading). Where it printed something else than the tessh version,

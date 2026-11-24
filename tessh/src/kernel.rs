@@ -424,7 +424,7 @@ fn complete(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
     let word = &before[start_b..];
     let line_before = before[..start_b].rsplit('\n').next().unwrap_or("");
     let head = line_before.trim_end();
-    let first = head.is_empty() || head.ends_with(['|', ';', '(']) || head.ends_with("&&") || head.ends_with("||");
+    let first = head.is_empty() || head.ends_with(['|', ';', '(']) || head.ends_with("&&") || head.ends_with("||") || head.ends_with("&&?") || head.ends_with("||?");
     let matches = crate::repl::completions(py, ns, word, first, &before[..start_b]);
     let start = before[..start_b].chars().count();
     json!({"status": "ok", "matches": matches, "cursor_start": start, "cursor_end": pos, "metadata": {}})

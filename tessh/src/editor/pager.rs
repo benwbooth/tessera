@@ -128,18 +128,24 @@ impl Guide {
         self.relayout(false);
     }
 
-    /// Example `n`'s tab: its bash version or tessh's, the guide where it was.
+    /// Every example's tab, as example `n`'s was clicked: their bash
+    /// versions or tessh's, with `n`'s tab bar kept where it was on screen.
     fn show_tab(&mut self, n: usize, bash: bool) {
-        let set = &mut self.bash[self.which];
-        if bash == set.contains(&n) {
+        let w = self.which;
+        let all: Vec<usize> = self.tab_lines.iter().map(|&(_, k)| k).collect();
+        if all.iter().all(|k| bash == self.bash[w].contains(k)) {
             return;
         }
+        let row = self.tab_lines.iter().find(|&&(_, k)| k == n).map(|&(l, _)| l as isize - self.top as isize);
         if bash {
-            set.insert(n);
+            self.bash[w].extend(all);
         } else {
-            set.remove(&n);
+            self.bash[w].clear();
         }
         self.relayout(true);
+        if let (Some(row), Some(&(l, _))) = (row, self.tab_lines.iter().find(|&&(_, k)| k == n)) {
+            self.top = (l as isize - row).max(0) as usize;
+        }
     }
 
     /// Laid out again at the same width; `stay`: at the same line, not the
@@ -247,15 +253,24 @@ impl Guide {
         }
         Some(if a <= b { (a, b) } else { (b, a) })
     }
+    /// The chars of line `i` in the pick: a code block's line without its
+    /// "  │ " gutter, which is the guide's, not the code's.
+    fn picked_span(&self, i: usize, ((l0, c0), (l1, c1)): ((usize, usize), (usize, usize))) -> (usize, usize) {
+        let line = &self.plain[i];
+        let len = line.chars().count();
+        let gutter = if line.starts_with("  │ ") { 4 } else if line == "  │" { 3 } else { 0 };
+        let from = if i == l0 { c0.min(len) } else { 0 }.max(gutter);
+        let to = if i == l1 { c1.min(len) } else { len };
+        (from, to.max(from))
+    }
     /// The text picked, lines joined with newlines.
     fn sel_text(&self) -> String {
-        let Some(((l0, c0), (l1, c1))) = self.sel_range() else { return String::new() };
+        let Some(r @ (_, (l1, _))) = self.sel_range() else { return String::new() };
         let mut out = vec![];
-        for i in l0..=l1.min(self.plain.len().saturating_sub(1)) {
+        for i in r.0 .0..=l1.min(self.plain.len().saturating_sub(1)) {
             let chars: Vec<char> = self.plain[i].chars().collect();
-            let from = if i == l0 { c0.min(chars.len()) } else { 0 };
-            let to = if i == l1 { c1.min(chars.len()) } else { chars.len() };
-            out.push(chars[from..to.max(from)].iter().collect::<String>().trim_end().to_string());
+            let (from, to) = self.picked_span(i, r);
+            out.push(chars[from..to].iter().collect::<String>().trim_end().to_string());
         }
         out.join("\n")
     }
@@ -361,13 +376,13 @@ impl Guide {
             let i = self.top + r;
             let Some(l) = self.lines.get(i) else { continue };
             let picked = self.sel_range().filter(|((l0, _), (l1, _))| (*l0..=*l1).contains(&i));
-            if let Some(((l0, c0), (l1, c1))) = picked {
-                // (A line in the pick: the picked part reversed.)
+            if let Some(r @ (_, (l1, _))) = picked {
+                // (A line in the pick: the picked part reversed; a code
+                // block's gutter never is.)
                 let chars: Vec<char> = self.plain[i].chars().collect();
-                let from = if i == l0 { c0.min(chars.len()) } else { 0 };
-                let to = if i == l1 { c1.min(chars.len()) } else { chars.len() };
+                let (from, to) = self.picked_span(i, r);
                 let (a, b, c): (String, String, String) =
-                    (chars[..from].iter().collect(), chars[from..to.max(from)].iter().collect(), chars[to.max(from)..].iter().collect());
+                    (chars[..from].iter().collect(), chars[from..to].iter().collect(), chars[to..].iter().collect());
                 let b = if b.is_empty() && i != l1 { " ".to_string() } else { b };
                 let _ = write!(o, "{a}\x1b[7m{b}\x1b[27m{c}");
             } else if !q.is_empty() && self.lower[i].contains(&q) {
@@ -712,4 +727,32 @@ fn run(mut g: Guide, at: &str) {
     let _ = write!(o, "\x1b[?1006l\x1b[?1002l\x1b[?1049l\x1b[?25h");
     let _ = o.flush();
     let _ = crossterm::terminal::disable_raw_mode();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_tab_switches_every_example_and_stays_put() {
+        let mut g = Guide::new(include_str!("../../doc/advanced/02-sha-bang.md"));
+        assert!(g.tab_lines.len() > 2);
+        let (line, n) = g.tab_lines[2];
+        g.top = line - 3;
+        g.show_tab(n, true);
+        let all: Vec<usize> = g.tab_lines.iter().map(|&(_, k)| k).collect();
+        assert!(all.iter().all(|k| g.bash[0].contains(k)), "every example shows bash");
+        let now = g.tab_lines.iter().find(|&&(_, k)| k == n).unwrap().0;
+        assert_eq!(now - g.top, 3, "the clicked tab bar stays on its row");
+        g.show_tab(all[0], false);
+        assert!(g.bash[0].is_empty(), "and back to tessh, all of them");
+    }
+
+    #[test]
+    fn a_pick_in_code_leaves_out_the_gutter() {
+        let mut g = Guide::new("Text.\n\n```tessh\nif True\n  print hi\n```\n");
+        let a = g.plain.iter().position(|l| l.contains("if True")).unwrap();
+        g.sel = Some(((a, 0), (a + 1, g.plain[a + 1].chars().count())));
+        assert_eq!(g.sel_text(), "if True\n  print hi");
+    }
 }

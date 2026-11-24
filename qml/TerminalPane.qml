@@ -332,7 +332,9 @@ Item {
         history: pane.commandHistory
         // (A notebook with a Jupyter kernel: the editor writes its next cell.)
         readonly property bool forNotebook: notebook.visible && !notebook.shellKernel
-        autoLang: forNotebook ? notebook.language : pane.replLang !== "" ? pane.replLang : "bash"
+        // (tessh as the pane's shell, not only started from another: its
+        // completions, colors and checks, and what's typed goes to it.)
+        autoLang: forNotebook ? notebook.language : pane.replLang !== "" ? pane.replLang : pane.shellName === "tessh" ? "tessh" : "bash"
         themeData: { try { return JSON.parse(pane.themeJson) } catch (e) { return {} } }
         cwd: term.pwd !== "" ? term.pwd : pane.procCwd
         showPrompt: pane.editorPrompt
@@ -405,6 +407,7 @@ Item {
             const inTerm = pane.viewMode !== "notebook"
             const shellLang = (l) => ["tessh", "fish", "nu", "powershell", "elvish", "xonsh"].indexOf(l) >= 0
             const asLang = () => {
+                if (inTerm && L === pane.shellName) { plain(); return }
                 if (inTerm && shellLang(L) && controller) { snippet(L, plain); return }
                 if (!inTerm && pane.replLang === "" && L !== "" && L !== "bash" && controller && notebook.hasKernelFor(L)) {
                     notebook.submitLang(t, L)

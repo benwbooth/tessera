@@ -36,7 +36,7 @@ Bash's options, and where tessh stands on each:
 | `-b` | notify | none; `jobs` shows finished jobs |
 | `-c …` | (run a string) | `tessh -c 'code' args…` |
 | `checkjobs` | | none |
-| `-e` | errexit | **Gap:** a failing program never stops a script. A Python error always does; for a program, `cmd || exit 1` or check `$?` |
+| `-e` | errexit | Half: a builtin (`cd`, `pushd`, `source`…) that fails on a line of its own stops the script, and so does a Python error; a failing program doesn't. Check it with `cmd || exit 1`, `if cmd` or `$?`, and turn a Python error into a false value with `(expr)?` |
 | `-f` | noglob | none needed: a variable's value is never globbed, and a quoted pattern is text |
 | `globstar` | | always on: `**/*.py` searches the subfolders |
 | `-i` | interactive | `tessh` alone is the REPL |

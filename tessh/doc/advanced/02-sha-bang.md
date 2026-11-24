@@ -201,13 +201,10 @@ if (os.getuid) != $ROOT_UID
   exit $E_NOTROOT
 
 # The number of lines to keep: the first argument, if there is one.
-lines = if (len $argv) > 1 and $argv[1] then $argv[1] else $LINES
+# (Without one, $argv[1] is an IndexError, and ||? falls back.)
+lines = $argv[1] ||? $LINES
 
-cd $LOG_DIR
-
-if (pwd) != $LOG_DIR         # Not in the log folder?
-  print "Can't change to $LOG_DIR."
-  exit $E_XCD
+cd $LOG_DIR || exit $E_XCD   # cd says why on standard error.
 
 tail -n $lines messages > mesg.temp   # Save last section of message log file.
 mv mesg.temp messages                 # Rename it as system log file.
@@ -225,21 +222,32 @@ Log files cleaned up.
  50 total
 ```
 
-The `cd` check is there because a failed `cd` in bash only prints an error
-and goes on, so the script would cut the logs of whatever folder it was in.
-In tessh a `cd` that fails is an error that stops the script, so the check
-is a belt with braces; to handle it yourself, catch it. (`cd dir || exit 1`
-also works, as in bash, when the folder is there.)
+A failed `cd` in bash only prints an error and goes on, so the script would
+cut the logs of whatever folder it was in. The bash checks afterwards with
+`pwd`, and its comment gives the better way, which tessh uses: `cd $LOG_DIR
+|| exit $E_XCD`. A builtin's status works as bash's: `cd` prints why it
+failed on standard error, sets `$?` to 1, and `||` runs the `exit`. Without
+the `||`, a `cd` on a line of its own that fails stops the script anyway,
+with status 1 rather than `$E_XCD`.
+
+`$argv[1]` is Python indexing, so with no argument it raises an IndexError
+instead of being empty. `||?` is `||` that also takes an exception on its
+left as a failure, so `$argv[1] ||? $LINES` falls back when the argument is
+missing, and when it's empty (a false value). `&&?` is the same for `&&`:
+what's after it runs only when the left side worked and raised nothing.
 
 ```tessh
-try
-  cd /no/such/folder
-except OSError as e
-  print "Cannot change to necessary directory: $e"
+cd /no/such/folder 2>/dev/null || print "Cannot change to necessary directory."
+n = int "fifty" ||? 50
+print $n
+int "50" &&? print "a number"
+int "fifty" &&? print "never printed"
 ```
 
 ```output
-Cannot change to necessary directory: cd: /no/such/folder: No such file or directory
+Cannot change to necessary directory.
+50
+a number
 ```
 
 The ABS Guide's better check of the argument, with `case`, is a `match` in

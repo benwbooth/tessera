@@ -10,15 +10,18 @@ In bash a function's status is that of its last command, and a script's
 too, which is why a bare `exit` (or `exit $?`, or none at all) passes on
 the last command's status.
 
-tessh keeps exit statuses for programs: `$?` is the last program's, and a
+tessh keeps exit statuses for commands: `$?` is the last command's, and a
 command's value (an `Output`) has it as `.code`, with `.ok` for "it was 0"
 and a truth value to match. A script that ends without `exit` ends with
 the last program's status, as in bash, but a bare `exit` is `exit 0`, so
 write `exit $?` to pass a failure on. tessh's functions return values, not
-statuses: `return 5` gives 5 to the caller, and leaves `$?` alone. And
-where bash goes on after an error, a Python error in tessh (a missing
-file, a failed `cd`, a bad conversion) is an exception that stops the
-script unless it's caught.
+statuses: `return 5` gives 5 to the caller, and leaves `$?` alone.
+
+Builtins give statuses too: `cd dir || exit 1`, `if cd dir` and `$?` work
+as in bash. Where bash goes on after a builtin fails on a line of its own,
+tessh stops the script, as it does for a Python error (a missing file, a
+bad conversion). `(expr)?` turns a Python error into a false value, so
+`(int $s)? || 0` falls back the way `cmd || other` does.
 
 ### Example 6-1. exit / exit status (`ex5.sh`)
 

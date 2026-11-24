@@ -122,9 +122,20 @@ Rectangle {
             + "if(h.startsWith('#')){const t=document.getElementById(decodeURIComponent(h.slice(1)));if(t)t.scrollIntoView({block:'start'})}else if(/^(https?|mailto|tessera-guide):/.test(h))window.open(h)})</script>"
             + "<script>" + momentum + "</script>"
             + "<script>" + navSplit + "</script>"
+            + "<script>" + tabSync + "</script>"
     }
     // The contents list's edge, dragged: the list follows the pointer; let go,
     // the width goes to Tessera to keep ("tessera-navw:N" on the console).
+    // (An example's bash/tessh tab switches every example's, and the one
+    // clicked stays where it was on screen.)
+    // (Where it was is taken at the press: by the change, focusing the
+    // radio button has scrolled it into view.)
+    readonly property string tabSync: "let exY=null;document.addEventListener('pointerdown',e=>{const l=e.target.closest('.ex-tabs>label');exY=l?l.parentElement.getBoundingClientRect().top:null},true);"
+        + "document.addEventListener('change',e=>{const t=e.target;if(!t.matches('.ex-tabs>input'))return;"
+        + "const box=t.closest('.ex-tabs'),y=exY!==null?exY:box.getBoundingClientRect().top;exY=null;"
+        + "document.querySelectorAll('.ex-tabs>input.'+t.className).forEach(i=>{if(i!==t)i.checked=true});"
+        + "let sc=box.parentElement;while(sc&&!(sc.scrollHeight>sc.clientHeight&&/auto|scroll/.test(getComputedStyle(sc).overflowY)))sc=sc.parentElement;"
+        + "(sc||document.scrollingElement).scrollTop+=box.getBoundingClientRect().top-y;console.log('tessera-tabs:'+t.className)})"
     readonly property string navSplit: "document.addEventListener('DOMContentLoaded',()=>{const nav=document.querySelector('nav');if(!nav)return;"
         + "const sp=document.createElement('div');sp.id='navsplit';sp.title='Drag to resize the contents';nav.after(sp);"
         + "sp.addEventListener('mousedown',ev=>{if(ev.button!==0)return;ev.preventDefault();const x0=ev.clientX,w0=nav.getBoundingClientRect().width;sp.classList.add('on');"

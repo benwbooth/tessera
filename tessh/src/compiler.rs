@@ -860,16 +860,26 @@ impl<'py, 's> Compiler<'py, 's> {
             return Ok(Res { stmts, expr: r.expr });
         }
         let sub = if ctx == Ctx::Value { Ctx::Value } else { Ctx::Cond };
+        // (`a ||? b`, `a &&? b`: as || and &&, and an exception in a counts
+        // as a failure, as (a)? would make it.)
         for (opname, is_and) in [("||", false), ("&&", true)] {
-            let parts = split(items, |x| x.is_op(opname));
+            let catching = format!("{opname}?");
+            let is_sep = |x: &Form| x.is_op(opname) || x.is_op(&catching);
+            let parts = split(items, is_sep);
             if parts.len() > 1 {
                 if parts.iter().any(|p| p.is_empty()) {
                     return err(format!("'{opname}' needs something on both sides"), items.first());
                 }
+                let seps: Vec<&Form> = items.iter().filter(|x| is_sep(x)).collect();
                 let n = parts.len();
                 let mut rs = vec![];
                 for (k, p) in parts.into_iter().enumerate() {
-                    rs.push(self.compile_shell(p, if k + 1 == n { children } else { &[] }, sub)?);
+                    let r = self.compile_shell(p, if k + 1 == n { children } else { &[] }, sub)?;
+                    let r = match seps.get(k) {
+                        Some(sep) if sep.is_op(&catching) => self.try_res(r, sep)?,
+                        _ => r,
+                    };
+                    rs.push(r);
                 }
                 return self.bool_chain(is_and, rs);
             }
@@ -960,7 +970,11 @@ impl<'py, 's> Compiler<'py, 's> {
     fn compile_segment(&mut self, items: &[Form], children: &[Form], ctx: Ctx) -> R<Res<'py>> {
         match self.segment_kind(items) {
             "special" => self.compile_items(items, children, ctx, &[], &[]),
-            "command" => self.compile_command(items, children, if ctx == Ctx::Value { "capture" } else { "attach" }),
+            "command" => self.compile_command(items, children, match ctx {
+                Ctx::Value => "capture",
+                Ctx::Stmt => "stmt",
+                _ => "attach",
+            }),
             _ => {
                 if items.len() == 1 && children.is_empty() {
                     if let Some((m, field)) = member(&items[0]) {
@@ -1138,6 +1152,7 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::Op { name, tick: true } => Ok(Res::e(self.c(format!("`{name}`"))?)),
             Kind::Num(t) => Ok(Res::e(self.c(t.as_str())?)),
             Kind::Str { value, .. } => Ok(Res::e(self.c(value.as_str())?)),
+            Kind::Word(_) if try_inner(x).is_some() => self.try_value(try_inner(x).unwrap()),
             Kind::Word(ps) => {
                 let r = self.word_value(x, false)?;
                 let texts: Vec<&String> = ps.iter().filter_map(|p| if let Part::Text(t) = p { Some(t) } else { None }).collect();
@@ -1261,7 +1276,7 @@ impl<'py, 's> Compiler<'py, 's> {
         if items.is_empty() {
             return err("expected an expression", children.first());
         }
-        if items.len() > 1 && (items.iter().any(|x| x.is_op("||") || x.is_op("&&")) || items[items.len() - 1].is_op("&") || self.pipe_split(items).len() > 1) {
+        if items.len() > 1 && (items.iter().any(|x| ["||", "&&", "||?", "&&?"].iter().any(|o| x.is_op(o))) || items[items.len() - 1].is_op("&") || self.pipe_split(items).len() > 1) {
             return self.compile_shell(items, children, ctx);
         }
         if self.special_head(&items[0]).is_some() {
@@ -1961,6 +1976,7 @@ impl<'py, 's> Compiler<'py, 's> {
                     self.c(value.as_str())?
                 }
             }
+            Kind::Word(_) if try_inner(x).is_some() => return self.try_value(try_inner(x).unwrap()),
             // (A word with a glob in it: a Glob of what it spells.)
             Kind::Word(_) if is_glob_word(x) => {
                 let w = self.word_value(x, false)?;
@@ -3152,6 +3168,29 @@ impl<'py, 's> Compiler<'py, 's> {
         }))
     }
 
+    /// (expr)?: expr's value, or, if it raised, a Failed (false) holding
+    /// the exception. A NameError still raises: a typo isn't a failure.
+    fn try_value(&mut self, g: &Form) -> R<Res<'py>> {
+        let r = self.compile_value(g, Ctx::Value)?;
+        self.try_res(r, g)
+    }
+
+    /// r's statements and value in a try: an exception (but a NameError)
+    /// gives a Failed instead.
+    fn try_res(&mut self, r: Res<'py>, at: &Form) -> R<Res<'py>> {
+        let t = self.tmp("q");
+        let mut body = r.stmts;
+        body.push(self.assign(&t, self.val(r.expr)?)?);
+        let reraise = self.n("Raise", vec![("exc", self.none()), ("cause", self.none())])?;
+        let h1 = self.n("ExceptHandler", vec![("type", self.name("NameError", false)?), ("name", self.none()), ("body", self.list(vec![reraise])?)])?;
+        let ev = self.tmp("e");
+        let got = self.rcall("failed", vec![self.name(&ev, false)?])?;
+        let h2 = self.n("ExceptHandler", vec![("type", self.name("Exception", false)?), ("name", self.s(&ev)), ("body", self.list(vec![self.assign(&t, got)?])?)])?;
+        let node = self.n("Try", vec![("body", self.list(body)?), ("handlers", self.list(vec![h1, h2])?), ("orelse", self.list(vec![])?), ("finalbody", self.list(vec![])?)])?;
+        let node = self.at(node, at);
+        Ok(Res::s(vec![node], self.name(&t, false)?))
+    }
+
     fn sf_try(&mut self, items: &[Form], children: &[Form], ctx: Ctx, conts: &[Form]) -> R<Res<'py>> {
         let t = if ctx == Ctx::Stmt { None } else { Some(self.tmp("try")) };
         let main = self.branch(children, ctx, &t)?;
@@ -3975,6 +4014,20 @@ fn is_path_start(t: &str) -> bool {
 }
 
 /// A bare word with glob characters (*, ?, […]): *, *.txt, src/**/x, a$n*.
+/// `(expr)?`: the group in it.
+fn try_inner(x: &Form) -> Option<&Form> {
+    let Kind::Word(ps) = &x.kind else { return None };
+    let [Part::F(f), Part::Text(q)] = ps.as_slice() else { return None };
+    if q != "?" {
+        return None;
+    }
+    let g = match &f.kind {
+        Kind::Interp { expr, conv: None, spec: None, braced: false } => expr.as_ref(),
+        _ => f,
+    };
+    matches!(g.kind, Kind::Group { open: '(', .. }).then_some(g)
+}
+
 fn is_glob_word(x: &Form) -> bool {
     let glob = |t: &str| t.contains(['*', '?', '[']);
     match &x.kind {

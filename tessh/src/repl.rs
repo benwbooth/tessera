@@ -990,7 +990,7 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
     let start = before.rfind(|c: char| " \t\n()[]{}\"'`;$".contains(c)).map(|i| i + 1).unwrap_or(0);
     let word = &before[start..];
     let head = before[..start].trim_end();
-    let first = head.is_empty() || head.ends_with(['|', ';', '(', '\n']) || head.ends_with("&&") || head.ends_with("||");
+    let first = head.is_empty() || head.ends_with(['|', ';', '(', '\n']) || head.ends_with("&&") || head.ends_with("||") || head.ends_with("&&?") || head.ends_with("||?");
     let var = before[..start].ends_with('$');
     let mut items: Vec<Item> = vec![];
     // (obj.attr: what the object has, from a name tessh knows or a module

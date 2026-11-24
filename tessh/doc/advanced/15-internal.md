@@ -290,10 +290,7 @@ def error fmt *args
   print
   exit $E_BADDIR
 
-try
-  cd $var
-except OSError
-  error "Can't cd to %s." $var
+cd $var 2>/dev/null || error "Can't cd to %s." $var
 ```
 
 ```output

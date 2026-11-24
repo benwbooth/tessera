@@ -13,7 +13,10 @@ These came up while porting and were fixed in tessh, so the examples use
 them as bash would:
 
 - `$name1`, `$x2y`: a name with digits in it is the whole name.
-- `cd dir || exit 1`, `cd dir && make`: builtins that worked are a success.
+- `cd dir || exit 1`, `cd dir && make`, `if cd dir`: a builtin gives a
+  status as bash's do, 0 when it worked and 1 (its message on standard
+  error) when it didn't. On a line of its own, where nothing checks it, a
+  failing builtin stops the script instead.
 - `:`, bash's null command (`: >file`, `while :`).
 - `if false`, `while true`: a lone word as a condition runs the command.
 - `if ! cmd`, and `! cmd` sets `$?` as bash's does.

@@ -557,10 +557,9 @@ home=/home/bozo
 import os
 dir = /home/bozo
 
-try
-  cd $dir
+if cd $dir 2>/dev/null
   print "Now in $dir."
-except OSError
+else
   print "Can't change to $dir."
 
 var1 = 20

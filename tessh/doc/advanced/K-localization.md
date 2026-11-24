@@ -84,10 +84,7 @@ def run_in language
   t = gettext.translation "localized" "locale" languages=([$language]) fallback=True   # (in parentheses: a bug, for now)
   _ = $t.gettext
   var = /no/such/folder
-  try
-    cd $var
-  except OSError
-    print ((_ "Can't cd to {var}.").format var=$var)
+  cd $var 2>/dev/null || print ((_ "Can't cd to {var}.").format var=$var)
   print (_ "Enter the value: ")
 
 run_in fr

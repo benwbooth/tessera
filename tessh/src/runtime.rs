@@ -110,6 +110,20 @@ class Output(str):
         r = str.__repr__(self)
         return r if self.code == 0 else f"Output({r}, code={self.code})"
 
+class Failed:
+    """What (expr)? gives when expr raised: false, with the exception as
+    .error. `(int $s)? || 0` falls back; `raise $r.error` raises it again."""
+    __slots__ = ("error",)
+    def __init__(self, error):
+        self.error = error
+    def __bool__(self):
+        return False
+    ok = property(lambda s: False)
+    def __str__(self):
+        return str(self.error)
+    def __repr__(self):
+        return f"Failed({self.error!r})"
+
 # ---- pretty printing ------------------------------------------------------
 
 _notebook = False   # (the kernel sets it: cards show color)
@@ -966,6 +980,13 @@ fn status() -> i32 {
     STATUS.load(Ordering::SeqCst)
 }
 
+/// (expr)? when expr raised: a Failed holding the exception, and $? 1.
+#[pyfunction]
+fn failed(py: Python<'_>, e: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    set_status(1);
+    Ok(prelude(py)?.getattr("Failed")?.call1((e,))?.unbind())
+}
+
 /// `! cmd`: its status the other way round, 1 for success and 0 for
 /// failure, $? too, as bash's !. (Not a command: Python's not.)
 #[pyfunction]
@@ -1145,6 +1166,10 @@ fn resolve_callable<'py>(py: Python<'py>, ns: &Bound<'py, PyDict>, name: &str) -
 #[pyfunction]
 #[pyo3(signature = (ns, head, args, redirs, mode="attach", force=false))]
 fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, args: Bound<'py, PyAny>, redirs: Bound<'py, PyAny>, mode: &str, force: bool) -> PyResult<Py<PyAny>> {
+    // ("stmt": a command whose status nothing checks, a line of its own.
+    // Otherwise "attach".)
+    let unchecked = mode == "stmt";
+    let mode = if unchecked { "attach" } else { mode };
     let words = argv(py, &args)?;
     let red = redirs_of(&redirs)?;
     let head_s = word(&head)?;
@@ -1188,7 +1213,31 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
                 let p = partial.call(fargs, Some(&kw))?;
                 return bg_call(py, p);
             }
-            return with_redirs(py, &red, || call(py)).map(|v| v.unbind());
+            let builtin = f.cast::<Builtin>().ok().map(|b| b.get().name);
+            let attached = mode != "capture";
+            // (A builtin that fails gives a status, as bash's do, when
+            // something checks it: `cd dir || exit 1`, `if cd dir`,
+            // `r = (cd dir)`. On a line of its own, nothing checks it, and
+            // it stops the script: no `cd dir` failing quietly before an
+            // `rm -rf *`. Its message goes where its 2> sends it.)
+            let soft = !unchecked && builtin.is_some_and(|n| n != "source");
+            return with_redirs(py, &red, || match call(py) {
+                Err(e) if soft && e.is_instance_of::<pyo3::exceptions::PyException>(py) => {
+                    let name = builtin.unwrap();
+                    let msg = e.value(py).str()?.to_string();
+                    let msg = if msg.starts_with(&format!("{name}:")) { msg } else { format!("{name}: {msg}") };
+                    let code = if msg.contains("usage:") { 2 } else { 1 };
+                    let sys = py.import("sys")?;
+                    sys.getattr("stdout")?.call_method0("flush")?;
+                    let err = sys.getattr("stderr")?;
+                    err.call_method1("write", (format!("tessh: {msg}\n"),))?;
+                    err.call_method0("flush")?;
+                    set_status(code);
+                    prelude(py)?.getattr("Output")?.call1(("", code, msg, attached))
+                }
+                r => r,
+            })
+            .map(|v| v.unbind());
         }
     }
     let mut all = vec![head_s];
@@ -2738,6 +2787,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         wrap_pyfunction!(show, &m)?,
         wrap_pyfunction!(status, &m)?,
         wrap_pyfunction!(negate, &m)?,
+        wrap_pyfunction!(failed, &m)?,
         wrap_pyfunction!(g, &m)?,
         wrap_pyfunction!(t, &m)?,
         wrap_pyfunction!(cmd, &m)?,
@@ -2756,6 +2806,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         m.add_function(f)?;
     }
     m.add("Output", prelude(py)?.getattr("Output")?)?;
+    m.add("Failed", prelude(py)?.getattr("Failed")?)?;
     m.add("pick", prelude(py)?.getattr("pick")?)?;
     for n in CORE {
         m.add(*n, prelude(py)?.getattr(*n)?)?;
@@ -2781,7 +2832,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "help", "print", "pretty", "Path", "Glob"].iter()).chain(CORE.iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "Failed", "help", "print", "pretty", "Path", "Glob"].iter()).chain(CORE.iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }
