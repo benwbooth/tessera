@@ -136,7 +136,9 @@ static bool heredoc_start(State *s, TSLexer *l) {
         if (l->lookahead != q || n == 0) return false;
         next(l);
     } else if (is_ident(l->lookahead, true)) {
-        while (is_ident(l->lookahead, false)) {
+        // (The word up to a space or one of ;|&<>() and quotes, as bash and
+        // tessh's reader have it: End-Of-Session, EOF.txt.)
+        while (!l->eof(l) && !is_space(l->lookahead) && !strchr(";|&<>()'\"`", (int)l->lookahead)) {
             if (n < MAX_DELIM) d[n++] = (char)l->lookahead;
             next(l);
         }
