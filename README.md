@@ -177,8 +177,13 @@ defmacro unless cond:expr *body
 
 The language is described in [docs/TESSH.md](docs/TESSH.md), and the guide,
 with an example for each part of it, is [tessh/doc/guide.md](tessh/doc/guide.md)
-(every example there is run by the tests). tessh is built with
-Tessera (`nix run github:benwbooth/tessera#tessh` on its own).
+(every example there is run by the tests). The
+[Advanced tessh Scripting Guide](tessh/doc/advanced/00-introduction.md) is the
+Advanced Bash-Scripting Guide ported, every example in bash and tessh side by
+side. All of tessh's documentation, and how to install it on its own (one
+file from the releases, nothing else needed), is in [tessh/](tessh/README.md).
+tessh is built with Tessera (`nix run github:benwbooth/tessera#tessh` on its
+own).
 
 ## tesserad
 
