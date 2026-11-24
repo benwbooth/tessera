@@ -21,7 +21,11 @@ Builtins give statuses too: `cd dir || exit 1`, `if cd dir` and `$?` work
 as in bash. Where bash goes on after a builtin fails on a line of its own,
 tessh stops the script, as it does for a Python error (a missing file, a
 bad conversion). `(expr)?` turns a Python error into a false value, so
-`(int $s)? || 0` falls back the way `cmd || other` does.
+`(int $s)? || 0` falls back the way `cmd || other` does, and `a ||? b` says
+the same without the parentheses. The other way round, `(cmd)!` turns a
+failed command into an exception, `CommandFailed`, with the `.status`, and
+strict mode (`strict`, `set -e`, `tessh -e`) does that for every program
+that fails on a line of its own (chapter 33).
 
 ### Example 6-1. exit / exit status (`ex5.sh`)
 

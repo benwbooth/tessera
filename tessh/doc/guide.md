@@ -700,6 +700,11 @@ fallback
 anyway
 ```
 
+Python code fails with an exception rather than a status. `&&?` and `||?`
+count one as a failure, and a parenthesized command or expression with `?`
+or `!` after it converts between the two: `(expr)?` makes an exception a
+false value, and `(cmd)!` makes a failed command an exception (see Errors).
+
 ## Redirections
 <!-- help: redirections redirection redirect > >> < 2>&1 >&2 &> >| <> <<< << heredoc here-string fd stderr stdout process substitution <( >( -->
 
@@ -1251,7 +1256,7 @@ print $Registry.names
 ```
 
 ## Errors
-<!-- help: errors error exceptions exception try except finally raise assert traceback strict CommandFailed bang errexit -->
+<!-- help: errors error exceptions exception try except finally raise assert traceback strict CommandFailed bang errexit ? ! ||? &&? Failed -->
 
 Commands fail as in bash, with an exit status: a program (`mkdir`, `ls`,
 `grep`) and tessh's builtins (`cd`, `pushd`, `popd`, `export`, `which`…)
@@ -1419,6 +1424,9 @@ Nothing catching it, a `CommandFailed` stops the script with one line,
 script exits with the command's status. The `!` has to be glued to the `)`:
 `! cmd` is still not, `!=` still compares, and `wow!` is a word. For a chain
 put it after the part to check, `a && (b)!`, or around it all, `(a && b)!`.
+In a command's arguments `$(cmd)!` is the same form, so `echo hi $(whoami)!`
+prints no `!` (and `$(cmd)?` no `?`). Quote the string to keep the
+character: `echo "hi $(whoami)!"`.
 
 Strict mode does that for every line, as bash's `set -e` does: after
 `strict` (or `set -e`, or `tessh -e` in the `#!` line,

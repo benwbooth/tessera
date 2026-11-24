@@ -203,7 +203,9 @@ and the script exits with the command's status.
 
 The `!` is glued to a closing parenthesis and only there. `! cmd` and `!$x`
 are still not, `!=` still compares, and `wow!` is still a word. There's no
-`&&!` or `||!`: `a && (b)!` and `(a && b)!` cover them.
+`&&!` or `||!`: `a && (b)!` and `(a && b)!` cover them. Since `$(cmd)!` and
+`$(cmd)?` are these forms, an unquoted `echo hi $(whoami)!` prints no `!`.
+Quote it to keep the character: `echo "hi $(whoami)!"`.
 
 A builtin (`cd`, `pushd`, `source`…) that fails on a line of its own stops
 the script in any mode. In strict mode programs and pipes do too. A failure
@@ -364,10 +366,16 @@ variable). `{1 2 3}` is a set, `()` an empty tuple, and `(1, 2)` a tuple.
 |---|---|
 | `a \| b` | pipe `a`'s output into `b` |
 | `a && b`, `a \|\| b` | run `b` if `a` succeeded (failed) |
+| `a &&? b`, `a \|\|? b` | the same, with an exception in `a` counted as a failure: `(a)? && b`, `(a)? \|\| b` |
 | `a ; b` | one after the other |
+| `(expr)?` | an exception becomes a false `Failed` (see "Failures and exceptions") |
 | `(cmd)!` | raise `CommandFailed` if `cmd` fails (see "Failures and exceptions") |
 | `cmd &` | in the background (the value is a `Job`; `jobs` lists them) |
-| `>f` `>>f` `<f` `2>f` `2>>f` `&>f` `2>&1` `>&2` | redirections. Glued to the file they work anywhere. Spaced (`> f`) they work in command mode only |
+| `>f` `>>f` `<f` `>\|f` `<>f` `2>f` `2>>f` `&>f` `&>>f` `>&f` | redirections, bash's: a number in front picks the descriptor (`3>f`, `0<f`). Glued to the file they work anywhere, Python calls included (descriptors 0–2). Spaced (`> f`) they work in command mode only. Done left to right, as in bash |
+| `2>&1` `>&2` `3>&1` `0<&3` `2>&-` | copy or close a descriptor |
+| `<<<word` | the word and a newline as standard input (a here-string) |
+| `<<END` … `END` | a heredoc: the lines up to one that's just `END` as standard input. `$name`, `${expr}` and `$(…)` in them are filled in, unless the word is quoted (`<<'END'`, `<<"END"`). `<<-END` takes the tabs off the front of each line. The word is the whole word (`<<End-Of-Data`) |
+| `<(cmd)`, `>(cmd)` | process substitution: a path that reads what `cmd` prints, or that feeds what's written to it to `cmd`. `cmd` may be a program, a command or a function call |
 
 Each stage of a pipe can be:
 
@@ -534,7 +542,11 @@ and tessh warns when it isn't met.
 file      := line*
 line      := INDENT? item* ('#' comment)? NEWLINE  (children: more-indented lines)
 item      := term | OP | REDIR
-term      := atom postfix*
+REDIR     := DIGITS? ('>' | '>>' | '<' | '>|' | '<>' | '&>' | '&>>' | '>&' | '<&') WORD?
+           | '<<<' WORD | '<<' '-'? DELIM NEWLINE line* DELIM   (heredoc)
+           | '<(' form ')' | '>(' form ')'
+term      := atom postfix* | '(' items ')' ('?' | '!')   (glued: catch, ensure)
+           | '$(' form ')' ('?' | '!')
 atom      := NUMBER | STRING | WORD | '$' NAME | '$?' | '\' WORD | ':' NAME
            | ':(' form ')' | '`' NAME '`' | NAME '=' term | '*' term | '**' term
            | '(' items ')' | '[' items ']' | '{' items '}'
