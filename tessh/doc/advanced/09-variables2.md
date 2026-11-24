@@ -35,23 +35,23 @@ other exported variables are). The rest:
 | `$HOSTNAME` | `socket.gethostname` |
 | `$HOSTTYPE`, `$MACHTYPE` | `platform.machine` |
 | `$OSTYPE` | `sys.platform` |
-| `$IFS` | none: tessh doesn't split words; `str.split` does, where you say |
+| `$IFS` | `$IFS`, where `read` splits a line; tessh doesn't split words otherwise (`str.split` does, where you say) |
 | `$GLOBIGNORE` | none: filter a Glob's names yourself |
 | `$PIPESTATUS` | none: a pipeline's status is its last stage's |
-| `$REPLY` | none: there's no `read`; `input` returns the line |
+| `$REPLY` | `$REPLY`, set by `read` with no name; `input` returns the line |
 | `$SECONDS` | `time.monotonic`, less the time it was at the start |
-| `$TMOUT` | none: `select` or `signal.alarm` (examples 9-2 and 9-4) |
+| `$TMOUT` | none: `read -t secs`, or `select` or `signal.alarm` (examples 9-2 and 9-4) |
 | `$PS1`…`$PS4`, `$PROMPT_COMMAND`, `$IGNOREEOF`, `$SHELLOPTS`, `$-` | none (no `select` menus, no `-x` tracing) |
 | `$0`, `$1`…, `$#` | `$argv[0]`, `$argv[1]`…, `(len $argv) - 1` |
 | `$*`, `$@` | `" ".join $argv[1:]`, `$argv[1:]` |
-| `$!` | none: `cmd &` gives a Job without its PID; `subprocess.Popen` has `.pid` |
+| `$!` | `$j.pid`, after `j = cmd &`; `subprocess.Popen` has `.pid` too |
 | `$_` | none |
 | `$RANDOM` | `random.randrange 32768` (section 9.3) |
 
 **Gap:** none of these is a tessh variable, so a script ported from bash
 has to import and call. For most that's a plus (`os.getuid` says what it
 is, and can't be set by mistake), but `$LINENO`, `$FUNCNAME`, `$SECONDS`,
-`$PIPESTATUS`, `$!` and `$_` have no short form, and a few (`$PIPESTATUS`,
+`$PIPESTATUS` and `$_` have no short form, and a few (`$PIPESTATUS`,
 `set -o pipefail`, `$-`, `$PS4` with `-x`) have no equivalent at all.
 
 A subshell has its own PID in bash, which `$BASHPID` shows and `$$` hides.
@@ -314,8 +314,9 @@ IFS=:
 ### Timed input
 
 `$TMOUT` makes bash's prompt, and a `read` in a script, give up after that
-many seconds. tessh has no `read`; Python's `input` waits as long as it
-takes. The ABS Guide's three ways around that follow. Here, where no one
+many seconds. tessh has no `$TMOUT`, but its `read -t secs` gives up
+after that long (status 142); Python's `input` waits as long as it takes.
+The ABS Guide's three ways around that follow, the Python way. Here, where no one
 types, a program or a pipe stands in for the user.
 
 ### Example 9-2. Timed Input (`timed-input.sh`)
@@ -383,7 +384,8 @@ exit 0
 
 The "really elegant" way the comment wishes for is at hand in tessh:
 Python's `signal.alarm` is the C library's `alarm`, and `signal.signal`
-is bash's `trap`. No background timer, so no `$!` to kill: `signal.alarm 0`
+does what bash's `trap` does (tessh's `trap` would do here too). No
+background timer, so no `$!` to kill: `signal.alarm 0`
 turns the alarm off.
 
 ```tessh
@@ -538,8 +540,9 @@ fi
 exit 0
 ```
 
-`read -t` is a wait on the input with a time limit: `select.select` in
-Python. `read_t` returns `None` when nothing came in time. A pipe no one
+`read -t` is a wait on the input with a time limit. tessh's `read` has
+`-t` too (`read -t 4 variable`); here it's done the Python way, with
+`select.select`. `read_t` returns `None` when nothing came in time. A pipe no one
 writes to plays the user who types nothing; for a real one, give it `0`,
 the standard input.
 
@@ -1151,11 +1154,11 @@ a,b,c
 
 ### Other special parameters
 
-`$!` is the PID of the last job put in the background. tessh's `cmd &`
-gives a Job (for `jobs`, `fg` and `wait`) that doesn't tell its PID;
-`subprocess.Popen` starts a program in the background and has its `.pid`,
-and `.wait timeout=…` does the ABS Guide's "kill the job if it hangs"
-trick without a timing loop:
+`$!` is the PID of the last job put in the background. tessh's
+`j = cmd &` gives a Job (for `jobs`, `fg`, `wait` and `kill`), and
+`$j.pid` is its process ID. `subprocess.Popen` starts a program in the
+background too and has its `.pid`, and `.wait timeout=…` does the ABS
+Guide's "kill the job if it hangs" trick without a timing loop:
 
 ```bash no-run
 TIMEOUT=30   # Timeout value in seconds
@@ -1243,9 +1246,10 @@ in tessh it's `os.getpid`, and Python's `tempfile` makes one safely.
 
 ### $REPLY, $SECONDS and $PWD
 
-`read` with no variable name puts the line in `$REPLY`. tessh has no
-`read`: `input "prompt"` returns the line. Here the answers are canned,
-there being no one to type them.
+`read` with no variable name puts the line in `$REPLY`, in tessh too
+(`read -p "prompt"`). Python's `input "prompt"` returns the line instead,
+which is what the example uses. Here the answers are canned, there being
+no one to type them.
 
 ```bash no-run
 #!/bin/bash

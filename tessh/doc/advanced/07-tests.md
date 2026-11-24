@@ -1363,5 +1363,6 @@ else
     netscape /usr/share/doc/HTML/index.html &
 ```
 
-**Gap:** tessh has no `exec` builtin to replace the shell with a program;
-Python's `os.execv` does it.
+tessh's `exec` builtin replaces the shell with a program too
+(`exec ~/.Xclients`); the example uses Python's `os.execv`, which does the
+same.

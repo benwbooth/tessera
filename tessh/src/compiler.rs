@@ -531,6 +531,31 @@ impl<'py, 's> Compiler<'py, 's> {
         self.py_builtins.contains(root)
     }
 
+    /// `type ls`, `hash -r`, `exec zsh`, `eval "echo hi"`: Python's type,
+    /// hash, exec or eval (not a name of yours) whose first argument is a
+    /// word, so the shell's builtin; `type $x`, `hash $s`, `exec $code` stay
+    /// Python's. eval takes quoted text too: bash's `eval "$line"` is a string.
+    fn shell_dual(&self, items: &[Form]) -> bool {
+        let Kind::Sym { name, marks } = &items[0].kind else { return false };
+        if !["type", "hash", "exec", "eval"].contains(&name.as_str()) || self.binding(name, marks).is_some() || self.ns_get(name).is_some() {
+            return false;
+        }
+        if self.scopes.iter().chain(std::iter::once(&self.st.module)).any(|sc| sc.known.contains(name.as_str()) || sc.commands.contains(name.as_str())) {
+            return false;
+        }
+        // (The first argument decides: Python's take code or a value first,
+        // never a bareword, so `exec less $file` is the shell's.)
+        let eval = name == "eval";
+        items[1..].iter().take(1).all(|x| match &x.kind {
+            // (A bareword is a word, a name of yours too: `type f`; its value is $f.)
+            Kind::Sym { .. } => true,
+            Kind::Word(_) | Kind::Redir { .. } => true,
+            Kind::Str { kind, .. } => eval && *kind != 'b',
+            Kind::IStr(_) => eval,
+            _ => false,
+        }) && (items.len() > 1 || name != "eval")
+    }
+
     fn resolve(&self, name: &str, marks: &[u32], f: &Form) -> R<Obj<'py>> {
         if let Some(p) = self.binding(name, marks) {
             return Ok(self.at(self.name(&p, false)?, f));
@@ -950,6 +975,8 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::Sym { name, .. } => {
                 if self.special_head(head).is_some() {
                     "special"
+                } else if self.shell_dual(items) {
+                    "command"
                 } else if WORD_OPS.contains(&name.as_str()) || ["True", "False", "None", "..."].contains(&name.as_str()) || self.is_known(head) || walrus(items) || member(head).is_some() {
                     "expr"
                 } else {
@@ -1619,7 +1646,7 @@ impl<'py, 's> Compiler<'py, 's> {
             if self.special_head(head).is_some() {
                 return self.compile_items(items, children, ctx, &[], &[]);
             }
-            if !self.is_known(head) {
+            if !self.is_known(head) || self.shell_dual(items) {
                 return self.compile_command(items, children, mode);
             }
         } else if matches!(head.kind, Kind::Caret(_) | Kind::Word(_)) && self.segment_kind(items) == "command" {

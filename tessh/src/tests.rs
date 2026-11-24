@@ -1112,3 +1112,375 @@ fn top_level_await() {
         assert!(crate::runner::check(py, "import asyncio\nawait (asyncio.sleep 0)", "<test>").is_empty(), "--check takes a top-level await");
     });
 }
+
+// ---- the login shell's builtins (jobs.rs, shell.rs) ------------------------------------
+
+/// Run tessh text in a child process, as `tessh -c` does (its exit status,
+/// atexit's functions, a reported error): what it printed to stdout and
+/// stderr, and its status.
+fn run_forked(src: &str) -> (String, String, i32) {
+    run_forked_as(src, false)
+}
+
+/// The same, at the prompt's terms (interactive: jobs say so, get SIGHUP).
+fn run_forked_as(src: &str, interactive: bool) -> (String, String, i32) {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (mut out_r, out_w) = std::io::pipe().unwrap();
+    let (mut err_r, err_w) = std::io::pipe().unwrap();
+    Python::attach(|py| {
+        let _ = py.import("sys").and_then(|s| s.getattr("stdout")).and_then(|o| o.call_method0("flush"));
+        // (Python's fork: the child's Python is set up again, this thread its main one.)
+        let pid: i32 = py.import("os").unwrap().call_method0("fork").unwrap().extract().unwrap();
+        if pid == 0 {
+            unsafe {
+                libc::dup2(out_w.as_raw_fd(), 1);
+                libc::dup2(err_w.as_raw_fd(), 2);
+            }
+            crate::runtime::INTERACTIVE.store(interactive, std::sync::atomic::Ordering::SeqCst);
+            let ns = crate::runner::new_namespace(py, "__main__", vec!["-c".into()]).unwrap();
+            let r = crate::runner::run_source(py, src, &ns, "<string>", false);
+            let code = crate::finish(py, r, "<string>");
+            let _ = py.import("atexit").and_then(|a| a.call_method0("_run_exitfuncs"));
+            for s in ["stdout", "stderr"] {
+                let _ = py.import("sys").and_then(|m| m.getattr(s)).and_then(|o| o.call_method0("flush"));
+            }
+            let _ = std::io::stderr().flush();
+            unsafe { libc::_exit(code) };
+        }
+        drop(out_w);
+        drop(err_w);
+        let (mut out, mut err) = (String::new(), String::new());
+        py.detach(|| {
+            let _ = out_r.read_to_string(&mut out);
+            let _ = err_r.read_to_string(&mut err);
+        });
+        let mut st = 0;
+        unsafe { libc::waitpid(pid, &mut st, 0) };
+        (out, err, if libc::WIFEXITED(st) { libc::WEXITSTATUS(st) } else { 128 + libc::WTERMSIG(st) })
+    })
+}
+
+/// wait (all, a job spec, a Job value, a pid), its status, and $job.wait
+/// alone on a line or in parentheses.
+#[test]
+fn wait_for_jobs() {
+    let (ns, out) = run(concat!(
+        "a = sh -c 'sleep 0.1; echo one' &\n",
+        "wait\n",
+        "b = sh -c 'exit 3' &\n",
+        "rb = (wait $b)\n",
+        "c = sh -c 'exit 4' &\n",
+        "rc = (wait %sh)\n",
+        "d = sh -c 'exit 5' &\n",
+        "rd = (wait $d.pid)\n",
+        "e = sh -c 'sleep 0.1; echo two' &\n",
+        "$e.wait\n",
+        "f = sh -c 'exit 6' &\n",
+        "rf = ($f.wait)\n",
+        "g = sh -c 'exit 7' &\n",
+        "rg = wait -n\n",
+        "ok = (wait)\n",
+        "missing = (wait 1)\n",
+        "def six\n  6\n",
+        "py_job = six &\n",
+        "rp = (wait $py_job)\n",
+    ));
+    assert_eq!(out, "one\ntwo\n");
+    Python::attach(|py| {
+        let code = |k: &str| ns.bind(py).get_item(k).unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap();
+        assert_eq!([code("rb"), code("rc"), code("rd"), code("rf"), code("rg"), code("ok"), code("missing")], [3, 4, 5, 6, 7, 0, 127]);
+    });
+    assert_eq!(get::<i64>(&ns, "rp"), 6, "a Python job's result");
+}
+
+/// Job specs: %n, %%, %+, %-, %name, %?text; kill to a job and to a pid;
+/// kill -l; jobs with its marks; disown.
+#[test]
+fn job_specs_kill_and_disown() {
+    let (ns, out) = run(concat!(
+        "a = sleep 5 &\n",
+        "b = sh -c 'sleep 5; : marker' &\n",
+        "jobs\n",
+        "kill %-\n",
+        "ra = (wait $a)\n",
+        "kill %?marker\n",
+        "rb = (wait $b)\n",
+        "c = sleep 5 &\n",
+        "kill -s KILL $c\n",
+        "rc = (wait $c)\n",
+        "d = sleep 5 &\n",
+        "kill -INT $d.pid\n",
+        "rd = (wait $d)\n",
+        "kill -l 143\n",
+        "kill -l TERM\n",
+        "bad = (kill %nosuchjob 2>/dev/null)\n",
+        "e = sleep 5 &\n",
+        "pid = $e.pid\n",
+        "disown $e\n",
+        "gone = (wait $pid 2>/dev/null)\n",
+        "kill $pid\n",
+    ));
+    let jobs: Vec<&str> = out.lines().take(2).collect();
+    assert!(jobs[0].starts_with('[') && jobs[0].contains("]- running sleep 5"), "{out}");
+    assert!(jobs[1].contains("]+ running sh -c"), "{out}");
+    assert_eq!(out.lines().skip(2).collect::<Vec<_>>(), ["TERM", "15"]);
+    Python::attach(|py| {
+        let code = |k: &str| ns.bind(py).get_item(k).unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap();
+        assert_eq!([code("ra"), code("rb"), code("rc"), code("rd"), code("bad"), code("gone")], [143, 143, 137, 130, 1, 127]);
+    });
+}
+
+/// fg and bg take job specs too; a job value reads as %n in a command.
+#[test]
+fn fg_bg_take_specs() {
+    let (ns, _) = run("j = sh -c 'exit 9' &\ns = (str $j)\nr = fg %sh\nk = sleep 0.05 &\nfg $k\nn = (fg %nosuch 2>/dev/null)");
+    assert!(get::<String>(&ns, "s").starts_with('%'));
+    Python::attach(|py| {
+        let code = |k: &str| ns.bind(py).get_item(k).unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap();
+        assert_eq!([code("r"), code("n")], [9, 1]);
+    });
+}
+
+/// An interactive tessh's jobs get SIGHUP when it ends (disown -h spares one).
+#[test]
+fn jobs_get_hup_at_the_end() {
+    use std::sync::atomic::Ordering;
+    crate::runtime::INTERACTIVE.store(true, Ordering::SeqCst);
+    let (ns, _) = run("a = sleep 30 &\nb = sleep 0.3 &\ndisown -h $b\n__tessh__.hup_jobs\nra = ($a.wait)\nrb = ($b.wait)");
+    crate::runtime::INTERACTIVE.store(false, Ordering::SeqCst);
+    Python::attach(|py| {
+        let code = |k: &str| ns.bind(py).get_item(k).unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap();
+        assert_eq!([code("ra"), code("rb")], [129, 0]);
+    });
+}
+
+/// exit: without a status, the last command's; with jobs left at the
+/// prompt, a word first (twice ends them).
+#[test]
+fn exit_status_and_jobs_left() {
+    assert_eq!(run_forked("false\nexit").2, 1);
+    assert_eq!(run_forked("exit 3").2, 3);
+    let (out, err, code) = run_forked_as("j = sleep 30 &\nr = (exit 4)\nprint $r.code\nexit 5", true);
+    assert!(err.contains("you have 1 running job"), "{err}");
+    assert_eq!((out.as_str(), code), ("1\n", 5));
+}
+
+/// A builtin's error on a line of its own: one line, no traceback.
+#[test]
+fn builtin_errors_are_one_line() {
+    let (_, err, code) = run_forked("print before\npopd");
+    assert_eq!(err, "tessh: <string>:2: popd: directory stack empty\n");
+    assert_eq!(code, 1);
+    let (_, err, _) = run_forked("cd /no/such/folder");
+    assert!(err.starts_with("tessh: <string>:1: cd: /no/such/folder") && !err.contains("Traceback"), "{err}");
+}
+
+/// trap: EXIT when tessh ends, a signal's text run in the shell, - and ''.
+#[test]
+fn traps() {
+    let (out, _, code) = run_forked("trap 'print bye $n' EXIT\nn = 2\nexit 7");
+    assert_eq!((out.as_str(), code), ("bye 2\n", 7));
+    let (out, _, _) = run_forked("def done\n  print cleaned\ntrap done EXIT\nprint working");
+    assert_eq!(out, "working\ncleaned\n");
+    let (out, _, _) = run_forked(concat!(
+        "import os time\n",
+        "got = 0\n",
+        "trap 'got += 1' USR1\n",
+        "trap -p USR1\n",
+        "kill -USR1 (os.getpid)\n",
+        "time.sleep 0.05\n",
+        "trap '' USR1\n",
+        "kill -USR1 (os.getpid)\n",
+        "time.sleep 0.05\n",
+        "trap - USR1\n",
+        "bad = (trap 'x' NOSUCH 2>/dev/null)\n",
+        "err = (trap 'x' ERR 2>/dev/null)\n",
+        "print $got $bad.code ('CommandFailed' in $err.err)\n",
+    ));
+    assert_eq!(out, "trap -- 'got += 1' SIGUSR1\n1 1 True\n");
+}
+
+/// ulimit, umask and times.
+#[test]
+fn ulimit_umask_times() {
+    let (_, out) = run(concat!(
+        "import os\n",
+        "old = (os.umask 0o022)\n",
+        "umask\n",
+        "umask 077\n",
+        "umask\n",
+        "umask -S\n",
+        "umask u=rwx,g=rx,o=\n",
+        "umask\n",
+        "umask g-x\n",
+        "umask -p\n",
+        "os.umask $old\n",
+        "ulimit -S -c 0\n",
+        "ulimit -c\n",
+        "ulimit -a | grep -c 'open files'\n",
+        "times | wc -l\n",
+    ));
+    assert_eq!(out, "0022\n0077\nu=rwx,g=,o=\n0027\numask 0037\n0\n1\n2\n");
+}
+
+/// read: words into names (the last gets the rest), $REPLY, -a, -r, -d,
+/// -n, the status at the end of the input.
+#[test]
+fn read_builtin() {
+    let (ns, _) = run(concat!(
+        "read a b <<< 'one two  three '\n",
+        "read <<< '  whole line  '\n",
+        "read -a parts <<< '1 2 3'\n",
+        "read -r raw <<< 'back\\slash'\n",
+        "read cooked <<< 'back\\slash'\n",
+        "read -d , first <<< 'x,y'\n",
+        "read -n 2 two <<< 'abcdef'\n",
+        "echo 'piped in' | read p q\n",
+        "IFS = ':'\n",
+        "read u rest <<< 'root:x:0'\n",
+        "end = (read nothing </dev/null)\n",
+    ));
+    assert_eq!((get::<String>(&ns, "p"), get::<String>(&ns, "q")), ("piped".into(), "in".into()));
+    assert_eq!(get::<String>(&ns, "a"), "one");
+    assert_eq!(get::<String>(&ns, "b"), "two  three");
+    assert_eq!(get::<String>(&ns, "REPLY"), "  whole line  ");
+    assert_eq!(repr(&ns, "parts"), "['1', '2', '3']");
+    assert_eq!(get::<String>(&ns, "raw"), "back\\slash");
+    assert_eq!(get::<String>(&ns, "cooked"), "backslash");
+    assert_eq!(get::<String>(&ns, "first"), "x");
+    assert_eq!(get::<String>(&ns, "two"), "ab");
+    assert_eq!((get::<String>(&ns, "u"), get::<String>(&ns, "rest")), ("root".into(), "x:0".into()));
+    Python::attach(|py| assert_eq!(ns.bind(py).get_item("end").unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap(), 1));
+}
+
+/// getopts and shift, over $argv.
+#[test]
+fn getopts_and_shift() {
+    let (ns, out) = run(concat!(
+        "argv = [prog -a -bval -c sep -- rest more]\n",
+        "seen = []\n",
+        "while getopts 'ab:c:' opt\n",
+        "  seen.append [$opt $OPTARG]\n",
+        "shift ($OPTIND - 1)\n",
+        "argv2 = [x -z]\n",
+        "OPTIND = 1\n",
+        "getopts ':a' bad -z\n",
+        "print $bad $OPTARG\n",
+        "too_far = (shift 9)\n",
+    ));
+    assert_eq!(repr(&ns, "seen"), "[['a', None], ['b', 'val'], ['c', 'sep']]");
+    assert_eq!(repr(&ns, "argv"), "['prog', 'rest', 'more']");
+    assert_eq!(out, "? z\n");
+    Python::attach(|py| assert_eq!(ns.bind(py).get_item("too_far").unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap(), 1));
+}
+
+/// type, command -v and hash as bash's, with words; Python's with values.
+#[test]
+fn type_command_v_hash() {
+    let (ns, out) = run(concat!(
+        "def f x = $x\n",
+        "x = 1\n",
+        "type cd\n",
+        "type -t if f cd sh\n",
+        "type f\n",
+        "command -v cd\n",
+        "missing = (command -v no-such-program-here)\n",
+        "nf = (type no-such-program-here 2>/dev/null)\n",
+        "py_type = type $x\n",
+        "hash -r\n",
+        "h = (hash no-such-program-here 2>/dev/null)\n",
+        "py_hash = hash 'abc'\n",
+    ));
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "cd is a tessh builtin");
+    assert_eq!(&lines[1..5], ["keyword", "function", "builtin", "file"]);
+    assert!(lines[5].starts_with("f is a function"), "{out}");
+    assert_eq!(lines[6], "cd");
+    assert_eq!(repr(&ns, "py_type"), "<class 'int'>");
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        for k in ["missing", "nf", "h"] {
+            assert_eq!(ns.get_item(k).unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap(), 1, "{k}");
+        }
+        assert!(ns.get_item("py_hash").unwrap().unwrap().extract::<i64>().is_ok());
+    });
+}
+
+/// eval runs tessh text here (its value, the last form's); given a value,
+/// Python's.
+#[test]
+fn eval_tessh_text() {
+    let (ns, out) = run("eval \"echo ev\"\nx = (eval \"1 + 2\")\neval 'y = 5'\ncode = '2 * 3'\nz = eval $code\nw = eval \"print hi; 4\"\nline = 'echo held'\neval \"$line\"");
+    assert_eq!(out, "ev\nhi\nheld\n");
+    assert_eq!(get::<i64>(&ns, "x"), 3);
+    assert_eq!(get::<i64>(&ns, "y"), 5);
+    assert_eq!(get::<i64>(&ns, "z"), 6);
+    assert_eq!(get::<i64>(&ns, "w"), 4);
+}
+
+/// exec replaces tessh with a program; given code, it's Python's exec.
+#[test]
+fn exec_replaces_tessh() {
+    let (out, _, code) = run_forked("print before\nexec sh -c 'echo replaced; exit 3'\nprint not reached");
+    assert_eq!((out.as_str(), code), ("before\nreplaced\n", 3));
+    let (out, _, _) = run_forked("cmd = 'echo $0'\nexec -a myname sh -c $cmd");
+    assert_eq!(out, "myname\n");
+    let (_, err, code) = run_forked("exec no-such-program-here");
+    assert!(err.contains("exec: no-such-program-here: not found"), "{err}");
+    assert_eq!(code, 1);
+    let (ns, _) = run("exec \"q = 1\"");
+    assert_eq!(get::<i64>(&ns, "q"), 1);
+}
+
+/// builtin runs a builtin past a function of its name; history lists the
+/// prompt's; logout outside a login shell says so.
+#[test]
+fn builtin_history_logout() {
+    let dir = std::env::temp_dir().join(format!("tessh-hist-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("tessh")).unwrap();
+    std::fs::write(dir.join("tessh/history"), "ls\necho a<\\n>echo b\npwd\n").unwrap();
+    let (ns, out) = run(&format!(concat!(
+        "old = $env.get 'XDG_DATA_HOME'\n",
+        "$env.XDG_DATA_HOME = '{}'\n",
+        "def cd *a\n  builtin cd *$a\n  print moved\n",
+        "cd .\n",
+        "history\n",
+        "history 1\n",
+        "lo = (logout 2>/dev/null)\n",
+        "del cd\n",
+        "if $old\n  $env.XDG_DATA_HOME = $old\nelse\n  del $env.XDG_DATA_HOME\n",
+    ), dir.display()));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(out, "moved\n    1  ls\n    2  echo a\n       echo b\n    3  pwd\n    3  pwd\n");
+    Python::attach(|py| assert_eq!(ns.bind(py).get_item("lo").unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap(), 1));
+}
+
+/// bash's builtins tessh does its own way say what that way is, rather than
+/// "command not found".
+#[test]
+fn idioms_say_what_to_do() {
+    for (line, says) in [
+        ("alias ll='ls -l'", "@command"),
+        ("unalias ll", "@command"),
+        ("declare -i n=1", "Python's"),
+        ("local x=1", "def's own"),
+        ("readonly X=1", "read-only"),
+        ("shopt -s nullglob", "shell options"),
+        ("bind -x foo", "help keys"),
+        ("complete -F f cmd", "completes"),
+        ("compgen -c", "glob"),
+        ("caller", "traceback"),
+        ("enable -n cd", "can't be turned off"),
+        ("fc -e vi", "Ctrl+R"),
+    ] {
+        let (ns, _) = run(&format!("r = ({line} 2>&1)"));
+        Python::attach(|py| {
+            let r = ns.bind(py).get_item("r").unwrap().unwrap();
+            assert_eq!(r.getattr("code").unwrap().extract::<i32>().unwrap(), 1, "{line}");
+            let err = r.getattr("err").unwrap().to_string();
+            assert!(err.contains(says), "{line}: {err}");
+        });
+    }
+}

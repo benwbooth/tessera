@@ -9,7 +9,8 @@ aren't expanded inside `if`s, loops and functions defined at the same time,
 and they don't expand recursively. A function does all an alias does, and
 more.
 
-**Gap:** tessh has no aliases; a function is the way. A plain `def` gets
+**Gap:** tessh has no aliases; a function is the way. (`alias` and
+`unalias` say so, and fail.) A plain `def` gets
 its arguments as values. With `@command` before it, it gets them as the
 words a program would, globs and all, so it reads like a command and
 passes its arguments on: `def ll *words` then `ls -l *$words`. Unlike an

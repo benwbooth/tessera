@@ -46,7 +46,7 @@ complete -F _UseGetOpt-2 -o filenames ./UseGetOpt-2.sh
 ```
 
 **Gap:** tessh has no programmable completion: no `complete` or
-`compgen`, and no hook for a script's own completer, so Tab after a
+`compgen` (each says so, and fails), and no hook for a script's own completer, so Tab after a
 program's name offers files. What the function works out, the matches for
 the word being typed, is a one-line filter in tessh:
 

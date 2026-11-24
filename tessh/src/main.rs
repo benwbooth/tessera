@@ -19,7 +19,9 @@ mod pyforms;
 mod reader;
 mod repl;
 mod runner;
+mod jobs;
 mod runtime;
+mod shell;
 #[cfg(feature = "standalone")]
 mod standalone;
 mod viewer;

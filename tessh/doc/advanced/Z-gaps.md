@@ -4,7 +4,8 @@
 Porting the ABS Guide's examples turned up what bash has and tessh hasn't.
 Each one is marked **Gap** where it comes up; here they are together, with
 what to use meanwhile. Some are by design (tessh's values are Python's, so
-there's no word splitting and no `$IFS`), and those say so.
+there's no word splitting, and `$IFS` is only for `read`), and those say
+so.
 
 ## Fixed along the way
 <!-- help: abs-gaps-fixed -->
@@ -21,6 +22,18 @@ them as bash would:
 - `if false`, `while true`: a lone word as a condition runs the command.
 - `if ! cmd`, and `! cmd` sets `$?` as bash's does.
 - `$CMD args`, and `command prog args`: run the program the text names.
+- bash's builtins that change the shell, with bash's options (`help NAME`
+  describes each): `read`, `getopts` (with `$OPTIND`, `$OPTARG`), `shift`,
+  `eval` (of tessh text), `exec program`, `type`, `command -v`/`-V`,
+  `hash`, `builtin`, `trap`, `ulimit`, `umask`, `times`, `history`,
+  `fc -l`; and job control: `jobs`, `fg`, `bg`, `wait`, `disown`, `kill`
+  (a builtin taking `%job` specs), `suspend`, `logout`. A `Job` has `.pid`
+  (bash's `$!`), `.pids` and `.status`. A builtin used as a value gives
+  what it prints, and in a pipe its output goes down the pipe
+  (chapter 15).
+- `alias`, `declare`, `local`, `readonly`, `shopt`, `bind`, `complete`,
+  `caller`, `enable`: not in tessh, but each now says what to do instead,
+  rather than "command not found".
 - `$PWD` is right when tessh starts.
 - A heredoc's word is the whole word (`<<End-Of-Session`).
 - A redirection on a function call (`f >file`, `f <file`, `f 2>file`) reaches
@@ -38,27 +51,20 @@ them as bash would:
 ## Builtins
 <!-- help: abs-gaps-builtins read eval exec trap wait type readonly -->
 
-- **`read`**: no builtin. `input` reads a line; splitting it into names is
-  `[a b c] = (input).split`, and `-s`, `-n`, `-t`, `-p` need `termios`,
-  `tty` and `select` (chapter 15).
-- **`eval`** of tessh text: none. Write it to a file and `source` it, or
-  use a dict or `globals()`; `env *(shlex.split $text)` runs a command line
-  held in text (chapters 15, A-30).
-- **`exec`**: neither `exec prog` (use `os.execvp`, after
-  `sys.stdout.flush`) nor `exec >file` / `exec 3<file` for the rest of a
-  script (reassign `$sys.stdout`, or `os.dup2`) (chapters 15, 20).
-- **`trap`**: none. `try`/`finally`, `atexit`, `signal.signal` and
-  `KeyboardInterrupt` do its jobs (chapter 32).
+- **`eval $code`**: given a bare value, `eval` is Python's; tessh text
+  held in a variable runs with `eval "$code"` (chapters 15, 36, A-30).
+- **`exec` with only redirections**: no `exec >file` / `exec 3<file` for
+  the rest of a script (reassign `$sys.stdout`, or `os.dup2`) (chapters
+  15, 20, F).
+- **`trap` on `ERR`, `DEBUG`, `RETURN`**: none. `try`/`except
+  CommandFailed` with strict on, and `sys.settrace` (chapter 32).
 - **`set -u`, `-x`, `-v`, `-o pipefail`, `shopt`**: none (a `set -x`
-  line is an error). Python errors stop a script and unset names are
+  line is an error; `shopt` says so). Python errors stop a script and unset names are
   always errors; a failing *program* stops one only in strict mode
   (`strict`, `set -e`, `tessh -e`) or with `(cmd)!`, and a
   pipeline's status is its last stage's (no pipefail, no `$PIPESTATUS`).
   `sys.settrace` traces (chapters 32, 33).
-- **`wait`** for all jobs, **`$!`**, a Job's process ID, `kill %1`,
-  `disown`: a `Job` has only `.n` and `.wait` (chapters 15, 16, 29).
-- **`type`**, `command -v`, `hash`: nothing says whether a name is a
-  builtin, a function or a program (`which` finds programs).
+- **`$!`** by that name: `$j.pid`, after `j = cmd &` (chapters 9, 15).
 - **`readonly`** / `declare -r`: no read-only names (chapters 9, 15).
 - **`source file args`**: the arguments are dropped.
 - **`select`** menus, **`coproc`**, **`mapfile`**: a few lines of Python
@@ -66,7 +72,7 @@ them as bash would:
 - **`time`** keyword: `time` runs `/usr/bin/time`, so a pipeline, a Python
   call or a block can't be timed with it (chapter 16).
 - **`alias`**: none; `@command def` (chapter 25).
-- **`builtin cd`** once `cd` is a function: keep `real = $cd` beforehand.
+- **`read -i`**: no text put in the edit buffer (chapter 37).
 
 ## Variables
 <!-- help: abs-gaps-variables $UID $RANDOM $LINENO $SECONDS -->
@@ -76,9 +82,10 @@ form, listed in chapter 9: `$UID`/`$EUID` (`os.getuid`), `$$`/`$PPID`
 (`os.getpid`, `os.getppid`), `$RANDOM` (`random.randrange 32768`),
 `$SECONDS` (`time.monotonic`), `$LINENO`/`$FUNCNAME`/`caller` (`inspect`),
 `$HOSTNAME`/`$OSTYPE` (`socket`, `sys.platform`), `$BASH_VERSION`, `$_`,
-`$-`, `$REPLY`, `$DIRSTACK` (`dirs` only prints), `$BASH_SUBSHELL`,
-`$SHLVL`, `$GLOBIGNORE`, `$PS1`–`$PS4`, `$PROMPT_COMMAND`. `$IFS` is by
-design: tessh never splits a value into words.
+`$-`, `$DIRSTACK` (`dirs` only prints), `$BASH_SUBSHELL`, `$SHLVL`,
+`$GLOBIGNORE`, `$PS1`–`$PS4`, `$PROMPT_COMMAND`, `$TMOUT` (`read -t`
+times one read). `$REPLY` is set by `read`, and `$IFS` is where `read`
+splits; otherwise tessh never splits a value into words, by design.
 
 ## Words and expansion
 <!-- help: abs-gaps-expansion brace-expansion posix-classes -->
@@ -131,7 +138,8 @@ design: tessh never splits a value into words.
 - **`/dev/tcp/host/port`**: not a redirection; Python's `socket` (chapter 29).
 - **Programmable completion** (`complete`, `compgen`): the REPL completes
   names, programs and paths, not a script's own options (Appendix J).
-- **History**: no `history`, `fc` or `!` expansion (Appendix L).
+- **History**: no `!` expansion, no `fc` but `fc -l`, and no history
+  variables (Appendix L).
 - **The prompt** can't be set (`PS1`), and there's no logout file
   (Appendices H, M).
 - **Restricted mode**: none, and with Python underneath it couldn't mean

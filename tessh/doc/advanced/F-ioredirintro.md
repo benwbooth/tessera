@@ -62,8 +62,9 @@ points them, and the descriptors of the programs the call runs, at the
 file for the length of the call.
 
 **Gap:** bash's `exec 2>/dev/null` (or `exec 3>file`), which redirects a
-descriptor for the rest of the script, has no tessh form; a redirection
-lasts one command or call. Python's `os.dup2` can do it by hand, and a
+descriptor for the rest of the script, has no tessh form: tessh's `exec`
+only replaces the shell with a program, and a redirection lasts one
+command or call. Python's `os.dup2` can do it by hand, and a
 function holding the rest of the script can be called with the
 redirection.
 

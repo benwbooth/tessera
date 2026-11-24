@@ -32,9 +32,10 @@ exit 0
 # Stéphane Chazelas (thanks again).
 ```
 
-**Gap:** tessh has no `eval` of tessh code given as text, so the loop has
-to hand each line to a new tessh (`tessh -c $line`), which forgets its
-variables between lines. (Python's `eval` and `exec` take Python, and `py`
+tessh's `eval "$line"` runs a line of tessh text in the shell, so the
+loop could keep its variables between lines; this one hands each line to a
+new tessh (`tessh -c $line`), which forgets them. (`eval $line`, without
+the quotes, is Python's `eval`.) (Python's `eval` and `exec` take Python, and `py`
 takes Python written in the script.) The REPL itself is the real thing.
 
 ```tessh no-run
@@ -48,7 +49,7 @@ while True
 ```
 
 An interactive script is one that asks the user things, usually with
-`read` (in tessh, `input`). Init scripts and most maintenance scripts are
+`read` (in tessh, `read` or `input`). Init scripts and most maintenance scripts are
 non-interactive, and must be: in the background an interactive script
 hangs waiting for input that never comes. A here document, a file
 redirected in, or `expect` can stand in for the user, and in tessh a value
@@ -308,9 +309,10 @@ exec $OPERATION "$@"
 
 The operation is a list, a program and its fixed arguments, so `[program
 *fixed] = $OPERATION` takes it apart and `$program *$fixed *$OPTIONS` runs
-it. There's no `exec` to replace the shell with the program (`exec` in
-tessh is Python's, which runs Python text: don't). The script exits with
-the program's status instead. (The log's date and user are cut off when
+it. tessh's `exec` replaces the shell with a program given as words
+(`exec ls -l`), but given a value (`exec $program`) it's Python's `exec`,
+which runs Python text: don't. So the script runs the program and exits
+with its status instead. (The log's date and user are cut off when
 it's shown here, so the output stays the same from run to run.)
 
 ```tessh
@@ -3113,7 +3115,8 @@ Entire array is: 11 12 13 14 15 16 17 18 19 20
 
 **More tips.** The C-style `(( ))` loops of bash are `for i in (range …)`
 and `i += 1` in tessh. Setting `PATH` and `umask` at the top makes a
-script safer on a machine whose user has a strange setup:
+script safer on a machine whose user has a strange setup (tessh's
+`umask 022` works too):
 
 ```bash no-run
 #!/bin/bash

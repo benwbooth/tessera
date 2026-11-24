@@ -925,7 +925,7 @@ fn prelude(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     .clone())
 }
 
-fn output(py: Python<'_>, text: &str, code: i32, attached: bool) -> PyResult<Py<PyAny>> {
+pub(crate) fn output(py: Python<'_>, text: &str, code: i32, attached: bool) -> PyResult<Py<PyAny>> {
     Ok(prelude(py)?.getattr("Output")?.call1((text, code, "", attached))?.unbind())
 }
 
@@ -1000,6 +1000,10 @@ fn show(py: Python<'_>, v: Bound<'_, PyAny>) -> PyResult<()> {
     // (A Failed, from ? or a ||?/&&? that gave up, is shown as a failed
     // command is: by its status, ✘. `r = (expr)?` keeps it to look at.)
     if v.is_none() || is_attached_output(&v) || v.is_instance(&prelude(py)?.getattr("Failed")?)? {
+        return Ok(());
+    }
+    // (`cmd &` at the prompt: "[1] 12345" said it already.)
+    if crate::jobs::announced(&v) {
         return Ok(());
     }
     let d = DISPLAY.lock().unwrap().as_ref().map(|d| d.clone_ref(py));
@@ -1315,6 +1319,9 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
     }
     if !force {
         if let Some(f) = resolve_callable(py, &ns, &head_s)? {
+            // (type ls, hash -r, exec zsh, eval "…": the compiler made them
+            // commands, for their words; the shell's, not Python's.)
+            let f = shell_dual(py, &head_s, &f)?.unwrap_or(f);
             let kw = PyDict::new(py);
             if f.hasattr("_tessh_wants_ns")? {
                 kw.set_item("_ns", &ns)?;
@@ -1324,16 +1331,40 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
             let fargs = PyTuple::new(py, fargs)?;
             if mode == "stage" {
                 let partial = py.import("functools")?.getattr("partial")?;
+                // (A builtin in a pipe: what it prints goes down the pipe, and
+                // what comes in is its input, so `history | grep x` and
+                // `echo hi | read v` work. Last in the pipe, its output is shown.)
+                if f.cast::<Builtin>().is_ok() {
+                    let staged = py.import("__tessh_shell__")?.getattr("staged")?;
+                    let mut sargs: Vec<Bound<'py, PyAny>> = vec![staged];
+                    sargs.extend(fargs.iter());
+                    let sargs = PyTuple::new(py, sargs)?;
+                    let p = partial.call(&sargs, Some(&kw))?;
+                    let kw_last = kw.copy()?;
+                    kw_last.set_item("_last", true)?;
+                    p.setattr("_tessh_last", partial.call(&sargs, Some(&kw_last))?)?;
+                    return Ok(Py::new(py, call_stage(p.unbind()))?.into_any());
+                }
                 let p = partial.call(fargs, Some(&kw))?;
                 return Ok(Py::new(py, call_stage(p.unbind()))?.into_any());
             }
             let thunk_f = f.clone();
             let kw2 = kw.clone();
-            let call = move |py: Python<'py>| -> PyResult<Bound<'py, PyAny>> { thunk_f.call(PyTuple::new(py, &words)?, Some(&kw2)) };
+            // (A builtin used as a value, `m = (umask)`, `t = (type -t ls)`:
+            // what it prints is the value, as bash's $(…) has it.)
+            let capture_print = mode == "capture" && f.cast::<Builtin>().is_ok_and(|b| !["source", "exit", "logout", "exec", "eval"].contains(&b.get().name));
+            let call = move |py: Python<'py>| -> PyResult<Bound<'py, PyAny>> {
+                if capture_print {
+                    let mut a: Vec<Bound<'py, PyAny>> = vec![thunk_f.clone()];
+                    a.extend(words.iter().map(|w| PyString::new(py, w).into_any()));
+                    return py.import("__tessh_shell__")?.getattr("captured")?.call(PyTuple::new(py, a)?, Some(&kw2));
+                }
+                thunk_f.call(PyTuple::new(py, &words)?, Some(&kw2))
+            };
             if mode == "bg" {
                 let partial = py.import("functools")?.getattr("partial")?;
                 let p = partial.call(fargs, Some(&kw))?;
-                return bg_call(py, p);
+                return crate::jobs::bg_call(py, p);
             }
             let builtin = f.cast::<Builtin>().ok().map(|b| b.get().name);
             let attached = mode != "capture";
@@ -1357,6 +1388,12 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
                     set_status(code);
                     prelude(py)?.getattr("Output")?.call1(("", code, msg, attached))
                 }
+                // (On a line of its own, it stops the script, reported as bash
+                // reports a builtin's error: one line, without a traceback.)
+                Err(e) if builtin.is_some_and(|n| n != "source") && e.is_instance_of::<pyo3::exceptions::PyException>(py) => {
+                    let _ = e.value(py).setattr("_tessh_builtin", builtin.unwrap());
+                    Err(e)
+                }
                 r => r,
             })
             .map(|v| v.unbind());
@@ -1371,6 +1408,33 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
     }
     let r = run_stages(py, vec![stage], mode)?;
     if unchecked { strict_check(py, r, &line) } else { Ok(r) }
+}
+
+/// Python's type, hash, exec or eval, run as a command (`type ls`): the
+/// shell's builtin of that name instead.
+fn shell_dual<'py>(py: Python<'py>, name: &str, f: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let name: &'static str = match name {
+        "type" => "type",
+        "hash" => "hash",
+        "exec" => "exec",
+        "eval" => "eval",
+        _ => return Ok(None),
+    };
+    if !f.is(&py.import("builtins")?.getattr(name)?) {
+        return Ok(None);
+    }
+    Ok(Some(Py::new(py, Builtin { name })?.into_bound(py).into_any()))
+}
+
+/// A tessh builtin by name (`builtin cd /`), or None.
+pub fn builtin_named<'py>(py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
+    if let Some(n) = COMMAND_BUILTINS.iter().find(|n| **n == name) {
+        return Ok(Some(Py::new(py, Builtin { name: n })?.into_bound(py).into_any()));
+    }
+    shell_dual(py, name, &py.import("builtins")?.getattr(match name {
+        "type" | "hash" | "exec" | "eval" => name,
+        _ => return Ok(None),
+    })?)
 }
 
 /// Words as one command line, quoted where they need it (for messages).
@@ -1413,7 +1477,7 @@ fn run_stages(py: Python<'_>, stages: Vec<Stage>, mode: &str) -> PyResult<Py<PyA
         let objs: Vec<Py<PyAny>> = stages.into_iter().map(|s| Py::new(py, s).map(|x| x.into_any())).collect::<PyResult<_>>()?;
         let partial = py.import("functools")?.getattr("partial")?;
         let p = partial.call1((tessh.getattr("pipe")?, objs, "capture"))?;
-        return bg_call(py, p);
+        return crate::jobs::bg_call(py, p);
     }
     let mut data: Option<Py<PyAny>> = None;
     let mut result: Py<PyAny> = py.None();
@@ -1429,10 +1493,18 @@ fn run_stages(py: Python<'_>, stages: Vec<Stage>, mode: &str) -> PyResult<Py<PyA
             }
             "call" => {
                 let arg = data.take().unwrap_or_else(|| py.None());
-                let v = s.obj.as_ref().unwrap().call1(py, (arg,))?;
+                let obj = s.obj.as_ref().unwrap().bind(py);
+                // (A builtin last in the pipe: its output shown, not kept.)
+                let f = match obj.getattr("_tessh_last") {
+                    Ok(l) if i + 1 == stages.len() => l,
+                    _ => obj.clone(),
+                };
+                let v = f.call1((arg,))?.unbind();
                 data = Some(v.clone_ref(py));
+                // (A builtin's status is its own.)
+                let code = if f.is(obj) && !obj.hasattr("_tessh_last")? { 0 } else { v.bind(py).getattr("code").ok().and_then(|c| c.extract::<i32>().ok()).unwrap_or(0) };
                 result = v;
-                set_status(0);
+                set_status(code);
                 i += 1;
             }
             _ => {
@@ -1485,7 +1557,7 @@ fn flush_python(py: Python<'_>) {
     }
 }
 
-fn tty_ok() -> bool {
+pub(crate) fn tty_ok() -> bool {
     INTERACTIVE.load(Ordering::SeqCst) && unsafe { libc::isatty(0) == 1 && libc::tcgetpgrp(0) == libc::getpgrp() }
 }
 
@@ -1824,11 +1896,11 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
     }
     if bg {
         let words = cmds[0].words.join(" ");
-        let job = add_job(children, pgid, words.clone(), false);
+        let (job, n) = crate::jobs::add_job(children, pgid, words.clone(), false, None);
         if INTERACTIVE.load(Ordering::SeqCst) {
-            eprintln!("[{job}] {pgid}");
+            eprintln!("[{n}] {pgid}");
         }
-        return Ok(Py::new(py, JobRef { n: job })?.into_any());
+        return crate::jobs::job_ref(py, job);
     }
     if let Some(mut r) = cap_reader {
         let reader = std::thread::spawn(move || {
@@ -1853,7 +1925,7 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
     }
     let code = if job_control {
         let words = cmds[0].words.join(" ");
-        py.detach(|| wait_foreground(children, pgid, words))
+        py.detach(|| crate::jobs::wait_foreground(children, pgid, words, None))
     } else {
         wait_all(py, children)?
     };
@@ -2069,7 +2141,7 @@ fn wait_all(py: Python<'_>, mut children: Vec<Child>) -> PyResult<i32> {
     }
 }
 
-fn exit_code(s: std::process::ExitStatus) -> i32 {
+pub(crate) fn exit_code(s: std::process::ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
     match s.code() {
         Some(c) => c,
@@ -2077,122 +2149,10 @@ fn exit_code(s: std::process::ExitStatus) -> i32 {
     }
 }
 
-/// Give the terminal to the programs, wait (or see them stopped), take it back.
-fn wait_foreground(children: Vec<Child>, pgid: i32, words: String) -> i32 {
-    unsafe {
-        let old = libc::signal(libc::SIGTTOU, libc::SIG_IGN);
-        libc::tcsetpgrp(0, pgid);
-        let pids: Vec<i32> = children.iter().map(|c| c.id() as i32).collect();
-        let last = *pids.last().unwrap_or(&0);
-        let mut left: std::collections::HashSet<i32> = pids.iter().copied().collect();
-        let mut code = 0;
-        let mut stopped = false;
-        while !left.is_empty() {
-            let mut st = 0;
-            let pid = libc::waitpid(-pgid, &mut st, libc::WUNTRACED);
-            if pid < 0 {
-                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
-                    continue;
-                }
-                break;
-            }
-            if libc::WIFSTOPPED(st) {
-                stopped = true;
-                break;
-            }
-            left.remove(&pid);
-            if pid == last {
-                code = if libc::WIFEXITED(st) { libc::WEXITSTATUS(st) } else { 128 + libc::WTERMSIG(st) };
-            }
-        }
-        libc::tcsetpgrp(0, libc::getpgrp());
-        libc::signal(libc::SIGTTOU, old);
-        if stopped {
-            let n = add_job(children, pgid, words.clone(), true);
-            eprintln!("\n[{n}] stopped {words}");
-            return 148;
-        }
-        // (Reaped already: the Child handles must not wait again.)
-        std::mem::forget(children);
-        code
-    }
-}
-
-// ---- jobs -----------------------------------------------------------------------------
-
-struct JobInfo {
-    n: usize,
-    pgid: i32,
-    pids: Vec<i32>,
-    words: String,
-    stopped: bool,
-    thread: Option<Py<PyAny>>,
-    children: Vec<Child>,
-}
-
-static JOBS: Mutex<Vec<JobInfo>> = Mutex::new(Vec::new());
-static JOB_N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-fn add_job(children: Vec<Child>, pgid: i32, words: String, stopped: bool) -> usize {
-    let n = JOB_N.fetch_add(1, Ordering::SeqCst) + 1;
-    let pids = children.iter().map(|c| c.id() as i32).collect();
-    JOBS.lock().unwrap().push(JobInfo { n, pgid, pids, words, stopped, thread: None, children });
-    n
-}
-
-fn job_done(j: &mut JobInfo, py: Python<'_>) -> bool {
-    if let Some(t) = &j.thread {
-        return !t.call_method0(py, "is_alive").and_then(|v| v.extract::<bool>(py)).unwrap_or(false);
-    }
-    !j.stopped && j.children.iter_mut().all(|c| c.try_wait().map(|s| s.is_some()).unwrap_or(true))
-}
-
-#[pyclass(module = "__tessh__", name = "Job")]
-pub struct JobRef {
-    #[pyo3(get)]
-    n: usize,
-}
-
-#[pymethods]
-impl JobRef {
-    /// Wait for it; its result (a Python job) or exit status.
-    fn wait(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        fg(py, Some(self.n.to_string()))
-    }
-
-    fn __repr__(&self, py: Python<'_>) -> String {
-        let mut jobs = JOBS.lock().unwrap();
-        match jobs.iter_mut().find(|j| j.n == self.n) {
-            Some(j) => {
-                let what = if job_done(j, py) { "done" } else if j.stopped { "stopped" } else { "running" };
-                format!("[{}] {what} {}", j.n, j.words)
-            }
-            None => format!("[{}] done", self.n),
-        }
-    }
-}
-
-fn bg_call(py: Python<'_>, thunk: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    let threading = py.import("threading")?;
-    let holder = PyList::empty(py);
-    let code = std::ffi::CString::new("def _run(f, out):\n    out.append(f())\n").unwrap();
-    let helper = PyModule::from_code(py, &code, c"<tessh bg>", c"__tessh_bg__")?.getattr("_run")?;
-    let kw = PyDict::new(py);
-    kw.set_item("target", helper)?;
-    kw.set_item("args", (thunk, &holder))?;
-    kw.set_item("daemon", true)?;
-    let th = threading.getattr("Thread")?.call((), Some(&kw))?;
-    th.call_method0("start")?;
-    let n = JOB_N.fetch_add(1, Ordering::SeqCst) + 1;
-    th.setattr("_tessh_result", holder)?;
-    JOBS.lock().unwrap().push(JobInfo { n, pgid: 0, pids: vec![], words: "(python)".into(), stopped: false, thread: Some(th.unbind()), children: vec![] });
-    Ok(Py::new(py, JobRef { n })?.into_any())
-}
-
 #[pyfunction]
 #[pyo3(name = "bg_call")]
 fn py_bg_call(py: Python<'_>, thunk: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    bg_call(py, thunk)
+    crate::jobs::bg_call(py, thunk)
 }
 
 // ---- redirections of Python calls ------------------------------------------------------
@@ -2532,7 +2492,13 @@ fn dump_env(b64_env: &str, b64_pwd: &str) -> PyResult<()> {
 
 // ---- builtins ------------------------------------------------------------------------------
 
-pub const COMMAND_BUILTINS: &[&str] = &["cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg", "need", "view", "strict"];
+pub const COMMAND_BUILTINS: &[&str] = &[
+    "cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg", "need", "view", "strict",
+    // (Job control and the login shell's: jobs.rs. The rest: shell.rs.)
+    "wait", "disown", "kill", "suspend", "logout",
+    "trap", "ulimit", "umask", "read", "history", "fc", "shift", "getopts", "times", "caller", "builtin", "enable",
+    "readonly", "declare", "typeset", "local", "alias", "unalias", "shopt", "bind", "complete", "compgen",
+];
 
 pub fn is_command_builtin(n: &str) -> bool {
     COMMAND_BUILTINS.contains(&n)
@@ -2556,17 +2522,17 @@ impl Builtin {
             "dirs" => "dirs [-clpv] [+N | -N]\n\nThe folder stack, the current folder first. -c clears it, -l spells out ~, -p puts one folder a line, -v numbers them, +N/-N shows just that one.",
             "export" => "export NAME=value …\n\nSet environment variables for this shell and every program it runs. export NAME alone exports the tessh variable $NAME's value.",
             "unset" => "unset NAME …\n\nRemove environment variables.",
-            "exit" => "exit [status]\n\nEnd tessh (a script, or the REPL) with status, 0 without one.",
+            "exit" => "exit [status]\n\nEnd tessh (a script, or the REPL) with status: without one, the last command's ($?). At the prompt, with jobs still running or stopped, it says so and stays; exit again ends them (they get SIGHUP) and leaves.",
             "source" => "source file\n\nRun a tessh file here: its names and folder changes stay in this shell.",
             "which" => "which name …\n\nWhere each program is on PATH (name: path, or name: not found); its value is the first path found.",
             "glob" => "glob pattern …\n\nThe names matching the patterns (*, ?, […]), sorted, as a list.",
-            "jobs" => "jobs\n\nThe background jobs (commands run with a trailing &): [n] running or stopped, and the command.",
-            "fg" => "fg [n]\n\nBring background job n (the latest without one) to the foreground and wait for it.",
-            "bg" => "bg [n]\n\nLet a stopped job n (the latest without one) run on in the background.",
+            "jobs" => "jobs [-lprs] [%job …]\n\nThe background jobs (commands run with a trailing &, programs stopped with Ctrl+Z): [n] running, stopped, done or exit N, then the command. + marks the current job (%+, what fg and bg take without one) and - the one before (%-). -l adds the process IDs, -p prints only them, -r lists only running jobs, -s only stopped ones.",
+            "fg" => "fg [%job]\n\nBring a job to the foreground (the current one without a job: the latest stopped or sent to the background) and wait for it. A job is %n (or n), %%, %+, %- (the one before), %name (its command starts with name) or %?text (its command has text in it).",
+            "bg" => "bg [%job …]\n\nLet a stopped job (the current one without a job) run on in the background. Jobs are named as for fg.",
             "view" => crate::viewer::USAGE,
             "strict" => "strict [on | off]\n\nStrict mode, bash's set -e: a program or pipe that fails on a line of its own raises CommandFailed (status, stderr, command), so the script stops with \"Unhandled error\" unless a try catches it. On without an argument; strict off ends it. set -e / set +e and tessh -e say the same. A failure something checks (||, &&, if, r = (cmd)) doesn't raise.",
             "need" => "need package \"package>=version\" …\n\nPyPI packages this script, cell or REPL uses: uv installs them once into a cache, and they import from the next line. Quote a version range, so its > isn't a redirection.",
-            _ => "A tessh builtin.",
+            n => crate::shell::usage(n).unwrap_or("A tessh builtin."),
         }
     }
 
@@ -2577,7 +2543,7 @@ impl Builtin {
 
     #[getter]
     fn _tessh_wants_ns(&self) -> PyResult<bool> {
-        if self.name == "export" || self.name == "source" {
+        if self.name == "export" || self.name == "source" || crate::shell::wants_ns(self.name) {
             Ok(true)
         } else {
             Err(pyo3::exceptions::PyAttributeError::new_err("_tessh_wants_ns"))
@@ -2762,9 +2728,20 @@ impl Builtin {
                 STRICT.store(on, Ordering::SeqCst);
                 Ok(none)
             }
-            "exit" => {
-                let code: i32 = words.first().map(|c| c.parse().unwrap_or(1)).unwrap_or(0);
-                Err(PySystemExit::new_err(code))
+            // (exit and logout: with jobs left at the prompt, a word first.)
+            "exit" | "logout" => {
+                if self.name == "logout" && !crate::LOGIN.load(Ordering::SeqCst) {
+                    return Err(PyOSError::new_err("logout: not a login shell: use exit"));
+                }
+                let code: i32 = match words.first() {
+                    Some(c) => c.parse().map_err(|_| PyValueError::new_err(format!("{}: {c}: a number, the exit status\n{}: usage: {} [n]", self.name, self.name, self.name)))?,
+                    None => STATUS.load(Ordering::SeqCst),
+                };
+                if !crate::jobs::exit_check(py)? {
+                    set_status(1);
+                    return output(py, "", 1, true);
+                }
+                Err(PySystemExit::new_err(code & 0xff))
             }
             "source" => {
                 let path = words.first().ok_or_else(|| PyTypeError::new_err("source: which file?"))?;
@@ -2786,24 +2763,25 @@ impl Builtin {
             }
             "glob" => Ok(PyList::new(py, words)?.into_any().unbind()),
             "jobs" => {
-                let mut jobs = JOBS.lock().unwrap();
-                jobs.retain_mut(|j| j.stopped || !job_done(j, py));
-                let lines: Vec<String> = jobs.iter().map(|j| format!("[{}] {} {}", j.n, if j.stopped { "stopped" } else { "running" }, j.words)).collect();
-                drop(jobs);
-                for l in lines {
-                    py_print(py, &l)?;
-                }
+                crate::jobs::jobs(py, &words)?;
                 Ok(none)
             }
-            "fg" => fg(py, words.first().cloned()),
+            "fg" => crate::jobs::fg(py, words.first().map(String::as_str)),
             "bg" => {
-                let mut jobs = JOBS.lock().unwrap();
-                let j = pick_job(&mut jobs, words.first())?;
-                j.stopped = false;
-                unsafe { libc::killpg(j.pgid, libc::SIGCONT) };
+                crate::jobs::bg(py, &words)?;
                 Ok(none)
             }
-            _ => Ok(none),
+            "wait" => crate::jobs::wait(py, &words),
+            "disown" => {
+                crate::jobs::disown(py, &words)?;
+                Ok(none)
+            }
+            "kill" => crate::jobs::kill(py, &words),
+            "suspend" => {
+                crate::jobs::suspend(&words)?;
+                Ok(none)
+            }
+            _ => crate::shell::run(py, self.name, &words, _ns),
         }
     }
 
@@ -2854,56 +2832,17 @@ fn print_dirs(py: Python<'_>, opts: &[String]) -> PyResult<()> {
 
 /// A builtin's output, through Python's print: redirections and the
 /// notebook see it.
-fn py_print(py: Python<'_>, s: &str) -> PyResult<()> {
+pub(crate) fn py_print(py: Python<'_>, s: &str) -> PyResult<()> {
     py.import("builtins")?.getattr("print")?.call1((s,))?;
     Ok(())
 }
 
-fn pick_job<'a>(jobs: &'a mut [JobInfo], n: Option<&String>) -> PyResult<&'a mut JobInfo> {
-    match n {
-        None => jobs.last_mut().ok_or_else(|| PyIndexError::new_err("no jobs")),
-        Some(n) => {
-            let k: usize = n.trim_start_matches('%').parse().map_err(|_| PyValueError::new_err(format!("no job {n}")))?;
-            jobs.iter_mut().find(|j| j.n == k).ok_or_else(|| PyIndexError::new_err(format!("no job {n}")))
-        }
-    }
-}
-
-fn fg(py: Python<'_>, n: Option<String>) -> PyResult<Py<PyAny>> {
-    let job = {
-        let mut jobs = JOBS.lock().unwrap();
-        let k = pick_job(&mut jobs, n.as_ref())?.n;
-        let i = jobs.iter().position(|j| j.n == k).unwrap();
-        jobs.remove(i)
-    };
-    if let Some(th) = job.thread {
-        let th = th.bind(py);
-        py.detach(|| ());
-        th.call_method0("join")?;
-        let res = th.getattr("_tessh_result")?;
-        return Ok(if res.len()? > 0 { res.get_item(0)?.unbind() } else { py.None() });
-    }
-    unsafe { libc::killpg(job.pgid, libc::SIGCONT) };
-    let words = job.words.clone();
-    let code = if tty_ok() {
-        py.detach(|| wait_foreground(job.children, job.pgid, words))
-    } else {
-        let mut children = job.children;
-        py.detach(|| {
-            let mut code = 0;
-            for c in children.iter_mut() {
-                code = c.wait().map(exit_code).unwrap_or(0);
-            }
-            code
-        })
-    };
-    let _ = job.pids;
-    set_status(code);
-    output(py, "", code, true)
-}
-
 /// Before each prompt (and notebook cell): prompt_hooks, run.
 pub fn run_prompt_hooks(py: Python<'_>) {
+    // (First, the jobs that ended since the last prompt, as bash's "Done".)
+    if let Err(e) = crate::jobs::job_notices(py) {
+        e.print(py);
+    }
     let r = py.import("__tessh__").and_then(|m| m.getattr("run_prompt_hooks")).and_then(|f| f.call0());
     if let Err(e) = r {
         e.print(py);
@@ -2967,6 +2906,10 @@ fn command<'py>(py: Python<'py>, args: Vec<Bound<'py, PyAny>>) -> PyResult<Bound
             return Ok(w);
         }
     }
+    // (command -v name, command -V name: what it is; command -p prog: the program.)
+    if args.first().and_then(|a| a.extract::<String>().ok()).is_some_and(|a| a.len() > 1 && a.starts_with('-') && a[1..].chars().all(|c| "vVp".contains(c))) {
+        return Ok(crate::shell::command_opts(py, &args)?.into_bound(py));
+    }
     let words = argv(py, &PyList::new(py, &args)?.into_any())?;
     let Some((head, rest)) = words.split_first() else {
         return Err(PyTypeError::new_err("command: which program? (or @command on a function)"));
@@ -2979,7 +2922,7 @@ fn command<'py>(py: Python<'py>, args: Vec<Bound<'py, PyAny>>) -> PyResult<Bound
 pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     let m = PyModule::new(py, "__tessh__")?;
     m.add_class::<Stage>()?;
-    m.add_class::<JobRef>()?;
+    crate::jobs::add(&m)?;
     m.add_class::<Env>()?;
     m.add_class::<Builtin>()?;
     for f in [
@@ -3034,6 +2977,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         m.add(*n, Py::new(py, Builtin { name: n })?)?;
     }
     crate::help::add(&m)?;
+    crate::shell::add(&m)?;
     py.import("sys")?.getattr("modules")?.set_item("__tessh__", &m)?;
     Ok(m)
 }

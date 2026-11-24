@@ -398,9 +398,9 @@ exit $?
 ```
 
 This needs the network, and a host to scan. The background `nc` has to be
-killed later, so it's started with Python's `subprocess.Popen`, whose
-`.send_signal` does `kill -HUP $PROC` (a tessh `&` job doesn't give its
-process ID: see chapter 15's gap).
+killed later. In tessh that's `j = nc … &` and then `kill -HUP $j`; this
+port starts it with Python's `subprocess.Popen` instead, whose
+`.send_signal` does `kill -HUP $PROC`.
 
 ```tessh no-run
 #!/usr/bin/env tessh
@@ -940,9 +940,10 @@ script, in a `with` block. **mknod** and **MAKEDEV** make device files, and
 **ulimit** sets limits on what a process may use: file size (`-f`), core
 dumps (`-c`), number of processes (`-u`). A limit on processes stops a
 fork bomb, a script that starts copies of itself until the system freezes
-(the ABS Guide shows one; it isn't repeated here). tessh has no `ulimit`;
-Python's `resource` module does the same for the script and the programs
-it runs.
+(the ABS Guide shows one; it isn't repeated here). tessh's
+`ulimit [-SHa] [-c -d -f -n -s -t -u -v …] [limit]` works as bash's does:
+`ulimit -u 200`, `ulimit -c 0`. Python's `resource` module, shown here,
+does the same for the script and the programs it runs.
 
 ```tessh no-run
 import resource
@@ -954,8 +955,9 @@ resource.setrlimit $resource.RLIMIT_CORE (0, 0)        # ulimit -c 0: no core du
 root device.
 
 **umask** sets which permissions new files *don't* get: with `umask 022`
-they have at most `755`. In tessh it's `os.umask` (and the programs the
-script runs inherit it).
+they have at most `755`. tessh's `umask [-p] [-S] [mode]` takes an octal
+or a symbolic mode, as bash's does; from Python it's `os.umask`, as in the
+example. Either way the programs the script runs inherit it.
 
 ### Example 17-10. Using umask to hide an output file from prying eyes (`rot13a.sh`)
 

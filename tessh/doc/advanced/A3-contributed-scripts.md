@@ -678,9 +678,10 @@ end    # ... exit not needed.
 
 The canned answers come from an iterator here, one per question. The
 original ends with `exec less "$savefile"`, which replaces the script with
-`less`; tessh has no `exec`, but `os.execvp less [less $savefile]` does the
-same. Here the page is simply `cat`ed. Writing the `.TH` line is one `print`
-to the file opened for appending, not five `echo -n >>`s.
+`less`; tessh's `exec less $savefile` does the same, as does Python's
+`os.execvp less [less $savefile]`. Here the page is simply `cat`ed.
+Writing the `.TH` line is one `print` to the file opened for appending,
+not five `echo -n >>`s.
 
 ```tessh
 #!/usr/bin/env tessh

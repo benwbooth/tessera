@@ -10,9 +10,9 @@ and puts carets under the part that failed; `tessh --py` shows the Python a
 script becomes; and Python's own tools (`pdb`, `sys.settrace`, `inspect`,
 `atexit`, `signal`) work on tessh scripts and report tessh line numbers.
 
-What tessh does not have is most of bash's switches: `set -u`, `set -x`,
-`set -v` and `trap` don't exist (a `set -x` line is an error that says
-so). `set -e` is tessh's strict mode (`strict`, chapter 33). This chapter shows what to use instead.
+What tessh does not have is most of bash's switches: `set -u`, `set -x`
+and `set -v` don't exist (a `set -x` line is an error that says so), and
+`trap` has no `ERR`, `DEBUG` or `RETURN`. `set -e` is tessh's strict mode (`strict`, chapter 33). This chapter shows what to use instead.
 
 ### Example 32-1. A buggy script (`ex74.sh`)
 
@@ -450,7 +450,8 @@ Traceback (most recent call last):
 AssertionError: a should be less than b
 ```
 
-**`$LINENO` and `caller`.** **Gap:** tessh has neither by name.
+**`$LINENO` and `caller`.** **Gap:** tessh has neither by name (its
+`caller` builtin says what to use instead).
 `(inspect.currentframe).f_lineno` is the current line,
 `(inspect.stack)[1]` the caller's file, line and function, and
 `traceback.print_stack` prints the whole chain of calls.
@@ -476,10 +477,17 @@ $ tessh total.tsh
 **Trapping at exit.** Bash's `trap` runs a command when the script gets a
 signal, and its `EXIT` "signal" when the script ends. A signal is a message
 from the kernel or another process telling a program to do something,
-usually to stop: Control-C sends `INT`. tessh has no `trap`. **Gap:** for
-the same jobs it uses Python: `atexit.register` for `EXIT`, `try`/`finally`
-for cleaning up however a block ends, `KeyboardInterrupt` for Control-C,
-and `signal.signal` for the rest.
+usually to stop: Control-C sends `INT`. tessh has `trap` too:
+`trap 'tessh text' SIG…` takes `EXIT`, `INT`, `TERM`, `HUP`, `USR1` and the
+rest by name, `SIGNAME` or number; the text is tessh, run in the shell, and
+a function's name calls the function. `trap - SIG` puts the default back,
+`trap '' SIG` ignores the signal, `trap -p` shows the traps and `trap -l`
+lists the signals. The examples here show the Python way, which works too:
+`atexit.register` for `EXIT`, `try`/`finally` for cleaning up however a
+block ends, `KeyboardInterrupt` for Control-C, and `signal.signal` for the
+rest. **Gap:** there's no `ERR`, `DEBUG` or `RETURN` trap: `try`/`except
+CommandFailed` with strict on stands in for `ERR`, and `sys.settrace` for
+`DEBUG`.
 
 ### Example 32-5. Trapping at exit (`ex76.sh`)
 
@@ -553,7 +561,9 @@ trap 'echo "Control-C disabled."' 2
 ```output bash
 ```
 
-`signal.signal` takes the signal and a function of two arguments (the
+tessh's `trap` takes the same forms (`trap '' INT`, `trap 'tessh text'
+INT`). In Python, `signal.signal`
+takes the signal and a function of two arguments (the
 signal's number and the frame it interrupted), or `SIG_IGN` to ignore it.
 Here the script sends itself the Control-C, with `os.kill`, to show each.
 
@@ -812,8 +822,8 @@ Long-running process ........ Finished!
 ```
 
 **The DEBUG trap.** `trap '…' DEBUG` runs a command before every command
-in the script, which can trace a variable. `sys.settrace` is tessh's way,
-as with `-x` above.
+in the script, which can trace a variable. tessh's `trap` has no `DEBUG`;
+`sys.settrace` is tessh's way, as with `-x` above.
 
 ### Example 32-8. Tracing a variable (`vartrace.sh`)
 
@@ -1123,7 +1133,8 @@ Ending 6
 ```
 
 `trap '' SIGNAL` turns a signal off for the rest of the script and `trap
-SIGNAL` turns it back on, to keep a critical part from being interrupted:
+SIGNAL` turns it back on, to keep a critical part from being interrupted
+(tessh's `trap '' 2` and `trap - 2` do the same):
 
 ```bash no-run
 trap '' 2  # Signal 2 is Control-C, now disabled.

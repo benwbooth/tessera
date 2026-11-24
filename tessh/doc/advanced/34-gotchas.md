@@ -504,9 +504,11 @@ c = ccc
 
 ```
 
-**Gap:** tessh has no `read`. What it reads is a value, so the words go
-into names by unpacking: `[a b c] = $text.split`. That always works, with
-no subshell to lose them in. The subshell half of the script is a function
+tessh has no subshells, and its `read` runs in the shell, so
+`echo "one two three" | read a b c` sets all three. Or, since what a
+command prints is a value, the words go into names by unpacking:
+`[a b c] = $text.split`, as here. Either way there's no subshell to lose
+them in. The subshell half of the script is a function
 used as a pipe stage, which gets the text as its argument and whose names
 are its own.
 

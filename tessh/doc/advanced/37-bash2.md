@@ -1276,7 +1276,8 @@ I am main
 
 **`mapfile`** loads a file's lines into an array. In tessh, `.splitlines`
 on the text, or `.lines` on a program's output; `read -a` reads one line's
-words, which is `.split` on that line.
+words, which is `.split` on that line (tessh's `read -a Arr2 <file` works
+too).
 
 ```bash no-run
 #!/bin/bash4
@@ -1313,8 +1314,8 @@ print $Arr2
 ```
 
 `read -t` takes fractions of a second and `read -i` fills in the edit
-buffer; in tessh `input` reads a line and there's no timeout without
-`select` or a thread.
+buffer. tessh's `read` has `-t secs` (status 142 when time runs out) but
+no `-i`; Python's `input` has no timeout without `select` or a thread.
 
 **Case conversion** in parameter substitution, and `declare -l`/`-c`:
 
@@ -1534,7 +1535,8 @@ num_chars=61
 num_chars=61
 ```
 
-A file's `.read n` reads n characters.
+A file's `.read n` reads n characters; tessh's `read -N n` does too, from
+its input.
 
 ```tessh
 #!/usr/bin/env tessh
@@ -1753,8 +1755,9 @@ Exit status of attempting to set "lastpipe" option is 0
 $line = #!/bin/bash
 ```
 
-There's no `read` in tessh (chapter 34), and no subshell to lose the
-value in: the pipe's output is the value, assigned like any other.
+tessh has no subshell to lose the value in: its `read` runs in the shell,
+so `head -1 $argv[0] | read line` sets `line`, `lastpipe` or not. Or the pipe's
+output is the value, assigned like any other, as here.
 
 ```tessh
 #!/usr/bin/env tessh

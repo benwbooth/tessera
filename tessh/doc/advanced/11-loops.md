@@ -1253,8 +1253,12 @@ Still going: t = 3
 Still going: t = 4
 ```
 
-`while read line` reads a file line by line; in tessh a `for` over the
-open file does it, and the file is closed when the `with` ends.
+`while read line` reads a file line by line. tessh has `read`, and it
+fails at the end of the input, so `while read line` loops over the
+script's own standard input (`cmd | tessh script.tsh`). But
+`while read line <file` opens the file again on every pass and never
+ends: for a file, a `for` over the open file is the way, and the file is
+closed when the `with` ends.
 
 ```bash no-run
 cat $filename |   # Supply input from a file.
@@ -2057,8 +2061,9 @@ Usage: ex.tsh <filename>
 None ./-weird notes.txt
 ```
 
-And a loop over the options. A `match` on the argument list takes an
-option and its value off the front in one pattern, so there's no `shift`.
+And a loop over the options. tessh has `shift`, but here a `match` on the
+argument list takes an option and its value off the front in one pattern,
+so no `shift` is needed.
 
 ```bash no-run
 while [ $# -gt 0 ]; do    # Until you run out of parameters . . .

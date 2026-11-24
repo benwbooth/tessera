@@ -20,7 +20,7 @@ The chapters say more.
 | `$$` | the script's process ID | `os.getpid` |
 | `$-` | the shell's option flags | none (tessh has no `set` options) |
 | `$_` | the last argument of the last command | none: keep the command as a list |
-| `$!` | the last background job's PID | `j = cmd &` gives a `Job` |
+| `$!` | the last background job's PID | `$j.pid`, after `j = cmd &` |
 
 ## B.2 Test operators: comparisons
 <!-- help: abs-refcard-comparison -eq -ne -lt -gt = != -z -n comparison -->

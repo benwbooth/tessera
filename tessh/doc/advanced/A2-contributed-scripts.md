@@ -5530,12 +5530,14 @@ exit 0
 ```
 
 In tessh the script keeps its shape: the same globals, functions and
-messages. `read` is `input`; the option letters live on one namespace,
+messages. `read` is `input` (tessh's `read` would do too); the option letters live on one namespace,
 `opt`, so `$opt.save` reads like bash's `$save` without the letters
 taking names such as `list` and `help` from Python, and a `match` case
 `opt.save` compares with it. Python has no `getopts` that goes on past an
 option it doesn't know (`getopt.getopt` stops with an error), so the port
 has a short one of its own that gives what bash's does, `?` and all.
+(tessh's own `getopts` takes bash's arguments too; the port shows the
+Python way.)
 The configuration file holds lines such as `cFlag=1` and
 `Cookie=" --load-cookies …"`, which are tessh as well as bash, so
 `source` reads it as before. Where the bash `eval`s a saved command line,

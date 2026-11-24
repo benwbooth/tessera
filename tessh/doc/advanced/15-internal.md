@@ -1,17 +1,28 @@
 # 15. Internal Commands and Builtins
-<!-- help: abs-internal abs-15 builtins builtin internal-commands keywords -->
+<!-- help: abs-internal abs-15 builtins builtin internal-commands keywords read eval exec type getopts shift wait kill trap ulimit umask times hash command disown suspend -->
 
 A builtin is a command bash carries out itself, without starting a program:
 for speed, or because it has to change the shell's own state (`cd`,
 `export`, `read` into a variable). A keyword (`for`, `while`, `!`) is part
 of the syntax rather than a command.
 
-tessh has only a handful of builtins: `cd`, `pushd`, `popd`, `dirs`,
-`export`, `unset`, `exit`, `source`, `which`, `glob`, `jobs`, `fg`, `bg` and
-`need` (`help NAME` describes each). Most of bash's others do things that in
-tessh are plain Python: a variable is set with `=`, arithmetic is Python's,
-text is formatted with f-strings, arguments are a list. Where that leaves a
-real hole, this chapter says so.
+tessh has its own builtins (`cd`, `pushd`, `popd`, `dirs`, `export`,
+`unset`, `exit`, `source`, `which`, `glob`, `need`) and most of bash's that
+change the shell itself: `read`, `getopts`, `shift`, `eval`, `exec`,
+`type`, `command`, `hash`, `builtin`, `trap`, `ulimit`, `umask`, `times`,
+`history`, `fc`, and job control (`jobs`, `fg`, `bg`, `wait`, `disown`,
+`kill`, `suspend`, `logout`). They take bash's options; `help NAME`
+describes each. Others do things that in tessh are plain Python: a
+variable is set with `=`, arithmetic is Python's, text is formatted with
+f-strings. A few of bash's (`alias`, `declare`, `local`, `readonly`,
+`shopt`, `bind`, `complete`, `caller`, `enable`) say what to do in tessh
+instead. Where that leaves a real hole, this chapter says so.
+
+A builtin used as a value gives what it prints (`m = (umask)`), and in a
+pipe its output goes down the pipe (`history | grep ssh`). `type`, `hash`,
+`exec` and `eval` are Python's names too: given words (`type ls`,
+`eval "echo hi"`) they are the shell's builtins, given a value (`type $x`,
+`eval $code`) they are Python's.
 
 When a shell runs a program it *forks*: the new process is the child, and
 the parent goes on (or waits for it). A child can't change its parent's
@@ -297,8 +308,11 @@ cd $var 2>/dev/null || error "Can't cd to %s." $var
 
 ```
 
-**read** reads a line from standard input into variables. tessh has no
-`read`: `input` reads a line (`input "prompt"` shows the prompt first), and
+**read** reads a line from standard input into variables. tessh has
+`read` too, with bash's options (`read [-rs] [-p prompt] [-n N] [-t secs]
+[-d delim] [-a list] [-u fd] [name …]`). It reads what `<`, `<<<` or a pipe
+gives it, and sets module-level names. The examples here show the Python
+way: `input` reads a line (`input "prompt"` shows the prompt first), and
 `$sys.stdin` is the input as a Python file. These examples answer with
 canned input (the `io.StringIO` at the top stands in for the keyboard), so
 they run without anyone typing; take that line out and they ask you.
@@ -332,8 +346,8 @@ exit 0
 ```
 
 One `read` can fill several variables: the line is split at whitespace and
-the last one gets what's left. In tessh, split the line and unpack it.
-(Python wants exactly as many parts as names; `read` leaves the extra
+the last one gets what's left. tessh's `read var2 var3` does the same.
+In Python, split the line and unpack it. (Python wants exactly as many parts as names; `read` leaves the extra
 variables empty. The original's `echo =n` is a typo for `echo -n`.)
 
 ```tessh
@@ -364,9 +378,8 @@ Enter the values of variables 'var2' and 'var3' (separated by a space or tab): v
 (The typed answers don't show in the output: a terminal echoes what you
 type, and here nobody typed.)
 
-**Gap:** no `read`: `input` reads a line, but splitting it into several
-names, the last taking the rest and missing ones left empty, is done by
-hand.
+With tessh's `read` the splitting isn't done by hand: it splits the line
+at `$IFS`, and the last name takes the rest.
 
 ### Example 15-4. What happens when read has no variable (`read-novar.sh`)
 
@@ -422,8 +435,8 @@ echo            #   #!/bin/bash  line discarded.
 exit 0
 ```
 
-`read` with no name puts the line in `$REPLY`. tessh's `input` returns the
-line, so it's always given a name. The second half reads the script's own
+`read` with no name puts the line in `$REPLY`, in tessh too. Python's
+`input`, used here, returns the line, so it's always given a name. The second half reads the script's own
 first two lines, keeping the second; in tessh that's a file opened with
 `open` and read with `.readline`.
 
@@ -444,7 +457,7 @@ print "\"var\" = $var"
 print
 
 # -------------------------- #
-REPLY = input "Enter another value: "   # (tessh has no default $REPLY.)
+REPLY = input "Enter another value: "   # (read alone would set $REPLY.)
 var = $REPLY
 print "\"var\" = $var"
 # -------------------------- #
@@ -515,7 +528,8 @@ exit 0
 
 Without `-r`, `read` takes a `\` at the end of a line to mean "carry on on
 the next line". Python's `readline` takes lines as they are, which is
-`read -r`; a small function does the joining.
+`read -r`; a small function does the joining. (tessh's `read` takes `-r`
+as bash's does.)
 
 ```tessh
 #!/usr/bin/env tessh
@@ -585,9 +599,10 @@ echo; echo "Keypress was "\"$keypress\""."
 # Using these options is tricky, since they need to be in the correct order.
 ```
 
-In Python these take the terminal module: `tty.setcbreak` hands over each
-key as it's pressed, without showing it, and `termios` puts the terminal
-back after.
+tessh's `read` takes the same options:
+`read -s -n1 -p "Hit a key " keypress`. In Python they take the terminal
+module: `tty.setcbreak` hands over each key as it's pressed, without
+showing it, and `termios` puts the terminal back after.
 
 ```tessh no-run
 import sys os tty termios
@@ -609,9 +624,6 @@ print ; print "Keypress was \"$keypress\"."
 
 (`getpass.getpass` reads a whole line without echoing it, and
 `select.select` waits for input with a time limit.)
-
-**Gap:** `read`'s `-s`, `-n`, `-t` and `-p` have no short tessh form; the
-terminal has to be set up by hand with `tty` and `termios`, as above.
 
 ### Example 15-6. Detecting the arrow keys (`arrow-detect.sh`)
 
@@ -745,7 +757,8 @@ done
 ```
 
 The keys here are canned (an arrow key sends three characters: Escape, `[`
-and a letter); read them from the keyboard with `read_keys 3` above.
+and a letter); read them from the keyboard with `read -s -n3 key`, or
+`read_keys 3` above.
 Rather than one `grep` per key, the codes go in a list and a loop tests
 them with `in`.
 
@@ -875,10 +888,14 @@ echo "\$IFS still $IFS"
 exit 0
 ```
 
-In tessh a file is read with `open` (or `cat` as a value): `.readline`
-for one line, a `for` for all of them, `.split` to break a line at a
-separator. There is no `$IFS`, so there's nothing to save and restore: the
-separator is the argument to `.split`. (The users come from a made-up
+tessh's `read var1 <data-file` reads the first line too. `read` fails at
+the end of the input, so `while read line` loops over the script's own
+standard input (`cmd | tessh script.tsh`); but `while read line <file`
+opens the file again on every pass and never ends. For a file, the way is
+`open` (or `cat` as a value): `.readline` for one line,
+a `for` for all of them, `.split` to break a line at a separator. The
+separator is the argument to `.split`, so there's no `$IFS` to save and
+restore. (The users come from a made-up
 `passwd` file, not the real `/etc/passwd`.)
 
 ```tessh
@@ -1027,8 +1044,9 @@ but its value does not persist outside the loop.
 All done, last: (null)
 ```
 
-A tessh `for` over a command's lines runs in the script itself, so `last`
-keeps its value. (A Python function as a pipe stage also runs in the
+tessh has no subshells, and its `read` runs in the shell, so
+`echo "a b" | read x y` sets `x` and `y`. A tessh `for` over a command's
+lines runs in the script itself too, so `last` keeps its value. (A Python function as a pipe stage also runs in the
 script.) `read` without `-r` also eats the backslashes in the script's
 lines, `\n` becoming `n`; `.lines` keeps them.
 
@@ -1279,8 +1297,11 @@ command, after expanding the variables in it: text becomes code. Each `eval`
 expands once more: with `a='$b' b='$c' c=d`, `echo $a` prints `$b`, `eval
 echo $a` prints `$c` and `eval eval echo $a` prints `d`.
 
-tessh has no `eval` for tessh text. Python's `exec` and `eval` run Python
-text, `source` runs a file of tessh, and most of what scripts use `eval` for
+tessh's `eval text…` runs tessh text (not sh text) in the shell, and its
+value is the last form's: `x = (eval "1 + 2")`. Text in a variable goes
+in quotes (`eval "$code"`); a bare value (`eval $code`) is Python's `eval`,
+which runs Python text;
+`source` runs a file of tessh. Most of what scripts use `eval` for
 (choosing a variable by name, building a command) is done more safely with
 a dict, a list of arguments, or `$env`.
 
@@ -1352,7 +1373,7 @@ print "==========================================================="
 print
 
 code = seq 3 | sed -e 's/.*/echo var&=ABCDEFGHIJ/'
-print $code >generated.tsh     # (No eval of tessh text: source a file of it.)
+print $code >generated.tsh     # (Or eval "$code": a file of it, sourced.)
 source generated.tsh
 # var1=ABCDEFGHIJ
 # var2=ABCDEFGHIJ
@@ -1389,8 +1410,9 @@ version = 3.4
 Major: 3, minor: 4
 ```
 
-**Gap:** no `eval` of tessh text: Python's `exec` runs Python, and
-`source` needs a file.
+tessh's `eval` runs tessh text given as words or a string (`eval "echo
+hi"`, `eval "$code"`); a bare value (`eval $code`) goes to Python's `eval`.
+The lines above go through a file, which `eval "$code"` would do too.
 
 ### Example 15-12. Using eval to select among variables (`arr-choice.sh`)
 
@@ -1837,7 +1859,8 @@ c
 a b
 ```
 
-`shift` drops the first argument; on a list, that's `.pop 0` or a slice.
+`shift` drops the first argument; tessh's `shift` does it to `$argv`, and
+on any other list it's `.pop 0` or a slice.
 Splitting `$k` at `:` is `.split ":"`, which keeps the empty field after the
 last `:` that bash's word splitting drops, so the empty ones are filtered
 out.
@@ -2133,7 +2156,8 @@ exit 0
 read-only, exported), and **readonly** is `declare -r`. tessh's values
 carry their types themselves (an `int` is an int, a list a list), `export`
 covers exporting, and there's no read-only (see the gap under Example
-15-2).
+15-2). Run in tessh, `declare`, `typeset`, `local` and `readonly` say so
+and fail: a name set in a `def` is already local.
 
 **getopts** reads a script's options one at a time: letters after a `-`,
 several in one word (`-abc`), a letter followed by `:` in its list taking an
@@ -2162,10 +2186,16 @@ shift $(($OPTIND - 1))
 # All this is not nearly as complicated as it looks <grin>.
 ```
 
-Python's `getopt` module takes the same option string and gives back the
-options found, each with its argument, and the arguments left after them
-(so no `$OPTIND` and no `shift`). An unknown option is a `GetoptError`.
-`argparse` does more: long options, `--help`, types and defaults.
+tessh has `getopts optstring name [args]` too, over `$argv`, with
+`$OPTIND` and `$OPTARG` (`$OPTARG` is `None` for an option without an
+argument), and `shift [n]` drops `$argv[1]`… (it fails if there aren't
+that many). So a `getopts` loop ports to tessh, with the `case` written
+as a `match`. Python's `getopt`
+module, used in the example below, takes the same option string and gives
+back the options found, each with its argument, and the arguments left
+after them (so no `$OPTIND` and no `shift`). An unknown option is a
+`GetoptError`. `argparse` does more: long options, `--help`, types and
+defaults.
 
 ### Example 15-21. Using getopts to read the options/arguments passed to a script (`ex33.sh`)
 
@@ -2523,7 +2553,8 @@ exit 0   # The net effect is counting from 1 to 100.
 
 **exit** ends the script, with a status (0 for success). A bare `exit` in
 bash passes on the last command's status; tessh's exits 0. `exit` raises
-`SystemExit`, so a `finally` still runs.
+`SystemExit`, so a `finally` still runs. In an interactive tessh with jobs
+still running, `exit` warns first, as bash does.
 
 **exec** replaces the shell with a program: the script ends when the
 program does. (`exec <file` and the like, with only redirections, change the
@@ -2548,9 +2579,11 @@ exit 99                       #  This script will not exit here.
                               #  It will *not* be 99.
 ```
 
-Python's `os.execvp` is `exec`. Python keeps what's printed in a buffer
-when the output is a file or a pipe, and the new program won't write it out,
-so flush it first.
+tessh's `exec [-cl] [-a name] program args…` does this, as in bash:
+`exec echo "Exiting…"` ends the script there. The example uses Python's
+`os.execvp`, which is the same thing underneath. Python keeps what's
+printed in a buffer when the output is a file or a pipe, and the new
+program won't write it out, so flush it first.
 
 ```tessh
 #!/usr/bin/env tessh
@@ -2571,9 +2604,9 @@ exit 99
 Exiting "ex.tsh" at line 5.
 ```
 
-**Gap:** no `exec` builtin: `os.execvp` replaces the process (after a
-`sys.stdout.flush`), and there's no `exec 3<file` to open a descriptor for
-the rest of the script.
+**Gap:** `exec` with only redirections isn't in tessh: there's no
+`exec 3<file` to open a descriptor for the rest of the script, and no
+`exec >log`.
 
 ### Example 15-25. A script that exec's itself (`self-exec.sh`)
 
@@ -2653,11 +2686,13 @@ The PID of this instance of the script is still the first one: True
 ```
 
 **shopt** sets bash's optional behaviors (`cdspell`, `extglob`,
-`nullglob`…). tessh has no such switches.
+`nullglob`…). tessh has no such switches; its `shopt` says so and fails.
 
 **caller**, inside a function, tells where it was called from: the line,
 the function and the file. Python's `inspect.stack` does that, and a
-traceback shows the whole chain.
+traceback shows the whole chain; tessh's `caller` says as much and fails.
+The example defines its own `caller`, and a function of the name comes
+before the builtin.
 
 ```bash no-run
 #!/bin/bash
@@ -2733,31 +2768,48 @@ A word alone after `if` or `while` is a command, as in bash: `if false`
 runs `false`. `False` and `True` are Python's values.
 
 **type** says what a name is: keyword, builtin, function, alias or program,
-and with `-a` all of them. tessh's `which` finds programs, `help name`
-describes builtins and functions, and Python's `type` gives a value's type.
+and with `-a` all of them. tessh's `type [-afptP] name …` says whether it's
+a keyword, a function, a variable, a tessh builtin, a Python builtin, or a
+program (and gives its path); `command -v name` and `command -V name` do
+too. Given a value (`type $x`) it's Python's `type`, which gives the
+value's type. `which` finds programs, and `help name` describes builtins
+and functions.
 
 **hash** remembers where programs are, so `$PATH` needn't be searched
-again; **bind** shows and changes the keys of bash's line editor; **help**
-describes a builtin. tessh has `help` (for its builtins, its topics, and any
-Python value); the others have no counterpart.
-
-**Gap:** no `type`: nothing says in one step whether a name is a tessh
-builtin, a function or a program (and where).
+again. tessh keeps no such table: `hash -r` does nothing, `hash name`
+checks the program exists, and `hash -t name` prints its path. **bind**
+shows and changes the keys of bash's line editor; tessh's `bind` points to
+`help keys`, which lists them. **help** describes a builtin. tessh has
+`help` (for its builtins, its topics, and any Python value).
 
 ## 15.1 Job Control Commands
 <!-- help: abs-job-control-builtins jobs disown fg bg wait suspend logout times kill killall command builtin enable autoload -->
 
-**jobs** lists the background jobs, **fg** brings one to the front and
-**bg** lets a stopped one go on; tessh has all three. A job (`[1]`) isn't a
-process (`1384`): `kill %1` and `kill 1384` both work in bash. In tessh a
-trailing `&` gives a `Job` value, and `$job.wait` waits for it.
+tessh has all of bash's job control builtins, with bash's options.
+**jobs** (`jobs [-lprs]`) lists the background jobs, marking the current
+one `+` and the one before it `-` (`[1]+ running sleep 5`); **fg** brings
+one to the front and **bg** lets a stopped one go on. A job (`[1]`) isn't
+a process (`1384`): `kill %1` and `kill 1384` both work, in bash and in
+tessh. In tessh a trailing `&` gives a `Job` value: `j = cmd &`. `$j.pid`
+is its process ID (bash's `$!`), `$j.pids` all of them, `$j.status` its
+status. A Job reads as `%n` in words, so `wait $j`, `kill $j` and `fg $j`
+work. `$j.wait` alone on a line waits for it; `r = ($j.wait)` keeps the
+status (a method needs parentheses to be called as a value:
+`r = $j.wait` is the method itself).
 
-**disown** takes a job off the list; **suspend** stops the shell as
-Ctrl+Z does; **logout** leaves a login shell; **times** prints the time the
-shell has used (Python: `os.times`).
+Jobs that end are reported before the next prompt. When an interactive
+tessh exits, or its terminal hangs up, its jobs get `SIGHUP`.
+
+**disown** (`disown [-ahr]`) takes a job off the list; **suspend**
+(`suspend [-f]`) stops the shell as Ctrl+Z does; **logout** leaves a login
+shell; **times** prints the time the shell has used (tessh has it too;
+from Python, `os.times`).
 
 **wait** waits for the background jobs, or for one, and returns its status.
-It keeps a script from going on before a job's work is done.
+It keeps a script from going on before a job's work is done. tessh's
+`wait [-n] [%job|pid …]` with no arguments waits for all the jobs and
+returns 0; given jobs, it returns the last one's status (for a Python
+function's job, its result).
 
 ### Example 15-26. Waiting for a process to finish before proceeding (`ex39.sh`)
 
@@ -2799,8 +2851,8 @@ locate $1
 exit 0
 ```
 
-`updatedb` needs root, so this can't run here. The job's `.wait` is bash's
-`wait`.
+`updatedb` needs root, so this can't run here. tessh's `wait` works as it
+is; the job's `.wait`, used here, waits for that one job.
 
 ```tessh no-run
 #!/usr/bin/env tessh
@@ -2844,13 +2896,12 @@ Updating the database...
 database updated
 ```
 
-**Gap:** no `wait` for all the background jobs at once (wait on each `Job`),
-no `$!`, and a `Job` doesn't give its process ID, so `kill` can't be sent to
-it.
-
 **kill** sends a process a signal: `kill -l` lists them, `-9` (KILL) can't
 be caught, `-15` (TERM) is the default. **killall** kills processes by name.
-In tessh `kill` is the program; from Python, `os.kill pid signal`.
+tessh's `kill` is a builtin, as bash's is: `kill [-s SIG|-n N|-SIG]
+%job|pid …` takes job specs and process IDs, and `kill -l [n]` lists the
+signals. `\kill` runs the program. From Python, `os.kill pid signal`, as
+the example does.
 
 ### Example 15-27. A script that kills itself (`self-destruct.sh`)
 
@@ -2896,10 +2947,13 @@ exit 0   # Normal exit? No!
 ```
 
 **command** runs a program even when a function or alias has its name:
-tessh's `\name`. **builtin** runs the builtin of that name, and **enable**
-turns builtins off and on (or loads new ones from a shared library);
-**autoload** loads a function from a file when it's first called. In
-tessh, `import` loads modules (tessh or Python) when the script asks.
+tessh's `\name` (tessh's `command` has `-v` and `-V`, as under `type`
+above). **builtin** runs the builtin of that name, past a function of the
+same name: `builtin cd dir`, in tessh too. **enable** turns builtins off
+and on (or loads new ones from a shared library); tessh has no such
+switch, and its `enable` says so. **autoload** loads a function from a
+file when it's first called. In tessh, `import` loads modules (tessh or
+Python) when the script asks.
 
 A job can be named in several ways in bash:
 
@@ -2913,4 +2967,6 @@ A job can be named in several ways in bash:
 | `%-` | Last job |
 | `$!` | Last background process |
 
-tessh's `fg` and `bg` take the job's number, or none for the latest.
+tessh takes all of these but `$!` wherever a job is named (`jobs`, `fg`,
+`bg`, `wait`, `disown`, `kill`); `fg` and `bg` take a bare number `n` too,
+or none for the current job. For `$!` it's `$j.pid`, after `j = cmd &`.

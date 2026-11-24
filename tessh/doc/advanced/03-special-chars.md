@@ -726,8 +726,10 @@ TOTAL 2
 ```
 
 A bash pipe's stages run in subshells, so `echo "new_value" | read variable`
-leaves `variable` as it was. tessh has no `read`; a value comes out of a
-pipe by capturing it, or by a function at its end:
+leaves `variable` as it was. tessh has no subshells: its `read` runs in
+the shell, so `echo "new_value" | read variable` does set `variable`. A
+value also comes out of a pipe by capturing it, or by a function at its
+end:
 
 ```bash
 variable="initial_value"
@@ -756,7 +758,9 @@ tests. tessh has both, and `or` and `and` too.
 <!-- help: abs-background & background-job job -->
 
 A trailing `&` runs a command in the background. In tessh a function call
-can go in the background too, and its value is a `Job`; `fg` waits for it.
+can go in the background too, and its value is a `Job`; `fg` and `wait`
+wait for it, and `jobs`, `kill` and the rest of bash's job control work on
+it (chapter 15.1).
 
 ### Example 3-3. Running a loop in the background (`background-loop.sh`)
 
@@ -807,7 +811,7 @@ exit 0
 
 A loop can't take `&` in tessh, but a function holding it can. The order of
 the output is up to chance, as in bash. `fg` waits for the job, so the
-script doesn't end before it does (bash's `wait`; tessh has no `wait` yet).
+script doesn't end before it does; `wait` does too, as in bash.
 
 ```tessh
 #!/usr/bin/env tessh

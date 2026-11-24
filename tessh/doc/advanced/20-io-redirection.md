@@ -179,7 +179,8 @@ exec 3>&-                              # Now close it for the remainder of the s
 # Thanks, S.C.
 ```
 
-tessh has no `exec`, but the descriptors are the process's own, so
+tessh's `exec` only replaces the shell with a program; it has no
+`exec 3>&1` form. But the descriptors are the process's own, so
 Python's `os.dup2` and `os.close` do what bash's `exec 3>&1` and
 `exec 3>&-` do, and the programs tessh runs inherit them.
 
@@ -201,8 +202,9 @@ total 0
 
 In bash, `exec <filename` makes a file the standard input of the rest of
 the script, and `exec >filename` its standard output; `exec 6<&0` keeps
-the old one in descriptor 6 so it can be put back. tessh has no `exec`.
-What it has instead:
+the old one in descriptor 6 so it can be put back. tessh's `exec`
+replaces the shell with a program (`exec command`), as bash's does, but it
+has no form with only redirections. What it has instead:
 
 - for Python code (`print`, `input`, `sys.stdin.read`), set `$sys.stdin`
   or `$sys.stdout` to an open file, and back again after;
@@ -212,8 +214,8 @@ What it has instead:
   back;
 - for the descriptors themselves, `os.dup2`, as above.
 
-**Gap:** `exec` itself, both for redirecting the rest of a script and for
-replacing the shell with a program (`exec command`).
+**Gap:** `exec` with only redirections (`exec <file`, `exec >log`,
+`exec 3<file`), for redirecting the rest of a script.
 
 ### Example 20-1. Redirecting stdin using exec (`redir1.sh`)
 

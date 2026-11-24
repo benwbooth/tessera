@@ -467,8 +467,9 @@ diff list123 list456
 ```
 
 A trailing `&` puts the whole pipeline in the background, and its value is
-a `Job`, whose `.wait` waits for it to finish. **Gap:** tessh has no
-`wait` command (to wait for every background job).
+a `Job`, whose `.wait` waits for it to finish. tessh's `wait` with no
+arguments waits for every background job, as bash's does; the example
+waits on each `Job`.
 
 ```tessh
 # (Made-up lists to try it on.)

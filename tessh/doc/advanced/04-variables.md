@@ -373,8 +373,9 @@ echo
 exit 0
 ```
 
-tessh needs no `let`: arithmetic is everywhere. `read` is Python's
-`input`; here a canned answer stands in for what you'd type.
+tessh needs no `let`: arithmetic is everywhere. tessh has `read` too, and
+Python's `input` does the same; here a canned answer stands in for what
+you'd type.
 
 ```tessh
 #!/usr/bin/env tessh

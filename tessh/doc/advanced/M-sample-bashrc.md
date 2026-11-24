@@ -945,9 +945,11 @@ What changes, part by part:
 - **Options.** `set -o nounset` is always on in tessh (an unset variable is
   an error). **Gap:** there's no `xtrace`, `noclobber`, `ignoreeof`,
   `notify`, or `shopt` (`cdspell`, `cdable_vars`, `checkwinsize`,
-  `histappend`…). `ulimit -S -c 0` is Python's `resource.setrlimit`.
+  `histappend`…). `ulimit -S -c 0` works in tessh as it is; the version
+  here uses Python's `resource.setrlimit`, which is the same.
 - **Colors** are a dict of escape strings; `"\x1b"` is bash's `\e`.
-- **The exit trap** is `atexit.register`.
+- **The exit trap** is `trap _exit EXIT` in tessh too; the version here
+  uses Python's `atexit.register`.
 - **Aliases.** tessh has no aliases; a function does the job. With
   `@command` it reads its arguments as words (globs included), as a
   command does, and passes them on with `$args`. A function named after a
@@ -1154,8 +1156,9 @@ def mkdir *args
 @command
 def j *args
   jobs
-# (h, history: tessh has no history command. which: tessh's own which
-#  says where a program is. ..: a line that's only a folder goes there.)
+# (h: history is a builtin, as in bash. which: tessh's own which says
+#  where a program is, and type -a works. ..: a line that's only a folder
+#  goes there.)
 
 # Pretty-print of some PATH variables:
 def path

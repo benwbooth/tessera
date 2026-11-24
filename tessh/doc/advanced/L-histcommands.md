@@ -12,8 +12,13 @@ tune it: `$HISTFILE`, `$HISTSIZE`, `$HISTFILESIZE`, `$HISTCONTROL`,
 tessh's REPL keeps its history in `~/.local/share/tessh/history`. ↑ and ↓
 go through it (PgUp and PgDn a whole multi-line entry at a time), Ctrl+R
 searches it, and the grey suggestion after the cursor comes from it (→ or
-End takes it). **Gap:** there's no `history` or `fc` command, no `!`
-expansion and no history variables.
+End takes it). `history [N]` lists the entries (the last N), and
+`history -c`, `history -d N` and `history -s text` clear the list, delete
+an entry and add one; `fc -l [-nr] [first [last]]` lists them as bash's
+does. Like any builtin, `history` used as a value gives what it prints,
+and in a pipe its output goes down the pipe: `history | grep ssh`.
+**Gap:** there's no `!` expansion, no `fc` but `fc -l` (↑ and Ctrl+R edit
+a past command instead), and no history variables.
 
 The ABS Guide notes that history is no use in a script anyway: it's
 turned off there.
@@ -41,7 +46,8 @@ var=$(history); echo "$var"   # 1  var=$(history)
     1  var=$(history); echo "$var"   # 1  var=$(history)
 ```
 
-A tessh script has no history; the REPL's file can be read like any other,
+A tessh script has no history of its own; the REPL's file can be read
+like any other,
 an entry to a line (with a multi-line entry's lines joined by an escape),
 but a script that depends on it depends on what you typed, so it's for
 your own use at the REPL:

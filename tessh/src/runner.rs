@@ -264,6 +264,71 @@ pub fn run_source(py: Python<'_>, text: &str, ns: &Bound<'_, PyDict>, filename: 
     Ok(())
 }
 
+/// Run tessh text in ns, as `eval "…"` does: the last form's value (None
+/// for a definition, an assignment or a loop).
+pub fn eval_source(py: Python<'_>, text: &str, ns: &Bound<'_, PyDict>, filename: &str) -> Result<Py<PyAny>, TesshError> {
+    install(py, ns)?;
+    let lines = read_at(text, 1).map_err(TesshError::Read)?;
+    let sb = state_of(ns)?;
+    let sb = sb.borrow();
+    let builtins = py.import("builtins")?;
+    let ast = py.import("ast")?;
+    let units = {
+        let mut st = sb.st.lock().unwrap();
+        let mut c = Compiler::new(py, Some(ns.clone()), &mut st)?;
+        c.prescan_module(&lines);
+        c.units_of(&lines).map_err(|e| TesshError::Compile(e, text.to_string()))?
+    };
+    let n = units.len();
+    let mut value = py.None();
+    for (k, u) in units.iter().enumerate() {
+        let last = k + 1 == n;
+        let module = {
+            let mut st = sb.st.lock().unwrap();
+            let mut c = Compiler::new(py, Some(ns.clone()), &mut st)?;
+            c.unit_module(u, if last { Ctx::Tail } else { Ctx::Stmt }, last).map_err(|e| TesshError::Compile(e, text.to_string()))?
+        };
+        // (The last form's `__tessh__.show(v)`, as the REPL has it: kept as
+        // a value instead.)
+        const KEY: &str = "__tessh_eval_value__";
+        let mut kept = false;
+        if last {
+            let body = module.getattr("body")?;
+            let stmt = body.get_item(-1)?;
+            let call = stmt.getattr("value").ok().filter(|c| ast.getattr("Call").and_then(|t| c.is_instance(&t)).unwrap_or(false));
+            if let Some(call) = call.filter(|c| c.getattr("func").and_then(|f| f.getattr("attr")).and_then(|a| a.extract::<String>()).is_ok_and(|a| a == "show")) {
+                let kw = PyDict::new(py);
+                kw.set_item("id", KEY)?;
+                kw.set_item("ctx", ast.getattr("Store")?.call0()?)?;
+                let target = ast.getattr("Name")?.call((), Some(&kw))?;
+                let kw = PyDict::new(py);
+                kw.set_item("targets", vec![target])?;
+                kw.set_item("value", call.getattr("args")?.get_item(0)?)?;
+                let assign = ast.getattr("Assign")?.call((), Some(&kw))?;
+                ast.getattr("copy_location")?.call1((&assign, &stmt))?;
+                body.set_item(-1, assign)?;
+                ast.getattr("fix_missing_locations")?.call1((&module,))?;
+                kept = true;
+            }
+        }
+        let code = builtins.getattr("compile")?.call1((module, filename, "exec", TOP_LEVEL_AWAIT))?;
+        let flags: i64 = code.getattr("co_flags")?.extract()?;
+        if flags & CO_COROUTINE != 0 {
+            let coro = builtins.getattr("eval")?.call1((code, ns))?;
+            py.import("__tessh__")?.getattr("run_top")?.call1((coro,))?;
+        } else {
+            builtins.getattr("exec")?.call1((code, ns))?;
+        }
+        if kept {
+            if let Some(v) = ns.get_item(KEY)? {
+                value = v.unbind();
+                ns.del_item(KEY)?;
+            }
+        }
+    }
+    Ok(value)
+}
+
 /// ast.PyCF_ALLOW_TOP_LEVEL_AWAIT, and inspect.CO_COROUTINE.
 const TOP_LEVEL_AWAIT: i32 = 0x2000;
 const CO_COROUTINE: i64 = 0x80;
@@ -355,6 +420,31 @@ pub fn report(py: Python<'_>, e: TesshError, filename: &str) {
                     Some(l) => eprintln!("tessh: {filename}:{l}: Unhandled error: {}", line.1),
                     None => eprintln!("tessh: {filename}: Unhandled error: {}", line.1),
                 }
+                return;
+            }
+            // (A builtin's error on a line of its own (cd to a folder that
+            // isn't there, popd with nothing pushed): one line, as bash says it.)
+            if e.value(py).hasattr("_tessh_builtin").unwrap_or(false) {
+                let _ = py.import("sys").and_then(|s| s.getattr("stdout")).and_then(|o| o.call_method0("flush"));
+                let name: String = e.value(py).getattr("_tessh_builtin").and_then(|n| n.extract()).unwrap_or_default();
+                let msg = e.value(py).str().map(|m| m.to_string()).unwrap_or_default();
+                let msg = if msg.starts_with(&format!("{name}:")) { msg } else { format!("{name}: {msg}") };
+                let mut line = None;
+                let mut tb = e.traceback(py).map(|t| t.into_any());
+                while let Some(t) = tb {
+                    // (The last frame in this file: the builtin's own Python has frames too.)
+                    let here = t.getattr("tb_frame").and_then(|f| f.getattr("f_code")).and_then(|c| c.getattr("co_filename")).and_then(|f| f.extract::<String>()).is_ok_and(|f| f == filename);
+                    if here {
+                        line = t.getattr("tb_lineno").ok().and_then(|l| l.extract::<u32>().ok()).or(line);
+                    }
+                    tb = t.getattr("tb_next").ok().filter(|n| !n.is_none());
+                }
+                let text = match line {
+                    Some(l) if filename != "<stdin>" => format!("tessh: {filename}:{l}: {msg}\n"),
+                    _ => format!("tessh: {msg}\n"),
+                };
+                use std::io::Write;
+                let _ = std::io::stderr().write_all(text.as_bytes());
                 return;
             }
             e.print(py);

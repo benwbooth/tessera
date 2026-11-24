@@ -796,7 +796,7 @@ SPLIT
 ```
 
 ## Jobs
-<!-- help: jobs job background & fg bg wait ctrl-z -->
+<!-- help: jobs job background & fg bg wait disown kill ctrl-z jobspec %1 %% suspend $! pid -->
 
 A trailing `&` runs a command in the background, and its value is a `Job`.
 `jobs` lists them, `fg` brings one back and `bg` continues a stopped one.
@@ -810,9 +810,44 @@ print done
 ```
 
 ```output
-[1] running sleep 0.5
+[1]+ running sleep 0.5
 done
 ```
+
+A job is named as in bash: `%1` (or `1` for fg and bg), `%%` or `%+` for
+the current one (the latest stopped or sent to the background, marked `+`
+by `jobs`), `%-` for the one before, `%name` for the one whose command
+starts with name and `%?text` for the one with text in it. A `Job` value
+reads as `%n` in a command's words, so `fg $j`, `wait $j` and `kill $j`
+work too, and `$j.pid` is its process ID (bash's `$!`).
+
+`wait` waits for every job (status 0), or for those named (the last one's
+status); `$j.wait` on a line of its own does the same for one job, and
+`r = ($j.wait)` keeps its status. A method is called alone on a line or
+alone in parentheses: `r = $j.wait` would be the method itself.
+
+```tessh
+a = sh -c "sleep 0.1; exit 3" &
+b = sh -c "exit 4" &
+r = (wait $a)
+print $r.code ($b.wait).code
+c = sleep 5 &
+kill %%
+print (wait $c).code (kill -l 143)
+```
+
+```output
+3 4
+143 TERM
+```
+
+`kill` sends a signal (TERM without one; `-9`, `-KILL`, `-s HUP`) to jobs
+and process IDs, `kill -l` lists the signals. `disown` takes a job off the
+list. When the REPL ends, its jobs get SIGHUP, as when the terminal closes;
+a disowned job goes on (`disown -h` keeps it listed but spares it).
+`exit` with jobs left says so first, and `exit` again ends them. Jobs that
+end in the background are reported before the next prompt. `suspend` stops
+tessh itself.
 
 ## Environment and folders
 <!-- help: environment env export unset cd pushd popd dirs which source argv folders -->
@@ -892,6 +927,76 @@ print $x_from_file
 ```output
 42
 ```
+
+## Shell builtins
+<!-- help: shell-builtins builtins builtin trap ulimit umask read getopts shift times history fc type hash exec eval command-v logout suspend alias unalias declare typeset local readonly shopt bind complete compgen caller enable -->
+
+Besides `cd`, `export` and the jobs, tessh has the builtins a login shell
+needs, with bash's options: `trap`, `ulimit`, `umask`, `read`, `getopts`,
+`shift`, `times`, `history` (and `fc -l`), `type`, `command -v`, `hash`,
+`exec`, `eval`, `builtin`, `logout` and `suspend`. `help NAME` describes
+each.
+
+`trap` runs tessh text when a signal comes, or `EXIT` when tessh ends; a
+function's name calls it. `read` reads a line into names (or `$REPLY`), and
+fails at the end of the input. `getopts` parses `$argv`'s options as bash's
+does, and `shift` drops arguments.
+
+```tessh
+read first rest <<< "one two three"
+print $first "/" $rest
+echo "a b" | read x y
+print $y $x
+argv = [prog -v -n 3 file]
+while getopts "vn:" opt
+  print $opt $OPTARG
+shift ($OPTIND - 1)
+print $argv
+```
+
+```output
+one / two three
+b a
+v None
+n 3
+['prog' 'file']
+```
+
+`type`, `hash`, `exec` and `eval` are Python's names too. Given words
+(`type ls`, `exec zsh`, `eval "echo hi"`) they're the shell's; given a
+value (`type $x`, `exec $code`) they're Python's. `eval` runs tessh text,
+and its value is the last form's.
+
+```tessh
+type cd
+type -t if
+x = 1
+print (type $x)
+eval "echo from eval"
+print (eval "2 + 3")
+old = (umask)
+umask 027
+print (umask) (umask -S)
+umask $old
+```
+
+```output
+cd is a tessh builtin
+keyword
+<class 'int'>
+from eval
+5
+0027 u=rwx,g=rx,o=
+```
+
+A builtin used as a value gives what it prints, as `$(…)` does in bash,
+and in a pipe what it prints goes down the pipe: `history | grep ssh`.
+
+Some of bash's builtins are tessh's own idioms instead, and say so when
+used: `alias` (a `@command` def, see Commands), `declare`, `typeset`,
+`local` and `readonly` (variables are Python's: a name set in a def is
+already local), `shopt`, `bind`, `complete`, `compgen`, `caller` and
+`enable`.
 
 # Python, written as tessh
 

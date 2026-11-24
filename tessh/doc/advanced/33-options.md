@@ -35,9 +35,9 @@ Bash's options, and where tessh stands on each:
 | `-C` | noclobber | none: `>` always writes, as bash's `>|` does |
 | `-D` | (list `$"…"` strings) | none |
 | `-a` | allexport | none: `export` each name, or set `$env[name]` |
-| `-b` | notify | none; `jobs` shows finished jobs |
+| `-b` | notify | none; jobs that end are reported before the next prompt, and `jobs` shows them |
 | `-c …` | (run a string) | `tessh -c 'code' args…` |
-| `checkjobs` | | none |
+| `checkjobs` | | none to set: `exit` in an interactive tessh with jobs left warns first |
 | `-e` | errexit | `strict` (or `set -e`, `tessh -e`): a program or pipe failing on a line of its own raises `CommandFailed`; `strict off` / `set +e` ends it. Without it a builtin (`cd`, `pushd`, `source`…) failing on a line of its own still stops the script, and so does a Python error. One command at a time: `(cmd)!` raises if `cmd` fails, and `(expr)?` turns a Python error into a false value |
 | `-f` | noglob | none needed: a variable's value is never globbed, and a quoted pattern is text |
 | `globstar` | | always on: `**/*.py` searches the subfolders |
