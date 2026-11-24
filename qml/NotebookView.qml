@@ -1508,14 +1508,14 @@ FocusScope {
     // A folder card (ls, cd shown as the folder): what its program prints
     // isn't shown, so only its end is kept, and none of it read while it runs.
     function isFolderCard(c) { return !!c && (c.lang === "" || c.lang === "tessh") && builtinKind(c.source) === "files" }
-    function ttyText(t, final) {
+    function ttyText(t, ended) {
         const r = ttyRun
         const i = indexOf(r.cid)
         if (i < 0) return
         // (An ls -lR's megabytes, read out of the terminal every 300 ms, held
         // the window up and its end back: read once, when it's done.)
         const folder = isFolderCard(cells.get(i))
-        if (folder && !final) return
+        if (folder && !ended) return
         let outs = []
         try { outs = JSON.parse(cells.get(i).outputs) } catch (x) {}
         // (It goes on the text before it, as a stream's next text would.)
@@ -1523,7 +1523,7 @@ FocusScope {
             const last = outs[outs.length - 1]
             const joins = last && last.output_type === "stream" && last.name === "stdout"
             ttyRun = Object.assign({}, r, { base: joins ? outs.length - 1 : outs.length, before: joins ? last.text : "" })
-            return ttyText(t, final)
+            return ttyText(t, ended)
         }
         outs = outs.slice(0, r.base)
         let text = t.screen ? "" : view.cellOutput(t.id, "text")
