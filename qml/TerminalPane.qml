@@ -129,8 +129,9 @@ Item {
     }
     onEditorOnChanged: {
         // (Back at the prompt after a command or a full-screen program like
-        // vim: the editor takes the keys again, even if the terminal had them.)
-        if (editorOn && focused) { preferEditor = true; Qt.callLater(compose.focusEditor) }
+        // vim: the editor takes the keys again if it had them before; keys
+        // given to the terminal (a click there, a tap of Ctrl) stay there.)
+        if (editorOn && focused && preferEditor) Qt.callLater(compose.focusEditor)
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
     readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (promptHeld || editorCalled)
