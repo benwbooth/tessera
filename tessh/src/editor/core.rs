@@ -509,7 +509,7 @@ impl Ed {
                 words.iter().all(|w| l.contains(w))
             })
             .take(300)
-            .map(|h| Item { label: h.replace('\n', " ⏎ "), insert: h.clone(), kind: "history".into(), ..Default::default() })
+            .map(|h| Item { label: one_line(h), insert: h.clone(), kind: "history".into(), ..Default::default() })
             .collect();
         if self.comp.index >= self.comp.items.len() {
             self.comp.index = 0;
@@ -1972,4 +1972,21 @@ pub fn clipboard() -> Option<String> {
         }
     }
     None
+}
+
+/// A command as one line for a list: newlines as ⏎, tabs as a space, other
+/// control characters (a CR, an escape) as ·. (A tab counted no columns
+/// but showed one, and pushed that row's scrollbar off the box's edge.)
+fn one_line(h: &str) -> String {
+    let mut out = String::with_capacity(h.len());
+    for c in h.chars() {
+        match c {
+            '\n' => out.push_str(" ⏎ "),
+            '\t' => out.push(' '),
+            '\r' => {}
+            c if c.is_control() => out.push('·'),
+            c => out.push(c),
+        }
+    }
+    out
 }

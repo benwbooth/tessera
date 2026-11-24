@@ -250,23 +250,30 @@ fn wrap_text(t: &str, w: usize) -> Vec<String> {
 
 /// Cut a line of spans to `w` columns (an ellipsis when cut).
 fn fit(l: Line, w: usize) -> Line {
+    if super::width(&l) <= w {
+        return l;
+    }
+    // (Too long: cut so the … takes the last column. It went one past the
+    // edge when the cut fell where one span ended, and that row's scrollbar
+    // and border were pushed off: the jagged edge.)
+    let room = w.saturating_sub(1);
     let mut out = vec![];
     let mut used = 0;
     for mut s in l {
-        let sw = cols_of(&s.text);
-        if used + sw <= w {
-            used += sw;
-            out.push(s);
-            continue;
-        }
         let mut t = String::new();
+        let mut whole = true;
         for c in s.text.chars() {
             let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-            if used + cw + 1 > w {
+            if used + cw > room {
+                whole = false;
                 break;
             }
             t.push(c);
             used += cw;
+        }
+        if whole {
+            out.push(s);
+            continue;
         }
         t.push('…');
         s.text = t;
@@ -350,7 +357,7 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         let sel_at = shown.iter().position(|&i| i == m.sel).unwrap_or(0);
         let top = if sel_at < top { sel_at } else if sel_at >= top + room { sel_at + 1 - room } else { top };
         ed.list_top.set(top);
-        let bar = scrollbar(shown.len(), room, top, v.pal.mix(0.10));
+        let bar = scrollbar(shown.len(), room, top, &v.pal);
         for (k, &i) in shown.iter().skip(top).take(room).enumerate() {
             let it = &m.items[i];
             let mut st = if it.section { v.pal.dimmed().bold() } else if it.enabled { Sty::default() } else { v.pal.dimmed() };
@@ -393,7 +400,7 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         ed.list_room.set(room);
         let top = if ed.comp.index < ed.comp.top { ed.comp.index } else if ed.comp.index >= ed.comp.top + room { ed.comp.index + 1 - room } else { ed.comp.top.min(n.saturating_sub(room)) };
         ed.list_top.set(top);
-        let bar = scrollbar(n, room, top, v.pal.mix(0.10));
+        let bar = scrollbar(n, room, top, &v.pal);
         let iw = if bar.is_empty() { w } else { w - 1 };
         for (k, (i, it)) in ed.comp.items.iter().enumerate().skip(top).take(room).enumerate() {
             let on = i == ed.comp.index;
@@ -479,28 +486,37 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
     None
 }
 
-/// A list's scrollbar, a cell a row, as the full-screen viewer's: ↑ and ↓
-/// at its ends (a click moves a row), the track (░ on a shaded column, a
-/// click pages) and the thumb (█) where the rows shown are, which drags;
-/// none when everything shows. (Arrows every font has: ▲▼ came out wider
-/// than a cell in some.)
-fn scrollbar(n: usize, room: usize, top: usize, shade: Option<Col>) -> Vec<Span> {
+/// A list's scrollbar, a cell a row: ↑ and ↓ at its ends (a click moves a
+/// row), the track (a click pages) and the thumb where the rows shown are,
+/// which drags; none when everything shows. Drawn as cells of color, a
+/// track a shade lighter than the popup and a thumb lighter still, so no
+/// font draws it differently (only when the terminal's colors aren't
+/// known: ░ and █).
+fn scrollbar(n: usize, room: usize, top: usize, pal: &Palette) -> Vec<Span> {
     if n <= room || room == 0 {
         return vec![];
     }
     let arrows = room >= 4;
-    let track = if arrows { room - 2 } else { room };
+    let track_n = if arrows { room - 2 } else { room };
     let (at, size) = thumb_of(n, room, top);
+    let (track, thumb) = (pal.mix(0.20), pal.mix(0.50));
+    let cell = |on: bool| match (on, track, thumb) {
+        (false, Some(t), _) => Span::new(" ", Sty { bg: Some(t), ..Default::default() }),
+        (true, _, Some(t)) => Span::new(" ", Sty { bg: Some(t), ..Default::default() }),
+        (false, _, _) => Span::new("░", Sty::fg(Col::Ansi(8))),
+        (true, _, _) => Span::new("█", Sty::fg(Col::Ansi(7))),
+    };
+    let arrow = |s: &str| Span::new(s.to_string(), Sty { bg: track, ..Default::default() });
     let mut out = vec![];
     if arrows {
-        out.push(Span::new("↑", Sty { fg: Some(Col::Ansi(7)), bg: shade, ..Default::default() }).hit(Hit::ScrollArrow(true, room)));
+        out.push(arrow("↑").hit(Hit::ScrollArrow(true, room)));
     }
-    for k in 0..track {
+    for k in 0..track_n {
         let on = k >= at && k < at + size;
-        out.push(if on { Span::new("█", Sty { fg: Some(Col::Ansi(7)), bg: shade, ..Default::default() }).hit(Hit::Thumb(n, room)) } else { Span::new("░", Sty { fg: Some(Col::Ansi(8)), bg: shade, ..Default::default() }).hit(Hit::Scroll(k < at)) });
+        out.push(if on { cell(true).hit(Hit::Thumb(n, room)) } else { cell(false).hit(Hit::Scroll(k < at)) });
     }
     if arrows {
-        out.push(Span::new("↓", Sty { fg: Some(Col::Ansi(7)), bg: shade, ..Default::default() }).hit(Hit::ScrollArrow(false, room)));
+        out.push(arrow("↓").hit(Hit::ScrollArrow(false, room)));
     }
     out
 }
@@ -809,4 +825,21 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
     }
     let popup_rows = 0;
     Built { frame: Frame { rows, cursor, fill, overlay, bare: 0 }, popup_rows }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    #[test]
+    fn a_cut_row_is_never_wider_than_its_room() {
+        // (Spans that fill the room exactly, then more: the … goes in the room.)
+        let l = vec![Span::new("abcde", Sty::default()), Span::new("fghij", Sty::default()), Span::new("k", Sty::default())];
+        for w in 1..12 {
+            let f = fit(l.clone(), w);
+            assert!(super::super::width(&f) <= w, "{w}: {:?}", f.iter().map(|s| s.text.clone()).collect::<Vec<_>>());
+        }
+        assert_eq!(fit(l.clone(), 10).iter().map(|s| s.text.as_str()).collect::<String>(), "abcdefghi…");
+        assert_eq!(fit(l, 11).iter().map(|s| s.text.as_str()).collect::<String>(), "abcdefghijk");
+    }
 }

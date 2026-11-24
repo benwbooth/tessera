@@ -93,11 +93,13 @@ fn encode(l: &Line, cols: usize) -> (String, Vec<Hit>, usize) {
         }
         let mut piece = String::new();
         for ch in s.text.chars() {
-            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            // (A control character takes no column, and so shows nothing: a
+            // space for it made the row a column wider than it was laid out.)
+            let Some(cw) = unicode_width::UnicodeWidthChar::width(ch) else { continue };
             if w + cw > cols {
                 break;
             }
-            piece.push(if ch == '\t' || ch == '\n' { ' ' } else { ch });
+            piece.push(ch);
             for _ in 0..cw {
                 hits.push(s.hit.clone());
             }
