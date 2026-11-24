@@ -5,12 +5,17 @@
 //! there comes back after. Keys: / or a click on the box to search, Enter /
 //! n / N for the next and previous match, [ ] for the parts, the arrows,
 //! PgUp PgDn, g G, the wheel; q or Esc goes back.
+//!
+//! The file viewer (`crate::viewer`) shows a file in it too: its views
+//! (rendered, source, …) as the chips the guides have, the lines it laid out
+//! (a line-number gutter, ← → when they're wider than the screen, w to wrap
+//! them), and the file's name and kind at the foot.
 
 use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use std::io::Write;
 use unicode_width::UnicodeWidthStr;
 
-fn strip(s: &str) -> String {
+pub(crate) fn strip(s: &str) -> String {
     let mut out = String::new();
     let mut it = s.chars().peekable();
     while let Some(c) = it.next() {
@@ -41,7 +46,7 @@ fn strip(s: &str) -> String {
     out
 }
 
-fn cut(s: &str, w: usize) -> String {
+pub(crate) fn cut(s: &str, w: usize) -> String {
     let mut out = String::new();
     let mut n = 0;
     for c in s.chars() {
@@ -55,18 +60,101 @@ fn cut(s: &str, w: usize) -> String {
     out
 }
 
+/// The columns `from` to `from + w` of a line with ANSI styles: the styles
+/// before `from` still apply, and it ends with them reset.
+pub(crate) fn slice(s: &str, from: usize, w: usize) -> String {
+    let mut out = String::new();
+    let mut col = 0;
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\x1b' {
+            // (An escape: kept, wherever it is, so the colors carry on.)
+            let mut e = String::from(c);
+            if it.peek() == Some(&'[') {
+                e.push(it.next().unwrap());
+                while let Some(n) = it.next() {
+                    e.push(n);
+                    if n.is_ascii_alphabetic() || n == '~' {
+                        break;
+                    }
+                }
+            } else if it.peek() == Some(&']') {
+                while let Some(n) = it.next() {
+                    e.push(n);
+                    if n == '\x07' {
+                        break;
+                    }
+                    if n == '\x1b' {
+                        if let Some(x) = it.next() {
+                            e.push(x);
+                        }
+                        break;
+                    }
+                }
+            }
+            out.push_str(&e);
+            continue;
+        }
+        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if col >= from && col + cw <= from + w {
+            out.push(c);
+        } else if col < from && col + cw > from {
+            // (A wide char cut in half at the left edge: a space for its right half.)
+            out.push(' ');
+        }
+        col += cw;
+        if col >= from + w && it.peek() != Some(&'\x1b') {
+            break;
+        }
+    }
+    out.push_str("\x1b[0m");
+    out
+}
+
+/// Text the viewer laid out: its lines (with styles), the columns of each
+/// line that are a gutter (line numbers: never picked, kept in place when
+/// the text scrolls sideways), whether long lines wrap, and its parts
+/// (level, title, line) for the contents column.
+#[derive(Clone, Default)]
+pub(crate) struct Lines {
+    pub lines: Vec<String>,
+    pub gutter: usize,
+    pub wrap: bool,
+    pub parts: Vec<(usize, String, usize)>,
+}
+
+/// What a guide or a view of a file shows: Markdown (laid out for the room
+/// there is) or lines laid out already.
+#[derive(Clone)]
+pub(crate) enum Content {
+    Markdown(String),
+    Lines(Lines),
+}
+
 struct Part {
     level: usize,
     title: String,
     line: usize,
 }
 
-struct Guide {
-    md: String,
+pub(crate) struct Guide {
     /// The guides there are (title, Markdown), the one shown, and where
-    /// each was left (the bundled guide: tessh's and the Advanced one).
-    guides: Vec<(&'static str, String)>,
+    /// each was left (the bundled guide: tessh's and the Advanced one); a
+    /// file's views (rendered, source…).
+    guides: Vec<(String, Content)>,
     which: usize,
+    /// The search box's hint ("the guide", a file's name), and what the
+    /// foot says first (a file's name, kind and size).
+    name: String,
+    info: String,
+    /// A file shown: o opens it in its own app.
+    file: Option<std::path::PathBuf>,
+    /// How far the lines are scrolled sideways (unwrapped lines only).
+    left: usize,
+    /// Each laid-out line's gutter width (0 for Markdown's but a code
+    /// block's), the widest line, and the source line each laid-out one is.
+    gutters: Vec<usize>,
+    widest: usize,
     tops: Vec<usize>,
     /// The examples showing their bash version (by number, per guide); the
     /// others show tessh's. And the laid-out lines that are tab bars.
@@ -91,9 +179,11 @@ struct Guide {
     dragging: bool,
     /// The right-click menu: where (column, row), and the item pointed at.
     menu: Option<(usize, usize, usize)>,
+    /// The scrollbar's thumb being dragged: the row in the thumb held.
+    thumb_drag: Option<usize>,
 }
 
-const MENU: [&str; 2] = ["Copy", "Select All"];
+const MENU: [&str; 3] = ["Copy", "Select All", "Copy all"];
 
 /// The contents column's width as dragged (0: as wide as suits the terminal).
 static SIDE_W: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -108,11 +198,37 @@ impl Guide {
     }
 
     fn of(guides: Vec<(&'static str, String)>, which: usize) -> Guide {
+        Guide::views(guides.into_iter().map(|(t, md)| (t.to_string(), Content::Markdown(md))).collect(), which, "the guide", "")
+    }
+
+    /// Views of something (one chip each when there's more than one): the
+    /// search box says "Search `name`", the foot starts with `info`.
+    pub(crate) fn views(guides: Vec<(String, Content)>, which: usize, name: &str, info: &str) -> Guide {
         let n = guides.len();
-        let md = guides[which].1.clone();
-        let mut g = Guide { md, guides, which, tops: vec![0; n], bash: vec![Default::default(); n], tab_lines: vec![], chips: vec![], width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None, sel: None, dragging: false, menu: None };
+        let mut g = Guide { guides, which, name: name.to_string(), info: info.to_string(), file: None, left: 0, gutters: vec![], widest: 0, tops: vec![0; n], bash: vec![Default::default(); n], tab_lines: vec![], chips: vec![], width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None, sel: None, dragging: false, menu: None, thumb_drag: None };
         g.layout(80);
         g
+    }
+
+    /// A file's views: o opens the file in its own app.
+    pub(crate) fn with_file(mut self, p: &std::path::Path) -> Guide {
+        self.file = Some(p.to_path_buf());
+        self
+    }
+
+    fn content(&self) -> &Content {
+        &self.guides[self.which].1
+    }
+    /// The view shown is lines that don't wrap: ← → scroll them.
+    fn unwrapped(&self) -> bool {
+        matches!(self.content(), Content::Lines(l) if !l.wrap)
+    }
+    /// Whether there are parts to list (the contents column shows then).
+    fn has_parts(&self) -> bool {
+        match self.content() {
+            Content::Markdown(md) => md.lines().any(|l| l.starts_with("# ") || l.starts_with("## ") || l.starts_with("### ")),
+            Content::Lines(l) => !l.parts.is_empty(),
+        }
     }
 
     /// Show guide `w`, where it was left.
@@ -122,8 +238,8 @@ impl Guide {
         }
         self.tops[self.which] = self.top;
         self.which = w;
-        self.md = self.guides[w].1.clone();
         self.top = self.tops[w];
+        self.left = 0;
         self.toc_top = 0;
         self.relayout(false);
     }
@@ -168,13 +284,22 @@ impl Guide {
         self.width = width;
         // (Laid out again, the lines move: a pick no longer means the same text.)
         self.sel = None;
+        self.tab_lines.clear();
+        let md = match self.content().clone() {
+            Content::Markdown(md) => md,
+            Content::Lines(l) => {
+                self.layout_lines(&l, width);
+                return;
+            }
+        };
         // (Each example's two versions as tabs, the one picked shown.)
         let set = &self.bash[self.which];
-        let md = if self.md.contains("```bash") { crate::help::tab_examples(&self.md, &|n| set.contains(&n)).0 } else { self.md.clone() };
+        let md = if md.contains("```bash") { crate::help::tab_examples(&md, &|n| set.contains(&n)).0 } else { md };
         let text = crate::help::terminal_at(&md, true, width.clamp(20, 100));
         self.lines = text.lines().map(String::from).collect();
         self.plain = self.lines.iter().map(|l| strip(l)).collect();
-        self.tab_lines.clear();
+        self.gutters = self.plain.iter().map(|l| if l.starts_with("  │ ") { 4 } else if l == "  │" { 3 } else { 0 }).collect();
+        self.widest = 0;
         for i in 0..self.plain.len() {
             let Some(k) = self.plain[i].find(crate::help::TAB_MARK) else { continue };
             let Ok(n) = self.plain[i][k + crate::help::TAB_MARK.len()..].trim().parse::<usize>() else { continue };
@@ -205,6 +330,48 @@ impl Guide {
                 from = i + 1;
             }
         }
+        if let Some(t) = keep {
+            if let Some(p) = self.parts.iter().find(|p| p.title == t) {
+                self.top = p.line;
+            }
+        }
+        self.search();
+    }
+
+    /// Lines laid out already: wrapped at `width` (a piece after the first
+    /// with a blank gutter), or as they are.
+    fn layout_lines(&mut self, l: &Lines, width: usize) {
+        let keep = self.parts.iter().rev().find(|p| p.line <= self.top).map(|p| p.title.clone());
+        let mut starts = Vec::with_capacity(l.lines.len());
+        self.lines.clear();
+        if l.wrap {
+            let room = width.saturating_sub(l.gutter).max(10);
+            for line in &l.lines {
+                starts.push(self.lines.len());
+                let head = slice(line, 0, l.gutter);
+                let plain = strip(line);
+                let body_w = plain.width().saturating_sub(l.gutter);
+                let mut from = l.gutter;
+                let mut first = true;
+                loop {
+                    let piece = slice(line, from, room);
+                    self.lines.push(if first { format!("{head}{piece}") } else { format!("{}{piece}", " ".repeat(l.gutter)) });
+                    first = false;
+                    from += room;
+                    if from >= l.gutter + body_w {
+                        break;
+                    }
+                }
+            }
+        } else {
+            starts = (0..l.lines.len()).collect();
+            self.lines = l.lines.clone();
+        }
+        self.plain = self.lines.iter().map(|x| strip(x)).collect();
+        self.widest = self.plain.iter().map(|x| x.width()).max().unwrap_or(0);
+        self.gutters = vec![l.gutter; self.lines.len()];
+        self.lower = self.plain.iter().map(|x| x.to_lowercase()).collect();
+        self.parts = l.parts.iter().filter_map(|(level, title, at)| starts.get(*at).map(|&line| Part { level: *level, title: title.clone(), line })).collect();
         if let Some(t) = keep {
             if let Some(p) = self.parts.iter().find(|p| p.title == t) {
                 self.top = p.line;
@@ -258,7 +425,7 @@ impl Guide {
     fn picked_span(&self, i: usize, ((l0, c0), (l1, c1)): ((usize, usize), (usize, usize))) -> (usize, usize) {
         let line = &self.plain[i];
         let len = line.chars().count();
-        let gutter = if line.starts_with("  │ ") { 4 } else if line == "  │" { 3 } else { 0 };
+        let gutter = self.gutters.get(i).copied().unwrap_or(0).min(len);
         let from = if i == l0 { c0.min(len) } else { 0 }.max(gutter);
         let to = if i == l1 { c1.min(len) } else { len };
         (from, to.max(from))
@@ -307,7 +474,10 @@ impl Guide {
         let body = rows.saturating_sub(2);
         let r = row.clamp(1, body.max(1)) - 1;
         let i = (self.top + r).min(self.lines.len().saturating_sub(1));
+        let g = self.gutters.get(i).copied().unwrap_or(0);
         let want = col.saturating_sub(x0);
+        // (Scrolled sideways: the text after the gutter is further along.)
+        let want = if self.unwrapped() && want >= g { want + self.left } else { want };
         let mut w = 0;
         let mut n = 0;
         for c in self.plain.get(i).map(String::as_str).unwrap_or("").chars() {
@@ -327,8 +497,29 @@ impl Guide {
         }
     }
 
-    fn sidebar_w(cols: usize) -> usize {
-        if cols < 70 {
+    /// The scrollbar's thumb: its first and past-last row in the body,
+    /// when there's more than a screen to scroll.
+    fn thumb(&self, rows: usize) -> Option<(usize, usize)> {
+        let body = rows.saturating_sub(2);
+        let total = self.lines.len();
+        if body == 0 || total <= body {
+            return None;
+        }
+        let size = (body * body / total).clamp(1, body);
+        let at = self.top.min(total - body) * (body - size) / (total - body).max(1);
+        Some((at, at + size))
+    }
+    /// The top line for the scrollbar's thumb starting at body row `r`.
+    fn top_for_thumb(&self, r: usize, rows: usize) -> usize {
+        let body = rows.saturating_sub(2);
+        let total = self.lines.len();
+        let size = (body * body / total.max(1)).clamp(1, body.max(1));
+        let room = body.saturating_sub(size).max(1);
+        r.min(room) * total.saturating_sub(body) / room
+    }
+
+    fn sidebar_w(&self, cols: usize) -> usize {
+        if cols < 70 || !self.has_parts() {
             return 0;
         }
         // (Dragged at its edge: that width, kept while tessh runs.)
@@ -339,11 +530,17 @@ impl Guide {
     }
 
     fn draw(&mut self, cols: usize, rows: usize) {
-        let sw = Self::sidebar_w(cols);
+        let sw = self.sidebar_w(cols);
         let cw = cols.saturating_sub(sw + if sw > 0 { 2 } else { 0 });
         self.layout(cw.saturating_sub(1));
         let body = rows.saturating_sub(2);
         self.top = self.top.min(self.lines.len().saturating_sub(body));
+        let unwrapped = self.unwrapped();
+        if unwrapped {
+            self.left = self.left.min(self.widest.saturating_sub(cw.saturating_sub(1)));
+        } else {
+            self.left = 0;
+        }
         let mut o = std::io::stdout().lock();
         // (One frame, synchronized output: shown whole, no flicker.)
         let _ = write!(o, "\x1b[?2026h\x1b[?25l");
@@ -358,7 +555,7 @@ impl Guide {
                 None => format!("{} matches  ", self.matches.len()),
             }
         };
-        let field = if self.query.is_empty() && !self.searching { "\x1b[2mSearch the guide (/)\x1b[22m".to_string() } else { self.query.clone() };
+        let field = if self.query.is_empty() && !self.searching { format!("\x1b[2mSearch {} (/)\x1b[22m", self.name) } else { self.query.clone() };
         // (More than one guide: a chip for each at the right, the one shown lit; Tab goes round.)
         let chips: Vec<String> = if self.guides.len() > 1 { self.guides.iter().map(|(t, _)| format!(" {t} ")).collect() } else { vec![] };
         let chips_w: usize = chips.iter().map(|c| c.width() + 1).sum();
@@ -404,7 +601,7 @@ impl Guide {
             let i = self.top + r;
             let Some(l) = self.lines.get(i) else { continue };
             let picked = self.sel_range().filter(|((l0, _), (l1, _))| (*l0..=*l1).contains(&i));
-            if let Some(r @ (_, (l1, _))) = picked {
+            let shown = if let Some(r @ (_, (l1, _))) = picked {
                 // (A line in the pick: the picked part reversed; a code
                 // block's gutter never is.)
                 let chars: Vec<char> = self.plain[i].chars().collect();
@@ -412,7 +609,7 @@ impl Guide {
                 let (a, b, c): (String, String, String) =
                     (chars[..from].iter().collect(), chars[from..to].iter().collect(), chars[to..].iter().collect());
                 let b = if b.is_empty() && i != l1 { " ".to_string() } else { b };
-                let _ = write!(o, "{a}\x1b[7m{b}\x1b[27m{c}");
+                format!("{a}\x1b[7m{b}\x1b[27m{c}")
             } else if !q.is_empty() && self.lower[i].contains(&q) {
                 // (A line with a match: the matches reversed.)
                 let (p, lp) = (&self.plain[i], &self.lower[i]);
@@ -430,24 +627,58 @@ impl Guide {
                     at = s + q.len();
                 }
                 out.push_str(&p[at..]);
-                let _ = write!(o, "{out}");
+                out
             } else {
-                let _ = write!(o, "{l}");
+                l.clone()
+            };
+            // (Never past the edge, where the terminal would wrap it; scrolled
+            // sideways, the gutter stays and the rest moves.)
+            let room = cw.saturating_sub(1).max(1);
+            if unwrapped && self.left > 0 {
+                let g = self.gutters.get(i).copied().unwrap_or(0).min(room);
+                let _ = write!(o, "{}{}", slice(&shown, 0, g), slice(&shown, g + self.left, room - g));
+            } else if self.widest > room || unwrapped {
+                let _ = write!(o, "{}", slice(&shown, 0, room));
+            } else {
+                let _ = write!(o, "{shown}");
+            }
+        }
+        // The scrollbar, down the right edge (more than a screen's worth):
+        // its thumb is where you are and how much of it shows.
+        if let Some((t0, t1)) = self.thumb(rows) {
+            for r in 0..body {
+                let on = (t0..t1).contains(&r);
+                let _ = write!(o, "\x1b[{};{}H\x1b[0m{}", r + 2, cols, if on { "\x1b[1m┃\x1b[22m" } else { "\x1b[2m│\x1b[22m" });
             }
         }
         let total = self.lines.len().max(1);
         let pct = ((self.top + body).min(total) * 100) / total;
-        let more = if self.guides.len() > 1 { "   Tab other guide" } else { "" };
-        let tabs = if self.tab_lines.is_empty() { "" } else { "   t bash/tessh" };
-        let hint = format!(" {pct}%   / search   Enter n N next   [ ] parts{more}{tabs}   ↑↓ PgUp PgDn   y copies the part (or drag, right click)   q back");
+        let hint = if self.file.is_some() || !self.info.is_empty() {
+            // (A file: its name and kind first, then the keys there are for it.)
+            let views = if self.guides.len() > 1 { format!("   Tab {}", self.guides[(self.which + 1) % self.guides.len()].0) } else { String::new() };
+            let side = match self.content() {
+                Content::Lines(l) if l.wrap => "   w no wrap",
+                Content::Lines(_) if self.widest > cw => "   ← → sideways   w wrap",
+                Content::Lines(_) => "   w wrap",
+                _ => "",
+            };
+            let parts = if self.parts.is_empty() { "" } else { "   [ ] parts" };
+            let open = if self.file.is_some() { "   o open in its app" } else { "" };
+            format!(" {}  {pct}%   / search   n N next{parts}{views}{side}   ↑↓ PgUp PgDn   Shift+↑↓ pick lines   y copy{open}   q back", self.info)
+        } else {
+            let more = if self.guides.len() > 1 { "   Tab other guide" } else { "" };
+            let tabs = if self.tab_lines.is_empty() { "" } else { "   t bash/tessh" };
+            format!(" {pct}%   / search   Enter n N next   [ ] parts{more}{tabs}   ↑↓ PgUp PgDn   y copies the part (or drag, right click)   q back")
+        };
         let _ = write!(o, "\x1b[{};1H\x1b[0m\x1b[2K\x1b[2m{}\x1b[0m", rows, cut(&hint, cols));
         // The right-click menu, over the guide.
         if let Some((mx, my, at)) = self.menu {
-            let w = 14;
+            let w = 17;
             let (x, y) = (mx.min(cols.saturating_sub(w + 2)), my.min(rows.saturating_sub(MENU.len() + 2)));
             let _ = write!(o, "\x1b[{};{}H\x1b[0m╭{}╮", y + 1, x + 1, "─".repeat(w));
             for (k, item) in MENU.iter().enumerate() {
                 let off = k == 0 && self.sel_range().is_none();
+                let item = if k == 2 && self.file.is_some() { &"Open in its app" } else { item };
                 let label = format!(" {item:<w$}", w = w - 1);
                 let sty = if off { "\x1b[2m" } else if k == at { "\x1b[7m" } else { "" };
                 let _ = write!(o, "\x1b[{};{}H│{sty}{label}\x1b[0m│", y + 2 + k, x + 1);
@@ -462,13 +693,47 @@ impl Guide {
     }
 }
 
-/// A right-click menu item: Copy, Select All.
+/// A right-click menu item: Copy, Select All, and Copy all (Open in its
+/// app, for a file).
 fn run_item(g: &mut Guide, i: usize) {
     match i {
         0 => g.copy(),
-        _ => {
-            let last = g.plain.len().saturating_sub(1);
-            g.sel = Some(((0, 0), (last, g.plain.get(last).map(|l| l.chars().count()).unwrap_or(0))));
+        1 => g.select_all(),
+        _ => match g.file.clone() {
+            Some(p) => crate::viewer::open_outside(&p),
+            None => {
+                g.select_all();
+                g.copy();
+            }
+        },
+    }
+}
+
+impl Guide {
+    fn select_all(&mut self) {
+        let last = self.plain.len().saturating_sub(1);
+        self.sel = Some(((0, 0), (last, self.plain.get(last).map(|l| l.chars().count()).unwrap_or(0))));
+    }
+    /// Shift+↓ / Shift+↑: whole lines picked from the keyboard, from the
+    /// top line shown (or the pick's end), the view following.
+    fn pick_lines(&mut self, down: bool, body: usize) {
+        let last = self.plain.len().saturating_sub(1);
+        let len = |g: &Guide, i: usize| g.plain.get(i).map(|l| l.chars().count()).unwrap_or(0);
+        let (a, end) = match self.sel {
+            Some(((a, _), (b, _))) if self.sel_range().is_some() => (a, b),
+            _ => {
+                let a = self.top.min(last);
+                self.sel = Some(((a, 0), (a, len(self, a))));
+                return;
+            }
+        };
+        let b = if down { (end + 1).min(last) } else { end.saturating_sub(1) };
+        let (from, to) = if b >= a { ((a, 0), (b, len(self, b))) } else { ((a, len(self, a)), (b, 0)) };
+        self.sel = Some((from, to));
+        if b < self.top {
+            self.top = b;
+        } else if b >= self.top + body {
+            self.top = b + 1 - body;
         }
     }
 }
@@ -485,13 +750,13 @@ pub fn show(md: &str, at: &str) {
     run(Guide::new(md), at);
 }
 
-fn run(mut g: Guide, at: &str) {
+pub(crate) fn run(mut g: Guide, at: &str) {
     let mut o = std::io::stdout();
     let _ = crossterm::terminal::enable_raw_mode();
     let _ = write!(o, "\x1b[?1049h\x1b[?1002h\x1b[?1006h\x1b[H\x1b[2J");
     let _ = o.flush();
     let (c0, _) = crossterm::terminal::size().unwrap_or((80, 24));
-    let sw = Guide::sidebar_w(c0 as usize);
+    let sw = g.sidebar_w(c0 as usize);
     g.layout((c0 as usize).saturating_sub(sw + if sw > 0 { 3 } else { 1 }));
     let at = at.trim();
     if !at.is_empty() {
@@ -537,7 +802,15 @@ fn run(mut g: Guide, at: &str) {
                 // (Without the mouse: y copies the part being read, Ctrl+A
                 // picks it all, Shift+F10 or the Menu key opens the menu.)
                 if !g.searching && k.code == KeyCode::Char('y') && !ctrl {
-                    if let Some(i) = g.current_part() {
+                    if g.sel_range().is_some() {
+                        g.copy();
+                    } else if g.parts.is_empty() {
+                        // (No parts: y copies what's shown.)
+                        let a = g.top.min(g.plain.len().saturating_sub(1));
+                        let b = (g.top + rows.saturating_sub(2)).min(g.plain.len()).max(a + 1) - 1;
+                        g.sel = Some(((a, 0), (b, g.plain.get(b).map(|l| l.chars().count()).unwrap_or(0))));
+                        g.copy();
+                    } else if let Some(i) = g.current_part() {
                         let a = g.parts[i].line;
                         let b = g.parts.get(i + 1).map(|p| p.line).unwrap_or(g.plain.len()).max(a + 1) - 1;
                         g.sel = Some(((a, 0), (b, g.plain.get(b).map(|l| l.chars().count()).unwrap_or(0))));
@@ -610,6 +883,22 @@ fn run(mut g: Guide, at: &str) {
                         }
                         g.relayout(true);
                     }
+                    KeyCode::Down | KeyCode::Up if k.modifiers.contains(KeyModifiers::SHIFT) => g.pick_lines(k.code == KeyCode::Down, rows.saturating_sub(2)),
+                    KeyCode::Left | KeyCode::Char('h') if g.unwrapped() => g.left = g.left.saturating_sub(8),
+                    KeyCode::Right | KeyCode::Char('l') if g.unwrapped() => g.left += 8,
+                    // (A file's lines: wrapped, or as they are with ← →.)
+                    KeyCode::Char('w') if matches!(g.content(), Content::Lines(_)) => {
+                        let w = g.which;
+                        if let Content::Lines(l) = &mut g.guides[w].1 {
+                            l.wrap = !l.wrap;
+                        }
+                        g.relayout(true);
+                    }
+                    KeyCode::Char('o') if g.file.is_some() => {
+                        if let Some(p) = g.file.clone() {
+                            crate::viewer::open_outside(&p);
+                        }
+                    }
                     KeyCode::Down | KeyCode::Char('j') => g.top += 1,
                     KeyCode::Up | KeyCode::Char('k') => g.top = g.top.saturating_sub(1),
                     KeyCode::PageDown | KeyCode::Char(' ') | KeyCode::Char('f') => g.top += page,
@@ -643,13 +932,13 @@ fn run(mut g: Guide, at: &str) {
                 }
             }
             Event::Mouse(m) => {
-                let sw = Guide::sidebar_w(cols);
+                let sw = g.sidebar_w(cols);
                 let over_toc = sw > 0 && (m.column as usize) < sw && m.row >= 1;
                 let x0 = if sw > 0 { sw + 2 } else { 0 };
                 let in_text = !over_toc && m.row >= 1 && (m.row as usize) <= rows.saturating_sub(2);
                 if let Some((x, y, _)) = g.menu {
                     // (The menu open: a click on an item does it, anywhere else closes it.)
-                    let (w, col, row) = (14usize, m.column as usize, m.row as usize);
+                    let (w, col, row) = (17usize, m.column as usize, m.row as usize);
                     let (x, y) = (x.min(cols.saturating_sub(w + 2)), y.min(rows.saturating_sub(MENU.len() + 2)));
                     let item = (row > y && row <= y + MENU.len() && col > x && col <= x + w).then(|| row - y - 1);
                     match m.kind {
@@ -667,6 +956,33 @@ fn run(mut g: Guide, at: &str) {
                         _ => {}
                     }
                     continue;
+                }
+                // (The scrollbar, at the right edge: its thumb dragged, or a
+                // click above or below it, a page.)
+                let on_bar = m.column as usize + 1 == cols && m.row >= 1 && (m.row as usize) <= rows.saturating_sub(2);
+                match m.kind {
+                    MouseEventKind::Down(MouseButton::Left) if on_bar && g.thumb(rows).is_some() => {
+                        let r = m.row as usize - 1;
+                        let (t0, t1) = g.thumb(rows).unwrap();
+                        if r < t0 {
+                            g.top = g.top.saturating_sub(page);
+                        } else if r >= t1 {
+                            g.top += page;
+                        } else {
+                            g.thumb_drag = Some(r - t0);
+                        }
+                        continue;
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) if g.thumb_drag.is_some() => {
+                        let held = g.thumb_drag.unwrap_or(0);
+                        g.top = g.top_for_thumb((m.row as usize).saturating_sub(1).saturating_sub(held), rows);
+                        continue;
+                    }
+                    MouseEventKind::Up(_) if g.thumb_drag.is_some() => {
+                        g.thumb_drag = None;
+                        continue;
+                    }
+                    _ => {}
                 }
                 // (The contents column's edge, the │: dragged, it resizes the column.)
                 match m.kind {
@@ -746,6 +1062,12 @@ fn run(mut g: Guide, at: &str) {
                     }
                     MouseEventKind::ScrollDown if over_toc => g.toc_top = (g.toc_top + 3).min(g.parts.len().saturating_sub(1)),
                     MouseEventKind::ScrollUp if over_toc => g.toc_top = g.toc_top.saturating_sub(3),
+                    // (Shift+wheel, or a sideways wheel: ← →.)
+                    MouseEventKind::ScrollDown | MouseEventKind::ScrollUp if g.unwrapped() && m.modifiers.contains(KeyModifiers::SHIFT) => {
+                        g.left = if m.kind == MouseEventKind::ScrollDown { g.left + 8 } else { g.left.saturating_sub(8) }
+                    }
+                    MouseEventKind::ScrollRight if g.unwrapped() => g.left += 8,
+                    MouseEventKind::ScrollLeft if g.unwrapped() => g.left = g.left.saturating_sub(8),
                     MouseEventKind::ScrollDown => g.top += 3,
                     MouseEventKind::ScrollUp => g.top = g.top.saturating_sub(3),
                     MouseEventKind::Down(MouseButton::Left) => {

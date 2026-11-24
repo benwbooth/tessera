@@ -41,3 +41,41 @@ hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
 bytes = "1"
 async-trait = "0.1"
+# The file viewer (view, a file run, cat at a tty): code highlighted with
+# the grammars Tessera's editor has built in (src/syntax.rs, same versions),
+# pictures decoded as Tessera's are (src/images.rs) and sent as kitty,
+# iTerm2 or sixel graphics, tables, YAML, archives' lists and PDFs' text.
+tree-sitter-c = "0.24.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-css = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-html = "0.23.2"
+tree-sitter-java = "0.23.5"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-json = "0.24.8"
+tree-sitter-lua = "0.5.0"
+tree-sitter-md = "0.5.4"
+tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-rust = "0.24.2"
+tree-sitter-sequel = "0.3.13"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-yaml = "0.7.2"
+# (Every other language: bat's ~200 syntaxes, as Grove's Quick Look has them.)
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "regex-fancy", "parsing"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+icy_sixel = "0.7.0"
+csv = "1.4.0"
+serde_yaml = "0.8"
+serde = "1"
+# (An archive's list: its headers only, so no codecs for zip's members.)
+zip = { version = "9.8.2", default-features = false }
+tar = "0.4"
+flate2 = "1"
+ruzstd = "0.9.1"
+lzma-rs = "0.3.0"
+bzip2 = "0.6.1"
+# (A PDF's text when poppler's pdftotext isn't installed.)
+pdf-extract = "0.12.1"

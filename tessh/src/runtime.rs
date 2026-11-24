@@ -1519,6 +1519,16 @@ fn sh_quote(s: &str) -> String {
 /// Run a chain of programs connected by pipes.
 fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: bool, bg: bool) -> PyResult<Py<PyAny>> {
     flush_python(py);
+    // (At the terminal: a file that isn't a program, typed alone, is shown
+    // (the viewer, or its own app); cat colors files and draws pictures.)
+    if !capture && !bg && data.is_none() && cmds.len() == 1 && cmds[0].redirs.is_empty() && !PASS_THROUGH.load(Ordering::SeqCst) && PROCSUBS.with(|p| p.borrow().is_empty()) && unsafe { libc::isatty(1) == 1 && libc::isatty(0) == 1 } && py_redirected(py, 1).is_none() {
+        let words = cmds[0].words.clone();
+        let interactive = INTERACTIVE.load(Ordering::SeqCst);
+        if let Some(code) = py.detach(|| crate::viewer::intercept(&words, interactive)) {
+            set_status(code);
+            return output(py, "", code, true);
+        }
+    }
     if let Some(hook) = EXEC_HOOK.get() {
         hook(exec_record(cmds));
     }
@@ -2386,7 +2396,7 @@ fn dump_env(b64_env: &str, b64_pwd: &str) -> PyResult<()> {
 
 // ---- builtins ------------------------------------------------------------------------------
 
-pub const COMMAND_BUILTINS: &[&str] = &["cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg", "need"];
+pub const COMMAND_BUILTINS: &[&str] = &["cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg", "need", "view"];
 
 pub fn is_command_builtin(n: &str) -> bool {
     COMMAND_BUILTINS.contains(&n)
@@ -2417,6 +2427,7 @@ impl Builtin {
             "jobs" => "jobs\n\nThe background jobs (commands run with a trailing &): [n] running or stopped, and the command.",
             "fg" => "fg [n]\n\nBring background job n (the latest without one) to the foreground and wait for it.",
             "bg" => "bg [n]\n\nLet a stopped job n (the latest without one) run on in the background.",
+            "view" => crate::viewer::USAGE,
             "need" => "need package \"package>=version\" …\n\nPyPI packages this script, cell or REPL uses: uv installs them once into a cache, and they import from the next line. Quote a version range, so its > isn't a redirection.",
             _ => "A tessh builtin.",
         }
@@ -2454,6 +2465,15 @@ impl Builtin {
         let words: Vec<String> = args.iter().map(word).collect::<PyResult<_>>()?;
         let none = py.None();
         match self.name {
+            // view file…: shown full screen (the file viewer).
+            "view" => {
+                let code = py.detach(|| crate::viewer::view_builtin(&words));
+                set_status(code);
+                if code != 0 {
+                    return output(py, "", code, true);
+                }
+                Ok(none)
+            }
             // need pkg "pkg>=1" …: PyPI packages, installed with uv (once, kept
             // in a cache) and importable from the next line.
             "need" => {

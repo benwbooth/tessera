@@ -22,6 +22,7 @@ mod runner;
 mod runtime;
 #[cfg(feature = "standalone")]
 mod standalone;
+mod viewer;
 
 #[cfg(test)]
 mod tests;
