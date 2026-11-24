@@ -768,6 +768,7 @@ Rectangle {
         })
     }
     function openComp() { compOpen = true; compChosen = false; compIndex = 0; typing = false; requestComplete() }
+    property double histClosedAt: 0   // (history shut by a press outside it, just now)
     function closeComp() { compOpen = false; compChosen = false; historyMode = false }
     function acceptComp(i) {
         const it = comp.items[i === undefined ? compIndex : i]
@@ -1527,7 +1528,7 @@ Rectangle {
         }
         // (Test hook: TESSERA_TEST_CDHIST opens it.)
         Timer { interval: 7000; running: box.controller !== null && box.controller.testEnv("CDHIST") !== ""; onTriggered: promptBar.toggleCdHistory(cdChip) }
-        Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : box.openHistory() }
+        Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : Date.now() - box.histClosedAt > 500 ? box.openHistory() : undefined }
         Chip {
             id: langChip
             base: box.color
@@ -2005,6 +2006,8 @@ Rectangle {
             m.accepted = false
             const p = mapToItem(compPopup, m.x, m.y)
             if (p.x >= 0 && p.y >= 0 && p.x < compPopup.width && p.y < compPopup.height) return
+            // (On the History button: its click, coming next, closes it, not opens it again.)
+            box.histClosedAt = Date.now()
             box.closeComp()
         }
     }
