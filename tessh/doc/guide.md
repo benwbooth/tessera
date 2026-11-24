@@ -952,7 +952,7 @@ total 6
 ```
 
 ## Functions
-<!-- help: functions function def return lambda fn parameters defaults args kwargs implicit async await -->
+<!-- help: functions function def return lambda fn parameters defaults args kwargs implicit async await asyncio top-level-await event-loop -->
 
 `def name params…` with an indented body. The value of the last form is
 returned.
@@ -1041,19 +1041,36 @@ print $total (c)
 2 3
 ```
 
-`async def`, `await`, `async for` and `async with` work as in Python.
+`async def`, `await`, `async for`, `async with` and async comprehensions
+(`[$x async for x in $source]`) work as in Python. `await`, `async for` and
+`async with` also work outside a function: in a script, at the prompt and
+in a notebook cell, as in IPython. There's no need for `asyncio.run`.
 
 ```tessh
 import asyncio
 async def twice x
   await (asyncio.sleep 0)
   $x * 2
-print (asyncio.run (twice 21))
+print (await (twice 21))
+async def count n
+  for i in (range $n)
+    yield $i
+print [$i async for i in (count 3)]
 ```
 
 ```output
 42
+[0 1 2]
 ```
+
+Those lines run on one event loop that lasts the whole session, so a task
+or client made on one line is still there on the next. A line without an
+`await` doesn't run the loop. Start a task with `asyncio.ensure_future`
+there, because `asyncio.create_task` wants a loop that's running. The task
+runs while a later line awaits something. Ctrl-C cancels what's being
+awaited. A program run from async code blocks the loop while it runs, as
+`subprocess.run` does in Python. Use `asyncio.create_subprocess_exec` to run
+programs alongside other tasks.
 
 ## Conditionals
 <!-- help: if elif else conditionals conditional then -->

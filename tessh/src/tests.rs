@@ -1088,3 +1088,27 @@ fn strict_mode_stops_on_a_failing_program() {
         assert_eq!(fails("strict\ntry\n  false\nexcept CommandFailed as e\n  after = $e.status"), (false, true));
     });
 }
+
+#[test]
+fn top_level_await() {
+    let (ns, out) = run(concat!(
+        "import asyncio\n",
+        "async def twice x\n  await (asyncio.sleep 0)\n  $x * 2\n",
+        "r = await (twice 21)\n",
+        "async def gen\n  for i in (range 3)\n    yield $i\n",
+        "got = [$i async for i in (gen)]\n",
+        "async for i in (gen)\n  print $i\n",
+        "t = asyncio.ensure_future (twice 5)\n",
+    ));
+    assert_eq!(get::<i64>(&ns, "r"), 42);
+    assert_eq!(repr(&ns, "got"), "[0, 1, 2]");
+    assert_eq!(out, "0\n1\n2\n");
+    // (The loop lasts: a task made in one run is awaited in the next.)
+    let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        assert!(crate::runner::run_source(py, "five = await $t", ns, "<test>", false).is_ok());
+        assert_eq!(ns.get_item("five").unwrap().unwrap().extract::<i64>().unwrap(), 10);
+        assert!(crate::runner::check(py, "import asyncio\nawait (asyncio.sleep 0)", "<test>").is_empty(), "--check takes a top-level await");
+    });
+}

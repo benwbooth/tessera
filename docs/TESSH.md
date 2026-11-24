@@ -183,6 +183,19 @@ if git diff --quiet
 files = (ls *.py).lines
 ```
 
+### Async at the top level
+
+`await`, `async for` and `async with` work outside a function too: a
+script's, prompt line's or cell's code that uses them compiles with
+Python's top-level-await flag. It runs on one `asyncio.Runner` that lasts
+the whole session, so tasks and clients survive from one line to the next.
+Code without them runs as before. A line without an `await` doesn't run the
+loop: schedule work there with `asyncio.ensure_future`
+(`create_task` needs a running loop). Ctrl-C cancels what's awaited. A
+top-level `await` in code that is itself run from a running loop (`source`
+from async code) is a `RuntimeError`. Programs run synchronously, so one run
+from async code blocks the loop while it runs.
+
 ### Failures and exceptions
 
 A program fails with a status and Python fails with an exception. Four
@@ -262,6 +275,8 @@ def name a b=1 *rest k=2 **kw   # parameters: bare names, defaults glued
   body…
 async def fetch url
   await (session.get $url)
+page = await (fetch $url)    # top-level await (async for, async with) in scripts, the REPL, cells
+xs = [$x async for x in $agen]   # async comprehensions
 fn [x y] ($x + $y)           # lambda; a block body works too
 @functools.cache             # decorators
 def slow n

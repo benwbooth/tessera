@@ -2475,13 +2475,16 @@ impl<'py, 's> Compiler<'py, 's> {
 
     fn comprehension(&mut self, items: &[Form], g: &Form, dict_ok: bool) -> R<(Vec<Obj<'py>>, Vec<Obj<'py>>)> {
         let k = top_for(items);
+        // (async for: an async comprehension, its async before the for.)
+        let k = if k > 0 && items[k - 1].is_sym("async") { k - 1 } else { k };
         let elt_items = &items[..k];
-        let mut clauses: Vec<(&str, Vec<Form>)> = vec![];
-        for x in &items[k..] {
+        let mut clauses: Vec<(&str, Vec<Form>, bool)> = vec![];
+        let mut is_async = false;
+        for (j, x) in items[k..].iter().enumerate() {
             if x.is_sym("for") || x.is_sym("if") {
-                clauses.push((if x.is_sym("for") { "for" } else { "if" }, vec![]));
-            } else if x.is_sym("async") {
-                continue;
+                clauses.push((if x.is_sym("for") { "for" } else { "if" }, vec![], std::mem::take(&mut is_async)));
+            } else if x.is_sym("async") && items.get(k + j + 1).is_some_and(|n| n.is_sym("for")) {
+                is_async = true;
             } else if let Some(c) = clauses.last_mut() {
                 c.1.push(x.clone());
             }
@@ -2490,7 +2493,7 @@ impl<'py, 's> Compiler<'py, 's> {
         // iterable.)
         {
             let mut names: Vec<String> = vec![];
-            for (kind, body) in &clauses {
+            for (kind, body, _) in &clauses {
                 if *kind == "for" {
                     if let Some(ins) = body.iter().position(|y| y.is_sym("in")) {
                         bare_iterable(&body[ins + 1..])?;
@@ -2510,7 +2513,7 @@ impl<'py, 's> Compiler<'py, 's> {
         self.push("comp");
         let result = (|| -> R<(Vec<Obj<'py>>, Vec<Obj<'py>>)> {
             let mut gens: Vec<Obj<'py>> = vec![];
-            for (kind, body) in clauses {
+            for (kind, body, is_async) in clauses {
                 if kind == "for" {
                     let Some(ins) = body.iter().position(|y| y.is_sym("in")) else { return err("for needs in", Some(g)) };
                     let it = self.compile_expr(&body[ins + 1..], Ctx::Value, &[])?;
@@ -2518,7 +2521,7 @@ impl<'py, 's> Compiler<'py, 's> {
                         return err("this can't go in a comprehension", Some(g));
                     }
                     let target = self.make_target(&body[..ins], g, false, false)?;
-                    gens.push(self.n("comprehension", vec![("target", self.val(target.expr)?), ("iter", self.val(it.expr)?), ("ifs", self.list(vec![])?), ("is_async", PyInt::new(self.py, 0).into_any())])?);
+                    gens.push(self.n("comprehension", vec![("target", self.val(target.expr)?), ("iter", self.val(it.expr)?), ("ifs", self.list(vec![])?), ("is_async", PyInt::new(self.py, is_async as i64).into_any())])?);
                 } else {
                     let c = self.compile_expr(&body, Ctx::Value, &[])?;
                     let Some(last) = gens.last() else { return err("if before for", Some(g)) };

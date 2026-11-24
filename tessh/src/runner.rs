@@ -250,11 +250,23 @@ pub fn run_source(py: Python<'_>, text: &str, ns: &Bound<'_, PyDict>, filename: 
             let mut c = Compiler::new(py, Some(ns.clone()), &mut st)?;
             c.unit_module(u, if show && last { Ctx::Tail } else { Ctx::Stmt }, show && last).map_err(|e| TesshError::Compile(e, text.to_string()))?
         };
-        let code = compile.call1((module, filename, "exec"))?;
-        exec.call1((code, ns))?;
+        // (await, async for and async with at the top level: the unit is a
+        // coroutine then, run on the session's event loop.)
+        let code = compile.call1((module, filename, "exec", TOP_LEVEL_AWAIT))?;
+        let flags: i64 = code.getattr("co_flags")?.extract()?;
+        if flags & CO_COROUTINE != 0 {
+            let coro = builtins.getattr("eval")?.call1((code, ns))?;
+            py.import("__tessh__")?.getattr("run_top")?.call1((coro,))?;
+        } else {
+            exec.call1((code, ns))?;
+        }
     }
     Ok(())
 }
+
+/// ast.PyCF_ALLOW_TOP_LEVEL_AWAIT, and inspect.CO_COROUTINE.
+const TOP_LEVEL_AWAIT: i32 = 0x2000;
+const CO_COROUTINE: i64 = 0x80;
 
 pub fn run_file(py: Python<'_>, path: &str, ns: &Bound<'_, PyDict>) -> Result<(), TesshError> {
     let mut text = std::fs::read_to_string(path).map_err(|e| TesshError::Py(pyo3::exceptions::PyOSError::new_err(format!("{path}: {e}"))))?;
@@ -298,7 +310,7 @@ pub fn check(py: Python<'_>, text: &str, filename: &str) -> Vec<(u32, u32, u32, 
     };
     let compile = py.import("builtins").and_then(|b| b.getattr("compile"));
     if let Ok(compile) = compile {
-        if let Err(e) = compile.call1((m, filename, "exec")) {
+        if let Err(e) = compile.call1((m, filename, "exec", TOP_LEVEL_AWAIT)) {
             let v = e.value(py);
             let line: u32 = v.getattr("lineno").and_then(|x| x.extract()).unwrap_or(1);
             let off: u32 = v.getattr("offset").and_then(|x| x.extract()).unwrap_or(1);

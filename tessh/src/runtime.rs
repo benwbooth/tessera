@@ -124,6 +124,32 @@ class Failed:
     def __repr__(self):
         return f"Failed({self.error!r})"
 
+_runner = None
+
+def run_top(coro):
+    """A script's, prompt line's or cell's top-level await: run on one event
+    loop for the session, so a task or client made on one line is there on
+    the next. Ctrl-C cancels what's awaited."""
+    import asyncio, atexit
+    global _runner
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        coro.close()
+        raise RuntimeError("a top-level await in code run from inside a running event loop (source, or an import, from async code): put it in an async def and await that")
+    if _runner is None:
+        _runner = asyncio.Runner()
+        atexit.register(_runner.close)
+    # (The current loop again, before and after: an asyncio.run in between
+    # leaves none, and ensure_future on a later line should find this one.)
+    asyncio.set_event_loop(_runner.get_loop())
+    try:
+        return _runner.run(coro)
+    finally:
+        asyncio.set_event_loop(_runner.get_loop())
+
 class CommandFailed(Exception):
     """What (cmd)! raises when cmd fails, and what a failing program on a
     line of its own raises in strict mode: .status, .stderr (what it said,
@@ -2919,6 +2945,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     m.add("Output", prelude(py)?.getattr("Output")?)?;
     m.add("Failed", prelude(py)?.getattr("Failed")?)?;
     m.add("CommandFailed", prelude(py)?.getattr("CommandFailed")?)?;
+    m.add("run_top", prelude(py)?.getattr("run_top")?)?;
     m.add("pick", prelude(py)?.getattr("pick")?)?;
     for n in CORE {
         m.add(*n, prelude(py)?.getattr(*n)?)?;
