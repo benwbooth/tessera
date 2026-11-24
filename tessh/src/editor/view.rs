@@ -114,7 +114,7 @@ pub fn chips(ed: &Ed, v: &ViewIn) -> Vec<Span> {
     if ed.status != 0 && ed.t.is_empty() && v.chat_ready && v.ai_busy.is_empty() {
         add(chip("✦ Fix", "fix", v));
     }
-    add(chip("▴ Folders", "folders", v));
+    add(chip("\u{f07b} Folders", "folders", v));
     add(chip("↺ History", "history", v));
     add(chip("Guide", "guide", v));
     let ind = ed.indent();

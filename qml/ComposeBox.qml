@@ -1500,7 +1500,8 @@ Rectangle {
             id: cdChip
             visible: box.showPrompt
             base: box.color
-            label: "\u25b4 Folders"
+            icon: "\uf07b"
+            label: "Folders"
             tip: "cd history: this tab's folders, then recent and frequent ones (Ctrl+Alt+D)"
             onClicked: promptBar.toggleCdHistory(cdChip)
         }
