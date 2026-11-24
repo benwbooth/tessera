@@ -147,6 +147,13 @@ impl Screen {
     pub fn resized(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
+        // (The terminal may have moved the lines when it changed size —
+        // reflowed them, scrolled them up as it got shorter, as some do while
+        // a full-screen program had it: where the editor is now, from where
+        // the cursor is, which was a known row of it.)
+        if let (Some((r, _)), Ok((_, now))) = (self.cursor_at.filter(|c| c.0 >= self.top), crossterm::cursor::position()) {
+            self.top = now.saturating_sub(r.saturating_sub(self.top));
+        }
         self.top = self.top.min(rows.saturating_sub(1));
         let mut o = std::io::stdout();
         let _ = write!(o, "\x1b[{};1H\x1b[J", self.top + 1);
