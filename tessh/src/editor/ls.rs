@@ -844,6 +844,8 @@ pub struct Ls {
     room: usize,
     sel_at: Option<(usize, usize)>,
     capped: bool,
+    /// The width it was last drawn at.
+    cols_last: usize,
 }
 
 impl Ls {
@@ -890,6 +892,7 @@ impl Ls {
             room: 0,
             sel_at: None,
             capped: false,
+            cols_last: 80,
         };
         ls.make_panes();
         ls
@@ -1555,6 +1558,15 @@ impl Ls {
             v.push((format!("{}{part}", if i > 0 { "/" } else { "" }), LsHit::Crumb(p, acc.clone()), true));
         }
         v.push(("   cd here".into(), LsHit::Nav(p, "cd"), true));
+        // (Too long for the row: the first folders folded into …, so "cd here" shows.)
+        let room = self.cols_last.max(20).saturating_sub(2);
+        while v.iter().map(|x| w(&x.0)).sum::<usize>() > room && v.len() > 7 {
+            let folded = matches!(v[4].1, LsHit::Space(_));
+            v.remove(if folded { 5 } else { 4 });
+            if !folded {
+                v.insert(4, ("…".into(), LsHit::Space(p), false));
+            }
+        }
         v
     }
 
@@ -1562,6 +1574,7 @@ impl Ls {
     /// selection; else as it's left in the scrollback).
     fn render(&mut self, pal: &Palette, cols: usize, hovered: Option<&LsHit>, live: bool, focused: bool, budget: usize) -> Vec<Line> {
         let cols = cols.max(20);
+        self.cols_last = cols;
         let dim = pal.dimmed();
         let mut out: Vec<Line> = vec![];
         self.sel_at = None;
@@ -1625,8 +1638,12 @@ impl Ls {
                 }
                 out.push(row);
             }
-            // The path bar, once it's been somewhere.
-            if self.panes[p].navigated() {
+            // The path bar, once it's been somewhere. (Left in the scrollback:
+            // where it was, as a heading; nothing there to click.)
+            if !live && self.panes[p].navigated() {
+                out.push(vec![Span::new(format!("{}:", self.panes[p].dir), dim)]);
+            }
+            if live && self.panes[p].navigated() {
                 let mut row: Line = vec![Span::new(" ", Sty::default()).hit(Hit::Ls(LsHit::Space(p)))];
                 let mut x = 1;
                 for (i, (t, hit, on)) in self.nav_items(p).into_iter().enumerate() {
@@ -1746,7 +1763,7 @@ impl Ls {
                     };
                     if let Some(nc) = &name_col {
                         let ax = nc.x + depth * 2;
-                        if e.dir {
+                        if e.dir && live {
                             let ah = LsHit::Arrow(p, ri);
                             let st = if live && hovered == Some(&ah) { Sty::fg(Col::Ansi(4)) } else { dim };
                             put(&mut row, &mut x, ax, if self.is_open(p, &e.path) { "▾ ".into() } else { "▸ ".into() }, st, ah);
@@ -2568,7 +2585,7 @@ impl Ed {
             ("reveal", Some(e)) => ls.act(if e.dir { "open" } else { "reveal" }, &e.path, "", Then::Nothing),
             ("cd", Some(e)) => {
                 let q = crate::repl::quote_path(&e.path);
-                self.done = Some(Outcome::Host(format!("run:{}", if e.dir { format!("cd {q}") } else { q })));
+                self.done = Some(Outcome::Host(if e.dir { format!("lscd:{}", e.path) } else { format!("run:{q}") }));
             }
             ("cut" | "copy", Some(e)) => ls.copy_file(&e.path, c == "cut"),
             ("pasteinto", Some(e)) => ls.paste_into(&e.path),
@@ -2590,7 +2607,7 @@ impl Ed {
             ("delete", Some(e)) => ls.confirm = Some((e, 0)),
             ("props", Some(e)) => ls.props = Some(e),
             ("fopen", _) => ls.act("open", &dir, "", Then::Nothing),
-            ("fcd", _) => self.done = Some(Outcome::Host(format!("run:cd {}", crate::repl::quote_path(&dir)))),
+            ("fcd", _) => self.done = Some(Outcome::Host(format!("lscd:{dir}"))),
             ("mkdir", _) => self.ls_ask("mkdir", None),
             ("touch", _) => self.ls_ask("touch", None),
             ("fpaste", _) => ls.paste_into(&dir),
@@ -2665,7 +2682,7 @@ impl Ed {
             }
             LsHit::Nav(_, "cd") => {
                 let d = ls.panes[p].dir.clone();
-                self.done = Some(Outcome::Host(format!("run:cd {}", crate::repl::quote_path(&d))));
+                self.done = Some(Outcome::Host(format!("lscd:{d}")));
             }
             LsHit::Crumb(_, path) => ls.go(p, path),
             _ => {}
@@ -3496,13 +3513,18 @@ mod tests {
         let i = ls.items(0).iter().position(|e| e.name == "sub").unwrap();
         let e = ls.items(0)[i].clone();
         ls.toggle_open(0, &e);
+        let (live, _) = ls.panel(&pal, 120, 40, None, false);
+        assert!(text_of(&live).iter().any(|r| r.contains("▾") && r.contains("sub/")));
         let rows = text_of(&ls.frozen(&pal, 120));
-        assert!(rows.iter().any(|r| r.contains("▾") && r.contains("sub/")));
         assert!(rows.iter().any(|r| r.contains("inner.md")), "{rows:?}");
         // Into a folder: the path bar.
         ls.go(0, &format!("{d}/sub"));
+        let (live, _) = ls.panel(&pal, 120, 40, None, false);
+        assert!(text_of(&live).iter().any(|r| r.contains("cd here")));
+        // (Left in the scrollback: nothing that looks clickable.)
         let rows = text_of(&ls.frozen(&pal, 120));
-        assert!(rows[0].contains("cd here"), "{rows:?}");
+        assert_eq!(rows[0], format!("{d}/sub:"), "{rows:?}");
+        assert!(!rows.iter().any(|r| r.contains("cd here") || r.contains('▸') || r.contains('▾')), "{rows:?}");
         ls.go_back(0);
         assert_eq!(ls.panes[0].dir, d);
         // -m: commas.

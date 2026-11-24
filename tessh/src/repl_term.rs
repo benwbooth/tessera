@@ -330,6 +330,13 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                     }
                     "keys" => save_own("editor_keys", serde_json::json!(arg)),
                     "run" => run = Some((arg.to_string(), false, false)),
+                    // (cd from the listing: the shell's folder changes, the
+                    // listing stays as it is, live.)
+                    "lscd" => {
+                        let cmd = format!("cd {}", quote_path(arg));
+                        Python::attach(|py| run_line(py, ns.bind(py), &cmd));
+                        fresh = true;
+                    }
                     "indent" => {
                         match arg.split_once('=') {
                             Some(("mode", m)) => set_indent_pref("mode", serde_json::json!(m)),
