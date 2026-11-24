@@ -1015,7 +1015,11 @@ programs does; `$PIPESTATUS` has each one's status.
 `readonly NAME=value` makes a name that a later assignment can't change.
 `complete -W "start stop" svc` (or `-F func`, `-f`, `-d`, `-c`, `-o default`
 and the rest) sets what Tab offers after a command; a `-F` function fills
-`$COMPREPLY` from `$COMP_WORDS` as bash's do, or returns a list.
+`$COMPREPLY` from `$COMP_WORDS` as bash's do, or returns a list. For the
+programs bash-completion knows (git, systemctl, nix and every other that
+ships a bash completion), Tab asks a bash in the background what it
+would offer, so their subcommands and options come up as in bash.
+`TESSH_BASH_COMPLETION=0` turns that off, or names the script to load.
 `$LINENO` is the line it's on, and at the prompt bash's history expansion
 works: `!!`, `!$`, `!n`, `!prefix`, `!?text?`, `:s/old/new/`, `:h`, `:t`,
 `^old^new` and the rest. `fc` edits past commands in `$EDITOR` and runs

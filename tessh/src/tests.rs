@@ -1844,3 +1844,38 @@ fn aliases() {
         assert_eq!([code("missing"), code("gone")], [1, 1]);
     });
 }
+
+/// bash's own completions, borrowed: a program's -F function run by a bash
+/// that loaded the completion script, its COMPREPLY offered.
+#[test]
+fn bash_completion_bridge() {
+    let f = std::env::temp_dir().join(format!("tessh-bashcomp-{}", std::process::id()));
+    std::fs::write(&f, "_mycmd() { COMPREPLY=($(compgen -W \"alpha beta $COMP_CWORD\" -- \"$2\")); }\ncomplete -F _mycmd mycmd\ncomplete -W 'one two' wordy\n").unwrap();
+    let (ns, _) = run("def mine x = $x");
+    Python::attach(|py| {
+        let os = py.import("os").unwrap();
+        os.getattr("environ").unwrap().set_item("TESSH_BASH_COMPLETION", f.to_string_lossy().to_string()).unwrap();
+        let sh = py.import("__tessh_shell__").unwrap();
+        let st = sh.getattr("_bash_state").unwrap();
+        st.set_item("proc", py.None()).unwrap();
+        st.set_item("script", py.None()).unwrap();
+        st.set_item("failed", false).unwrap();
+        let ns = ns.bind(py);
+        let bc = sh.getattr("bash_complete").unwrap();
+        let got = |b: &str, w: &str| -> Option<Vec<String>> { bc.call1((b, w, ns)).unwrap().extract().ok() };
+        if sh.getattr("_full_bash").unwrap().call0().unwrap().is_none() {
+            eprintln!("no bash with programmable completion here: skipped");
+            return;
+        }
+        assert_eq!(got("mycmd ", "al").unwrap(), ["alpha"]);
+        assert_eq!(got("ls | mycmd x ", "").unwrap(), ["alpha", "beta", "2"]);
+        assert_eq!(got("wordy ", "t").unwrap(), ["two"]);
+        assert!(got("nosuchcommand ", "").is_none(), "no spec: tessh's own");
+        assert!(got("mine ", "").is_none(), "a tessh function: tessh's own");
+        os.getattr("environ").unwrap().set_item("TESSH_BASH_COMPLETION", "0").unwrap();
+        assert!(got("mycmd ", "al").is_none(), "off");
+        os.getattr("environ").unwrap().del_item("TESSH_BASH_COMPLETION").unwrap();
+        st.set_item("script", py.None()).unwrap();
+    });
+    let _ = std::fs::remove_file(&f);
+}

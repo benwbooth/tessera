@@ -1037,6 +1037,17 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
                 return (start, pos, items);
             }
         }
+        // (A program bash-completion knows (git, systemctl, nix…): what bash would offer.)
+        let bash = py.import("__tessh_shell__").and_then(|m| m.getattr("bash_complete")).and_then(|f| f.call1((&before[..start], word, ns)));
+        if let Ok(list) = bash {
+            if let Ok(names) = list.extract::<Vec<String>>() {
+                for n in names {
+                    let dir = n.ends_with('/');
+                    items.push(Item { insert: n.clone(), label: n, kind: if dir { "dir" } else { "option" }, detail: "bash".into(), doc: String::new() });
+                }
+                return (start, pos, items);
+            }
+        }
     }
     let builtins = py.import("builtins").ok();
     for n in completions(py, ns, word, first, &before[..start]) {

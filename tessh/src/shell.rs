@@ -1935,6 +1935,181 @@ def complete_for(before, word, ns):
         return None
     return got
 
+# ---- bash's completions, borrowed -------------------------------------------------------
+
+_BASH_QUERY = r"""
+__tessh_q() {
+  COMP_WORDS=("${__w[@]}"); COMP_CWORD=$__c; COMP_LINE=$__l; COMP_POINT=$__p; COMP_TYPE=9; COMP_KEY=9
+  local cmd=${COMP_WORDS[0]} cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]} spec
+  cmd=${cmd##*/}
+  spec=$(complete -p -- "$cmd" 2>/dev/null)
+  if [[ -z $spec ]]; then
+    if declare -F _comp_load >/dev/null; then _comp_load -- "$cmd"
+    elif declare -F __load_completion >/dev/null; then __load_completion "$cmd"
+    elif declare -F _completion_loader >/dev/null; then _completion_loader "$cmd"
+    fi
+    spec=$(complete -p -- "$cmd" 2>/dev/null)
+  fi
+  [[ -z $spec ]] && return
+  COMPREPLY=()
+  if [[ $spec =~ \ -F\ ([^ ]+) ]]; then
+    "${BASH_REMATCH[1]}" "$cmd" "$cur" "$prev"
+  else
+    local opts=${spec#complete }
+    opts=${opts% *}
+    mapfile -t COMPREPLY < <(eval "compgen $opts -- \"\$cur\"")
+  fi
+  printf '%s\n' "${COMPREPLY[@]}"
+}
+"""
+
+_bash_state = {"proc": None, "script": None, "failed": False}
+
+def _bash_completion_script():
+    """bash-completion's main script: $TESSH_BASH_COMPLETION, the one
+    /etc/bashrc loads (NixOS), or where distributions and Homebrew put it."""
+    import re, glob
+    env = os.environ.get("TESSH_BASH_COMPLETION")
+    if env:
+        return env if os.path.isfile(env) else None
+    for rc in ("/etc/bashrc", "/etc/bash.bashrc", "/etc/bash/bashrc"):
+        try:
+            text = open(rc).read()
+        except OSError:
+            continue
+        for m in re.finditer(r"[\"']?(/[^\s\"';]*bash[-_]completion[^\s\"';]*)", text):
+            p = m.group(1)
+            if p.endswith("profile.d/bash_completion.sh"):
+                main = os.path.normpath(os.path.join(os.path.dirname(p), "..", "..", "share", "bash-completion", "bash_completion"))
+                if os.path.isfile(main):
+                    return main
+            if os.path.isfile(p) and not p.endswith(".d"):
+                return p
+    home = os.path.expanduser("~")
+    for p in ("/usr/share/bash-completion/bash_completion", "/etc/bash_completion",
+              "/usr/local/share/bash-completion/bash_completion", home + "/.nix-profile/share/bash-completion/bash_completion",
+              "/opt/homebrew/share/bash-completion/bash_completion", "/usr/local/etc/profile.d/bash_completion.sh",
+              "/opt/homebrew/etc/profile.d/bash_completion.sh"):
+        if os.path.isfile(p):
+            return p
+    return None
+
+def _full_bash():
+    """A bash with programmable completion (nixpkgs' non-interactive bash,
+    a build's, has no `complete`): the system's first, then $PATH's."""
+    import subprocess, shutil
+    seen = []
+    for b in ("/run/current-system/sw/bin/bash", "/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash", "/opt/homebrew/bin/bash", shutil.which("bash")):
+        if not b or b in seen or not os.access(b, os.X_OK):
+            continue
+        seen.append(b)
+        try:
+            r = subprocess.run([b, "--norc", "--noprofile", "-c", "type -t complete"], capture_output=True, text=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.stdout.strip() == "builtin":
+            return b
+    return None
+
+def _bash_proc():
+    import subprocess, shutil
+    st = _bash_state
+    p = st["proc"]
+    if p is not None and p.poll() is None:
+        return p
+    if st["failed"]:
+        return None
+    script = st["script"] or _bash_completion_script()
+    bash = st.get("bash") or _full_bash()
+    st["bash"] = bash
+    if not script or not bash:
+        st["failed"] = True
+        return None
+    st["script"] = script
+    # (Where completions live: the system's, the user's profiles', as a login bash would see.)
+    user = os.environ.get("USER", "")
+    dirs = [d for d in os.environ.get("XDG_DATA_DIRS", "").split(":") if d]
+    for d in ("/run/current-system/sw/share", f"/etc/profiles/per-user/{user}/share", os.path.expanduser("~/.nix-profile/share"),
+              os.path.expanduser("~/.local/share"), "/usr/local/share", "/usr/share"):
+        if d not in dirs:
+            dirs.append(d)
+    env = dict(os.environ, XDG_DATA_DIRS=":".join(dirs))
+    p = subprocess.Popen([bash, "--norc", "--noprofile"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, env=env, text=True, bufsize=1, start_new_session=True)
+    p.stdin.write(f"source {_shq(script)} >/dev/null 2>&1\n{_BASH_QUERY}\n")
+    p.stdin.flush()
+    st["proc"] = p
+    return p
+
+def _shq(s):
+    import shlex
+    return shlex.quote(s)
+
+def bash_complete(before, word, ns, timeout=1.0):
+    """What bash's own completion (git's, systemctl's, any command's that
+    bash-completion knows) offers for the word: a list, or None for tessh's
+    own. Off with TESSH_BASH_COMPLETION=0."""
+    import re, select, time
+    if os.environ.get("TESSH_BASH_COMPLETION") == "0":
+        return None
+    seg = re.split(r"\|\||&&|[|;&(]", before)[-1]
+    ws = hist_split(seg)
+    if not ws:
+        return None
+    cmd = ws[0]
+    # (tessh's own names, and a NAME=value before it: not bash's to say.)
+    if "=" in cmd or (ns is not None and cmd in ns) or cmd in _tessh().builtin_names() or cmd in _DUALS:
+        return None
+    p = _bash_proc()
+    if p is None:
+        return None
+    words = ws + [word]
+    line = seg.lstrip() + word
+    marker = "\x1e__tessh_done__"
+    q = "__w=(" + " ".join(_shq(w) for w in words) + f"); __c={len(words) - 1}; __l={_shq(line)}; __p={len(line)}; __tessh_q 2>/dev/null; printf '%s\\n' {_shq(marker)}\n"
+    try:
+        p.stdin.write(q)
+        p.stdin.flush()
+    except (BrokenPipeError, OSError):
+        _bash_state["proc"] = None
+        return None
+    out, end = [], time.monotonic() + timeout
+    fd = p.stdout.fileno()
+    buf = ""
+    while True:
+        left = end - time.monotonic()
+        if left <= 0 or not select.select([fd], [], [], left)[0]:
+            # (Too slow, or stuck: given up on, a fresh bash next time.)
+            try:
+                p.kill()
+            except OSError:
+                pass
+            _bash_state["proc"] = None
+            return None
+        chunk = os.read(fd, 65536).decode("utf-8", "replace")
+        if not chunk:
+            _bash_state["proc"] = None
+            return None
+        buf += chunk
+        if marker + "\n" in buf:
+            buf = buf[:buf.index(marker + "\n")]
+            break
+    seen, res = set(), []
+    for l in buf.split("\n"):
+        l = l.rstrip()
+        if l and l not in seen:
+            seen.add(l)
+            res.append(l)
+    return res or None
+
+def hist_split(seg):
+    """A command line's words, quotes kept out, as a shell splits them."""
+    import shlex
+    try:
+        return shlex.split(seg)
+    except ValueError:
+        return seg.split()
+
 # ---- history, fc -----------------------------------------------------------------------
 
 def _history_file():

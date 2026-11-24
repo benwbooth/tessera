@@ -52,7 +52,13 @@ matches), `-P prefix`, `-S suffix`, `-A action` (file, directory, command,
 builtin, keyword, variable, function, export, user, hostname, job,
 signal) and `-o default`, `bashdefault`, `dirnames`, `plusdirs` and
 `nosort`; `-o filenames` and `-o nospace` are accepted and do nothing.
-`compgen` takes the same, and `compopt -o`/`+o` changes the options,
+For the programs bash-completion knows (git, systemctl, nix and the rest
+that ship a bash completion), tessh's Tab asks a bash in the background,
+which has bash-completion loaded, what it would offer: their completions
+work without porting. `TESSH_BASH_COMPLETION=0` turns that off; set to a
+file, it loads that script instead of the system's. zsh's completions
+(`_git` and the like) aren't used. `compgen` takes the same, and
+`compopt -o`/`+o` changes the options,
 for a command or, inside a `-F` function, for the completion it's making.
 
 A `-F` function comes in two forms. tessh's has two parameters: it's
