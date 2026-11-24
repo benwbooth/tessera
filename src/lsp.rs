@@ -319,7 +319,12 @@ fn project_root(root: &str) -> String {
         }
         dir = d.parent();
     }
-    let empty = std::env::temp_dir().join(format!("tessera-lsp-{}", unsafe { libc::getuid() }));
+    // (One per user: the uid on Unix, the user's name on Windows.)
+    #[cfg(unix)]
+    let who = unsafe { libc::getuid() }.to_string();
+    #[cfg(not(unix))]
+    let who = std::env::var("USERNAME").unwrap_or_default();
+    let empty = std::env::temp_dir().join(format!("tessera-lsp-{who}"));
     let _ = std::fs::create_dir_all(&empty);
     empty.display().to_string()
 }
