@@ -358,14 +358,32 @@ fn install(rt: &Path, libc: Libc, want: &[u32], want_text: &str, have: Option<&P
 }
 
 /// A python-build-standalone install_only archive, unpacked to `dest`.
+/// (Fetched with the system's curl or wget, busybox's included: no TLS
+/// built in, which would be most of this launcher.)
 fn fetch_python(url: &str, dest: &Path) -> Result<(), String> {
     let parent = dest.parent().ok_or("no folder")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let tmp = parent.join(format!(".fetch-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
-    let resp = ureq::get(url).call().map_err(|e| e.to_string())?;
-    let gz = flate2::read::GzDecoder::new(resp.into_body().into_reader());
-    tar::Archive::new(gz).unpack(&tmp).map_err(|e| e.to_string())?;
+    let mut child = ["curl", "wget"]
+        .iter()
+        .find_map(|tool| {
+            let mut c = Command::new(tool);
+            if *tool == "curl" {
+                c.args(["-fsSL", url]);
+            } else {
+                c.args(["-qO-", url]);
+            }
+            c.stdout(std::process::Stdio::piped()).stdin(std::process::Stdio::null()).spawn().ok()
+        })
+        .ok_or("neither curl nor wget is installed")?;
+    let gz = flate2::read::GzDecoder::new(child.stdout.take().ok_or("no output")?);
+    let unpacked = tar::Archive::new(gz).unpack(&tmp).map_err(|e| e.to_string());
+    let status = child.wait().map_err(|e| e.to_string())?;
+    unpacked?;
+    if !status.success() {
+        return Err(format!("the download failed ({status})"));
+    }
     let _ = fs::remove_dir_all(dest);
     fs::rename(tmp.join("python"), dest).map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&tmp);

@@ -170,11 +170,11 @@
               # scratch. Without that directory, a throwaway one as before.
               # (The sources go in by content: cargo's freshness check reads
               # mtimes, and the store's are all the same.)
-              persistentBuild = { name, deps, cargo, artifact }: ''
+              persistentBuild = { name, deps, cargo, artifact, release ? false }: ''
                 runHook preBuild
                 workDir=$TMPDIR/cargo-nix
                 if [ -w /var/tmp/cargo-nix ]; then
-                  workDir=/var/tmp/cargo-nix/${name}
+                  workDir=/var/tmp/cargo-nix/${name}${if release then "-lto" else ""}
                 fi
                 sed -i "s|^directory = .*|directory = \"${deps}\"|" "$NIX_BUILD_TOP/.cargo/config.toml"
                 (
@@ -192,7 +192,8 @@
                   export NIX_ENFORCE_PURITY=0
                   cd "$workDir/src"
                   export CARGO_HOME="$NIX_BUILD_TOP/.cargo" CARGO_TARGET_DIR="$workDir/target" \
-                    CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_LTO=false
+                    ${if release then "CARGO_PROFILE_RELEASE_INCREMENTAL=false CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1"
+                      else "CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_LTO=false"}
                   ${cargo}
                   find "$workDir/target" -mindepth 1 -user "$(id -u)" ! -perm -o+w -exec chmod a+rwX {} + 2>/dev/null || true
                 )
@@ -201,14 +202,15 @@
               '';
               muslTarget = cross.stdenv.hostPlatform.rust.rustcTargetSpec;
               muslDeps = cross.rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
-              tesshMusl = cross.rustPlatform.buildRustPackage {
-                pname = "tessh-musl";
+              mkTesshMusl = release: cross.rustPlatform.buildRustPackage {
+                pname = "tessh-musl${if release then "-lto" else ""}";
                 version = (pkgs.lib.importTOML ./tessh/Cargo.toml).package.version;
                 inherit src;
                 cargoDeps = muslDeps;
                 nativeBuildInputs = [ pkgs.rsync ];
                 buildPhase = persistentBuild {
                   name = "tessh-musl";
+                  inherit release;
                   deps = muslDeps;
                   cargo = "cargo build --release --offline -p tessh --no-default-features --features standalone --target ${muslTarget} -j $NIX_BUILD_CORES";
                   artifact = "${muslTarget}/release/tessh";
@@ -242,8 +244,8 @@
                 suppress_build_script_link_lines=false
               '';
               gnuDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
-              tesshGnu = pkgs.rustPlatform.buildRustPackage {
-                pname = "tessh-gnu";
+              mkTesshGnu = release: pkgs.rustPlatform.buildRustPackage {
+                pname = "tessh-gnu${if release then "-lto" else ""}";
                 version = (pkgs.lib.importTOML ./tessh/Cargo.toml).package.version;
                 inherit src;
                 cargoDeps = gnuDeps;
@@ -256,6 +258,7 @@
                   export HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR/cache ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig
                 '' + persistentBuild {
                   name = "tessh-gnu";
+                  inherit release;
                   deps = gnuDeps;
                   cargo = "cargo zigbuild --release --offline -p tessh --no-default-features --features standalone --target ${arch}-unknown-linux-gnu.2.17 -j $NIX_BUILD_CORES";
                   artifact = "${arch}-unknown-linux-gnu/release/tessh";
@@ -273,6 +276,14 @@
                 cargoLock.lockFile = ./Cargo.lock;
                 cargoBuildFlags = [ "-p" "tessh-launcher" ];
                 doCheck = false;
+                # (It's at the front of every file, uncompressed: built for size.)
+                env = {
+                  CARGO_PROFILE_RELEASE_OPT_LEVEL = "z";
+                  CARGO_PROFILE_RELEASE_LTO = "fat";
+                  CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1";
+                  CARGO_PROFILE_RELEASE_PANIC = "abort";
+                  CARGO_PROFILE_RELEASE_STRIP = "symbols";
+                };
               };
               # One payload per C library: that tessh (stripped), the CPython
               # it runs with (stripped by python-build-standalone; its tests,
@@ -280,9 +291,9 @@
               # libgcc_s. zstd -19 with a 128 MiB window (--long=27): -22 is
               # 1% smaller (39.5 MB, not 39.8) but takes 114 s, not 49, on
               # every rebuild. Unpacked once, at the first run.
-              payload = libc: pkgs.runCommand "tessh-payload-${libc}" { nativeBuildInputs = [ pkgs.zstd pkgs.binutils pkgs.patchelf ]; } ''
+              payload = libc: release: pkgs.runCommand "tessh-payload-${libc}${if release then "-lto" else ""}" { nativeBuildInputs = [ pkgs.zstd pkgs.binutils pkgs.patchelf ]; } ''
                 mkdir -p root/bin root/lib $out
-                cp ${if libc == "musl" then tesshMusl else tesshGnu}/bin/tessh root/bin/tessh
+                cp ${(if libc == "musl" then mkTesshMusl else mkTesshGnu) release}/bin/tessh root/bin/tessh
                 chmod u+w root/bin/tessh
                 strip --strip-all root/bin/tessh
                 patchelf --set-rpath '$ORIGIN/../lib' root/bin/tessh
@@ -315,9 +326,9 @@
                 chmod 755 root/bin/*
                 tar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name -C root -cf - . | zstd -19 --long=27 -T0 -q > $out/payload.tar.zst
               '';
-              single = libc: pkgs.runCommand "tessh-static-${libc}-${tesshMusl.version}" { nativeBuildInputs = [ pkgs.coreutils ]; meta.mainProgram = "tessh"; } ''
+              single = libc: release: pkgs.runCommand "tessh-${if release then "release" else "static"}-${libc}-${(pkgs.lib.importTOML ./tessh/Cargo.toml).package.version}" { nativeBuildInputs = [ pkgs.coreutils ]; meta.mainProgram = "tessh"; } ''
                 mkdir -p $out/bin
-                p=${payload libc}/payload.tar.zst
+                p=${payload libc release}/payload.tar.zst
                 off=$(stat -c%s ${launcher}/bin/tessh)
                 cat ${launcher}/bin/tessh $p > $out/bin/tessh
                 hash=$(sha256sum $p | cut -c1-16)
@@ -328,9 +339,14 @@
             rec {
               # musl's runs on any Linux with nothing installed; glibc's takes
               # manylinux wheels. tessh-static is musl's (the login shell's).
-              tessh-static-musl = single "musl";
-              tessh-static-gnu = single "gnu";
+              # The fast builds (incremental, no LTO: the dev loop's) and the
+              # release ones (fat LTO, one codegen unit: smaller, slower to
+              # build; what CI and scripts/tessh-static.sh ship).
+              tessh-static-musl = single "musl" false;
+              tessh-static-gnu = single "gnu" false;
               tessh-static = tessh-static-musl;
+              tessh-release-musl = single "musl" true;
+              tessh-release-gnu = single "gnu" true;
             });
           tessera = pkgs.rustPlatform.buildRustPackage {
             pname = "tessera";

@@ -3996,7 +3996,6 @@ dependencies = [
  "ruzstd",
  "serde_json",
  "tar",
- "ureq",
 ]
 
 [[package]]
