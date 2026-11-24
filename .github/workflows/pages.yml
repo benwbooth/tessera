@@ -1,4 +1,5 @@
-# The GitHub Pages site: the website from docs/ at the root, and the Flatpak
+# The GitHub Pages site: the website from docs/ at the root, tessh's
+# documentation under /tessh/ (scripts/tessh-docs-site.sh), and the Flatpak
 # repo from the latest release under /flatpak/.
 #
 # Runs after the Release workflow attaches a new Flatpak repo (it starts this
@@ -43,11 +44,18 @@ jobs:
           <!doctype html><meta charset="utf-8"><title>Tessera</title>
           <h1>Tessera</h1>
           <p>A terminal in the spirit of iTerm2. Downloads: <a href="https://github.com/$GITHUB_REPOSITORY/releases/latest">latest release</a>.</p>
+          <p>tessh, its shell language: <a href="tessh/">the tessh documentation</a>.</p>
           <h2>Flatpak</h2>
           <pre>flatpak install --user https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/flatpak/tessera.flatpakref</pre>
           HTML
           fi
           touch public/.nojekyll
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.5.2
+      - name: tessh's documentation, at /tessh/
+        run: |
+          scripts/tessh-docs-site.sh public/tessh
           find public -maxdepth 2 | head -40
       - uses: actions/upload-pages-artifact@v3
         with:

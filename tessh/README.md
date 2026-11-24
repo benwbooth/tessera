@@ -18,6 +18,9 @@ an interactive shell with its own line editor, as scripts (`tessh file.tsh`,
 
 ## Documentation
 
+Read it as a site, with contents and search:
+**[benwbooth.github.io/tessera/tessh](https://benwbooth.github.io/tessera/tessh/)**.
+
 - **[The tessh guide](doc/guide.md):** the whole language, a part at a time,
   each with an example and what it prints (every example is run by the
   tests). In tessh, `help` shows it a topic at a time (`help pipes`).

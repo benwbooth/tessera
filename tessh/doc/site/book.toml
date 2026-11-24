@@ -1,0 +1,16 @@
+# tessh's documentation as a site (scripts/tessh-docs-site.sh builds it into
+# the GitHub Pages site under /tessh/).
+[book]
+title = "tessh"
+description = "tessh, Tessera's shell language: its guide, reference and the Advanced tessh Scripting Guide"
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/tessera/tessh/"
+git-repository-url = "https://github.com/benwbooth/tessera/tree/main/tessh"
+additional-css = ["tessh.css"]
+# (The chapters carry the ABS Guide's own numbers.)
+no-section-label = true
+default-theme = "light"
+preferred-dark-theme = "coal"
