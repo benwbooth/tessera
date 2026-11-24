@@ -203,9 +203,11 @@ and the script exits with the command's status.
 
 The `!` is glued to a closing parenthesis and only there. `! cmd` and `!$x`
 are still not, `!=` still compares, and `wow!` is still a word. There's no
-`&&!` or `||!`: `a && (b)!` and `(a && b)!` cover them. Since `$(cmd)!` and
-`$(cmd)?` are these forms, an unquoted `echo hi $(whoami)!` prints no `!`.
-Quote it to keep the character: `echo "hi $(whoami)!"`.
+`&&!` or `||!`: `a && (b)!` and `(a && b)!` cover them. In a program's
+arguments `$(cmd)!` and `$(cmd)?` are text, as in bash, so
+`echo hi $(whoami)!` prints `hi ben!`. Write `(cmd)!` there to raise:
+`echo hi (whoami)!`. Everywhere else (`x = $(cmd)!`, a line of its own,
+a Python call's arguments) `$(cmd)!` is the operator.
 
 A builtin (`cd`, `pushd`, `source`…) that fails on a line of its own stops
 the script in any mode. In strict mode programs and pipes do too. A failure
@@ -546,7 +548,7 @@ REDIR     := DIGITS? ('>' | '>>' | '<' | '>|' | '<>' | '&>' | '&>>' | '>&' | '<&
            | '<<<' WORD | '<<' '-'? DELIM NEWLINE line* DELIM   (heredoc)
            | '<(' form ')' | '>(' form ')'
 term      := atom postfix* | '(' items ')' ('?' | '!')   (glued: catch, ensure)
-           | '$(' form ')' ('?' | '!')
+           | '$(' form ')' ('?' | '!')                (not in a program's arguments: text there)
 atom      := NUMBER | STRING | WORD | '$' NAME | '$?' | '\' WORD | ':' NAME
            | ':(' form ')' | '`' NAME '`' | NAME '=' term | '*' term | '**' term
            | '(' items ')' | '[' items ']' | '{' items '}'

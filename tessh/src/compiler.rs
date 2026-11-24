@@ -1152,8 +1152,10 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::Op { name, tick: true } => Ok(Res::e(self.c(format!("`{name}`"))?)),
             Kind::Num(t) => Ok(Res::e(self.c(t.as_str())?)),
             Kind::Str { value, .. } => Ok(Res::e(self.c(value.as_str())?)),
-            Kind::Word(_) if try_inner(x).is_some() => self.try_value(try_inner(x).unwrap()),
-            Kind::Word(_) if bang_inner(x).is_some() => self.ensure_value(bang_inner(x).unwrap()),
+            // ((cmd)? and (cmd)! in a command's words; $(cmd)? and $(cmd)!
+            // there are text, as bash has them: echo hi $(whoami)!)
+            Kind::Word(_) if try_inner(x).is_some() && !dollar_suffix(x) => self.try_value(try_inner(x).unwrap()),
+            Kind::Word(_) if bang_inner(x).is_some() && !dollar_suffix(x) => self.ensure_value(bang_inner(x).unwrap()),
             Kind::Word(ps) => {
                 let r = self.word_value(x, false)?;
                 let texts: Vec<&String> = ps.iter().filter_map(|p| if let Part::Text(t) = p { Some(t) } else { None }).collect();
@@ -4071,6 +4073,12 @@ fn bang_inner(x: &Form) -> Option<&Form> {
         _ => f,
     };
     matches!(g.kind, Kind::Group { open: '(', .. }).then_some(g)
+}
+
+/// `$(…)?` / `$(…)!` rather than `(…)?` / `(…)!`.
+fn dollar_suffix(x: &Form) -> bool {
+    let Kind::Word(ps) = &x.kind else { return false };
+    matches!(ps.first(), Some(Part::F(f)) if matches!(f.kind, Kind::Interp { .. }))
 }
 
 fn is_glob_word(x: &Form) -> bool {

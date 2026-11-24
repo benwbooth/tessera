@@ -1424,9 +1424,10 @@ Nothing catching it, a `CommandFailed` stops the script with one line,
 script exits with the command's status. The `!` has to be glued to the `)`:
 `! cmd` is still not, `!=` still compares, and `wow!` is a word. For a chain
 put it after the part to check, `a && (b)!`, or around it all, `(a && b)!`.
-In a command's arguments `$(cmd)!` is the same form, so `echo hi $(whoami)!`
-prints no `!` (and `$(cmd)?` no `?`). Quote the string to keep the
-character: `echo "hi $(whoami)!"`.
+In a program's arguments, `$(cmd)!` and `$(cmd)?` are text, as in bash, so
+`echo hi $(whoami)!` prints `hi ben!`. To raise there, leave out the `$`:
+`echo hi (whoami)!`. Everywhere else, `$(cmd)!` is the operator:
+`x = $(cmd)!`, a line of its own, or a Python call's arguments.
 
 Strict mode does that for every line, as bash's `set -e` does: after
 `strict` (or `set -e`, or `tessh -e` in the `#!` line,

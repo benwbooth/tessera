@@ -1031,6 +1031,19 @@ fn bang_turns_a_failure_into_an_exception() {
 }
 
 #[test]
+fn dollar_bang_in_a_programs_words_is_text() {
+    let (_, out) = run(concat!(
+        "echo hi $(echo you)!\n",
+        "echo hi (echo you)!\n",
+        "print hi $(echo you)!\n",
+        "try\n  echo (false)!\nexcept CommandFailed\n  print args\n",
+        "try\n  x = $(false)!\nexcept CommandFailed\n  print value\n",
+        "try\n  $(false)!\nexcept CommandFailed\n  print line\n",
+    ));
+    assert_eq!(out, "hi you!\nhi you\nhi you\nargs\nvalue\nline\n");
+}
+
+#[test]
 fn uncaught_bang_reports_unhandled_error() {
     let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
     Python::attach(|py| {
