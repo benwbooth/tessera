@@ -263,6 +263,34 @@ impl Guide {
         let to = if i == l1 { c1.min(len) } else { len };
         (from, to.max(from))
     }
+    /// The word at (line, char): letters, digits and _ (or the run of
+    /// other non-blank chars there), picked.
+    fn pick_word(&mut self, (i, c): (usize, usize)) {
+        let Some(line) = self.plain.get(i) else { return };
+        let chars: Vec<char> = line.chars().collect();
+        let (lo, _) = self.picked_span(i, ((i, 0), (i, chars.len())));
+        let c = c.min(chars.len().saturating_sub(1)).max(lo);
+        let Some(&at) = chars.get(c) else { return };
+        let word = |x: char| x.is_alphanumeric() || x == '_';
+        let same = |x: char| if word(at) { word(x) } else if at.is_whitespace() { x.is_whitespace() } else { !word(x) && !x.is_whitespace() };
+        let mut a = c;
+        while a > lo && same(chars[a - 1]) {
+            a -= 1;
+        }
+        let mut b = c;
+        while b < chars.len() && same(chars[b]) {
+            b += 1;
+        }
+        self.sel = Some(((i, a), (i, b)));
+        self.dragging = false;
+    }
+    /// Line i, picked (a code line without its gutter).
+    fn pick_line(&mut self, i: usize) {
+        let Some(line) = self.plain.get(i) else { return };
+        let n = line.trim_end().chars().count();
+        self.sel = Some(((i, 0), (i, n)));
+        self.dragging = false;
+    }
     /// The text picked, lines joined with newlines.
     fn sel_text(&self) -> String {
         let Some(r @ (_, (l1, _))) = self.sel_range() else { return String::new() };
@@ -477,6 +505,9 @@ fn run(mut g: Guide, at: &str) {
         }
     }
     let mut resizing = false;
+    // (The last left press, for double and triple clicks: when, where, and
+    // how many in a row.)
+    let mut last_click: Option<(std::time::Instant, (usize, usize), u8)> = None;
     loop {
         let (c, r) = crossterm::terminal::size().unwrap_or((80, 24));
         let (cols, rows) = (c as usize, r as usize);
@@ -676,9 +707,21 @@ fn run(mut g: Guide, at: &str) {
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) if in_text => {
                         let p = g.pos_at(m.column as usize, m.row as usize, x0, rows);
-                        g.sel = Some((p, p));
-                        g.dragging = true;
+                        let n = match last_click {
+                            Some((t, q, n)) if q.0 == p.0 && t.elapsed() < std::time::Duration::from_millis(450) => n % 3 + 1,
+                            _ => 1,
+                        };
+                        last_click = Some((std::time::Instant::now(), p, n));
                         g.searching = false;
+                        // (Twice: the word; three times: the line.)
+                        match n {
+                            2 => g.pick_word(p),
+                            3 => g.pick_line(p.0),
+                            _ => {
+                                g.sel = Some((p, p));
+                                g.dragging = true;
+                            }
+                        }
                     }
                     MouseEventKind::Drag(MouseButton::Left) if g.dragging => {
                         // (Past the top or bottom: the guide scrolls along.)
@@ -746,6 +789,21 @@ mod tests {
         assert_eq!(now - g.top, 3, "the clicked tab bar stays on its row");
         g.show_tab(all[0], false);
         assert!(g.bash[0].is_empty(), "and back to tessh, all of them");
+    }
+
+    #[test]
+    fn double_click_picks_a_word_triple_a_line() {
+        let mut g = Guide::new("Some words here.\n\n```tessh\nprint hello_world\n```\n");
+        let a = g.plain.iter().position(|l| l.contains("Some words")).unwrap();
+        let c = g.plain[a].find("words").unwrap() + 1;
+        g.pick_word((a, c));
+        assert_eq!(g.sel_text(), "words");
+        let k = g.plain.iter().position(|l| l.contains("hello_world")).unwrap();
+        let c = g.plain[k].chars().position(|x| x == 'w').unwrap();
+        g.pick_word((k, c));
+        assert_eq!(g.sel_text(), "hello_world");
+        g.pick_line(k);
+        assert_eq!(g.sel_text(), "print hello_world");
     }
 
     #[test]

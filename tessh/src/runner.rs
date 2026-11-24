@@ -363,12 +363,21 @@ pub mod tests {
             let _ = r.read_to_string(&mut s);
             s
         });
+        // (fd 1 back however f ends: a test that panics in it would leave
+        // every later capture, and the reader, waiting.)
+        struct Restore(i32);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe {
+                    libc::dup2(self.0, 1);
+                    libc::close(self.0);
+                }
+            }
+        }
+        let restore = Restore(saved);
         f();
         let _ = py.import("sys").and_then(|s| s.getattr("stdout")).and_then(|o| o.call_method0("flush"));
-        unsafe {
-            libc::dup2(saved, 1);
-            libc::close(saved);
-        }
+        drop(restore);
         reader.join().unwrap()
     }
 

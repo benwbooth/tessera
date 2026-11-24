@@ -690,16 +690,25 @@ fn advanced_guide_examples() {
                 let pid: i32 = py.import("os").unwrap().call_method0("fork").unwrap().extract().unwrap();
                 if pid == 0 {
                     // (The child: the example, then out, whatever it did.)
-                    unsafe {
+                    // (Only 0, 1 and 2 low: the error pipe up high, so the
+                    // example's own files and pipes get the numbers a real
+                    // run would, /dev/fd/3 first.)
+                    let err_w = unsafe {
                         libc::alarm(120);
                         libc::dup2(out_w.as_raw_fd(), 1);
                         let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
                         libc::dup2(null, 0);
-                    }
+                        libc::close(null);
+                        let high = libc::fcntl(err_w.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 200);
+                        drop(err_w);
+                        <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(high)
+                    };
+                    drop(out_w);
                     drop(out_r);
                     drop(err_r);
                     let _ = std::env::set_current_dir(&work);
-                    let msg = match new_namespace(py, "__main__", vec![script.clone()]) {
+                    // (With __file__, as running the file sets it.)
+                    let msg = match new_namespace(py, "__main__", vec![script.clone()]).and_then(|ns| ns.set_item("__file__", &script).map(|_| ns)) {
                         Ok(ns) => match run_source(py, &code, &ns, &script, false) {
                             Ok(_) => None,
                             Err(TesshError::Py(e)) if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) => None,
@@ -708,6 +717,8 @@ fn advanced_guide_examples() {
                         },
                         Err(e) => Some(format!("{}", e.value(py))),
                     };
+                    // (What runs at exit, as it would: atexit's functions.)
+                    let _ = py.import("atexit").and_then(|a| a.call_method0("_run_exitfuncs"));
                     let _ = py.import("sys").and_then(|s| s.getattr("stdout")).and_then(|o| o.call_method0("flush"));
                     let mut err_w = err_w;
                     if let Some(m) = &msg {
@@ -727,7 +738,9 @@ fn advanced_guide_examples() {
                 for d in [&src, &work] {
                     let _ = std::fs::remove_dir_all(d);
                 }
-                if !err.is_empty() || !libc::WIFEXITED(st) {
+                // (A script may end itself by a signal, as bash's `kill $$`.)
+                let ended = libc::WIFEXITED(st) || (libc::WIFSIGNALED(st) && [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGKILL].contains(&libc::WTERMSIG(st)));
+                if !err.is_empty() || !ended {
                     failed.push(format!("{file}:{line}: error: {err} (status {st})\n{code}--- printed:\n{out}"));
                 } else if let Some(w) = want {
                     if addr(&out) != w {
@@ -906,7 +919,7 @@ fn a_lone_folder_goes_there() {
 #[test]
 fn globs_are_glob_objects() {
     let here = std::env::current_dir().unwrap();
-    let d = std::env::temp_dir().join(format!("tessh-glob-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("tessh-globobj-{}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     for f in ["a.txt", "b.txt", "c.py"] {
         std::fs::write(d.join(f), "").unwrap();

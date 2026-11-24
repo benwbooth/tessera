@@ -834,8 +834,8 @@ False
 that run; the shell's own environment is as it was after.
 
 ```tessh
-GREETING=hi sh -c 'echo $GREETING'
-print ("GREETING" in $env)
+SALUTE=hi sh -c 'echo $SALUTE'
+print ("SALUTE" in $env)
 ```
 
 ```output
@@ -1314,6 +1314,10 @@ json.loads "{oops" &&? print never
 8080
 valid JSON
 ```
+
+At the prompt, a `Failed` isn't shown, as a failed command shows nothing:
+its ✘ and `$?` say it failed. Keep it with `r = (expr)?` to look at
+`$r.error`.
 
 As with `or`, a value that works but is false (`0`, `""`, `[]`) also takes
 the fallback. To tell those apart, keep the value with `(expr)?` and test

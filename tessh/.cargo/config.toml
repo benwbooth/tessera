@@ -1,0 +1,5 @@
+# tessh's tests capture fd 1 and change the process's folder, both shared by
+# the whole test binary (and libtest prints each result on fd 1 too): one at
+# a time. (Here, for cargo run in tessh/; ~90 s for the lot.)
+[env]
+RUST_TEST_THREADS = "1"

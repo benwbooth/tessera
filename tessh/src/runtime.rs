@@ -922,7 +922,9 @@ pub fn display_hook(py: Python<'_>) -> Option<Py<PyAny>> {
 /// Show a value at the REPL (the last form of an input).
 #[pyfunction]
 fn show(py: Python<'_>, v: Bound<'_, PyAny>) -> PyResult<()> {
-    if v.is_none() || is_attached_output(&v) {
+    // (A Failed, from ? or a ||?/&&? that gave up, is shown as a failed
+    // command is: by its status, ✘. `r = (expr)?` keeps it to look at.)
+    if v.is_none() || is_attached_output(&v) || v.is_instance(&prelude(py)?.getattr("Failed")?)? {
         return Ok(());
     }
     let d = DISPLAY.lock().unwrap().as_ref().map(|d| d.clone_ref(py));
