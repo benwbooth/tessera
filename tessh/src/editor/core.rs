@@ -113,6 +113,8 @@ pub enum MenuKind {
     Context,
     /// The prompt bar's widgets with choices (Ctrl+Alt+P).
     Widgets,
+    /// The ls listing's menus ("item", "folder", "columns", "sort", …).
+    Ls(String),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -195,6 +197,10 @@ pub struct Ed {
     pub vi: super::vi::Vi,
     pub ex: super::ex::Ex,
     pub cmd: super::vi::CmdLine,
+    /// The last ls's listing, above the prompt until the next command
+    /// (Tessera's folder view: editor/ls.rs), and whether it has the keys.
+    pub ls: Option<Box<super::ls::Ls>>,
+    pub ls_focus: bool,
 }
 
 const CONT: &[&str] = &["else", "elif", "except", "except*", "finally"];
@@ -291,6 +297,8 @@ impl Ed {
             },
             ex: super::ex::Ex::new(),
             cmd: super::vi::CmdLine::new(),
+            ls: None,
+            ls_focus: false,
         }
     }
 
@@ -744,6 +752,10 @@ impl Ed {
         self.ctrl_side = 0;
         if self.menu.is_some() {
             self.menu_key(&k, h);
+            return;
+        }
+        // (The ls listing above, when it has the keys: Ctrl+Alt+L.)
+        if self.ls_key(&k) {
             return;
         }
         if self.comp.hist {
@@ -1535,6 +1547,7 @@ impl Ed {
             }
             MenuKind::Indent => self.done = Some(Outcome::Host(format!("indent:{}", it.cmd))),
             MenuKind::Widgets => self.done = Some(Outcome::Host(format!("widget:{}", it.cmd))),
+            MenuKind::Ls(_) => self.ls_pick(&it.cmd),
             MenuKind::Context => {
                 let sel = self.t.selection();
                 match it.cmd.as_str() {
@@ -1759,9 +1772,15 @@ impl Ed {
             }
         }
         if let Some((c, r, at)) = self.pointer {
-            if at.elapsed() >= Duration::from_millis(550) {
+            let under = hit_at(c, r);
+            // (How long it rests first: the listing's as Tessera's tooltips wait.)
+            let wait = match &under {
+                Some(Hit::Ls(x)) => super::ls::tip_delay(x),
+                _ => 550,
+            };
+            if at.elapsed() >= Duration::from_millis(wait) {
                 self.pointer = None;
-                match hit_at(c, r) {
+                match under {
                     Some(Hit::Text(p)) if self.hover.is_none() && !self.comp.open && self.menu.is_none() && !self.t.text.trim().is_empty() => {
                         let d = h.hover(&self.t.text, p);
                         if !d.trim().is_empty() {

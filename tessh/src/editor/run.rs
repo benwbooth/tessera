@@ -103,12 +103,58 @@ impl Editor {
         let mut hl = |s: &str| h.highlight(s);
         let cache = std::cell::RefCell::new(&mut hl);
         let spans_for = |s: &str| (cache.borrow_mut())(s);
-        let built = view::build(&self.ed, &v, &spans_for);
+        let mut built = view::build(&self.ed, &v, &spans_for);
+        // The ls listing, above it all (not when the prompt's done: it's
+        // been printed by then, freeze_ls).
+        if !final_ {
+            let pal = self.palette();
+            let cols = self.screen.cols();
+            let room = self.screen.rows().saturating_sub(built.frame.rows.len() + 1);
+            let hov = match &self.hovered {
+                Some(Hit::Ls(x)) => Some(x.clone()),
+                _ => None,
+            };
+            let focus = self.ed.ls_focus;
+            if let Some(ls) = self.ed.ls.as_mut() {
+                let (rows, at) = ls.panel(&pal, cols, room, hov.as_ref(), focus);
+                let n = rows.len();
+                let f = &mut built.frame;
+                f.cursor = if focus { at.or(f.cursor.map(|(r, c)| (r + n, c))) } else { f.cursor.map(|(r, c)| (r + n, c)) };
+                f.rows.splice(0..0, rows);
+                f.bare = n;
+                if let Some((lines, cur)) = ls.dialog(&pal, cols) {
+                    let w = lines.first().map(|l| super::width(l)).unwrap_or(0);
+                    let col = cols.saturating_sub(w) / 2;
+                    f.overlay = Some(super::screen::Overlay { lines, col, cursor: cur });
+                }
+            }
+        }
         if final_ {
             self.screen.finish(&built.frame);
         } else {
             self.screen.draw(&built.frame);
         }
+    }
+
+    /// The ls listing printed whole, as text, where it was (it stays in
+    /// the scrollback): done with it.
+    pub fn freeze_ls(&mut self) {
+        let Some(mut ls) = self.ed.ls.take() else { return };
+        self.ed.ls_focus = false;
+        if matches!(self.ed.menu.as_ref().map(|m| &m.kind), Some(super::core::MenuKind::Ls(_))) {
+            self.ed.menu = None;
+        }
+        let cols = self.screen.cols();
+        let lines = ls.frozen(&self.palette(), cols);
+        self.screen.clear();
+        let mut o = std::io::stdout().lock();
+        use std::io::Write;
+        for l in &lines {
+            let _ = write!(o, "{}\r\n", super::screen::line_text(l, cols));
+        }
+        let _ = o.flush();
+        drop(o);
+        self.screen.begin();
     }
 
     /// The editor's rows cleared (something's printed where it was; the next
@@ -250,6 +296,7 @@ impl Editor {
                         }
                         self.ed.key(k, h);
                     }
+                    Ok(Event::Paste(s)) if self.ed.ls_paste(&s) => {}
                     Ok(Event::Paste(s)) => {
                         let s = s.replace("\r\n", "\n").replace('\r', "\n");
                         self.ed.t.insert(&s);
@@ -267,7 +314,10 @@ impl Editor {
                         if matches!(m.kind, crossterm::event::MouseEventKind::Down(_)) && matches!(hit, Some(Hit::Chip(_)) | Some(Hit::Widget(_))) {
                             self.ed.menu_x = Some(self.screen.run_start(m.column, m.row));
                         }
-                        let keep = self.ed.mouse(m, hit, h);
+                        // (The listing's own: its rows, a drag begun there, a click while its dialog's open.)
+                        let to_ls = self.ed.ls.as_ref().is_some_and(|l| l.dragging() || (l.dialog_open() && matches!(m.kind, crossterm::event::MouseEventKind::Down(_))))
+                            || matches!(hit, Some(Hit::Ls(_)));
+                        let keep = if to_ls { self.ed.ls_mouse(m, hit) } else { self.ed.mouse(m, hit, h) };
                         if !keep {
                             self.term.set_mouse(false);
                         }
@@ -301,9 +351,11 @@ impl Editor {
                 self.ed.tick(h, view::tooltip, |c, r| screen.hit(c, r).cloned());
             }
             self.ai_tick();
+            self.ed.ls_tick();
             if let Some(o) = self.ed.done.take() {
                 match &o {
                     Outcome::Submit { .. } | Outcome::Interrupt | Outcome::Eof => {
+                        self.freeze_ls();
                         self.ed.close_comp();
                         self.ed.menu = None;
                         self.ed.hover = None;

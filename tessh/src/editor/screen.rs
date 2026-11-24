@@ -27,6 +27,9 @@ pub struct Frame {
     /// Paint the rows' empty ends with this (the editor's panel tint).
     pub fill: Option<Col>,
     pub overlay: Option<Overlay>,
+    /// The first rows that aren't the editor's panel (the ls listing):
+    /// not painted with `fill`.
+    pub bare: usize,
 }
 
 pub struct Screen {
@@ -212,7 +215,9 @@ impl Screen {
         if let Some(ov) = &f.overlay {
             let n = ov.lines.len();
             let below = self.rows.saturating_sub(self.top + h) as usize;
-            let start: i32 = if below >= n { (self.top + h) as i32 } else { self.top as i32 - n as i32 };
+            // (No room above either, as under a tall ls listing: from the screen's
+            // top, over the rows there, never moving the editor.)
+            let start: i32 = if below >= n { (self.top + h) as i32 } else { (self.top as i32 - n as i32).max(0) };
             for (i, l) in ov.lines.iter().enumerate() {
                 let r = start + i as i32;
                 if r < 0 || r >= self.rows as i32 {
@@ -247,7 +252,7 @@ impl Screen {
         let mut encoded = Vec::with_capacity(rows.len());
         let mut redrawn: Vec<u16> = vec![];
         for (i, l) in rows.iter().enumerate() {
-            let (s, hm) = encode_row(l, cols, f.fill);
+            let (s, hm) = encode_row(l, cols, if i + skip < f.bare { None } else { f.fill });
             hits.push(hm);
             let r = self.top + i as u16;
             // (A row the old popup covered, and the new doesn't the same way: drawn again.)
@@ -315,7 +320,7 @@ impl Screen {
     /// Done with this prompt: the final look stays (the prompt and what was
     /// run, as a shell leaves them) and the cursor goes under it.
     pub fn finish(&mut self, f: &Frame) {
-        let mut plain = Frame { rows: f.rows.clone(), cursor: None, fill: None, overlay: None };
+        let mut plain = Frame { rows: f.rows.clone(), cursor: None, fill: None, overlay: None, bare: 0 };
         if plain.rows.is_empty() {
             plain.rows.push(vec![]);
         }
@@ -333,6 +338,12 @@ impl Screen {
         self.hits.clear();
         self.pop_hits.clear();
     }
+}
+
+/// A line as the terminal gets it (printed, not drawn: the ls listing
+/// left in the scrollback).
+pub fn line_text(l: &Line, cols: usize) -> String {
+    format!("{}\x1b[0m", encode(l, cols).0)
 }
 
 /// Columns a string takes.

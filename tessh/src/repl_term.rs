@@ -176,6 +176,62 @@ fn menu_of(cs: Vec<crate::editor::promptbar::Choice>) -> Vec<MenuItem> {
     cs.into_iter().map(|c| MenuItem { enabled: !c.section, label: c.label, cmd: c.cmd, section: c.section, checked: c.current }).collect()
 }
 
+// ---- ls: Tessera's folder view ---------------------------------------------------------
+
+/// An ls the listing shows (editor/ls.rs): one run here, not a name the
+/// session has given something else, naming what's there (else the real ls
+/// says what's wrong).
+fn ls_plan(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cwd: &str) -> Option<crate::editor::ls::Plan> {
+    if std::env::var("TESSH_LS").is_ok_and(|v| v == "0") {
+        return None;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let plan = crate::editor::ls::command(text, cwd, &home)?;
+    let first = crate::editor::ls::shell_words(text).first()?.text.clone();
+    if ns.contains(first.as_str()).unwrap_or(false) {
+        return None;
+    }
+    let _ = py;
+    let p = std::path::Path::new;
+    if !plan.single.is_empty() && !p(&plan.single).is_dir() {
+        return None;
+    }
+    for g in &plan.groups {
+        if g.names.iter().any(|n| std::fs::symlink_metadata(p(&g.dir).join(n)).is_err()) {
+            return None;
+        }
+    }
+    Some(plan)
+}
+
+/// A file as a card under the listing (View in a card): its lines numbered.
+fn print_file_card(path: &str) {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let text = match std::fs::read(path) {
+        Ok(b) => String::from_utf8_lossy(&b[..b.len().min(3_000_000)]).to_string(),
+        Err(e) => {
+            println!("tessh: {path}: {e}");
+            return;
+        }
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let shown = lines.len().min(2000);
+    let w = shown.to_string().len();
+    println!("\x1b[1m{name}\x1b[0m \x1b[2m{} lines\x1b[0m", lines.len());
+    for (i, l) in lines.iter().take(shown).enumerate() {
+        println!("\x1b[2m{:>w$} │\x1b[0m {}", i + 1, l.replace('\t', "    "));
+    }
+    if lines.len() > shown {
+        println!("\x1b[2m… {} more lines (the viewer has them all)\x1b[0m", lines.len() - shown);
+    }
+}
+
+/// A file in tessh's full-screen viewer (media and office files: the
+/// desktop's app for them, when there's a desktop).
+fn view_file(path: &str) {
+    crate::viewer::open_path(std::path::Path::new(path));
+}
+
 // ---- the loop ------------------------------------------------------------------------
 
 fn run_line(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str) -> Option<i32> {
@@ -256,12 +312,19 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                 let (what, arg) = c.split_once(':').unwrap_or((c.as_str(), ""));
                 match what {
                     "guide" => crate::editor::pager::show_guides(arg, 0),
+                    "lsview" => view_file(arg),
+                    "lscard" => {
+                        editor.freeze_ls();
+                        print_file_card(arg);
+                    }
                     "help" => match crate::help::lookup(arg) {
                         Some(md) => print_md(&md),
                         None => println!("tessh: no help for {arg}"),
                     },
                     "jobs" => run = Some(("jobs".into(), false, false)),
                     "clear" => {
+                        editor.ed.ls = None;
+                        editor.ed.ls_focus = false;
                         print!("\x1b[H\x1b[2J");
                         let _ = std::io::stdout().flush();
                     }
@@ -346,6 +409,8 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
             }
         }
         let Some((text, background, from_editor)) = run else { continue };
+        // (Something's printed from here: the listing goes to the scrollback first.)
+        editor.freeze_ls();
         let text = if background && !text.trim_end().ends_with('&') { format!("{} &", text.trim_end()) } else { text.trim_end().to_string() };
         if text.trim().is_empty() {
             fresh = true;
@@ -368,6 +433,18 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
         osc(&format!("1337;TesseraCommand={}", b64.encode(&text)));
         osc("133;C");
         started = Instant::now();
+        // ls: Tessera's folder view, above the next prompt.
+        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        if !background {
+            if let Some(plan) = Python::attach(|py| ls_plan(py, ns.bind(py), &text, &cwd)) {
+                editor.ed.show_ls(crate::editor::ls::Ls::new(plan, &cwd));
+                runtime::STATUS.store(0, Ordering::SeqCst);
+                editor.ed.duration_ms = started.elapsed().as_millis() as u64;
+                osc("133;D;0");
+                fresh = true;
+                continue;
+            }
+        }
         let exit = Python::attach(|py| run_line(py, ns.bind(py), &text));
         editor.ed.duration_ms = started.elapsed().as_millis() as u64;
         if let Some(c) = exit {

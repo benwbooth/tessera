@@ -157,6 +157,7 @@ pub fn tooltip(ed: &Ed, hit: &Hit) -> String {
         },
         Hit::Widget(w) => format!("{} (the prompt bar's choices: Ctrl+Alt+P)", super::promptbar::widget_title(w)),
         Hit::Path(p) => super::promptbar::path_title(p),
+        Hit::Ls(h) => super::ls::tooltip(ed, h),
         _ => String::new(),
     }
 }
@@ -174,7 +175,7 @@ pub fn keys_table(ed: &Ed) -> String {
                 ("Shift+Tab", "Outdent"),
             ],
         ),
-        ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+D", "Folders: cd history"), ("Ctrl+Alt+J", "Background jobs"), ("Ctrl+Alt+P", "The prompt bar's choices (branches, contexts…)")]),
+        ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+D", "Folders: cd history"), ("Ctrl+Alt+J", "Background jobs"), ("Ctrl+Alt+P", "The prompt bar's choices (branches, contexts…)"), ("Ctrl+Alt+L", "The ls listing above the prompt, by keys")]),
         ("More", vec![("F1", "Help for the word at the cursor (on an empty line: these keys)"), ("Shift+F1", "The guide, at the word"), ("Shift+F10", "The text's menu (Copy, Paste, …); or the Menu key"), ("Ctrl+Alt+S", "Indentation: spaces or tabs, and its size"), ("Ctrl+Alt+E", "Editor keys: Emacs, vi, VS Code"), ("Ctrl+Alt+X", "Ask the AI to fix the command that failed")]),
     ];
     if ed.ai.lock().unwrap().command_ready {
@@ -755,5 +756,5 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
         }
     }
     let popup_rows = 0;
-    Built { frame: Frame { rows, cursor, fill, overlay }, popup_rows }
+    Built { frame: Frame { rows, cursor, fill, overlay, bare: 0 }, popup_rows }
 }

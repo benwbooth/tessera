@@ -493,12 +493,72 @@ pub fn apps_for(path: &str) -> String {
     json!({"mime": mime, "apps": out}).to_string()
 }
 
+/// A .desktop Exec line's words, as a shell splits them: quotes ('' and
+/// "") and backslashes taken off. (Here, not a crate: tessh shares this file.)
+fn exec_words(s: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let (mut w, mut has, mut q) = (String::new(), false, None::<char>);
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        match (q, c) {
+            (Some('\''), '\'') => q = None,
+            (Some('\''), _) => w.push(c),
+            (Some('"'), '"') => q = None,
+            (Some('"'), '\\') => match it.next() {
+                Some(n) if "\"\\$`".contains(n) => w.push(n),
+                Some(n) => {
+                    w.push('\\');
+                    w.push(n);
+                }
+                None => w.push('\\'),
+            },
+            (Some(_), _) => w.push(c),
+            (None, '\'' | '"') => {
+                q = Some(c);
+                has = true;
+            }
+            (None, '\\') => {
+                if let Some(n) = it.next() {
+                    w.push(n);
+                }
+                has = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if has {
+                    out.push(std::mem::take(&mut w));
+                }
+                has = false;
+            }
+            (None, c) => {
+                w.push(c);
+                has = true;
+            }
+        }
+    }
+    if q.is_some() {
+        return Err("missing closing quote".into());
+    }
+    if has {
+        out.push(w);
+    }
+    Ok(out)
+}
+
+/// A word quoted for sh, when it needs it.
+fn sh_quote(a: &str) -> String {
+    if !a.is_empty() && a.chars().all(|c| c.is_ascii_alphanumeric() || "_-./=:,+@%".contains(c)) {
+        a.to_string()
+    } else {
+        format!("'{}'", a.replace('\'', "'\\''"))
+    }
+}
+
 /// Start the app `id` on `path`: its Exec line with the file put in.
 fn open_with(id: &str, path: &str) -> Result<(), String> {
     let file = desktop_file(id).ok_or_else(|| format!("No app {id}."))?;
     let e = desktop_entry(&file);
     let exec = e.get("Exec").ok_or("It has no Exec line.")?;
-    let words = shell_words::split(exec).map_err(|e| e.to_string())?;
+    let words = exec_words(exec)?;
     let url = format!("file://{}", path.split('/').map(|s| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>()).collect::<Vec<_>>().join("/"));
     let mut argv: Vec<String> = Vec::new();
     let mut put = false;
@@ -518,7 +578,7 @@ fn open_with(id: &str, path: &str) -> Result<(), String> {
     // (A terminal app: in a terminal of its own.)
     if e.get("Terminal").is_some_and(|v| v == "true") {
         let me = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "tessera".into());
-        argv = vec![me, "--new-window".into(), "--run".into(), shell_words::join(&argv)];
+        argv = vec![me, "--new-window".into(), "--run".into(), argv.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" ")];
     }
     let refs: Vec<&str> = argv.iter().map(|s| s.as_str()).collect();
     spawn(refs[0], &refs[1..])
@@ -812,7 +872,13 @@ pub fn read_text(path: &str) -> String {
 /// files make their folder; a user's file needs it there.)
 pub fn write_text(path: &str, text: &str) -> String {
     let p = std::path::PathBuf::from(path);
-    if p.starts_with(crate::settings::state_dir()) {
+    // (settings::state_dir, worked out here: tessh shares this file.)
+    let state = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("tessera");
+    if p.starts_with(state) {
         if let Some(d) = p.parent() {
             let _ = std::fs::create_dir_all(d);
         }

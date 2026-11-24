@@ -16,6 +16,7 @@ pub mod term;
 pub mod text;
 pub mod vi;
 pub mod ex;
+pub mod ls;
 pub mod view;
 pub mod promptbar;
 
@@ -76,6 +77,8 @@ pub enum Hit {
     Path(String),
     /// A prompt bar widget ("dir", "git", "starship", "star:<module>", …).
     Widget(String),
+    /// The ls listing above the prompt (an entry, a heading, a button…).
+    Ls(ls::LsHit),
 }
 
 /// A run of text with one look and one meaning for the mouse.
