@@ -662,11 +662,41 @@ static bool isBoxChar(QChar c)
 {
     const ushort u = c.unicode();
     if (u >= 0x2580 && u <= 0x259f) return true;
+    // (Powerline's: drawn to the cell, so a prompt's pills meet their
+    // backgrounds whatever the font. Nerd Font Mono shrinks them to fit
+    // a cell's width, and they no longer reach its top and bottom.)
+    if (u >= 0xe0b0 && u <= 0xe0bf) return true;
     return u >= 0x2500 && u <= 0x257f && kBoxLines[u - 0x2500] != 0;
 }
 
 static void drawBoxChar(QPainter& p, int x, int cw, int ch, ushort u, const QColor& color, int light)
 {
+    if (u >= 0xe0b0) {
+        // Powerline: solid shapes (even codes) and their outlines (odd).
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const qreal l = x, r = x + cw, h = ch, m = ch / 2.0;
+        QPainterPath path;
+        const bool solid = (u & 1) == 0;
+        switch (u & ~1) {
+        case 0xe0b0: path.moveTo(l, 0); path.lineTo(r, m); path.lineTo(l, h); break;          // right-pointing
+        case 0xe0b2: path.moveTo(r, 0); path.lineTo(l, m); path.lineTo(r, h); break;          // left-pointing
+        case 0xe0b4: path.moveTo(l, 0); path.arcTo(QRectF(l - cw, 0, 2.0 * cw, h), 90, -180); break;   // right half-round
+        case 0xe0b6: path.moveTo(r, 0); path.arcTo(QRectF(l, 0, 2.0 * cw, h), 90, 180); break;         // left half-round
+        case 0xe0b8: path.moveTo(l, 0); path.lineTo(r, h); path.lineTo(l, h); break;          // lower-left
+        case 0xe0ba: path.moveTo(r, 0); path.lineTo(r, h); path.lineTo(l, h); break;          // lower-right
+        case 0xe0bc: path.moveTo(l, 0); path.lineTo(r, 0); path.lineTo(l, h); break;          // upper-left
+        case 0xe0be: path.moveTo(l, 0); path.lineTo(r, 0); path.lineTo(r, h); break;          // upper-right
+        }
+        if (solid) {
+            path.closeSubpath();
+            p.fillPath(path, color);
+        } else {
+            p.strokePath(path, QPen(color, qMax(1, light)));
+        }
+        p.restore();
+        return;
+    }
     if (u >= 0x2580) {
         // Block elements.
         auto fill = [&](qreal x0, qreal y0, qreal x1, qreal y1, qreal a = 1) {
