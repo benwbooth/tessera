@@ -105,6 +105,14 @@ pub fn opens_block(line: &str, macros: &[String]) -> bool {
     if h == "if" && words.contains(&"then") {
         return false;
     }
+    // (time alone times the block under it; coproc alone, or coproc NAME
+    // when NAME isn't a program, runs the block as the coprocess.)
+    if h == "time" && words[1..].iter().all(|w| *w == "-p") {
+        return true;
+    }
+    if h == "coproc" && (words.len() == 1 || (words.len() == 2 && crate::reader::is_ident(words[1]) && crate::runtime::which(words[1]).is_none())) {
+        return true;
+    }
     BLOCK_SPECIALS.contains(&h) || CONT_KEYWORDS.contains(&h) || h == "case" || macros.iter().any(|m| m == h)
 }
 

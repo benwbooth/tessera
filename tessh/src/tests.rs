@@ -1808,3 +1808,15 @@ fn fc_and_compopt() {
     assert!(out.contains("-o default") && out.contains("-o nosort") && out.contains("+o dirnames"), "{out}");
     assert_eq!(get::<String>(&ns, "v"), "typed");
 }
+
+/// At the prompt, time and coproc NAME alone open a block; coproc cat doesn't.
+#[test]
+fn time_and_coproc_open_blocks() {
+    assert!(crate::repl::opens_block("time", &[]));
+    assert!(crate::repl::opens_block("time -p", &[]));
+    assert!(!crate::repl::opens_block("time sleep 1", &[]));
+    assert!(crate::repl::opens_block("coproc", &[]));
+    assert!(crate::repl::opens_block("coproc WORKER", &[]));
+    assert!(!crate::repl::opens_block("coproc sh", &[]));
+    assert!(!crate::repl::opens_block("coproc sh -c 'cat'", &[]));
+}
