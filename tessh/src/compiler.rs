@@ -1636,7 +1636,10 @@ impl<'py, 's> Compiler<'py, 's> {
                 let f = [Form::sym_at("strict", &[], head.pos.clone()), Form::sym_at(on, &[], items[1].pos.clone())];
                 return self.compile_command(&f, &[], if ctx == Ctx::Value { "capture" } else { "attach" });
             }
-            return err("tessh has no set options but -e (set -x, -u, -o pipefail): see help abs-options for what to do instead", Some(head));
+            // (The rest, -x, -v, -u, -o pipefail, -- args: the shell's set.)
+            let mut f = vec![Form::sym_at("builtin", &[], head.pos.clone()), Form::sym_at("set", &[], head.pos.clone())];
+            f.extend(items[1..].iter().cloned());
+            return self.compile_command(&f, &[], if ctx == Ctx::Value { "capture" } else { "attach" });
         }
         let mode = if ctx == Ctx::Value { "capture" } else { "attach" };
         // (True, False, None, ... alone: the constant.)
@@ -2090,6 +2093,11 @@ impl<'py, 's> Compiler<'py, 's> {
         let name = s.sym_name().unwrap_or("");
         if self.is_known(s) || !s.marks().is_empty() || self.ns_get(name).is_some() {
             let e = self.name_load(s)?;
+            return Ok(self.at(e, v));
+        }
+        // ($PIPESTATUS: the last pipe's statuses.)
+        if name == "PIPESTATUS" {
+            let e = self.rcall("pipestatus", vec![])?;
             return Ok(self.at(e, v));
         }
         // ($LINENO: the line it's on, as bash's.)

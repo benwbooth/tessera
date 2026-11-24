@@ -17,11 +17,21 @@ End takes it). `history [N]` lists the entries (the last N), and
 an entry and add one; `fc -l [-nr] [first [last]]` lists them as bash's
 does. Like any builtin, `history` used as a value gives what it prints,
 and in a pipe its output goes down the pipe: `history | grep ssh`.
-At the prompt, `!!`, `!$`, `!^`, `!*`, `!n`, `!-n` and `!prefix` bring
-back a past command or its words, as bash's do, and the line is shown as
-it runs. **Gap:** no `!?text?`, `:s` modifiers or `^old^new`, no `fc` but
-`fc -l` (↑ and Ctrl+R edit a past command instead), and no history
-variables.
+At the prompt, `!!`, `!$`, `!^`, `!*`, `!n`, `!-n`, `!prefix`,
+`!?text?` and `!#` (the line so far) bring back a past command or its
+words, as bash's do, and the line is shown as it runs. Word designators
+pick words (`:0`, `:n`, `:x-y`, `:x-`, `:$`, `:^`, `:*`, `:%`), and the
+modifiers `:h`, `:t`, `:r`, `:e`, `:p`, `:q`, `:x`, `:s/old/new/`,
+`:gs/old/new/`, `:&` and `:g&` change them. `^old^new^` reruns the last
+command with old replaced by new. **Gap:** no `fc` but `fc -l` (↑ and
+Ctrl+R edit a past command instead), and no history variables
+(`$HISTSIZE`, `$HISTCONTROL`…).
+
+```tessh no-run
+cp notes.txt /tmp/backup/
+^notes^todo^                       # cp todo.txt /tmp/backup/
+ls !$:h                            # ls /tmp/backup
+```
 
 The ABS Guide notes that history is no use in a script anyway: it's
 turned off there.

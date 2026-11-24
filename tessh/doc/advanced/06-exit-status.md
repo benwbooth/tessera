@@ -148,7 +148,7 @@ echo $?                # 0
 # Thanks, Stéphane Chazelas and Kristopher Newsome.
 ```
 
-tessh's history expansion (at the prompt: `!!`, `!$`, `!n`, `!prefix`)
+tessh's history expansion (at the prompt: `!!`, `!$`, `!n`, `!prefix`…)
 works on `!true` there too, as bash's does; in a script it's only the name
 of a program that isn't there. The rest is the same. (`not` inverts any value, a
 command's result included: `not (true)` is `False`.)

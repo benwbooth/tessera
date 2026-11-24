@@ -35,6 +35,12 @@ them as bash would:
   `source file args…`, `select` (`for x in (select …)`), `readonly`,
   `trap … ERR`, `complete` and `compgen`, `$LINENO`, `$SHLVL`, and `!!`,
   `!$`, `!n`, `!prefix` at the prompt.
+- `set -x`/`+x` (after `$PS4`), `set -v`, `set -o pipefail`, `set -o
+  name`/`+o name`, `set -o` alone, `set -- a b`; `$PIPESTATUS`; `trap …
+  DEBUG` (with `$BASH_COMMAND`) and `trap … RETURN`; `coproc`; `mapfile`
+  and `readarray`; `time` as a builtin (`\time` is the program); `while
+  read line <file` reads the file once, line after line; and history's
+  `!?text?`, `!#`, word designators, modifiers and `^old^new^`.
 - `alias`, `declare`, `local`, `shopt`, `bind`, `caller`, `enable`: not
   in tessh, but each now says what to do instead, rather than "command not
   found".
@@ -50,24 +56,23 @@ them as bash would:
 - Output is line-buffered, so it stays in order with programs' when piped.
 - Errors instead of silent mistakes: `if [ -n "$x" ]` (a list, always
   true), a `for`/`while`/`if` with no indented block (bash's missing
-  `done`), `set -x`, a method not called given to a program.
+  `done`), `set +u`, a method not called given to a program.
 
 ## Builtins
 <!-- help: abs-gaps-builtins read eval exec trap wait type -->
 
 - **`eval $code`**: given a bare value, `eval` is Python's; tessh text
   held in a variable runs with `eval "$code"` (chapters 15, 36, A-30).
-- **`trap` on `DEBUG`, `RETURN`**: none; `sys.settrace` (chapter 32).
-- **`set -u`, `-x`, `-v`, `-o pipefail`, `shopt`**: none (a `set -x`
-  line is an error; `shopt` says so). Python errors stop a script and unset names are
-  always errors; a failing *program* stops one only in strict mode
-  (`strict`, `set -e`, `tessh -e`) or with `(cmd)!`, and a
-  pipeline's status is its last stage's (no pipefail, no `$PIPESTATUS`).
-  `sys.settrace` traces (chapters 32, 33).
+- **`set` options** other than `-e`, `-x`, `-v`, `-u`, `-C` (noclobber)
+  and `-o pipefail` (`-f`, `-n`, `ignoreeof` and the rest), and
+  `shopt` (it says so). `set -u` is always on, so `set +u` fails. A
+  failing *program* stops a script only in strict mode (`strict`, `set
+  -e`, `tessh -e`) or with `(cmd)!` (chapters 32, 33).
 - **`$!`** by that name: `$j.pid`, after `j = cmd &` (chapters 9, 15).
-- **`coproc`**, **`mapfile`**: a few lines of Python each (chapters 11, 37).
-- **`time`** keyword: `time` runs `/usr/bin/time`, so a pipeline, a Python
-  call or a block can't be timed with it (chapter 16).
+- **`coproc NAME { … }`**: bash's block form; `coproc NAME -- command
+  args` runs a program (chapter 37).
+- **`time`** on a block: it times one command line; `time.perf_counter`
+  around a block (chapter 16).
 - **`alias`**: none; `@command def` (chapter 25).
 - **`read -i`**: no text put in the edit buffer (chapter 37).
 
@@ -135,19 +140,16 @@ by design.
 <!-- help: abs-gaps-elsewhere dev-tcp completion history prompt -->
 
 - **`/dev/tcp/host/port`**: not a redirection; Python's `socket` (chapter 29).
-- **Completion**: `complete -F` functions return a list; bash's
-  `COMPREPLY`/`COMP_WORDS` and `-o` options aren't there (Appendix J).
-- **History**: `!!`, `!$`, `!^`, `!*`, `!n`, `!-n` and `!prefix` at the
-  prompt, but no `!?text?`, `:s` modifiers or `^old^new`, no `fc` but
-  `fc -l`, and no history variables (Appendix L).
+- **Completion**: no `compopt`, and `complete -o filenames` and `-o
+  nospace` are accepted but do nothing (Appendix J).
+- **History**: no `fc` but `fc -l`, and no history variables (`HISTSIZE`,
+  `HISTCONTROL`…) (Appendix L).
 - **The prompt** can't be set (`PS1`), and there's no logout file
   (Appendices H, M).
 - **Restricted mode**: none, and with Python underneath it couldn't mean
   much (chapter 22).
 - A background command redirected to or from a named pipe opens it before
   starting, so it can block the shell until the other end opens (A-14).
-- A script's exit status is its last *program's*, even when Python lines
-  come after it: end with `exit 0` where it matters.
 - Docstrings in tessh functions are dropped.
 - Starting a program costs about 20 ms, several times what bash takes:
   loops that run thousands of tiny programs (`expr`) are slow; do the work

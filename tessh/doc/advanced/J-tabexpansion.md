@@ -46,10 +46,30 @@ complete -F _UseGetOpt-2 -o filenames ./UseGetOpt-2.sh
 ```
 
 tessh has `complete` and `compgen`: `complete -W "words" cmd` (or `-F
-func`, `-f`, `-d`, `-c`) sets what Tab offers after a command. A `-F`
-function is given the word being typed and the line's words so far, and
-returns the matches as a list, rather than setting `COMPREPLY`. What it
-works out is a one-line filter in tessh:
+func`, `-f`, `-d`, `-c`) sets what Tab offers after a command. It also
+takes bash's `-C command`, `-G glob`, `-X filter` (`!` keeps the
+matches), `-P prefix`, `-S suffix`, `-A action` (file, directory, command,
+builtin, keyword, variable, function, export, user, hostname, job,
+signal) and `-o default`, `bashdefault`, `dirnames`, `plusdirs` and
+`nosort`; `-o filenames` and `-o nospace` are accepted and do nothing.
+`compgen` takes the same. There's no `compopt`.
+
+A `-F` function comes in two forms. tessh's has two parameters: it's
+given the word being typed and the line's words so far, and returns the
+matches as a list. Any other is bash's: it's called with the command,
+the word and the word before it, with `$COMP_WORDS`, `$COMP_CWORD`,
+`$COMP_LINE` and `$COMP_POINT` set, and it fills `$COMPREPLY` (a global,
+so `global COMPREPLY` in a `def`) or returns a list.
+
+```tessh no-run
+def _UseGetOpt_2 cmd cur prev      # bash's form: fills $COMPREPLY.
+  global COMPREPLY
+  COMPREPLY = [$o for o in $OPTIONS if ($o.startswith $cur)]
+
+complete -F _UseGetOpt_2 ./UseGetOpt-2.sh
+```
+
+What the function works out is a one-line filter in tessh:
 
 ```tessh
 OPTIONS = [-a -d -f -l -t -h --aoption --debug --file --log --test --help --]

@@ -10,9 +10,11 @@ and puts carets under the part that failed; `tessh --py` shows the Python a
 script becomes; and Python's own tools (`pdb`, `sys.settrace`, `inspect`,
 `atexit`, `signal`) work on tessh scripts and report tessh line numbers.
 
-What tessh does not have is most of bash's switches: `set -u`, `set -x`
-and `set -v` don't exist (a `set -x` line is an error that says so), and
-`trap` has `ERR` but no `DEBUG` or `RETURN`. `set -e` is tessh's strict mode (`strict`, chapter 33). This chapter shows what to use instead.
+tessh has bash's main switches too: `set -x` shows each command on stderr
+before it runs, `set -v` shows each line as it's read, and `set -u` is
+always on. `trap` has `ERR`, `DEBUG` and `RETURN`. `set -e` is tessh's
+strict mode (`strict`, chapter 33). This chapter shows these and Python's
+tools beside them.
 
 ### Example 32-1. A buggy script (`ex74.sh`)
 
@@ -255,17 +257,18 @@ shows what passes through at that point, in tessh as in bash.
   is `tessh --check script` (`--json` for a program to read): it compiles
   the whole script, as tessh always does before running one, and prints
   `file:line:col: message` per problem.
-- `sh -v script` (`set -v`) echoes each line before running it.
-  **Gap:** tessh has nothing like it.
+- `sh -v script` (`set -v`) echoes each line before running it. tessh's
+  `set -v` shows each line on stderr as it's read.
 - `sh -x script` (`set -x`) echoes each command, expanded, as it runs.
-  **Gap:** tessh has no `-x` either. `tessh --py script` shows what each
-  line compiles to, and `sys.settrace` can do the echoing, as below.
+  tessh's `set -x` shows each command on stderr before it runs, after
+  `$PS4` (or `+ `); `set +x` turns it off. `tessh --py script` shows what
+  each line compiles to, and `sys.settrace` can do the echoing, as below.
 - `set -u` (`set -o nounset`) makes an unset variable an error. In tessh it
   always is.
 
-`set -x` carried over from bash is an error in tessh ("tessh has no set
-options but -e"), as are `set -u` and the rest, so a script doesn't
-quietly run without what it asked for. `set -e` works: it's strict mode. (`set` alone is Python's set type.)
+`set -x`, `set -v` and `set -o pipefail` carried over from bash work in
+tessh, and `set -e` is strict mode. `set +u` is an error that says nounset
+is always on. (`set` given a value is Python's set type.)
 
 ```bash no-run
 set -u   # Or   set -o nounset
@@ -296,11 +299,11 @@ Traceback (most recent call last):
 NameError: name 'unset_var' is not defined (and there's no environment variable unset_var)
 ```
 
-For `-x`, Python calls a function of yours before each line it runs, once
-`sys.settrace` has it. The frame it gets has the line number, and the line
-number is the tessh script's, so `linecache` gives back the tessh line
-itself. (It traces the script's own lines as written, not expanded as
-bash's `-x` does.)
+The Python way to trace, which works too: Python calls a function of yours
+before each line it runs, once `sys.settrace` has it. The frame it gets
+has the line number, and the line number is the tessh script's, so
+`linecache` gives back the tessh line itself. (It traces the script's own
+lines as written, not expanded as bash's `-x` does.)
 
 ```tessh
 import sys linecache
@@ -486,8 +489,9 @@ lists the signals. The examples here show the Python way, which works too:
 `atexit.register` for `EXIT`, `try`/`finally` for cleaning up however a
 block ends, `KeyboardInterrupt` for Control-C, and `signal.signal` for the
 rest. `trap … ERR` runs when a command on a line of its own fails, as
-bash's does. **Gap:** there's no `DEBUG` or `RETURN` trap: `sys.settrace`
-stands in for both.
+bash's does. `trap '…' DEBUG` runs before each command, with
+`$BASH_COMMAND` the command, and `trap '…' RETURN` runs when one of your
+functions returns and when `source` finishes a file.
 
 ### Example 32-5. Trapping at exit (`ex76.sh`)
 
@@ -822,8 +826,9 @@ Long-running process ........ Finished!
 ```
 
 **The DEBUG trap.** `trap '…' DEBUG` runs a command before every command
-in the script, which can trace a variable. tessh's `trap` has no `DEBUG`;
-`sys.settrace` is tessh's way, as with `-x` above.
+in the script, which can trace a variable. tessh's `trap` has `DEBUG` too,
+and `$BASH_COMMAND` is the command about to run. The tessh example below
+shows the Python way, `sys.settrace`, as with `-x` above.
 
 ### Example 32-8. Tracing a variable (`vartrace.sh`)
 
@@ -1167,7 +1172,7 @@ Their tessh counterparts:
 | --- | --- |
 | `$BASH_ARGC`, the number of arguments | `(len $argv) - 1` |
 | `$BASH_ARGV`, the last argument | `$argv[-1]` |
-| `$BASH_COMMAND`, the command running | none (a trace function sees the line) |
+| `$BASH_COMMAND`, the command running | `$BASH_COMMAND` in a `DEBUG` trap (a trace function sees the line) |
 | `$BASH_EXECUTION_STRING`, the `-c` string | none |
 | `$BASH_LINENO`, the caller's line | `(inspect.stack)[1].lineno` |
 | `$BASH_REMATCH`, what `=~` matched | the match `=~ re'…'` gives back, `.group n` |

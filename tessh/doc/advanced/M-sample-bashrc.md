@@ -943,8 +943,9 @@ What changes, part by part:
   "$PS1" ] && return` guard isn't needed. There's no system-wide file like
   `/etc/bashrc` to source.
 - **Options.** `set -o nounset` is always on in tessh (an unset variable is
-  an error). **Gap:** there's no `xtrace`, `noclobber`, `ignoreeof`,
-  `notify`, or `shopt` (`cdspell`, `cdable_vars`, `checkwinsize`,
+  an error), and `set -o xtrace` works as in bash, so the `debug` alias
+  could be a function running `set -o xtrace`; `set -o noclobber` works
+  too. **Gap:** there's no `ignoreeof`, `notify`, or `shopt` (`cdspell`, `cdable_vars`, `checkwinsize`,
   `histappend`…). `ulimit -S -c 0` works in tessh as it is; the version
   here uses Python's `resource.setrlimit`, which is the same.
 - **Colors** are a dict of escape strings; `"\x1b"` is bash's `\e`.
@@ -960,8 +961,10 @@ What changes, part by part:
   function that prints the same line on demand.
 - **History and timing variables** (`HISTIGNORE`, `HISTCONTROL`,
   `HISTTIMEFORMAT`, `TIMEFORMAT`) have no counterpart (Appendix L).
-- **Programmable completion** (the long last section) has none either
-  (Appendix J).
+- **Programmable completion** (the long last section) is left out here.
+  tessh's `complete -F` takes bash's form too, a function that fills
+  `$COMPREPLY` from `$COMP_WORDS` and `$COMP_CWORD`, and `compgen` takes
+  `-W`, `-f`, `-G` and the rest, so it could be ported (Appendix J).
 - `getopts` (in `fstr`) is a loop over the arguments; `${!#}`, the last
   argument, is `$args[-1]`; `local` is unnecessary, since a function's
   names are its own.
@@ -1009,8 +1012,9 @@ if not ($env.get DISPLAY)
 # Don't want coredumps.
 resource.setrlimit $resource.RLIMIT_CORE (0, (resource.getrlimit $resource.RLIMIT_CORE)[1])
 
-# (set -o nounset is always on; xtrace, notify, noclobber, ignoreeof and
-#  the shopt options have no tessh counterpart. MAILCHECK isn't read.)
+# (set -o nounset is always on; set -o xtrace and noclobber work as in
+#  bash. notify, ignoreeof and the shopt options have no tessh counterpart.
+#  MAILCHECK isn't read.)
 unset MAILCHECK
 
 #-------------------------------------------------------------
@@ -1461,8 +1465,9 @@ def corename *files             # Get name of app that created a corefile.
     print "$file :" end=""
     gdb "--core=$file" --batch | head -1
 
-# (PROGRAMMABLE COMPLETION SECTION: tessh has no programmable completion.
-#  Tab completes names, programs, paths, variables and attributes.)
+# (PROGRAMMABLE COMPLETION SECTION: left out. tessh's complete -F takes
+#  bash's COMPREPLY form too (Appendix J); Tab already completes names,
+#  programs, paths, variables and attributes.)
 ```
 
 Some of the functions, tried on made-up files (with `ask` given a canned

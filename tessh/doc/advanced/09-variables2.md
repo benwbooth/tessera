@@ -37,12 +37,13 @@ other exported variables are). The rest:
 | `$OSTYPE` | `sys.platform` |
 | `$IFS` | `$IFS`, where `read` splits a line; tessh doesn't split words otherwise (`str.split` does, where you say) |
 | `$GLOBIGNORE` | none: filter a Glob's names yourself |
-| `$PIPESTATUS` | none: a pipeline's status is its last stage's |
+| `$PIPESTATUS` | `$PIPESTATUS`: a list of the last pipe's programs' statuses |
 | `$REPLY` | `$REPLY`, set by `read` with no name; `input` returns the line |
 | `$SECONDS` | `time.monotonic`, less the time it was at the start |
 | `$TMOUT` | none: `read -t secs`, or `select` or `signal.alarm` (examples 9-2 and 9-4) |
 | `$PS3` | `select`'s prompt, as in bash |
-| `$PS1`, `$PS2`, `$PS4`, `$PROMPT_COMMAND`, `$IGNOREEOF`, `$SHELLOPTS`, `$-` | none (no `-x` tracing; `@before_prompt` is `$PROMPT_COMMAND`) |
+| `$PS4` | `$PS4`, shown before each command `set -x` traces (`+ ` if unset) |
+| `$PS1`, `$PS2`, `$PROMPT_COMMAND`, `$IGNOREEOF`, `$SHELLOPTS`, `$-` | none (`@before_prompt` is `$PROMPT_COMMAND`) |
 | `$0`, `$1`…, `$#` | `$argv[0]`, `$argv[1]`…, `(len $argv) - 1` |
 | `$*`, `$@` | `" ".join $argv[1:]`, `$argv[1:]` |
 | `$!` | `$j.pid`, after `j = cmd &`; `subprocess.Popen` has `.pid` too |
@@ -51,9 +52,10 @@ other exported variables are). The rest:
 
 **Gap:** none of these is a tessh variable, so a script ported from bash
 has to import and call. For most that's a plus (`os.getuid` says what it
-is, and can't be set by mistake), but `$LINENO`, `$FUNCNAME`, `$SECONDS`,
-`$PIPESTATUS` and `$_` have no short form, and a few (`$PIPESTATUS`,
-`set -o pipefail`, `$-`, `$PS4` with `-x`) have no equivalent at all.
+is, and can't be set by mistake), but `$LINENO`, `$FUNCNAME`, `$SECONDS`
+and `$_` have no short form, and `$-` has no equivalent at all.
+`$PIPESTATUS` and `$PS4` (with `set -x`) are there as in bash, and so is
+`set -o pipefail`.
 
 A subshell has its own PID in bash, which `$BASHPID` shows and `$$` hides.
 tessh has no subshells (a block in parentheses is a value, not a process),

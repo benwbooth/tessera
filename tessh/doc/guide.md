@@ -929,19 +929,24 @@ print $x_from_file
 ```
 
 ## Shell builtins
-<!-- help: shell-builtins builtins builtin trap ulimit umask read getopts shift times history fc type hash exec eval command-v logout suspend alias unalias declare typeset local readonly shopt bind complete compgen caller enable select LINENO SHLVL history-expansion !! -->
+<!-- help: shell-builtins builtins builtin trap ulimit umask read getopts shift times history fc type hash exec eval command-v logout suspend alias unalias declare typeset local readonly shopt bind complete compgen caller enable select LINENO SHLVL history-expansion !! set-x xtrace pipefail PIPESTATUS coproc mapfile readarray time COMPREPLY DEBUG RETURN -->
 
 Besides `cd`, `export` and the jobs, tessh has the builtins a login shell
 needs, with bash's options: `trap`, `ulimit`, `umask`, `read`, `getopts`,
-`shift`, `select`, `times`, `history` (and `fc -l`), `type`, `command -v`,
-`hash`, `exec`, `eval`, `builtin`, `readonly`, `complete`, `compgen`,
-`logout` and `suspend`. `help NAME` describes each.
+`shift`, `select`, `mapfile` (`readarray`), `coproc`, `time`, `times`,
+`history` (and `fc -l`), `type`, `command -v`, `hash`, `exec`, `eval`,
+`builtin`, `readonly`, `complete`, `compgen`, `logout` and `suspend`, and
+`set`'s `-x`, `-v`, `-u`, `-o pipefail` and `--`. `help NAME` describes
+each.
 
-`trap` runs tessh text when a signal comes, `EXIT` when tessh ends, or
-`ERR` when a command on a line of its own fails; a function's name calls
-it. `read` reads a line into names (or `$REPLY`), and fails at the end of
+`trap` runs tessh text when a signal comes, `EXIT` when tessh ends, `ERR`
+when a command on a line of its own fails, `DEBUG` before each command
+(`$BASH_COMMAND`) and `RETURN` when a function or a sourced file returns; a
+function's name calls it. `read` reads a line into names (or `$REPLY`), and fails at the end of
 the input. `getopts` parses `$argv`'s options as bash's does, and `shift`
 drops arguments. `source file args…` gives the file those as `$argv`.
+`while read line <file` reads the file once, a line each time round, as
+bash's `while read line; do …; done <file`.
 
 ```tessh
 read first rest <<< "one two three"
@@ -999,16 +1004,28 @@ and in a pipe what it prints goes down the pipe: `history | grep ssh`.
 `exec` with only redirections keeps them: `exec >log 2>&1` sends the rest
 of the script's output to `log`, `exec 3<file` opens a descriptor. `select`
 is bash's menu as a loop, `for choice in (select red green blue)`.
+`mapfile -t lines <file` reads the lines into a list. `coproc cmd` runs a
+program with its input and output piped back, `$COPROC` its two
+descriptors. `time cmd …` says how long it took. `set -x` shows each
+command as it runs, and with `set -o pipefail` a pipe fails if any of its
+programs does; `$PIPESTATUS` has each one's status.
 `readonly NAME=value` makes a name that a later assignment can't change.
-`complete -W "start stop" svc` (or `-F func`, `-f`, `-d`, `-c`) sets what
-Tab offers after a command. `$LINENO` is the line it's on, and at the
-prompt `!!`, `!$`, `!n` and `!prefix` bring back past commands, as in bash.
+`complete -W "start stop" svc` (or `-F func`, `-f`, `-d`, `-c`, `-o default`
+and the rest) sets what Tab offers after a command; a `-F` function fills
+`$COMPREPLY` from `$COMP_WORDS` as bash's do, or returns a list.
+`$LINENO` is the line it's on, and at the prompt bash's history expansion
+works: `!!`, `!$`, `!n`, `!prefix`, `!?text?`, `:s/old/new/`, `:h`, `:t`,
+`^old^new` and the rest.
 
 ```tessh
 readonly LIMIT=10
 eval "LIMIT = 11" 2>/dev/null || print "LIMIT stays" $LIMIT
 compgen -W "start stop status" st
 print line $LINENO
+printf "a\nb\n" | mapfile -t lines
+print $lines
+false | true
+print $PIPESTATUS
 ```
 
 ```output
@@ -1017,6 +1034,8 @@ start
 stop
 status
 line 4
+['a' 'b']
+[1 0]
 ```
 
 Some of bash's builtins are tessh's own idioms instead, and say so when

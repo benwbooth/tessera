@@ -1105,6 +1105,38 @@ fn ensure<'py>(py: Python<'py>, v: Bound<'py, PyAny>, cmd: &str) -> PyResult<Bou
 /// Whether `trap … ERR` is set (shell.rs): run for a failing command on a
 /// line of its own, before strict mode stops the script.
 pub static ERR_TRAP: AtomicBool = AtomicBool::new(false);
+/// `trap … DEBUG`, and `set -x`: something to do before each command.
+pub static DEBUG_TRAP: AtomicBool = AtomicBool::new(false);
+pub static XTRACE: AtomicBool = AtomicBool::new(false);
+/// `set -o pipefail`: a pipe's status is its last failing stage's.
+pub static PIPEFAIL: AtomicBool = AtomicBool::new(false);
+/// `set -v`: each line shown (to stderr) as it's read.
+pub static VERBOSE: AtomicBool = AtomicBool::new(false);
+static PIPESTATUS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+/// A pipe's programs' statuses, kept as $PIPESTATUS: its status, the last
+/// one's (with pipefail, the last that failed).
+pub fn pipe_status(codes: Vec<i32>) -> i32 {
+    let last = codes.last().copied().unwrap_or(0);
+    let code = if PIPEFAIL.load(Ordering::SeqCst) { codes.iter().rev().find(|c| **c != 0).copied().unwrap_or(0) } else { last };
+    *PIPESTATUS.lock().unwrap() = codes;
+    code
+}
+
+/// $PIPESTATUS: the statuses of the last pipe's programs.
+#[pyfunction]
+fn pipestatus() -> Vec<i32> {
+    let v = PIPESTATUS.lock().unwrap().clone();
+    if v.is_empty() { vec![STATUS.load(Ordering::SeqCst)] } else { v }
+}
+
+/// Before a command: set -x's `+ line`, and the DEBUG trap.
+fn before_command(py: Python<'_>, line: &str) -> PyResult<()> {
+    if DEBUG_TRAP.load(Ordering::SeqCst) || XTRACE.load(Ordering::SeqCst) {
+        py.import("__tessh_shell__")?.getattr("before_command")?.call1((line,))?;
+    }
+    Ok(())
+}
 
 fn strict_check(py: Python<'_>, v: Py<PyAny>, cmd: &str) -> PyResult<Py<PyAny>> {
     if ERR_TRAP.load(Ordering::SeqCst) && STATUS.load(Ordering::SeqCst) != 0 {
@@ -1309,6 +1341,11 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
     let words = argv(py, &args)?;
     let red = redirs_of(&redirs)?;
     let head_s = word(&head)?;
+    if mode != "stage" && (DEBUG_TRAP.load(Ordering::SeqCst) || XTRACE.load(Ordering::SeqCst)) {
+        let mut all = vec![head_s.clone()];
+        all.extend(words.iter().cloned());
+        before_command(py, &shell_join(&all))?;
+    }
     // (A line that's only a folder — ~, /tmp, ../src — goes there, as fish
     // does and zsh with autocd: a folder isn't a program.)
     if !force && mode != "stage" && mode != "bg" && words.is_empty() && red.is_empty() {
@@ -1448,6 +1485,10 @@ pub fn builtin_named<'py>(py: Python<'py>, name: &str) -> PyResult<Option<Bound<
     if let Some(n) = COMMAND_BUILTINS.iter().find(|n| **n == name) {
         return Ok(Some(Py::new(py, Builtin { name: n })?.into_bound(py).into_any()));
     }
+    // (set -x, set -o pipefail, set -- args: the compiler sends them here.)
+    if name == "set" {
+        return Ok(Some(Py::new(py, Builtin { name: "set" })?.into_bound(py).into_any()));
+    }
     shell_dual(py, name, &py.import("builtins")?.getattr(match name {
         "type" | "hash" | "exec" | "eval" => name,
         _ => return Ok(None),
@@ -1479,6 +1520,7 @@ fn pipe(py: Python<'_>, stages: Vec<Bound<'_, PyAny>>, mode: &str) -> PyResult<P
         }
     }
     let line = ss.iter().map(|s| if s.kind == "cmd" { shell_join(&s.words) } else { "…".into() }).collect::<Vec<_>>().join(" | ");
+    before_command(py, &line)?;
     let r = run_stages(py, ss, mode)?;
     if unchecked { strict_check(py, r, &line) } else { Ok(r) }
 }
@@ -1626,6 +1668,22 @@ fn parse_redir(op: &str) -> Option<(i32, RKind)> {
     Some((fd.unwrap_or(dflt), k))
 }
 
+/// `set -C` (noclobber): `>` and `&>` won't overwrite a file that's there
+/// (`>|` does).
+pub static NOCLOBBER: AtomicBool = AtomicBool::new(false);
+
+fn clobber_check(op: &str, target: &Option<String>) -> PyResult<()> {
+    if !NOCLOBBER.load(Ordering::SeqCst) || op.ends_with(">|") || op.ends_with(">>") {
+        return Ok(());
+    }
+    if let Some(t) = target {
+        if std::fs::metadata(t).is_ok_and(|m| m.is_file()) {
+            return Err(PyOSError::new_err(format!("{t}: cannot overwrite existing file (set -C; >| does)")));
+        }
+    }
+    Ok(())
+}
+
 /// A here-string's or heredoc's text: <<<word gets a newline, a heredoc
 /// loses the one the reader put first.
 fn here_text(op: &str, t: &Option<String>) -> String {
@@ -1659,10 +1717,16 @@ fn child_redirs(command: &mut Command, redirs: &[(String, Option<String>)]) -> P
         };
         match k {
             RKind::Out | RKind::Append | RKind::In | RKind::ReadWrite => {
+                if k == RKind::Out {
+                    clobber_check(op, target)?;
+                }
                 let f = open_redir(match k { RKind::Out => ">", RKind::Append => ">>", RKind::In => "<", _ => "<>" }, target)?;
                 acts.push((ours(f.into(), &mut keep), fd, 0));
             }
             RKind::Both | RKind::BothAppend => {
+                if k == RKind::Both {
+                    clobber_check(op, target)?;
+                }
                 let raw = ours(open_redir(if k == RKind::Both { ">" } else { ">>" }, target)?.into(), &mut keep);
                 acts.push((raw, 1, 0));
                 acts.push((raw, 2, 0));
@@ -1724,10 +1788,16 @@ fn exec_redirs(py: Python<'_>, redirs: &[(String, Option<String>)]) -> PyResult<
         };
         match k {
             RKind::Out | RKind::Append | RKind::In | RKind::ReadWrite => {
+                if k == RKind::Out {
+                    clobber_check(op, target)?;
+                }
                 let f: OwnedFd = open_redir(match k { RKind::Out => ">", RKind::Append => ">>", RKind::In => "<", _ => "<>" }, target)?.into();
                 put(f.as_raw_fd(), fd)?;
             }
             RKind::Both | RKind::BothAppend => {
+                if k == RKind::Both {
+                    clobber_check(op, target)?;
+                }
                 let f: OwnedFd = open_redir(if k == RKind::Both { ">" } else { ">>" }, target)?.into();
                 put(f.as_raw_fd(), 1)?;
                 put(f.as_raw_fd(), 2)?;
@@ -1876,7 +1946,23 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
             Some(f) => command.stderr(Stdio::from(f)),
             None => command.stderr(Stdio::inherit()),
         };
-        let _keep = child_redirs(&mut command, &c.redirs)?;
+        // (A redirection that can't be made, a file not there or set -C's
+        // refusal, fails the command, status 1, as bash's does.)
+        let _keep = match child_redirs(&mut command, &c.redirs) {
+            Ok(k) => k,
+            Err(e) => {
+                for ch in children.iter_mut() {
+                    let _ = ch.kill();
+                    let _ = ch.wait();
+                }
+                let msg = format!("tessh: {}\n", e.value(py));
+                let err = py.import("sys")?.getattr("stderr")?;
+                err.call_method1("write", (msg,))?;
+                let _ = err.call_method0("flush");
+                set_status(1);
+                return output(py, "", 1, !capture);
+            }
+        };
         if job_control || bg {
             command.process_group(pgid);
         }
@@ -2165,9 +2251,8 @@ fn wait_all(py: Python<'_>, mut children: Vec<Child>) -> PyResult<i32> {
             all
         });
         if done {
-            for ch in children.iter_mut() {
-                code = ch.wait().map(exit_code).unwrap_or(1);
-            }
+            let codes: Vec<i32> = children.iter_mut().map(|ch| ch.wait().map(exit_code).unwrap_or(1)).collect();
+            code = pipe_status(codes);
             return Ok(code);
         }
         if let Err(e) = py.check_signals() {
@@ -2256,11 +2341,17 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
         };
         match k {
             RKind::Out | RKind::Append | RKind::In | RKind::ReadWrite => {
+                if k == RKind::Out {
+                    clobber_check(op, target)?;
+                }
                 let fl = file(match k { RKind::Out => "w", RKind::Append => "a", RKind::In => "r", _ => "r+" })?;
                 sys.setattr(slot(fd)?, &fl)?;
                 opened.push(fl);
             }
             RKind::Both | RKind::BothAppend => {
+                if k == RKind::Both {
+                    clobber_check(op, target)?;
+                }
                 let fl = file(if k == RKind::Both { "w" } else { "a" })?;
                 sys.setattr("stdout", &fl)?;
                 sys.setattr("stderr", &fl)?;
@@ -2550,6 +2641,7 @@ pub const COMMAND_BUILTINS: &[&str] = &[
     "wait", "disown", "kill", "suspend", "logout",
     "trap", "ulimit", "umask", "read", "history", "fc", "shift", "getopts", "times", "caller", "builtin", "enable",
     "readonly", "declare", "typeset", "local", "alias", "unalias", "shopt", "bind", "complete", "compgen", "select",
+    "mapfile", "readarray", "time", "coproc",
 ];
 
 pub fn is_command_builtin(n: &str) -> bool {
@@ -2807,10 +2899,14 @@ impl Builtin {
                         Some(o) => ns.set_item("argv", o)?,
                         None => ns.del_item("argv")?,
                     }
+                    py.import("__tessh_shell__")?.getattr("after_source")?.call0()?;
                     r?;
                     return Ok(none);
                 }
-                crate::runner::run_file(py, &expanduser(path), &ns).map_err(|e| e.into_pyerr(py))?;
+                let r = crate::runner::run_file(py, &expanduser(path), &ns).map_err(|e| e.into_pyerr(py));
+                // (trap … RETURN: when a sourced file is done, as bash's.)
+                py.import("__tessh_shell__")?.getattr("after_source")?.call0()?;
+                r?;
                 Ok(none)
             }
             "which" => {
@@ -3004,6 +3100,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         wrap_pyfunction!(pipe, &m)?,
         wrap_pyfunction!(procsub, &m)?,
         wrap_pyfunction!(direnv_export, &m)?,
+        wrap_pyfunction!(pipestatus, &m)?,
         wrap_pyfunction!(ps_mark, &m)?,
         wrap_pyfunction!(ps_done, &m)?,
         wrap_pyfunction!(call_stage, &m)?,

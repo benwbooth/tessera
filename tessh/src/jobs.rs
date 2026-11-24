@@ -948,6 +948,7 @@ pub fn wait_foreground(children: Vec<Child>, pgid: i32, words: String, again: Op
         let last = *pids.last().unwrap_or(&0);
         let mut left: std::collections::HashSet<i32> = pids.iter().copied().collect();
         let mut code = 0;
+        let mut codes: std::collections::HashMap<i32, i32> = Default::default();
         let mut stopped = false;
         while !left.is_empty() {
             let mut st = 0;
@@ -963,8 +964,10 @@ pub fn wait_foreground(children: Vec<Child>, pgid: i32, words: String, again: Op
                 break;
             }
             left.remove(&pid);
+            let c = if libc::WIFEXITED(st) { libc::WEXITSTATUS(st) } else { 128 + libc::WTERMSIG(st) };
+            codes.insert(pid, c);
             if pid == last {
-                code = if libc::WIFEXITED(st) { libc::WEXITSTATUS(st) } else { 128 + libc::WTERMSIG(st) };
+                code = c;
             }
         }
         libc::tcsetpgrp(0, libc::getpgrp());
@@ -976,12 +979,53 @@ pub fn wait_foreground(children: Vec<Child>, pgid: i32, words: String, again: Op
         }
         // (Reaped already: the Child handles must not wait again.)
         std::mem::forget(children);
+        if pids.len() > 1 || !codes.is_empty() {
+            code = crate::runtime::pipe_status(pids.iter().map(|p| codes.get(p).copied().unwrap_or(0)).collect());
+        }
         code
     }
 }
 
+/// The jobs' commands, for `complete -A job`.
+#[pyfunction]
+fn job_words() -> Vec<String> {
+    JOBS.lock().unwrap().iter().filter(|j| !j.reported).map(|j| j.words.split_whitespace().next().unwrap_or("").to_string()).collect()
+}
+
+/// coproc: the command in the background, in its own process group, its
+/// input and output pipes kept here: (its Job, the read fd, the write fd, its pid).
+#[pyfunction]
+fn start_coproc(py: Python<'_>, words: Vec<String>) -> PyResult<(Py<PyAny>, i32, i32, i32)> {
+    use std::os::fd::{IntoRawFd, OwnedFd};
+    use std::os::unix::process::CommandExt;
+    let (head, rest) = words.split_first().ok_or_else(|| PyValueError::new_err("coproc: which command?"))?;
+    let mut c = std::process::Command::new(head);
+    c.args(rest).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).process_group(0);
+    unsafe {
+        c.pre_exec(|| {
+            for s in [libc::SIGTSTP, libc::SIGTTOU, libc::SIGTTIN, libc::SIGINT, libc::SIGQUIT, libc::SIGPIPE, libc::SIGXFSZ] {
+                libc::signal(s, libc::SIG_DFL);
+            }
+            Ok(())
+        });
+    }
+    let mut ch = c.spawn().map_err(|e| PyOSError::new_err(format!("coproc: {head}: {e}")))?;
+    let pid = ch.id() as i32;
+    // (Its pipes, kept by tessh: close-on-exec, so other programs don't hold
+    // them open; a redirection like >&$COPROC[1] gives one to a program.)
+    let r: OwnedFd = ch.stdout.take().unwrap().into();
+    let w: OwnedFd = ch.stdin.take().unwrap().into();
+    let (id, n) = add_job(vec![ch], pid, words.join(" "), false, None);
+    if INTERACTIVE.load(Ordering::SeqCst) {
+        eprintln!("[{n}] {pid}");
+    }
+    Ok((job_ref(py, id)?, r.into_raw_fd(), w.into_raw_fd(), pid))
+}
+
 pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<JobRef>()?;
+    m.add_function(wrap_pyfunction!(job_words, m)?)?;
+    m.add_function(wrap_pyfunction!(start_coproc, m)?)?;
     m.add_function(wrap_pyfunction!(job_notices, m)?)?;
     m.add_function(wrap_pyfunction!(hup_jobs, m)?)?;
     m.add_function(wrap_pyfunction!(set_exit_trap, m)?)?;

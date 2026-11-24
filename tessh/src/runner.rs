@@ -247,8 +247,17 @@ pub fn run_source(py: Python<'_>, text: &str, ns: &Bound<'_, PyDict>, filename: 
         c.units_of(&lines).map_err(|e| TesshError::Compile(e, text.to_string()))?
     };
     let n = units.len();
+    // (set -v: each unit's lines, to stderr, as they're read.)
+    let starts: Vec<usize> = units.iter().map(|u| u.0.pos.as_ref().map(|p| p.line as usize).unwrap_or(1)).collect();
+    let src_lines: Vec<&str> = text.lines().collect();
     for (k, u) in units.iter().enumerate() {
         let last = k + 1 == n;
+        if crate::runtime::VERBOSE.load(std::sync::atomic::Ordering::SeqCst) {
+            let from = starts[k].max(1);
+            let to = starts.get(k + 1).copied().unwrap_or(src_lines.len() + 1).max(from + 1);
+            let shown: Vec<&str> = src_lines.iter().skip(from - 1).take(to - from).copied().collect();
+            let _ = py.import("sys").and_then(|s| s.getattr("stderr")).and_then(|e| e.call_method1("write", (shown.join("\n") + "\n",)));
+        }
         let module = {
             let mut st = sb.st.lock().unwrap();
             let mut c = Compiler::new(py, Some(ns.clone()), &mut st)?;

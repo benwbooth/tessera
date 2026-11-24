@@ -438,9 +438,22 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
             continue;
         }
         // (!!, !$, !n, !prefix: bash's history expansion, said as it runs.)
-        let text = if from_editor && text.contains('!') {
+        let text = if from_editor && (text.contains('!') || (text.starts_with('^') && text[1..].contains('^'))) {
             match crate::shell::expand_history(&text, &hist) {
-                Ok(Some(t)) => {
+                // (:p: shown, and kept in history, not run.)
+                Ok(Some((t, true))) => {
+                    println!("{t}");
+                    if from_editor {
+                        editor.ed.t.reset();
+                        editor.ed.hist_index = None;
+                        editor.ed.history.retain(|h| *h != t);
+                        editor.ed.history.push(t.clone());
+                        append_history(&hist, &t);
+                    }
+                    fresh = true;
+                    continue;
+                }
+                Ok(Some((t, false))) => {
                     println!("{t}");
                     t
                 }

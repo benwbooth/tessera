@@ -6,11 +6,19 @@ Bash's options change how the shell itself behaves: `set -o name` or `set
 letters work after the `#!` line (`#!/bin/bash -x`) or on the command line
 (`bash -v script`). `shopt -s name` sets the newer ones.
 
-tessh has one such switch, strict mode: `strict` / `strict off`, also
-spelled `set -e` / `set +e`, `set -o errexit` and `tessh -e`. The rest of
-its behavior is fixed, mostly at what bash's careful scripters turn on, and
-Python modules cover the rest. Any other `set -x` line carried over is an
-error saying so (`set` alone is Python's set type).
+tessh's `set` has a few of these. Strict mode is `strict` / `strict off`,
+also spelled `set -e` / `set +e`, `set -o errexit` and `tessh -e`. `set -x`
+/ `set +x` (xtrace) shows each command on stderr before it runs, after
+`$PS4` or `+ `. `set -v` (verbose) shows each line on stderr as it's read.
+`set -o pipefail` makes a pipe fail if any program in it fails, and `set
+-C` (noclobber) keeps `>` from overwriting a file (`>|` still does). `set
+-o name` and `set +o name` take errexit, xtrace, verbose, nounset,
+pipefail and noclobber, and `set -o` alone lists them. `set -u` is always on: an unset
+name is an error, and `set +u` says so and fails. `set -- a b` (or `set a
+b`) makes `$argv` `[script a b]`. The rest of tessh's behavior is fixed,
+mostly at what bash's careful scripters turn on, and Python modules cover
+the rest. `-f`, `-n` and bash's other options aren't there. `set`
+given a value is still Python's set type.
 
 ```bash no-run
 #!/bin/bash
@@ -32,7 +40,7 @@ Bash's options, and where tessh stands on each:
 | bash | name | tessh |
 | --- | --- | --- |
 | `-B` / `+B` | braceexpand | **Gap:** no brace expansion; `x{a,b}y` stays as written. Use a list: `["x${c}y" for c in [a b]]` |
-| `-C` | noclobber | none: `>` always writes, as bash's `>|` does |
+| `-C` | noclobber | `set -C`: `>` won't overwrite a file; `>|` does |
 | `-D` | (list `$"…"` strings) | none |
 | `-a` | allexport | none: `export` each name, or set `$env[name]` |
 | `-b` | notify | none; jobs that end are reported before the next prompt, and `jobs` shows them |
@@ -44,15 +52,15 @@ Bash's options, and where tessh stands on each:
 | `-i` | interactive | `tessh` alone is the REPL |
 | `-n` | noexec | `tessh --check script`, and better: every script is compiled whole before it runs |
 | `-o posix` | | none |
-| `-o pipefail` | | **Gap:** a pipeline's status is its last program's, as without `pipefail` |
+| `-o pipefail` | | `set -o pipefail`: a pipe fails if any program in it fails. Without it a pipe's status is its last program's. `$PIPESTATUS` lists every program's status |
 | `-p` | privileged | none |
 | `-r` | restricted | none |
 | `-s` | stdin | `tessh --check` reads stdin; a script is read from a file or `-c` |
 | `-t` | (exit after one command) | none |
-| `-u` | nounset | always: an unknown `$name` is a `NameError` |
-| `-v` | verbose | **Gap:** none |
-| `-x` | xtrace | **Gap:** none; `tessh --py` shows the compiled Python, and `sys.settrace` can trace lines (chapter 32) |
-| `-` / `--` | end of options | `$argv` is the list as given; `set -- a b` is `argv = [$argv[0] a b]` |
+| `-u` | nounset | always: an unknown `$name` is a `NameError`. `set -u` is accepted; `set +u` says it's always on and fails |
+| `-v` | verbose | `set -v`: each line is shown on stderr as it's read |
+| `-x` | xtrace | `set -x` / `set +x`: each command is shown on stderr before it runs, after `$PS4` (or `+ `). `tessh --py` shows the compiled Python, and `sys.settrace` can trace lines (chapter 32) |
+| `-` / `--` | end of options | `$argv` is the list as given; `set -- a b` (or `set a b`) makes it `[script a b]` |
 
 A few of these, tried:
 
@@ -68,7 +76,7 @@ echo **/*.py                       # globstar is always on.
 pattern = "*.py"
 echo $pattern                      # A value is never globbed (noglob for free).
 
-false | true                       # No pipefail: the last program's status.
+false | true                       # pipefail is off: the last program's status.
 print $?
 
 try                                # nounset: an unknown name is an error.

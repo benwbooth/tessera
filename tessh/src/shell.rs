@@ -34,6 +34,10 @@ pub fn usage(name: &str) -> Option<&'static str> {
         "hash" => "hash [-r] [-t name …] [name …]\n\ntessh doesn't remember where programs are: it looks each one up on $PATH as it runs it, so hash -r has nothing to forget. hash name checks it's there (and fails if not); -t prints where. Given a value (hash $x), it's Python's hash.",
         "exec" => "exec [-cl] [-a name] program [arg …]\n\nReplace tessh with the program (exec zsh, exec tmux): it never comes back. -c gives it an empty environment, -l starts it as a login shell (a - before its name), -a gives it another name. With only redirections (exec >log, exec 2>&1, exec 3<file) they stay in force, for tessh and every program after. Given code (exec $code, exec \"x = 1\"), it's Python's exec; builtins.exec is Python's whatever it's given.",
         "eval" => "eval text …\n\nRun the words joined as tessh text, here, as bash's eval does: eval \"echo hi\", eval $\"(ssh-agent -c)\" (tessh doesn't read sh: give it tessh, or run sh -c). Its value is the last form's, so x = (eval \"1 + 2\") is 3. Given a value (eval $code), it's Python's eval.",
+        "set" => "set [-exvuC] [+exvC] [-o NAME | +o NAME] [-o] [-- arg …]\n\nbash's options: -e (errexit, strict mode), -C (noclobber: > won't overwrite a file, >| will), -x (xtrace: each command shown before it runs, after $PS4 or +), -v (verbose: each line shown as it's read), -u (nounset: always so in tessh), -o pipefail (a pipe fails if any of its programs does; $PIPESTATUS has each one's status). + turns one off, -o alone lists them. set -- a b (or set a b) makes $argv [script a b]. set with a value is Python's set.",
+        "mapfile" | "readarray" => "mapfile [-t] [-d delim] [-n count] [-O origin] [-s count] [-u fd] [-C callback] [-c quantum] [name]\n\nThe lines of standard input (what <, <<< or a pipe gives: cat f | mapfile -t lines) into a list, $MAPFILE without a name. -t drops each line's newline (delim with -d), -n reads at most count, -s skips the first count, -O puts them from index origin on (keeping what's before), -u reads descriptor fd, -C calls callback (index, line) every quantum lines (-c, 5000).",
+        "time" => "time [-p] command …\n\nRun the command (a program, a pipe, a call: tessh text), then say how long it took, real, user and sys, to stderr, as bash's time. -p in POSIX's form. Its value is the command's. \\time runs the time program (/usr/bin/time -v …).",
+        "coproc" => "coproc [NAME --] command [arg …]\n\nRun the command in the background with its input and output piped to tessh: $COPROC is [read fd, write fd] (from its output, to its input), $COPROC_PID its process ID, and its value is its Job (jobs, wait and kill take it). NAME -- names them $NAME and $NAME_PID instead. Write with cmd >&$COPROC[1] or os.write, read with read -u $COPROC[0] or os.read; exec $COPROC[1]>&- closes its input.",
         "readonly" => "readonly [-p] [NAME[=value] …]\n\nMake module names read-only: a later NAME = … (at the prompt, or further on in the script) is an error. NAME=value sets it first (to the text value). Alone, or with -p, it lists them. A def's own names, and globals() from Python, aren't checked.",
         "select" => "select item …\n\nbash's menu, as a loop: for choice in (select red green blue) prints the items numbered (to stderr), asks $PS3 (#? without it) and gives the item picked each time; a number that isn't on the menu gives None, Enter alone shows the menu again, and the end of the input ends the loop (break ends it too). $REPLY is what was typed.",
         "complete" => "complete [-fdcbkv] [-W words] [-F function] [-A action] name …\ncomplete -r [name …]   complete [-p] [name …]\n\nWhat Tab offers after a command: -W the words (a string split at spaces), -F a function given (word, words of the line so far) that returns a list, -f files, -d folders, -c commands, -v variables, -k keywords, -b builtins. -r forgets a command's, -p (or complete alone) lists them.",
@@ -57,7 +61,7 @@ fn idiom(name: &str) -> Option<&'static str> {
 
 /// Whether the builtin is given the namespace it runs in (to set names, run text there).
 pub fn wants_ns(name: &str) -> bool {
-    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash" | "readonly" | "select" | "complete" | "compgen")
+    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash" | "readonly" | "select" | "complete" | "compgen" | "set" | "mapfile" | "readarray" | "time" | "coproc")
 }
 
 /// Run builtin `name` with its words: the Python function `sh_name`, or the
@@ -92,15 +96,97 @@ pub fn command_opts(py: Python<'_>, args: &[Bound<'_, PyAny>]) -> PyResult<Py<Py
     Ok(f.call1((words, ns))?.unbind())
 }
 
-/// bash's history expansion, at the prompt: `!!` the last command, `!$`
-/// its last word, `!^` its first argument, `!*` all its arguments, `!n`
-/// entry n (as history numbers them), `!-n` the nth back, `!prefix` the
-/// latest starting with prefix. Not inside '…', and `!` before a space, =,
-/// ( or the end is left as it is (tessh's ! and !=). None: nothing to expand.
-pub fn expand_history(text: &str, file: &std::path::Path) -> Result<Option<String>, String> {
+/// The words of a command line, as history expansion counts them (quotes
+/// kept, spaces inside them not splitting).
+fn hist_words(e: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut cur = String::new();
+    let mut q: Option<char> = None;
+    for c in e.chars() {
+        match q {
+            Some(x) => {
+                cur.push(c);
+                if c == x {
+                    q = None;
+                }
+            }
+            None if c.is_whitespace() => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            None => {
+                if c == '\'' || c == '"' {
+                    q = Some(c);
+                }
+                cur.push(c);
+            }
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// One modifier's change: :h :t :r :e :q :x, s/old/new/ (g: every one).
+fn hist_modify(v: &str, m: &str, last_sub: &mut Option<(String, String)>) -> Result<String, String> {
+    let path_part = |v: &str, f: &dyn Fn(&str) -> String| v.to_string().split(' ').map(f).collect::<Vec<_>>().join(" ");
+    Ok(match m {
+        "h" => path_part(v, &|w| match w.rfind('/') { Some(0) => "/".into(), Some(i) => w[..i].into(), None => w.into() }),
+        "t" => path_part(v, &|w| w.rsplit('/').next().unwrap_or(w).into()),
+        "r" => path_part(v, &|w| match (w.rfind('.'), w.rfind('/')) { (Some(d), s) if s.is_none_or(|s| d > s) => w[..d].into(), _ => w.into() }),
+        "e" => path_part(v, &|w| match (w.rfind('.'), w.rfind('/')) { (Some(d), s) if s.is_none_or(|s| d > s) => w[d + 1..].into(), _ => String::new() }),
+        "q" => format!("'{}'", v.replace('\'', "'\\''")),
+        "x" => hist_words(v).iter().map(|w| format!("'{}'", w.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" "),
+        _ => {
+            let (global, body) = if let Some(b) = m.strip_prefix("gs").or_else(|| m.strip_prefix("as")) { (true, Some(b)) } else if let Some(b) = m.strip_prefix('s') { (false, Some(b)) } else { (m.starts_with('g') || m.starts_with('a'), None) };
+            let (old, new) = match body {
+                Some(b) => {
+                    let d = b.chars().next().ok_or_else(|| ":s: which delimiter?".to_string())?;
+                    let parts: Vec<&str> = b[d.len_utf8()..].splitn(3, d).collect();
+                    let old = parts.first().copied().unwrap_or("").to_string();
+                    let old = if old.is_empty() { last_sub.as_ref().map(|s| s.0.clone()).ok_or_else(|| ":s: no previous substitution".to_string())? } else { old };
+                    let new = parts.get(1).copied().unwrap_or("").replace('&', &old);
+                    (old, new)
+                }
+                None if m.trim_start_matches(['g', 'a']) == "&" => last_sub.clone().ok_or_else(|| ":&: no previous substitution".to_string())?,
+                None => return Err(format!(":{m}: unrecognized history modifier")),
+            };
+            *last_sub = Some((old.clone(), new.clone()));
+            if !v.contains(&old) {
+                return Err(format!(":s/{old}/: substitution failed"));
+            }
+            if global { v.replace(&old, &new) } else { v.replacen(&old, &new, 1) }
+        }
+    })
+}
+
+/// bash's history expansion, at the prompt. Events: `!!` the last command,
+/// `!n` entry n (as history numbers them), `!-n` the nth back, `!prefix`
+/// the latest starting with prefix, `!?text?` the latest with text in it,
+/// `!#` the line so far. Words, after `:` (or `!$ !^ !*` alone): `0`, `n`,
+/// `^`, `$`, `*`, `x-y`, `x-`, `%` (the `?text?` word). Modifiers, each
+/// after `:`: `h t r e` (path parts), `p` (show, don't run), `q x` (quote),
+/// `s/old/new/`, `gs/old/new/`, `&`, `g&`. `^old^new^` at the start is
+/// `!!:s/old/new/`. Not inside '…', and `!` before a space, =, ( or the end
+/// is left as it is (tessh's ! and !=). None: nothing to expand; else the
+/// line, and whether only to show it (:p).
+pub fn expand_history(text: &str, file: &std::path::Path) -> Result<Option<(String, bool)>, String> {
     let entries: Vec<String> = std::fs::read_to_string(file).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(|l| l.replace("<\\n>", "\n")).collect();
-    let words = |e: &str| -> Vec<String> { e.split_whitespace().map(String::from).collect() };
     let last = || entries.last().cloned().ok_or_else(|| "!!: no history yet".to_string());
+    let mut last_sub: Option<(String, String)> = None;
+    let mut print_only = false;
+    // (^old^new^: the last command with old made new.)
+    if let Some(rest) = text.strip_prefix('^') {
+        let parts: Vec<&str> = rest.splitn(3, '^').collect();
+        if parts.len() >= 2 && !parts[0].is_empty() {
+            let e = last()?;
+            let line = hist_modify(&e, &format!("s^{}^{}^", parts[0], parts[1]), &mut last_sub)?;
+            let tail = parts.get(2).copied().unwrap_or("");
+            return Ok(Some((line + tail, false)));
+        }
+    }
     let cs: Vec<char> = text.chars().collect();
     let mut out = String::new();
     let mut changed = false;
@@ -137,30 +223,63 @@ pub fn expand_history(text: &str, file: &std::path::Path) -> Result<Option<Strin
         }
         let at_start = i == 0 || cs[i - 1].is_whitespace() || "(;|&".contains(cs[i - 1]);
         let n = cs[i + 1];
-        let rest: String = cs[i + 1..].iter().take_while(|c| !c.is_whitespace() && !"();|&'\"".contains(**c)).collect();
-        let (with, used) = match n {
-            '!' => (last()?, 2),
-            '$' => (words(&last()?).last().cloned().unwrap_or_default(), 2),
-            '^' => (words(&last()?).get(1).cloned().unwrap_or_default(), 2),
-            '*' => (words(&last()?).get(1..).map(|w| w.join(" ")).unwrap_or_default(), 2),
-            _ if !at_start => {
+        let mut j = i + 1;
+        let take = |j: &mut usize, stop: &dyn Fn(char) -> bool| -> String {
+            let mut s = String::new();
+            while *j < cs.len() && !stop(cs[*j]) {
+                s.push(cs[*j]);
+                *j += 1;
+            }
+            s
+        };
+        let word_end = |c: char| c.is_whitespace() || "();|&'\":".contains(c);
+        // (The event, and a word designator given with it: !$ !^ !*.)
+        let mut matched_word: Option<String> = None;
+        let (event, mut designator): (String, Option<String>) = match n {
+            '!' => {
+                j += 1;
+                (last()?, None)
+            }
+            '$' | '^' | '*' => {
+                j += 1;
+                (last()?, Some(n.to_string()))
+            }
+            '#' => {
+                j += 1;
+                (out.clone(), None)
+            }
+            _ if !at_start && n != '?' => {
                 out.push(c);
                 i += 1;
                 continue;
             }
-            '-' if rest.len() > 1 && rest[1..].chars().all(|c| c.is_ascii_digit()) => {
-                let k: usize = rest[1..].parse().map_err(|_| format!("!{rest}: event not found"))?;
-                let e = entries.len().checked_sub(k).and_then(|j| entries.get(j)).ok_or_else(|| format!("!{rest}: event not found"))?;
-                (e.clone(), 1 + rest.chars().count())
+            '?' => {
+                j += 1;
+                let t = take(&mut j, &|c| c == '?' || c == '\n');
+                if j < cs.len() && cs[j] == '?' {
+                    j += 1;
+                }
+                let e = entries.iter().rev().find(|e| e.contains(&t)).ok_or_else(|| format!("!?{t}: event not found"))?;
+                matched_word = hist_words(e).into_iter().find(|w| w.contains(&t));
+                (e.clone(), None)
             }
-            _ if n.is_ascii_digit() && rest.chars().all(|c| c.is_ascii_digit()) => {
-                let k: usize = rest.parse().map_err(|_| format!("!{rest}: event not found"))?;
-                let e = k.checked_sub(1).and_then(|j| entries.get(j)).ok_or_else(|| format!("!{rest}: event not found"))?;
-                (e.clone(), 1 + rest.chars().count())
+            '-' if cs.get(i + 2).is_some_and(|c| c.is_ascii_digit()) => {
+                j += 1;
+                let d = take(&mut j, &|c| !c.is_ascii_digit());
+                let k: usize = d.parse().map_err(|_| format!("!-{d}: event not found"))?;
+                let e = entries.len().checked_sub(k).and_then(|x| entries.get(x)).ok_or_else(|| format!("!-{d}: event not found"))?;
+                (e.clone(), None)
+            }
+            _ if n.is_ascii_digit() => {
+                let d = take(&mut j, &|c| !c.is_ascii_digit());
+                let k: usize = d.parse().map_err(|_| format!("!{d}: event not found"))?;
+                let e = k.checked_sub(1).and_then(|x| entries.get(x)).ok_or_else(|| format!("!{d}: event not found"))?;
+                (e.clone(), None)
             }
             _ if n.is_alphabetic() || "_./~".contains(n) => {
-                let e = entries.iter().rev().find(|e| e.starts_with(&rest)).ok_or_else(|| format!("!{rest}: event not found"))?;
-                (e.clone(), 1 + rest.chars().count())
+                let p = take(&mut j, &word_end);
+                let e = entries.iter().rev().find(|e| e.starts_with(&p)).ok_or_else(|| format!("!{p}: event not found"))?;
+                (e.clone(), None)
             }
             _ => {
                 out.push(c);
@@ -168,11 +287,87 @@ pub fn expand_history(text: &str, file: &std::path::Path) -> Result<Option<Strin
                 continue;
             }
         };
-        out.push_str(&with);
+        // (A designator right after the event needs no colon: !?text?%, !cp$.)
+        if designator.is_none() && j < cs.len() && "^$*%".contains(cs[j]) && !matches!(n, '$' | '^' | '*') {
+            designator = Some(cs[j].to_string());
+            j += 1;
+        }
+        // (:designator and :modifiers.)
+        let mut mods: Vec<String> = vec![];
+        while j < cs.len() && cs[j] == ':' && j + 1 < cs.len() {
+            let k0 = j + 1;
+            let first = cs[k0];
+            if designator.is_none() && mods.is_empty() && (first.is_ascii_digit() || "^$*%-".contains(first)) {
+                j = k0;
+                designator = Some(take(&mut j, &|c| !(c.is_ascii_digit() || "^$*%-".contains(c))));
+                continue;
+            }
+            j = k0;
+            let m = if first == 's' || (first == 'g' || first == 'a') && cs.get(k0 + 1) == Some(&'s') {
+                let start = j;
+                let pre = if first == 's' { 1 } else { 2 };
+                j += pre;
+                let d = cs.get(j).copied().ok_or_else(|| ":s: which delimiter?".to_string())?;
+                j += 1;
+                let mut seen = 0;
+                while j < cs.len() && seen < 2 {
+                    if cs[j] == d {
+                        seen += 1;
+                    }
+                    j += 1;
+                    if seen < 2 && j >= cs.len() {
+                        break;
+                    }
+                }
+                cs[start..j].iter().collect::<String>()
+            } else if first == 'g' || first == 'a' {
+                j += 2;
+                cs[k0..j.min(cs.len())].iter().collect()
+            } else {
+                j += 1;
+                first.to_string()
+            };
+            mods.push(m);
+        }
+        let ws = hist_words(&event);
+        let pick = |a: usize, b: usize| -> Result<String, String> {
+            if a > b || b >= ws.len() {
+                return Err(format!("{}: bad word specifier", designator.clone().unwrap_or_default()));
+            }
+            Ok(ws[a..=b].join(" "))
+        };
+        let lastw = ws.len().saturating_sub(1);
+        let mut v = match designator.as_deref() {
+            None => event.clone(),
+            Some("$") => pick(lastw, lastw)?,
+            Some("^") => pick(1, 1)?,
+            Some("*") => if ws.len() > 1 { pick(1, lastw)? } else { String::new() },
+            Some("%") => matched_word.clone().ok_or_else(|| ":%: no ?text? search".to_string())?,
+            Some(d) => {
+                let (a, b) = match d.split_once('-') {
+                    Some((a, "")) => (a.parse().unwrap_or(0), lastw.saturating_sub(1)),
+                    Some(("", b)) => (0, if b == "$" { lastw } else { b.parse().map_err(|_| format!("{d}: bad word specifier"))? }),
+                    Some((a, b)) => (a.parse().map_err(|_| format!("{d}: bad word specifier"))?, if b == "$" { lastw } else { b.parse().map_err(|_| format!("{d}: bad word specifier"))? }),
+                    None => {
+                        let k: usize = d.parse().map_err(|_| format!("{d}: bad word specifier"))?;
+                        (k, k)
+                    }
+                };
+                pick(a, b)?
+            }
+        };
+        for m in &mods {
+            if m == "p" {
+                print_only = true;
+            } else {
+                v = hist_modify(&v, m, &mut last_sub)?;
+            }
+        }
+        out.push_str(&v);
         changed = true;
-        i += used;
+        i = j;
     }
-    Ok(changed.then_some(out))
+    Ok(changed.then_some((out, print_only)))
 }
 
 /// Tessh text, run in ns (a trap's, eval's): the last form's value.
@@ -256,6 +451,46 @@ fn builtin_named<'py>(py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py,
     crate::runtime::builtin_named(py, name)
 }
 
+/// set -o NAME / +o NAME.
+#[pyfunction]
+fn set_option(name: &str, on: bool) -> PyResult<()> {
+    use crate::runtime::*;
+    let flag = match name {
+        "errexit" => &STRICT,
+        "xtrace" => &XTRACE,
+        "verbose" => &VERBOSE,
+        "pipefail" => &PIPEFAIL,
+        "noclobber" => &NOCLOBBER,
+        _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("set: {name}: invalid option name"))),
+    };
+    flag.store(on, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
+#[pyfunction]
+fn get_option(name: &str) -> bool {
+    use crate::runtime::*;
+    let o = std::sync::atomic::Ordering::SeqCst;
+    match name {
+        "errexit" => STRICT.load(o),
+        "xtrace" => XTRACE.load(o),
+        "verbose" => VERBOSE.load(o),
+        "pipefail" => PIPEFAIL.load(o),
+        "noclobber" => NOCLOBBER.load(o),
+        _ => false,
+    }
+}
+
+#[pyfunction]
+fn xtrace_on() -> bool {
+    crate::runtime::XTRACE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[pyfunction]
+fn set_debug_trap(on: bool) {
+    crate::runtime::DEBUG_TRAP.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
 #[pyfunction]
 fn builtin_names() -> Vec<&'static str> {
     crate::runtime::COMMAND_BUILTINS.to_vec()
@@ -280,6 +515,10 @@ pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_login, m)?)?;
     m.add_function(wrap_pyfunction!(set_err_trap, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_names, m)?)?;
+    m.add_function(wrap_pyfunction!(set_option, m)?)?;
+    m.add_function(wrap_pyfunction!(get_option, m)?)?;
+    m.add_function(wrap_pyfunction!(xtrace_on, m)?)?;
+    m.add_function(wrap_pyfunction!(set_debug_trap, m)?)?;
     let code = std::ffi::CString::new(SHELL_PY).unwrap();
     let sh = PyModule::from_code(py, &code, c"<tessh builtins>", c"__tessh_shell__")?;
     py.import("sys")?.getattr("modules")?.set_item("__tessh_shell__", &sh)?;
@@ -386,6 +625,8 @@ _exit_hooked = False
 
 def _signum(s):
     u = s.upper()
+    if u.startswith("SIG") and u[3:] in ("ERR", "DEBUG", "RETURN", "EXIT"):
+        u = u[3:]
     if u in ("EXIT", "SIGEXIT", "0"):
         return "EXIT"
     if u in ("ERR", "DEBUG", "RETURN"):
@@ -393,7 +634,7 @@ def _signum(s):
     return _tessh().signal_number(s)
 
 def _signame(k):
-    if k in ("EXIT", "ERR"):
+    if k in ("EXIT", "ERR", "DEBUG", "RETURN"):
         return k
     names = {v: n for n, v in _tessh().signal_names()}
     return "SIG" + names[k] if k in names else str(k)
@@ -410,6 +651,57 @@ def _run_trap(k):
         _err(f"trap {_signame(k)}: {type(e).__name__}: {e}")
 
 _in_err_trap = False
+_in_trap = set()
+
+def before_command(line):
+    """Before each command: set -x prints it ($PS4, + without one), then the
+    DEBUG trap runs, $BASH_COMMAND the command."""
+    # (set's own line, as written: the compiler sends it through builtin.)
+    if line.startswith("builtin set "):
+        line = line[len("builtin "):]
+    if _tessh().xtrace_on():
+        ps4 = os.environ.get("PS4") or "+ "
+        sys.stdout.flush()
+        sys.stderr.write(ps4 + line + "\n")
+        sys.stderr.flush()
+    if "DEBUG" in _traps and "DEBUG" not in _in_trap:
+        ns = _trap_ns.get("DEBUG")
+        if ns is not None:
+            ns["BASH_COMMAND"] = line
+        _in_trap.add("DEBUG")
+        try:
+            _run_trap("DEBUG")
+        finally:
+            _in_trap.discard("DEBUG")
+
+def _user_code(code):
+    """Code of the user's tessh (a script, the prompt, a sourced file), not
+    tessh's own or a library's."""
+    f = code.co_filename
+    return not f.startswith(("<tessh", "<frozen", "<eval>")) and not f.endswith(".py")
+
+def _on_profile(frame, event, arg):
+    if event == "return" and "RETURN" in _traps and "RETURN" not in _in_trap and frame.f_code.co_name != "<module>" and _user_code(frame.f_code):
+        _in_trap.add("RETURN")
+        try:
+            _run_trap("RETURN")
+        finally:
+            _in_trap.discard("RETURN")
+
+def _return_hook(on):
+    """trap … RETURN: run when a function of the user's tessh returns (and
+    when source finishes a file)."""
+    import threading
+    sys.setprofile(_on_profile if on else None)
+    threading.setprofile(_on_profile if on else None)
+
+def after_source():
+    if "RETURN" in _traps and "RETURN" not in _in_trap:
+        _in_trap.add("RETURN")
+        try:
+            _run_trap("RETURN")
+        finally:
+            _in_trap.discard("RETURN")
 
 def run_err_trap():
     """A command failed on a line of its own: the ERR trap (not from inside it)."""
@@ -462,7 +754,16 @@ def sh_trap(*args, _ns=None):
         if k is None:
             raise ValueError(f"trap: {s}: invalid signal specification")
         if k in ("DEBUG", "RETURN"):
-            raise NotImplementedError(f"trap: {k}: not in tessh: Python's sys.settrace runs a function for each line (DEBUG) and each return (RETURN).")
+            if action == "-" or action == "":
+                _traps.pop(k, None)
+            else:
+                _traps[k] = action
+                _trap_ns[k] = _ns
+            if k == "DEBUG":
+                _tessh().set_debug_trap(k in _traps)
+            else:
+                _return_hook(k in _traps)
+            continue
         if k == "ERR":
             if action == "-" or action == "":
                 _traps.pop(k, None)
@@ -656,6 +957,8 @@ def _ifs_split(s, ifs, n=None):
         return [s]
     return re.split("|".join(alts), s, maxsplit=0 if n is None else max(n - 1, 0))
 
+_read_pos = {}
+
 def sh_read(*args, _ns=None):
     import select, time
     flags, vals, names = _split_opts(args, "pnNtdaui")
@@ -683,6 +986,20 @@ def sh_read(*args, _ns=None):
     if "p" in vals and (tty or (stream is not None and getattr(stream, "isatty", lambda: False)())):
         sys.stderr.write(vals["p"])
         sys.stderr.flush()
+    # (read … <file, in a loop: the file read once, line after line, as
+    # bash's `while read line; do …; done <file`; the same call site goes on
+    # where it left off, until the end of the file.)
+    pos_key = None
+    if stream is not None and isinstance(getattr(stream, "name", None), str) and getattr(stream, "mode", "") == "r" and os.path.isfile(stream.name):
+        fr = sys._getframe(1)
+        while fr is not None and not _user_code(fr.f_code):
+            fr = fr.f_back
+        if fr is not None:
+            st = os.stat(stream.name)
+            pos_key = (id(fr), fr.f_code, fr.f_lasti, os.path.realpath(stream.name), st.st_ino)
+            off = _read_pos.get(pos_key)
+            if off:
+                stream.seek(off)
     old = None
     if tty and (silent or nchars is not None):
         import termios
@@ -749,6 +1066,11 @@ def sh_read(*args, _ns=None):
             if silent and tty:
                 sys.stderr.write("\n")
                 sys.stderr.flush()
+    if pos_key is not None:
+        if eof:
+            _read_pos.pop(pos_key, None)
+        else:
+            _read_pos[pos_key] = stream.tell()
     text = "".join(out)
     ns = _ns if _ns is not None else {}
     ifs = ns.get("IFS")
@@ -911,15 +1233,199 @@ def sh_select(*items, _ns=None):
             yield items[k - 1] if 1 <= k <= len(items) else None
     return gen()
 
+_SET_LONG = {"errexit": "e", "xtrace": "x", "verbose": "v", "nounset": "u", "pipefail": "P", "noclobber": "C"}
+
+def sh_set(*args, _ns=None):
+    """bash's set: -e/+e (strict), -x (xtrace), -v (verbose), -u (nounset:
+    always so in tessh), -o NAME / +o NAME, -o alone lists, -- args sets $argv."""
+    T = _tessh()
+    args = list(args)
+    def flip(letter, on):
+        names = {"e": "errexit", "x": "xtrace", "v": "verbose", "P": "pipefail", "C": "noclobber"}
+        if letter in names:
+            T.set_option(names[letter], on)
+        elif letter == "u":
+            if not on:
+                raise NotImplementedError("set +u: in tessh an unset name is always an error ($env.get NAME, or (globals).get 'name', gives a default)")
+        else:
+            raise ValueError(f"set: -{letter}: invalid option (tessh's are -e, -x, -v, -u, -C, and -o errexit, xtrace, verbose, nounset, pipefail, noclobber)")
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            argv = _ns.get("argv")
+            _ns["argv"] = (list(argv[:1]) if argv else ["tessh"]) + list(args[i + 1:])
+            return None
+        if a in ("-o", "+o"):
+            if i + 1 >= len(args):
+                for name in _SET_LONG:
+                    on = True if name == "nounset" else T.get_option(name)
+                    print(f"{name:<15}{'on' if on else 'off'}")
+                return None
+            name = args[i + 1]
+            if name not in _SET_LONG:
+                raise ValueError(f"set: {name}: invalid option name (tessh's are {', '.join(_SET_LONG)})")
+            flip(_SET_LONG[name], a == "-o")
+            i += 2
+            continue
+        if len(a) > 1 and a[0] in "-+":
+            for c in a[1:]:
+                flip(c, a[0] == "-")
+            i += 1
+            continue
+        argv = _ns.get("argv")
+        _ns["argv"] = (list(argv[:1]) if argv else ["tessh"]) + list(args[i:])
+        return None
+    return None
+
+def _read_chunks(fd, delim):
+    """mapfile's input: what <, <<< or a pipe gives (sys.stdin), or descriptor fd, split after delim."""
+    redirected = fd == 0 and sys.stdin is not None and sys.stdin is not sys.__stdin__
+    if redirected or (fd == 0 and sys.__stdin__ is None):
+        data = sys.stdin.read()
+    else:
+        import codecs
+        dec = codecs.getincrementaldecoder("utf-8")("replace")
+        parts = []
+        while True:
+            b = os.read(fd, 65536)
+            if not b:
+                break
+            parts.append(dec.decode(b))
+        parts.append(dec.decode(b"", True))
+        data = "".join(parts)
+    out, start = [], 0
+    while start < len(data):
+        k = data.find(delim, start)
+        if k < 0:
+            out.append(data[start:])
+            break
+        out.append(data[start:k + 1])
+        start = k + 1
+    return out
+
+def sh_mapfile(*args, _ns=None):
+    """mapfile / readarray: lines of the input into a list."""
+    flags, vals, names = _split_opts(args, "dnOsuCc")
+    for f in flags:
+        if f != "t":
+            raise ValueError(f"mapfile: -{f}: invalid option\nmapfile: usage: mapfile [-d delim] [-n count] [-O origin] [-s count] [-t] [-u fd] [-C callback] [-c quantum] [array]")
+    try:
+        count = int(vals.get("n", 0))
+        origin = int(vals["O"]) if "O" in vals else None
+        skip = int(vals.get("s", 0))
+        fd = int(vals.get("u", 0))
+        quantum = int(vals.get("c", 5000))
+    except ValueError as e:
+        raise ValueError(f"mapfile: {e}") from None
+    delim = vals.get("d", "\n")
+    delim = delim[0] if delim else "\0"
+    name = names[0] if names else "MAPFILE"
+    chunks = _read_chunks(fd, delim)[skip:]
+    if count:
+        chunks = chunks[:count]
+    if "t" in flags:
+        chunks = [c[:-1] if c.endswith(delim) else c for c in chunks]
+    if origin is None:
+        arr = []
+    else:
+        arr = list(_ns.get(name) or [])
+        del arr[origin:]
+        arr += [""] * (origin - len(arr))
+    cb = None
+    if "C" in vals:
+        cb = _ns.get(vals["C"])
+        if not callable(cb):
+            raise ValueError(f"mapfile: {vals['C']}: not a function")
+    for k, c in enumerate(chunks):
+        if cb is not None and quantum > 0 and (k + 1) % quantum == 0:
+            cb(len(arr), c)
+        arr.append(c)
+    _ns[name] = arr
+    return None
+
+sh_readarray = sh_mapfile
+
+def _quote_word(w):
+    """A word back into tessh text: as it was when it needs no quotes."""
+    import re
+    if re.fullmatch(r"[A-Za-z0-9_./=:,+@%~|&<>*?!-]+", w):
+        return w
+    return "'" + w.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+def sh_time(*args, _ns=None):
+    """time [-p] command …: run it (a program, a pipe, a call), then real,
+    user and sys time to stderr, as bash's keyword."""
+    import time as _time
+    args = list(args)
+    posix = False
+    while args and args[0] in ("-p", "--"):
+        posix = posix or args[0] == "-p"
+        args.pop(0)
+    t0, c0 = _time.monotonic(), os.times()
+    v = None
+    try:
+        if args:
+            v = _tessh().eval_tessh(" ".join(_quote_word(w) for w in args), _ns)
+    finally:
+        t1, c1 = _time.monotonic(), os.times()
+        user = (c1.user - c0.user) + (c1.children_user - c0.children_user)
+        system = (c1.system - c0.system) + (c1.children_system - c0.children_system)
+        sys.stdout.flush()
+        if posix:
+            sys.stderr.write(f"real {t1 - t0:.2f}\nuser {user:.2f}\nsys {system:.2f}\n")
+        else:
+            f = lambda x: f"{int(x // 60)}m{x % 60:.3f}s"
+            sys.stderr.write(f"\nreal\t{f(t1 - t0)}\nuser\t{f(user)}\nsys\t{f(system)}\n")
+        sys.stderr.flush()
+    return v
+
+def sh_coproc(*args, _ns=None):
+    """coproc [NAME --] command …: the command in the background, its input
+    and output piped to tessh: $COPROC (or $NAME) is [read fd, write fd],
+    $COPROC_PID (or $NAME_PID) its process ID; its value is the Job."""
+    args = list(args)
+    name = "COPROC"
+    if "--" in args:
+        k = args.index("--")
+        if k > 1:
+            raise ValueError("coproc: usage: coproc [NAME --] command [arg …]")
+        if k == 1:
+            name = args[0]
+            if not name.isidentifier():
+                raise ValueError(f"coproc: {name}: not a valid name")
+        args = args[k + 1:]
+    if not args:
+        raise ValueError("coproc: usage: coproc [NAME --] command [arg …]")
+    job, rfd, wfd, pid = _tessh().start_coproc(args)
+    _ns[name] = [rfd, wfd]
+    _ns[name + "_PID"] = pid
+    return job
+
 # ---- complete, compgen ---------------------------------------------------------------
 
 _complete = {}
 
-_ACTIONS = {"file": "f", "directory": "d", "command": "c", "builtin": "b", "keyword": "k", "variable": "v", "function": "F*", "alias": ""}
+_ACTIONS = {"file": "f", "directory": "d", "command": "c", "builtin": "b", "keyword": "k", "variable": "v", "function": "F*", "export": "e", "user": "u", "hostname": "h", "job": "j", "signal": "s", "alias": ""}
+_OPTIONS = {"default", "dirnames", "filenames", "nospace", "plusdirs", "bashdefault", "noquote", "nosort", "fullquote"}
 
 def _parse_spec(args):
-    flags, vals, rest = _split_opts(args, "WFAGXPSo")
-    spec = {"flags": set(f for f in flags if f in "fdcbkv"), "words": vals.get("W"), "func": vals.get("F"), "functions": False}
+    args = list(args)
+    opts = set()
+    k = 0
+    while k < len(args):
+        if args[k] in ("-o", "+o") and k + 1 < len(args):
+            if args[k + 1] not in _OPTIONS:
+                raise ValueError(f"-o {args[k + 1]}: invalid option name")
+            if args[k] == "-o":
+                opts.add(args[k + 1])
+            del args[k:k + 2]
+        else:
+            k += 1
+    flags, vals, rest = _split_opts(args, "WFAGXPSC")
+    spec = {"flags": set(f for f in flags if f in "fdcbkveuhjs"), "words": vals.get("W"), "func": vals.get("F"),
+            "command": vals.get("C"), "glob": vals.get("G"), "filter": vals.get("X"),
+            "prefix": vals.get("P", ""), "suffix": vals.get("S", ""), "opts": opts, "functions": False}
     a = vals.get("A")
     if a:
         k = _ACTIONS.get(a)
@@ -931,19 +1437,62 @@ def _parse_spec(args):
             spec["flags"].add(k)
     return flags, spec, rest
 
-def _gen(spec, word, line_words, ns):
-    import glob as _glob, keyword, builtins
+def _files(word, dirs_only):
+    import glob as _glob
     out = []
+    pat = os.path.expanduser(word) + "*"
+    for p in sorted(_glob.glob(pat)):
+        isdir = os.path.isdir(p)
+        if not dirs_only or isdir:
+            shown = word + p[len(os.path.expanduser(word)):] if word.startswith("~") else p
+            out.append(shown + ("/" if isdir else ""))
+    return out
+
+def _call_completer(f, word, line_words, ns, line, point):
+    """A -F function: tessh's (two parameters: the word and the line's words,
+    giving a list back) or bash's (cmd word prev, filling $COMPREPLY from
+    $COMP_WORDS, $COMP_CWORD, $COMP_LINE and $COMP_POINT)."""
+    import inspect
+    try:
+        params = [p for p in inspect.signature(f).parameters.values() if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        two = len(params) == 2 and not any(p.kind == p.VAR_POSITIONAL for p in inspect.signature(f).parameters.values())
+    except (TypeError, ValueError):
+        two = False
+    if two:
+        return [str(x) for x in (f(word, list(line_words)) or [])]
+    words = list(line_words) + [word]
+    cmd = words[0] if words else ""
+    prev = words[-2] if len(words) > 1 else ""
+    if ns is not None:
+        ns["COMP_WORDS"] = words
+        ns["COMP_CWORD"] = len(words) - 1
+        ns["COMP_LINE"] = line
+        ns["COMP_POINT"] = point
+        ns["COMPREPLY"] = []
+    try:
+        got = f(cmd, word, prev)
+    except TypeError:
+        got = f()
+    if isinstance(got, (list, tuple)):
+        return [str(x) for x in got]
+    reply = (ns or {}).get("COMPREPLY") or []
+    return [str(x) for x in (reply if isinstance(reply, (list, tuple)) else [reply])]
+
+def _gen(spec, word, line_words, ns, line=None, point=None):
+    import fnmatch, keyword, builtins, signal, pwd
+    out = []
+    if line is None:
+        line = " ".join(list(line_words) + [word])
+    if point is None:
+        point = len(line)
     if spec.get("words"):
         out += [w for w in str(spec["words"]).split() if w.startswith(word)]
     fl = spec.get("flags", ())
     if "f" in fl or "d" in fl:
-        pat = os.path.expanduser(word) + "*"
-        for p in sorted(_glob.glob(pat)):
-            isdir = os.path.isdir(p)
-            if "f" in fl or isdir:
-                shown = word + p[len(os.path.expanduser(word)):] if word.startswith("~") else p
-                out.append(shown + ("/" if isdir else ""))
+        out += _files(word, "f" not in fl)
+    if spec.get("glob"):
+        import glob as _glob
+        out += [g for g in sorted(_glob.glob(os.path.expanduser(spec["glob"]))) if g.startswith(word)]
     if "c" in fl or "b" in fl:
         names = set(_tessh().builtin_names()) | set(_DUALS)
         if "c" in fl:
@@ -958,19 +1507,55 @@ def _gen(spec, word, line_words, ns):
         out += sorted(k for k in _keywords() if k.startswith(word))
     if "v" in fl:
         out += sorted(n for n in (ns or {}) if n.startswith(word) and not n.startswith("_") and not callable(ns[n]))
+    if "e" in fl:
+        out += sorted(n for n in os.environ if n.startswith(word))
+    if "u" in fl:
+        out += sorted({p.pw_name for p in pwd.getpwall() if p.pw_name.startswith(word)})
+    if "h" in fl:
+        hosts = set()
+        try:
+            for l in open("/etc/hosts"):
+                hosts |= set(l.split("#")[0].split()[1:])
+        except OSError:
+            pass
+        out += sorted(h for h in hosts if h.startswith(word))
+    if "s" in fl:
+        out += sorted("SIG" + n for n, _ in _tessh().signal_names() if ("SIG" + n).startswith(word))
+    if "j" in fl:
+        out += [w for w in _tessh().job_words() if w.startswith(word)]
     if spec.get("functions"):
         out += sorted(n for n, v in (ns or {}).items() if n.startswith(word) and callable(v) and getattr(v, "__module__", "") == (ns or {}).get("__name__"))
     if spec.get("func"):
         f = (ns or {}).get(spec["func"])
         if not callable(f):
             raise ValueError(f"{spec['func']}: not a function")
-        got = f(word, list(line_words))
-        out += [str(x) for x in (got or [])]
+        out += _call_completer(f, word, line_words, ns, line, point)
+    if spec.get("command"):
+        words = list(line_words) + [word]
+        prev = words[-2] if len(words) > 1 else ""
+        env = dict(os.environ, COMP_LINE=line, COMP_POINT=str(point), COMP_TYPE="9", COMP_KEY="9")
+        import subprocess
+        r = subprocess.run(["sh", "-c", spec["command"] + ' "$@"', "complete", words[0] if words else "", word, prev], capture_output=True, text=True, env=env)
+        out += [l for l in r.stdout.splitlines() if l]
+    if spec.get("filter"):
+        pat = spec["filter"]
+        keep = pat.startswith("!")
+        pat = pat[1:] if keep else pat
+        pat = pat.replace("&", word)
+        out = [x for x in out if fnmatch.fnmatchcase(x, pat) == keep]
+    out = [spec.get("prefix", "") + x + spec.get("suffix", "") for x in out]
+    opts = spec.get("opts", ())
+    if "plusdirs" in opts:
+        out += _files(word, True)
+    if not out and "dirnames" in opts:
+        out = _files(word, True)
     seen, res = set(), []
     for x in out:
         if x not in seen:
             seen.add(x)
             res.append(x)
+    if "nosort" not in opts and spec.get("words") is None and not spec.get("func"):
+        res.sort()
     return res
 
 def sh_complete(*args, _ns=None):
@@ -986,10 +1571,11 @@ def sh_complete(*args, _ns=None):
             if sp is None:
                 continue
             parts = ["-" + "".join(sorted(sp["flags"]))] if sp["flags"] else []
-            if sp["words"] is not None:
-                parts += ["-W", shlex.quote(sp["words"])]
-            if sp["func"]:
-                parts += ["-F", sp["func"]]
+            for o in sorted(sp.get("opts", ())):
+                parts += ["-o", o]
+            for key, opt in (("words", "-W"), ("func", "-F"), ("command", "-C"), ("glob", "-G"), ("filter", "-X"), ("prefix", "-P"), ("suffix", "-S")):
+                if sp.get(key):
+                    parts += [opt, shlex.quote(sp[key]) if key != "func" else sp[key]]
             if sp["functions"]:
                 parts += ["-A", "function"]
             print("complete " + " ".join(parts + [n]))
@@ -1021,10 +1607,15 @@ def complete_for(before, word, ns):
     spec = _complete.get(os.path.basename(ws[0]))
     if spec is None:
         return None
+    line = seg.lstrip() + word
     try:
-        return _gen(spec, word, ws, ns)
+        got = _gen(spec, word, ws, ns, line, len(line))
     except Exception:
         return None
+    # (-o default, -o bashdefault: tessh's own when there's nothing.)
+    if not got and spec.get("opts", set()) & {"default", "bashdefault"}:
+        return None
+    return got
 
 # ---- history, fc -----------------------------------------------------------------------
 

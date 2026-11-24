@@ -217,8 +217,8 @@ function ran
 `!` turns a command's exit status around (`! grep -q x file`), and `!=` is
 "not equal". tessh has `!` before a command (`! grep -q x file && …`) and
 `not` for any value, a command's result included: `if not (grep -q x
-file)`. History expansion (`!!`, `!$`) is the REPL's business, and tessh
-has none (Appendix L).
+file)`. History expansion (`!!`, `!$`, `^old^new^`…) is the REPL's
+business: tessh has it at the prompt, not in a script (Appendix L).
 
 `*` is the wildcard of globbing, and `?` matches one character, in both.
 In tessh a pattern written bare is a Glob, a value you can loop over and
@@ -595,8 +595,7 @@ The ABS Guide's `base64_charset=( {A..Z} {a..z} {0..9} + / = )` is
 The redirections are bash's, in tessh: `>file`, `>>file`, `&>file`,
 `>&2`, `<file`, `[i]<>file`, `<<` (a here document), `<<<` (a here string),
 `<(…)` and `>(…)` (process substitution). `>|` writes even over an existing
-file in bash with `noclobber` set; tessh has no `noclobber`, so `>|` is
-`>`. Chapter 20 has them all.
+file with `noclobber` set (`set -C`), in tessh too. Chapter 20 has them all.
 
 `&>/dev/null` is the usual way to ask whether a command works without
 seeing its output. Asking whether a command exists, tessh has `which`, whose

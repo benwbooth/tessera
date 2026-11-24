@@ -10,12 +10,14 @@ tessh has its own builtins (`cd`, `pushd`, `popd`, `dirs`, `export`,
 `unset`, `exit`, `source`, `which`, `glob`, `need`) and most of bash's that
 change the shell itself: `read`, `getopts`, `shift`, `eval`, `exec`,
 `type`, `command`, `hash`, `builtin`, `trap`, `ulimit`, `umask`, `times`,
-`history`, `fc`, and job control (`jobs`, `fg`, `bg`, `wait`, `disown`,
-`kill`, `suspend`, `logout`). They take bash's options; `help NAME`
+`history`, `fc`, `mapfile` (`readarray`), `coproc`, `time`, `complete`,
+`compgen`, and job control (`jobs`, `fg`, `bg`, `wait`, `disown`, `kill`,
+`suspend`, `logout`). `set` takes `-e`, `-x`, `-v`, `-o pipefail` and `set
+-- args`. They take bash's options; `help NAME`
 describes each. Others do things that in tessh are plain Python: a
 variable is set with `=`, arithmetic is Python's, text is formatted with
 f-strings. A few of bash's (`alias`, `declare`, `local`, `readonly`,
-`shopt`, `bind`, `complete`, `caller`, `enable`) say what to do in tessh
+`shopt`, `bind`, `caller`, `enable`) say what to do in tessh
 instead. Where that leaves a real hole, this chapter says so.
 
 A builtin used as a value gives what it prints (`m = (umask)`), and in a
@@ -890,9 +892,10 @@ exit 0
 
 tessh's `read var1 <data-file` reads the first line too. `read` fails at
 the end of the input, so `while read line` loops over the script's own
-standard input (`cmd | tessh script.tsh`); but `while read line <file`
-opens the file again on every pass and never ends. For a file, the way is
-`open` (or `cat` as a value): `.readline` for one line,
+standard input (`cmd | tessh script.tsh`), and `while read line <file`
+reads the file once, line after line, as bash's `done <file` loop does.
+The Python way, shown here, is `open` (or `cat` as a value): `.readline`
+for one line,
 a `for` for all of them, `.split` to break a line at a separator. The
 separator is the argument to `.split`, so there's no `$IFS` to save and
 restore. (The users come from a made-up
@@ -1682,7 +1685,8 @@ variables.
 
 tessh's arguments are `$argv`, a list, and any list can be split from a
 command's output: `fields = ((uname -a).split)`. There's no need to reuse the
-positional parameters. `(globals)` holds the script's variables and `$env`
+positional parameters, though `set -- a b` (or `set a b`) does make
+`$argv` `[script a b]`, and `set` given a value is Python's set. `(globals)` holds the script's variables and `$env`
 the environment.
 
 ### Example 15-16. Using set with positional parameters (`ex34.sh`)
@@ -1963,8 +1967,9 @@ echo "second parameter = $second_param"           # (null value)
 exit 0
 ```
 
-A list of the words, and slices of it: `$params[2:]` is what's left after
-two `shift`s. A missing parameter is `""` in bash; in Python indexing past
+tessh's `set -- a b` sets `$argv` to `[script a b]` as bash's does, and
+`shift` moves it along. The example uses a list of its own instead, and
+slices of it: `$params[2:]` is what's left after two `shift`s. A missing parameter is `""` in bash; in Python indexing past
 the end is an error, so the empty case takes defaults.
 
 ```tessh

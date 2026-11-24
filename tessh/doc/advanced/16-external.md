@@ -1323,14 +1323,17 @@ On 2007-09-01 at 17:30:24, there were
 
 ```
 
-`time` is not a bash-style keyword in tessh: `time cmd` runs the `time`
-program, which prints its own report (`0.00user 0.00system 0:00.10elapsed
-…`) on stderr. To time Python code, take `time.perf_counter` before and
-after.
+`time` is a builtin in tessh, as bash's keyword is: `time cmd …` runs
+the command (a program, a pipe or a call) and prints `real`, `user` and
+`sys` on stderr in bash's format; `time -p` prints POSIX's. `\time` runs
+the `/usr/bin/time` program instead, with its own report. `time` times one
+command line, not an indented block; to time a block of Python code, take
+`time.perf_counter` before and after.
 
-**Gap:** tessh has no `time` keyword: `time` runs `/usr/bin/time` when it's
-installed, so it can't time a pipeline as a whole, a Python call, or a
-block, and its report isn't bash's `real/user/sys`.
+```tessh no-run
+time sleep 0.2                     # real 0m0.2…s, then user and sys.
+time -p sort big.txt | uniq -c     # The whole pipe, in POSIX's format.
+```
 
 `touch`, `at`, `batch`, `cal`, `sleep` and `hwclock` are programs and run
 the same; `sleep` takes fractions (`sleep 0.2`), which makes `usleep`

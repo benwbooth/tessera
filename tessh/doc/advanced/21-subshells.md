@@ -419,8 +419,9 @@ fi
 ```output bash
 ```
 
-tessh has no noclobber, but Python's `os.open` with `O_EXCL` makes the
-file only if it isn't there, in one step, which is what a lock needs. The
+tessh's `set -C` works the same; this port uses Python's `os.open` with
+`O_EXCL`, which makes the file only if it isn't there, in one step, which
+is what a lock needs. The
 tessh version tries twice, to show both answers.
 
 ```tessh

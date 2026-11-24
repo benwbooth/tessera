@@ -1255,10 +1255,16 @@ Still going: t = 4
 
 `while read line` reads a file line by line. tessh has `read`, and it
 fails at the end of the input, so `while read line` loops over the
-script's own standard input (`cmd | tessh script.tsh`). But
-`while read line <file` opens the file again on every pass and never
-ends: for a file, a `for` over the open file is the way, and the file is
-closed when the `with` ends.
+script's own standard input (`cmd | tessh script.tsh`). `while read line
+<file` reads the file once, line after line, as bash's `while read line;
+do …; done <file` does: the same `read` goes on where it left off until
+the end of the file. A `for` over the open file is the Python way, shown
+below, and the file is closed when the `with` ends.
+
+```tessh no-run
+while read line <data.txt          # One line per pass, then the loop ends.
+  print $line
+```
 
 ```bash no-run
 cat $filename |   # Supply input from a file.

@@ -457,13 +457,14 @@ fn bracket_test_condition_is_an_error() {
     assert!(check_one("xs = [1]\nif $xs\n  print x\n").is_empty());
 }
 
-/// A for/while/if with nothing under it (bash's missing done) and bash's
-/// `set -e` are errors, not quietly nothing.
+/// A for/while/if with nothing under it (bash's missing done) is an error,
+/// not quietly nothing; bash's set options are the shell's set.
 #[test]
 fn empty_blocks_and_set_options_are_errors() {
-    for src in ["for a in [1 2]\nprint $a\n", "while False\nprint 1\n", "if True\nprint 1\n", "set -euo pipefail\n"] {
+    for src in ["for a in [1 2]\nprint $a\n", "while False\nprint 1\n", "if True\nprint 1\n"] {
         assert!(!check_one(src).is_empty(), "{src}");
     }
+    assert!(check_one("set -euo pipefail\n").is_empty());
     assert!(check_one("x = set [1]\nif True then 1\n").is_empty());
 }
 
@@ -1296,8 +1297,8 @@ fn traps() {
         "time.sleep 0.05\n",
         "trap - USR1\n",
         "bad = (trap 'x' NOSUCH 2>/dev/null)\n",
-        "err = (trap 'x' DEBUG 2>/dev/null)\n",
-        "print $got $bad.code ('settrace' in $err.err)\n",
+        "err = (trap 'x' KILL 2>/dev/null)\n",
+        "print $got $bad.code ('caught' in $err.err)\n",
     ));
     assert_eq!(out, "trap -- 'got += 1' SIGUSR1\n1 1 True\n");
 }
@@ -1551,17 +1552,164 @@ fn select_readonly_lineno_err_complete() {
 #[test]
 fn history_expansion() {
     let f = std::env::temp_dir().join(format!("tessh-hexp-{}", std::process::id()));
-    std::fs::write(&f, "ls -l /tmp\necho one two three\ngit status\n").unwrap();
-    let x = |t: &str| crate::shell::expand_history(t, &f);
-    assert_eq!(x("sudo !!").unwrap().as_deref(), Some("sudo git status"));
-    assert_eq!(x("cat !$").unwrap().as_deref(), Some("cat status"));
-    assert_eq!(x("echo !^ !*").unwrap().as_deref(), Some("echo status status"));
-    assert_eq!(x("!2").unwrap().as_deref(), Some("echo one two three"));
-    assert_eq!(x("!-3").unwrap().as_deref(), Some("ls -l /tmp"));
-    assert_eq!(x("!ec | wc").unwrap().as_deref(), Some("echo one two three | wc"));
+    std::fs::write(&f, "ls -l /tmp\ncp src/main.rs /tmp/backup.tar.gz\necho one two three\ngit status\n").unwrap();
+    let x = |t: &str| crate::shell::expand_history(t, &f).map(|o| o.map(|(s, p)| if p { format!("{s} [p]") } else { s }));
+    let ok = |t: &str| x(t).unwrap().unwrap_or_else(|| panic!("{t}: nothing"));
+    assert_eq!(ok("sudo !!"), "sudo git status");
+    assert_eq!(ok("cat !$"), "cat status");
+    assert_eq!(ok("echo !^ !*"), "echo status status");
+    assert_eq!(ok("!3"), "echo one two three");
+    assert_eq!(ok("!-4"), "ls -l /tmp");
+    assert_eq!(ok("!ec | wc"), "echo one two three | wc");
+    assert_eq!(ok("!?backup?"), "cp src/main.rs /tmp/backup.tar.gz");
+    assert_eq!(ok("ls !?backup?%"), "ls /tmp/backup.tar.gz");
+    assert_eq!(ok("echo !3:2"), "echo two");
+    assert_eq!(ok("echo !3:1-2"), "echo one two");
+    assert_eq!(ok("echo !3:2-"), "echo two");
+    assert_eq!(ok("echo !cp:$:h"), "echo /tmp");
+    assert_eq!(ok("echo !cp:$:t"), "echo backup.tar.gz");
+    assert_eq!(ok("echo !cp:$:r"), "echo /tmp/backup.tar");
+    assert_eq!(ok("echo !cp:$:e"), "echo gz");
+    assert_eq!(ok("echo !cp:1:t:r"), "echo main");
+    assert_eq!(ok("!3:s/one/1/"), "echo 1 two three");
+    assert_eq!(ok("!3:gs/o/0/"), "ech0 0ne tw0 three");
+    assert_eq!(ok("!3:p"), "echo one two three [p]");
+    assert_eq!(ok("echo !3:2:q"), "echo 'two'");
+    assert_eq!(ok("^status^log"), "git log");
+    assert_eq!(ok("echo a !#"), "echo a echo a ");
     assert_eq!(x("echo '!!' ok").unwrap(), None);
     assert_eq!(x("! true").unwrap(), None);
     assert_eq!(x("$a != $b").unwrap(), None);
     assert!(x("!nosuch").is_err());
+    assert!(x("!3:s/zzz/y/").is_err());
+    let _ = std::fs::remove_file(&f);
+}
+
+/// trap DEBUG ($BASH_COMMAND) and RETURN; set -x, -v, -o pipefail, --;
+/// $PIPESTATUS.
+#[test]
+fn debug_return_traps_and_set_options() {
+    let (out, _, _) = run_forked("trap 'print dbg $BASH_COMMAND' DEBUG\necho hi\ntrap - DEBUG\necho after");
+    // (As bash's: it runs before `trap - DEBUG` too.)
+    assert_eq!(out, "dbg echo hi\nhi\ndbg trap - DEBUG\nafter\n");
+    let (out, _, _) = run_forked("def f\n  print in f\ntrap 'print returned' RETURN\nf\nprint (len [1 2])\ntrap - RETURN\nf");
+    assert_eq!(out, "in f\nreturned\n2\nin f\n");
+    let (out, err, _) = run_forked("set -x\necho hi | tr a-z A-Z\nset +x\necho no");
+    assert_eq!(out, "HI\nno\n");
+    assert!(err.contains("+ echo hi | tr a-z A-Z\n") && !err.contains("echo no"), "{err}");
+    let (_, err, _) = run_forked("set -v\nx = 1\nset +v\ny = 2");
+    assert!(err.contains("x = 1\n") && !err.contains("y = 2"), "{err}");
+    let (ns, _) = run(concat!(
+        "false | true\n",
+        "ps = $PIPESTATUS\n",
+        "set -o pipefail\n",
+        "r = (false | true)\n",
+        "set +o pipefail\n",
+        "r2 = (false | true)\n",
+        "set -- a b\n",
+    ));
+    assert_eq!(repr(&ns, "ps"), "[1, 0]");
+    assert_eq!(repr(&ns, "argv"), "['tessh', 'a', 'b']");
+    Python::attach(|py| {
+        let code = |k: &str| ns.bind(py).get_item(k).unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap();
+        assert_eq!([code("r"), code("r2")], [1, 0]);
+    });
+}
+
+/// mapfile/readarray, and `while read line <file` reading the file once.
+#[test]
+fn mapfile_and_read_loop() {
+    let f = std::env::temp_dir().join(format!("tessh-rl-{}.txt", std::process::id()));
+    std::fs::write(&f, "x\ny\nz\n").unwrap();
+    let (ns, _) = run(&format!(
+        concat!(
+            "printf 'a\\nb\\nc\\n' | mapfile -t lines\n",
+            "mapfile -t -s 1 -n 1 mid <<< \"a\\nb\\nc\"\n",
+            "readarray <<< \"p\\nq\"\n",
+            "keep = [k1 k2 k3]\n",
+            "mapfile -t -O 1 keep <<< \"new\"\n",
+            "seen = []\n",
+            "def cb i line\n  seen.append [$i $line]\n",
+            "mapfile -t -C cb -c 2 cbl <<< \"1\\n2\\n3\\n4\"\n",
+            "got = []\n",
+            "while read line <{f}\n  got.append $line\n",
+            "again = []\n",
+            "while read line <{f}\n  again.append $line\n",
+        ),
+        f = f.display()
+    ));
+    let _ = std::fs::remove_file(&f);
+    assert_eq!(repr(&ns, "lines"), "['a', 'b', 'c']");
+    assert_eq!(repr(&ns, "mid"), "['b']");
+    assert_eq!(repr(&ns, "MAPFILE"), "['p\\n', 'q\\n']");
+    assert_eq!(repr(&ns, "keep"), "['k1', 'new']");
+    assert_eq!(repr(&ns, "seen"), "[[1, '2'], [3, '4']]");
+    assert_eq!(repr(&ns, "got"), "['x', 'y', 'z']");
+    assert_eq!(repr(&ns, "again"), "['x', 'y', 'z']");
+}
+
+/// coproc (named too), and time.
+#[test]
+fn coproc_and_time() {
+    let (out, _, _) = run_forked(concat!(
+        "import os\n",
+        "coproc tr a-z A-Z\n",
+        "os.write $COPROC[1] b\"hello\\n\"\n",
+        "os.close $COPROC[1]\n",
+        "read -u $COPROC[0] up\n",
+        "print $up ((int $COPROC_PID) > 0)\n",
+        "wait $COPROC_PID\n",
+        "j = coproc REV -- rev\n",
+        "os.write $REV[1] b\"abc\\n\"\n",
+        "os.close $REV[1]\n",
+        "read -u $REV[0] back\n",
+        "print $back\n",
+        "$j.wait\n",
+    ));
+    assert_eq!(out, "HELLO True\ncba\n");
+    let (out, err, _) = run_forked("time sh -c 'echo timed'\ntime -p true");
+    assert_eq!(out, "timed\n");
+    assert!(err.contains("\nreal\t0m") && err.contains("\nuser\t") && err.contains("real 0."), "{err}");
+}
+
+/// complete -F as bash's (COMPREPLY from COMP_WORDS, COMP_CWORD, COMP_LINE,
+/// COMP_POINT), and -o, -X, -P, -S, -G, -C.
+#[test]
+fn bash_style_completion() {
+    let (ns, _) = run(concat!(
+        "def _svc cmd cur prev\n",
+        "  global COMPREPLY\n",
+        "  COMPREPLY = [$w for w in [start stop status] if ($w.startswith $cur)]\n",
+        "  if $COMP_CWORD > 1\n    COMPREPLY = [$prev]\n",
+        "complete -F _svc svc\n",
+        "complete -W 'alpha beta' -P pre- -S /x -X '*ta' ab\n",
+        "complete -o default -W 'zz' dflt\n",
+        "complete -C 'sh -c \"echo one; echo two\"' cc\n",
+    ));
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        let f = py.import("__tessh_shell__").unwrap().getattr("complete_for").unwrap();
+        let got = |before: &str, word: &str| -> Option<Vec<String>> { f.call1((before, word, ns)).unwrap().extract().ok() };
+        assert_eq!(got("svc ", "st").unwrap(), ["start", "stop", "status"]);
+        assert_eq!(ns.get_item("COMP_LINE").unwrap().unwrap().extract::<String>().unwrap(), "svc st");
+        assert_eq!(ns.get_item("COMP_POINT").unwrap().unwrap().extract::<i64>().unwrap(), 6);
+        assert_eq!(got("svc start ", "x").unwrap(), ["start"]);
+        assert_eq!(got("ab ", "").unwrap(), ["pre-alpha/x"]);
+        assert!(got("dflt ", "q").is_none(), "-o default: tessh's own");
+        assert_eq!(got("cc ", "").unwrap(), ["one", "two"]);
+    });
+}
+
+/// set -C (noclobber): > won't overwrite a file, >| and >> still write.
+#[test]
+fn noclobber() {
+    let f = std::env::temp_dir().join(format!("tessh-noclobber-{}", std::process::id()));
+    let _ = std::fs::remove_file(&f);
+    let (out, _, _) = run_forked(&format!(
+        "set -C\necho a >{f}\nr = (echo b >{f} 2>/dev/null)\nr2 = (print c >{f})?\necho d >>{f}\necho e >|{f}\nset +C\necho f >>{f}\nprint $r.code (bool $r2)",
+        f = f.display()
+    ));
+    assert_eq!(out, "1 False\n");
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), "e\nf\n");
     let _ = std::fs::remove_file(&f);
 }

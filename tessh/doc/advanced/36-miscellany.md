@@ -2286,7 +2286,7 @@ matter, the ABS Guide's advice holds, adjusted for tessh:
 - Erik Brandsberg found bash's associative arrays faster than numeric ones
   for rewriting entries. Python's lists and dicts are both fast; use the
   one that fits.
-- Profile: `time` works on programs, and Python's `cProfile` and
+- Profile: `time` times a command line (a program, a pipe or a call), and Python's `cProfile` and
   `timeit` time Python: `timeit.timeit (fn ($n + 1)) number=100000`.
 - Keep file I/O down; read a file once into a value rather than with a
   program per line.

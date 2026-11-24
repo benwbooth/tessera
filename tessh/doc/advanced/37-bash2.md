@@ -782,7 +782,8 @@ for input in ["123-45-6789" "12-345-6789"]   # (sample inputs)
 ```
 
 **`set -o pipefail`** makes a pipe's status that of the last program in
-it that failed. **Gap:** tessh has no `pipefail` (chapter 33).
+it that failed. tessh's `set -o pipefail` makes a pipe fail if any program
+in it fails, and `$PIPESTATUS` lists each program's status (chapter 33).
 
 ### Bash, version 3.1
 
@@ -1120,9 +1121,27 @@ m is a lowercase alphabetic character.
 ```
 
 **Coprocesses.** `coproc` runs a command in the background with pipes to
-and from it. **Gap:** tessh has no `coproc`; `subprocess.Popen` with
-`stdin=PIPE` and `stdout=PIPE` is Python's coprocess, and its `stdout` is
-read like a file.
+and from it. tessh has `coproc command args`, and `coproc NAME -- command
+args` for a named one. `$COPROC` (or `$NAME`) is `[read fd, write fd]` and
+`$COPROC_PID` (or `$NAME_PID`) its pid; the value is a Job, so `jobs`,
+`wait` and `kill` work on it. `read -u $COPROC[0] var` reads from it,
+`os.write $COPROC[1] b"…"` (or a program's `>&N`) writes to it, and `os.close
+$COPROC[1]` closes its input. Bash's `coproc NAME { … }` form, with a
+block, isn't there: run `sh -c '…'` instead.
+
+```tessh no-run
+import os
+coproc cat                         # Input and output piped to tessh.
+os.write $COPROC[1] b"line one\n"
+os.close $COPROC[1]                 # cat sees the end of its input.
+read -u $COPROC[0] line
+print $line                         # line one
+wait $COPROC_PID
+```
+
+`subprocess.Popen` with `stdin=PIPE` and `stdout=PIPE` is Python's
+coprocess, and its `stdout` is read like a file. The examples below show
+the Python way.
 
 ```bash no-run
 #!/bin/bash4
@@ -1275,10 +1294,19 @@ hi
 I am main
 ```
 
-**`mapfile`** loads a file's lines into an array. In tessh, `.splitlines`
-on the text, or `.lines` on a program's output; `read -a` reads one line's
-words, which is `.split` on that line (tessh's `read -a Arr2 <file` works
-too).
+**`mapfile`** loads a file's lines into an array. tessh has `mapfile`
+(and `readarray`) too: `mapfile -t lines <file` or `cat file | mapfile -t
+lines` puts the lines of its stdin in a list, `$MAPFILE` without a name.
+It takes bash's `-d`, `-n`, `-O`, `-s`, `-u`, `-C` and `-c`; the `-C`
+callback is a tessh function given (index, line). The example below shows
+the Python way: `.splitlines` on the text, or `.lines` on a program's
+output. `read -a` reads one line's words, which is `.split` on that line
+(tessh's `read -a Arr2 <file` works too).
+
+```tessh no-run
+mapfile -t lines <data.txt         # Lines, without their newlines.
+print (len $lines)
+```
 
 ```bash no-run
 #!/bin/bash4
