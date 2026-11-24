@@ -235,7 +235,8 @@ fn plain_name(name: &str) -> bool {
 /// (`head`: its first lines, as the card read them). Linguist's rules first
 /// (by its name, and its start for names several languages share), then
 /// Magika's model (by its start and end) when the name says nothing; a
-/// plain-text name only for a language Magika is at least 90% sure of.
+/// plain-text name only for a language Magika is at least 90% sure of, or
+/// Java properties by a strict rule.
 pub fn language_of_file(path: &str, local: bool, head: &str) -> String {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let head = if local { read_head(path) } else { head.as_bytes().to_vec() };
@@ -260,10 +261,34 @@ pub fn language_of_file(path: &str, local: bool, head: &str) -> String {
             if std::env::var_os("TESSERA_DEBUG_LANG").is_some() {
                 eprintln!("tessera: magika {name}: {} ({score:.2})", t.info().label);
             }
-            if plain && score < 0.9 { String::new() } else { l.to_string() }
+            if !plain || score >= 0.9 {
+                return l.to_string();
+            }
+            // (Settings saved as .txt, as JXplorer does: Linguist calls any
+            // .txt Text, and Magika says txt. A strict rule instead.)
+            if looks_like_properties(&String::from_utf8_lossy(&head)) { "properties".to_string() } else { String::new() }
         }
         Err(_) => String::new(),
     }
+}
+
+/// Java .properties content: every line that isn't blank or a # / !
+/// comment is key=value or key: value (no spaces in the key, no [section]),
+/// at least five of them.
+fn looks_like_properties(text: &str) -> bool {
+    let mut pairs = 0;
+    for l in text.lines().map(str::trim).filter(|l| !l.is_empty()).take(400) {
+        if l.starts_with('#') || l.starts_with('!') {
+            continue;
+        }
+        let Some(i) = l.find(['=', ':']) else { return false };
+        let key = l[..i].trim_end();
+        if key.is_empty() || key.contains(char::is_whitespace) || key.starts_with('[') {
+            return false;
+        }
+        pairs += 1;
+    }
+    pairs >= 5
 }
 
 /// A file's first 64 KB (empty if it can't be read).
@@ -295,6 +320,9 @@ mod tests {
         // (Plain text stays plain; a name Linguist doesn't know: no answer.)
         assert_eq!(linguist("notes.txt", b"key=value\n").as_deref(), Some(""));
         assert_eq!(linguist("data.zzq", b"hello\n"), None);
+        assert!(super::looks_like_properties("# JXplorer\na=1\nb.c=2\nd: 3\ne=\nf=x y\n"));
+        assert!(!super::looks_like_properties("Buy milk.\na=1\nb=2\nc=3\nd=4\ne=5\n"));
+        assert!(!super::looks_like_properties("[core]\na=1\nb=2\nc=3\nd=4\ne=5\n"));
     }
 
     #[test]
