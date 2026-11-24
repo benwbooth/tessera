@@ -1,0 +1,1297 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>The tessh guide</title>
+<!-- The Guide tab's style and scripts, as Tessera renders tessh's guides
+     (qml/GuidePage.qml css(), its tab and contents scripts), for the site:
+     scripts/tessh-docs-site.sh. Taken from a page Tessera wrote. -->
+<style id='tessera-theme'>body{background:#000000;color:#d3d6db;font:14px/1.6 'Noto Sans','Segoe UI',system-ui,sans-serif;margin:0;display:flex;height:100vh;overflow:hidden}a{color:#5eb0ff}h1,h2{border-bottom:1px solid #191a1a;padding-bottom:.25em}h1{font-size:1.8em}h2{font-size:1.4em}h1,h2,h3,h4{margin:1.1em 0 .5em;line-height:1.25}code{font-family:monospace,monospace;font-size:.88em;background:#151516;padding:.15em .35em;border-radius:5px}pre{background:#151516;padding:10px 12px;border-radius:7px;overflow:auto}pre code{background:none;padding:0}table{border-collapse:collapse}th,td{border:1px solid #191a1a;padding:5px 10px}th{background:#151516}::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:#191a1a;border-radius:5px}nav{width:230px;flex:none;overflow:auto;padding:14px 10px 30px 14px;border-right:1px solid #191a1a;font-size:13px;line-height:1.35}nav .title{font-weight:bold;font-size:15px;margin-bottom:10px;color:#d3d6db}nav a{display:block;color:#d3d6db;text-decoration:none;padding:2px 6px;border-radius:5px}nav a:hover{background:#151516}nav a.part{font-weight:bold;margin-top:10px;color:#d3d6db}nav .topics a{padding-left:14px;color:#7a7c7f}main{flex:1;overflow:auto;padding:16px 28px 60px}main>*{max-width:860px}main>*{content-visibility:auto;contain-intrinsic-size:auto 80px}pre.tessh{border-left:3px solid #5eb0ff}#navsplit{flex:none;width:6px;margin-left:-3px;margin-right:-3px;cursor:col-resize;z-index:2}#navsplit:hover,#navsplit.on{background:#5eb0ff;opacity:.5}.ex-tabs{margin:.9em 0;position:relative}.ex-tabs>input{position:absolute;opacity:0;pointer-events:none}.ex-tabs>label{display:inline-block;padding:3px 14px;margin-right:3px;border-radius:7px 7px 0 0;font-size:12px;cursor:pointer;color:#7a7c7f}.ex-tabs>label:hover{color:#d3d6db}.ex-tabs>input:checked+label{background:#151516;color:#d3d6db;font-weight:bold}.ex-pane{display:none}.ex-r-bash:checked~.ex-bash,.ex-r-tessh:checked~.ex-tessh{display:block}.ex-pane>pre:first-child{margin-top:0;border-top-left-radius:0}pre.output{background:transparent;border:1px dashed #191a1a;color:#7a7c7f;margin-top:-6px}pre.output::before{content:'output';display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:2px}.t-keyword{color:#d38cff}.t-string{color:#7ee081}.t-number,.t-constant,.t-attribute{color:#ffd166}.t-function{color:#5eb0ff}.t-comment{color:#555b64;font-style:italic}.t-operator,.t-property{color:#4fd6d6}.t-variable{color:#ff5f6d}.t-punctuation{color:#7a7c7f}.t-embedded{color:#e3adff;font-weight:bold}.t-escape{color:#4fd6d6}.t-type,.t-constructor,.t-tag,.t-label,.t-namespace,.t-module{color:#ffd166}main li{margin:.5em 0}.hit{color:#7a7c7f;font-size:13px}.note{color:#7a7c7f}img{max-width:100%}blockquote{margin:.6em 0;padding:.2em 1em;border-left:3px solid #191a1a;color:#7a7c7f}main>blockquote:first-child{border-left-color:#5eb0ff;font-size:12.5px}.msg{margin:40px auto;max-width:520px;color:#7a7c7f;font-size:15px;text-align:center}h1:target,h2:target,h3:target{color:#5eb0ff}nav .guides{display:flex;gap:6px;margin:0 0 12px}nav .guides a{flex:1;text-align:center;border:1px solid #191a1a;padding:4px 6px}nav .guides a.on{background:#151516;font-weight:bold}nav .home{font-size:12px;margin:0 0 10px}</style>
+<script>document.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(!a)return;const t=document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)));if(t){e.preventDefault();t.scrollIntoView({block:'start'});history.replaceState(null,'',a.getAttribute('href'))}})</script>
+<script>document.addEventListener('DOMContentLoaded',()=>{const nav=document.querySelector('nav');if(!nav)return;const sp=document.createElement('div');sp.id='navsplit';sp.title='Drag to resize the contents';nav.after(sp);sp.addEventListener('mousedown',ev=>{if(ev.button!==0)return;ev.preventDefault();const x0=ev.clientX,w0=nav.getBoundingClientRect().width;sp.classList.add('on');document.body.style.cursor='col-resize';document.body.style.userSelect='none';const mv=e=>{nav.style.width=Math.max(140,Math.min(700,w0+e.clientX-x0))+'px'};const up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);sp.classList.remove('on');document.body.style.cursor='';document.body.style.userSelect='';console.log('tessera-navw:'+Math.round(nav.getBoundingClientRect().width))};addEventListener('mousemove',mv);addEventListener('mouseup',up)});sp.addEventListener('dblclick',()=>{nav.style.width='230px';console.log('tessera-navw:230')})})</script>
+<script>let exY=null;document.addEventListener('pointerdown',e=>{const l=e.target.closest('.ex-tabs>label');exY=l?l.parentElement.getBoundingClientRect().top:null},true);document.addEventListener('change',e=>{const t=e.target;if(!t.matches('.ex-tabs>input'))return;const box=t.closest('.ex-tabs'),y=exY!==null?exY:box.getBoundingClientRect().top;exY=null;document.querySelectorAll('.ex-tabs>input.'+t.className).forEach(i=>{if(i!==t)i.checked=true});let sc=box.parentElement;while(sc&&!(sc.scrollHeight>sc.clientHeight&&/auto|scroll/.test(getComputedStyle(sc).overflowY)))sc=sc.parentElement;(sc||document.scrollingElement).scrollTop+=box.getBoundingClientRect().top-y;console.log('tessera-tabs:'+t.className)})</script>
+</head><body><nav><div class='home'><a href='https://github.com/benwbooth/tessera/tree/main/tessh'>tessh on GitHub</a></div><div class='guides'><a href='index.html' class="on">Guide</a><a href='advanced.html'>Advanced</a></div><div class='title'>Contents</div><a class='part' href='#tessh-guide'>tessh guide</a><div class='topics'></div><a class='part' href='#words-and-values'>Words and values</a><div class='topics'><a href='#words'>Words</a><a href='#numbers'>Numbers</a><a href='#strings'>Strings</a><a href='#variables'>Variables</a></div><a class='part' href='#calls-and-structure'>Calls and structure</a><div class='topics'><a href='#calls'>Calls</a><a href='#lines'>Lines</a><a href='#operators'>Operators</a><a href='#custom-operators'>Custom operators</a></div><a class='part' href='#commands'>Commands</a><div class='topics'><a href='#commands-12'>Commands</a><a href='#globs'>Globs</a><a href='#regexes'>Regexes</a><a href='#pipes'>Pipes</a><a href='#and-or-then'>And, or, then</a><a href='#redirections'>Redirections</a><a href='#jobs'>Jobs</a><a href='#environment-and-folders'>Environment and folders</a></div><a class='part' href='#python-written-as-tessh'>Python, written as tessh</a><div class='topics'><a href='#assignment'>Assignment</a><a href='#functions'>Functions</a><a href='#conditionals'>Conditionals</a><a href='#loops'>Loops</a><a href='#collections'>Collections</a><a href='#comprehensions'>Comprehensions</a><a href='#classes'>Classes</a><a href='#errors'>Errors</a><a href='#with'>With</a><a href='#match'>Match</a><a href='#imports'>Imports</a><a href='#do'>Do</a><a href='#statements'>Statements</a></div><a class='part' href='#from-clojure'>From Clojure</a><div class='topics'><a href='#methods'>Methods</a><a href='#threading'>Threading</a><a href='#doto'>Doto</a><a href='#keywords'>Keywords</a><a href='#destructuring'>Destructuring</a><a href='#short-functions'>Short functions</a><a href='#discard'>Discard</a><a href='#core-functions'>Core functions</a></div><a class='part' href='#from-hy'>From Hy</a><div class='topics'><a href='#modules'>Modules</a><a href='#require'>Require</a><a href='#let'>Let</a><a href='#python-inline'>Python inline</a></div><a class='part' href='#macros'>Macros</a><div class='topics'><a href='#macros-49'>Macros</a><a href='#forms'>Forms</a></div><a class='part' href='#running-tessh'>Running tessh</a><div class='topics'><a href='#dependencies'>Dependencies</a><a href='#the-repl'>The REPL</a><a href='#keys-a-terminal-cant-send'>Keys a terminal can't send</a><a href='#the-ai'>The AI</a><a href='#the-guide-in-a-terminal'>The guide in a terminal</a><a href='#a-tessh-for-any-linux'>A tessh for any Linux</a><a href='#tessh-as-your-login-shell'>tessh as your login shell</a><a href='#scripts-and-checks'>Scripts and checks</a><a href='#notebooks'>Notebooks</a></div></nav><main><h1 id='tessh-guide'>tessh guide</h1>
+<p>tessh is a shell language that is Python underneath. You write it like a
+shell: one command per line, words separated by spaces, no commas and no
+call parentheses. Every line compiles to Python, so all of Python and every
+Python library work in it. Indentation gives the structure.</p>
+<pre class='tessh'><code><span class="t-function">print</span> hello world
+<span class="t-function">name</span> <span class="t-operator">=</span> tessh
+<span class="t-function">print</span> <span class="t-string">"hi from </span><span class="t-variable">$name</span><span class="t-string">"</span>
+<span class="t-function">echo</span> a program runs too</code></pre><pre class='output'><code>hello world
+hi from tessh
+a program runs too</code></pre>
+<p><code>help TOPIC</code> shows a topic, for example <code>help pipes</code>. <code>help $obj</code> shows
+Python's help for a value, such as <code>help $str.split</code>. Every example here is
+checked: the <code>output</code> under it is what it printed.</p>
+<h1 id='words-and-values'>Words and values</h1><h2 id='words'>Words</h2>
+<p>A <strong>bareword</strong> is text without quotes. As an argument it's the string it
+spells. Flags, paths, globs and file names are all barewords.</p>
+<pre class='tessh'><code><span class="t-function">print</span> hello <span class="t-attribute">-a</span> <span class="t-attribute">--all</span> <span class="t-attribute">--color=auto</span> ./run.sh ../x /etc/hosts foo.txt g++
+<span class="t-function">x</span> <span class="t-operator">=</span> hello
+<span class="t-function">print</span> <span class="t-punctuation">(</span>type <span class="t-variable">$x</span><span class="t-punctuation">)</span>.__name__ <span class="t-variable">$x</span></code></pre><pre class='output'><code>hello -a --all --color=auto ./run.sh ../x /etc/hosts foo.txt g++
+str hello</code></pre>
+<p>A backslash takes the next space or special character into the word, as in a
+shell: <code>7th\ Heaven/</code>, <code>\$5</code>, <code>a\;b</code>, <code>\*</code> (not a glob). At the end of a line
+it carries the line on to the next.</p>
+<pre class='tessh'><code><span class="t-function">print</span> 7th\ Heaven/ <span class="t-function">\$5</span> a\;b <span class="t-function">\*</span>
+<span class="t-function">echo</span> one \
+  two</code></pre><pre class='output'><code>7th Heaven/ $5 a;b *
+one two</code></pre>
+<p>Operator characters glued to other text are part of the word. Spaced, they're
+operators.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-attribute">-la</span> *.nothing a+b c++
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-number">1</span> <span class="t-operator">+</span> <span class="t-number">2</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>-la *.nothing a+b c++
+3</code></pre>
+<p>A bareword written as a path — starting with <code>/</code>, <code>~</code>, <code>./</code> or <code>../</code> — is a
+<strong>Path</strong>: a <code>pathlib</code> path, so <code>$p.name</code>, <code>$p.parent</code>, <code>$p / more</code> and
+<code>$p.exists</code> work. It keeps how it was written, which is what a command, <code>print</code>
+and <code>"$p"</code> get, and <code>~</code> is your home. <code>+</code> joins it as text; <code>Path 'x y'</code> makes
+one from text.</p>
+<pre class='tessh'><code><span class="t-function">p</span> <span class="t-operator">=</span> /tmp/notes/todo.txt
+<span class="t-function">print</span> <span class="t-punctuation">(</span>type <span class="t-variable">$p</span><span class="t-punctuation">)</span>.__name__ <span class="t-variable">$p.name</span> <span class="t-variable">$p.parent</span> <span class="t-variable">$p.suffix</span> <span class="t-punctuation">(</span><span class="t-variable">$p</span> <span class="t-operator">/</span> more<span class="t-punctuation">)</span>
+<span class="t-function">r</span> <span class="t-operator">=</span> ./run.sh
+<span class="t-function">print</span> <span class="t-variable">$r</span> <span class="t-string">"in </span><span class="t-variable">$r</span><span class="t-string">"</span> <span class="t-punctuation">(</span><span class="t-variable">$r</span> <span class="t-operator">+</span> .bak<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>Path <span class="t-string">'a b'</span> <span class="t-operator">/</span> c<span class="t-punctuation">)</span></code></pre><pre class='output'><code>Path todo.txt /tmp/notes .txt /tmp/notes/todo.txt/more
+./run.sh in ./run.sh ./run.sh.bak a b/c</code></pre>
+<p><code>True</code>, <code>False</code> and <code>None</code> are Python's constants.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-constant">True</span> <span class="t-constant">False</span> <span class="t-constant">None</span></code></pre><pre class='output'><code>True False None</code></pre><h2 id='numbers'>Numbers</h2>
+<p>Anything Python reads as a number is one.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-number">42</span> <span class="t-number">-7</span> <span class="t-number">0x1f</span> <span class="t-number">0b101</span> <span class="t-number">0o17</span> <span class="t-number">1_000</span> <span class="t-number">2.5e3</span> <span class="t-number">3j</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>type <span class="t-number">2.5</span><span class="t-punctuation">)</span>.__name__ <span class="t-punctuation">(</span>type <span class="t-number">42</span><span class="t-punctuation">)</span>.__name__</code></pre><pre class='output'><code>42 -7 31 5 15 1000 2500.0 3j
+float int</code></pre><h2 id='strings'>Strings</h2>
+<p>Double quotes interpolate <code>$name</code>, <code>$(form)</code> and <code>${expr}</code> and understand the
+usual escapes. Single quotes are raw: no escapes and no interpolation.</p>
+<pre class='tessh'><code><span class="t-function">name</span> <span class="t-operator">=</span> world
+<span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-number">3.14159</span>
+<span class="t-function">print</span> <span class="t-string">"hello </span><span class="t-variable">$name</span><span class="t-string">"</span>
+<span class="t-function">print</span> <span class="t-string">"two plus two is </span><span class="t-embedded">$(</span><span class="t-number">2</span> <span class="t-operator">+</span> <span class="t-number">2</span><span class="t-embedded">)</span><span class="t-string">"</span>
+<span class="t-function">print</span> <span class="t-string">"pi is </span><span class="t-embedded">${</span><span class="t-variable">n</span><span class="t-attribute">:.2f</span><span class="t-embedded">}</span><span class="t-string">"</span>
+<span class="t-function">print</span> <span class="t-string">"tab:</span><span class="t-escape">\t</span><span class="t-string">| newline escaped: </span><span class="t-escape">\\</span><span class="t-string">n | dollar: </span><span class="t-escape">\$</span><span class="t-string">name"</span>
+<span class="t-function">print</span> <span class="t-string">'raw: $name \n'</span></code></pre><pre class='output'><code>hello world
+two plus two is 4
+pi is 3.14
+tab:	| newline escaped: \n | dollar: $name
+raw: $name \n</code></pre>
+<p><code>${…}</code> takes any expression, a <code>!r</code> or <code>!s</code> conversion and a format spec, as
+f-strings do. Use it to glue text right after a variable.</p>
+<pre class='tessh'><code><span class="t-function">items</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span>a b<span class="t-punctuation">]</span>
+<span class="t-function">file</span> <span class="t-operator">=</span> notes
+<span class="t-function">print</span> <span class="t-string">"</span><span class="t-embedded">${</span><span class="t-variable">file</span><span class="t-embedded">}</span><span class="t-string">.txt"</span> <span class="t-string">"</span><span class="t-embedded">${</span><span class="t-variable">items</span><span class="t-attribute">!r</span><span class="t-embedded">}</span><span class="t-string">"</span> <span class="t-string">"</span><span class="t-embedded">${</span><span class="t-function">len</span> <span class="t-variable">$items</span><span class="t-embedded">}</span><span class="t-string">"</span></code></pre><pre class='output'><code>notes.txt ['a', 'b'] 2</code></pre>
+<p>Triple quotes span lines. <code>b"…"</code> is bytes and <code>r"…"</code> a raw string.</p>
+<pre class='tessh'><code><span class="t-function">text</span> <span class="t-operator">=</span> <span class="t-string">"""one
+two"""</span>
+<span class="t-function">print</span> <span class="t-variable">$text</span>
+<span class="t-function">print</span> <span class="t-string">b"bytes"</span> <span class="t-string">r"raw\n"</span></code></pre><pre class='output'><code>one
+two
+b'bytes' raw\n</code></pre><h2 id='variables'>Variables</h2>
+<p><code>$name</code> is the variable <code>name</code>. Attribute access, indexing and slicing glue
+on.</p>
+<pre class='tessh'><code><span class="t-function">xs</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span><span class="t-number">10</span> <span class="t-number">20</span> <span class="t-number">30</span> <span class="t-number">40</span><span class="t-punctuation">]</span>
+<span class="t-function">d</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>k: v<span class="t-punctuation">}</span>
+<span class="t-function">print</span> <span class="t-variable">$xs</span><span class="t-punctuation">[</span><span class="t-number">0</span><span class="t-punctuation">]</span> <span class="t-variable">$xs</span><span class="t-punctuation">[</span>1:3<span class="t-punctuation">]</span> <span class="t-variable">$xs</span><span class="t-punctuation">[</span><span class="t-number">-1</span><span class="t-punctuation">]</span> <span class="t-variable">$d</span><span class="t-punctuation">[</span>k<span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-variable">$xs.__len__</span> <span class="t-punctuation">(</span><span class="t-string">"a,b"</span>.split <span class="t-string">","</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>10 [20 30] 40 v
+&lt;method-wrapper '__len__' of list object at ADDR&gt; ['a' 'b']</code></pre>
+<p>Call a method by giving it its arguments, or by putting it alone on a line or
+alone in parentheses.</p>
+<pre class='tessh'><code><span class="t-function">s</span> <span class="t-operator">=</span> <span class="t-string">"Hello"</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$s.upper</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$s.replace</span> l L<span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$s.count</span> l<span class="t-punctuation">)</span></code></pre><pre class='output'><code>HELLO HeLLo 2</code></pre>
+<p>A <code>$name</code> that isn't a Python name is the environment variable, and <code>$?</code> is
+the last command's exit status.</p>
+<pre class='tessh'><code><span class="t-function">export</span> <span class="t-property">GREETING=hey</span>
+<span class="t-function">print</span> <span class="t-variable">$GREETING</span>
+<span class="t-function">false</span>
+<span class="t-function">print</span> <span class="t-variable">$?</span>
+<span class="t-function">true</span>
+<span class="t-function">print</span> <span class="t-variable">$?</span></code></pre><pre class='output'><code>hey
+1
+0</code></pre>
+<p>Glued text joins into one word: <code>$HOME/src</code>, <code>out-$n</code>. After a variable a
+glued <code>.name</code> is an attribute, so write <code>${n}.log</code> for "n, then <code>.log</code>".</p>
+<pre class='tessh'><code><span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-number">7</span>
+<span class="t-function">print</span> out-$<span class="t-punctuation">{</span>n<span class="t-punctuation">}</span>.log file_$n</code></pre><pre class='output'><code>out-7.log file_7</code></pre><h1 id='calls-and-structure'>Calls and structure</h1><h2 id='calls'>Calls</h2>
+<p>A call is the function then its arguments, spaced: <code>f a b c</code>.</p>
+<pre class='tessh'><code><span class="t-function">def</span> add a b
+  <span class="t-variable">$a</span> <span class="t-operator">+</span> <span class="t-variable">$b</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>add <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>max <span class="t-number">3</span> <span class="t-number">9</span> <span class="t-number">4</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>3
+9</code></pre>
+<p>Applying a function binds tighter than any operator, as in Haskell. Wrap a
+calculation in parentheses to pass its value.</p>
+<pre class='tessh'><code><span class="t-function">n</span> <span class="t-operator">=</span> len <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span> <span class="t-operator">+</span> <span class="t-number">1</span>         <span class="t-comment"># (len [1 2]) + 1</span>
+<span class="t-function">print</span> <span class="t-variable">$n</span> <span class="t-punctuation">(</span>len <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">((</span>len <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">])</span> <span class="t-operator">*</span> <span class="t-number">10</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>3 3 20</code></pre>
+<p>So <code>print $x + 1</code> is <code>(print $x) + 1</code>: write <code>print ($x + 1)</code>.</p>
+<p>Keyword arguments are <code>name=value</code>, glued. <code>*$xs</code> and <code>**$kw</code> splat.</p>
+<pre class='tessh'><code><span class="t-function">print</span> a b c <span class="t-property">sep=-</span>
+<span class="t-function">args</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]</span>
+<span class="t-function">opts</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>sep: <span class="t-string">"/"</span><span class="t-punctuation">}</span>
+<span class="t-function">print</span> *$args **$opts</code></pre><pre class='output'><code>a-b-c
+1/2/3</code></pre>
+<p>A function with no arguments is called when it stands alone on its line or
+alone in parentheses.</p>
+<pre class='tessh'><code><span class="t-function">import</span> os
+<span class="t-function">here</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>os.getcwd<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">((</span>len <span class="t-variable">$here</span><span class="t-punctuation">)</span> <span class="t-operator">&gt;</span> <span class="t-number">0</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>True</code></pre>
+<p>Indented lines under a call are more arguments, one per line.</p>
+<pre class='tessh'><code><span class="t-function">print</span>
+  <span class="t-function">one</span>
+  <span class="t-function">two</span>
+  <span class="t-property">sep=</span><span class="t-string">", "</span></code></pre><pre class='output'><code>one, two</code></pre>
+<p>An operator at the head of parentheses applies it Lisp-style.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-operator">+</span> <span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-operator">-</span> <span class="t-number">10</span> <span class="t-number">4</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-operator">-</span> <span class="t-number">5</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-operator">*</span> <span class="t-number">2</span> <span class="t-number">3</span> <span class="t-number">4</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>6 6 -5 24</code></pre><h2 id='lines'>Lines</h2>
+<p>Each line is a form. <code>;</code> separates forms on one line, a trailing <code>\</code> or an
+open bracket continues a line, and <code>#</code> starts a comment.</p>
+<pre class='tessh'><code><span class="t-function">a</span> <span class="t-operator">=</span> <span class="t-number">1</span> <span class="t-punctuation">;</span> b <span class="t-operator">=</span> <span class="t-number">2</span>   <span class="t-comment"># two forms on one line</span>
+<span class="t-function">total</span> <span class="t-operator">=</span> <span class="t-variable">$a</span> <span class="t-operator">+</span> \
+  <span class="t-variable">$b</span>
+<span class="t-function">nums</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span>
+        <span class="t-number">3</span> <span class="t-number">4</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-variable">$total</span> <span class="t-variable">$nums</span></code></pre><pre class='output'><code>3 [1 2 3 4]</code></pre>
+<p>Commas separate only when a space, a bracket or the end follows. Inside words
+they're text.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">[</span><span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-number">2</span><span class="t-punctuation">]</span> cut-f1<span class="t-punctuation">,</span><span class="t-number">3</span></code></pre><pre class='output'><code>[1 2] cut-f1,3</code></pre>
+<p>Indent with spaces; tabs are an error. <code>elif</code>, <code>else</code>, <code>except</code> and <code>finally</code>
+continue the form above them at the same indentation.</p>
+<h2 id='operators'>Operators</h2>
+<p>Python's operators, spaced, with Python's precedence. Comparisons chain.</p>
+<pre class='tessh'><code><span class="t-function">import</span> operator
+<span class="t-function">x</span> <span class="t-operator">=</span> <span class="t-number">4</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-number">1</span> <span class="t-operator">+</span> <span class="t-number">2</span> <span class="t-operator">*</span> <span class="t-number">3</span> <span class="t-operator">**</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-number">7</span> <span class="t-operator">//</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-number">7</span> <span class="t-operator">%</span> <span class="t-number">3</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-number">2</span> <span class="t-operator">**</span> <span class="t-number">10</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-number">7</span> <span class="t-operator">/</span> <span class="t-number">2</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-number">1</span> <span class="t-operator">&lt;</span> <span class="t-variable">$x</span> <span class="t-operator">&lt;</span> <span class="t-number">5</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$x</span> <span class="t-keyword">in</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">4</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span><span class="t-variable">$x</span> <span class="t-keyword">not</span> <span class="t-keyword">in</span> <span class="t-punctuation">[</span><span class="t-number">1</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span><span class="t-variable">$x</span> <span class="t-keyword">is</span> <span class="t-constant">None</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$x</span> <span class="t-keyword">is</span> <span class="t-keyword">not</span> <span class="t-constant">None</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-number">5</span> <span class="t-operator">&amp;</span> <span class="t-number">3</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-number">5</span> <span class="t-operator">^</span> <span class="t-number">3</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-number">1</span> <span class="t-operator">&lt;&lt;</span> <span class="t-number">4</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-number">256</span> <span class="t-operator">&gt;&gt;</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>operator.invert <span class="t-number">5</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-constant">True</span> <span class="t-keyword">and</span> <span class="t-constant">False</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-constant">True</span> <span class="t-keyword">or</span> <span class="t-constant">False</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-keyword">not</span> <span class="t-constant">True</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-constant">True</span> <span class="t-operator">&amp;&amp;</span> <span class="t-constant">False</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-constant">True</span> <span class="t-operator">||</span> <span class="t-constant">False</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-operator">!</span> <span class="t-constant">False</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>19 3 1 1024 3.5
+True True True False True
+1 6 16 64 -6
+False True False
+False True True</code></pre>
+<p>From the loosest to the tightest: <code>||</code> <code>or</code>, <code>&amp;&amp;</code> <code>and</code>, <code>not</code> <code>!</code>, <code>|</code>,
+comparisons, backtick and custom operators, <code>^</code>, <code>&amp;</code>, <code>&lt;&lt;</code> <code>&gt;&gt;</code>, <code>+</code> <code>-</code>,
+<code>*</code> <code>/</code> <code>//</code> <code>%</code> <code>@</code>, prefix <code>-x</code> <code>+x</code>, <code>**</code>, application, then glued
+<code>.attr</code> and <code>[i]</code>. (<code>~</code> is your home folder and a macro's unquote, so
+bitwise not is <code>operator.invert</code>.)</p>
+<p>Prefix minus: spaced, or glued to a variable or a bracket.</p>
+<pre class='tessh'><code><span class="t-function">x</span> <span class="t-operator">=</span> <span class="t-number">5</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-operator">-</span> <span class="t-variable">$x</span><span class="t-punctuation">)</span> -$x <span class="t-operator">-</span><span class="t-punctuation">(</span><span class="t-number">2</span> <span class="t-operator">+</span> <span class="t-number">1</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>-5 -5 -3</code></pre>
+<p><code>if … then … else …</code> is the conditional expression, and <code>:=</code> works inside
+parentheses.</p>
+<pre class='tessh'><code><span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-number">12</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-keyword">if</span> <span class="t-variable">$n</span> <span class="t-operator">&gt;</span> <span class="t-number">10</span> <span class="t-keyword">then</span> big <span class="t-keyword">else</span> small<span class="t-punctuation">)</span>
+<span class="t-function">if</span> <span class="t-punctuation">(</span>m <span class="t-operator">:=</span> <span class="t-variable">$n</span> <span class="t-operator">*</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-operator">&gt;</span> <span class="t-number">20</span>
+  <span class="t-function">print</span> <span class="t-variable">$m</span></code></pre><pre class='output'><code>big
+24</code></pre>
+<p>In a command, operators other than the shell's are words.</p>
+<pre class='tessh'><code><span class="t-function">echo</span> <span class="t-number">1</span> <span class="t-operator">+</span> <span class="t-number">2</span> <span class="t-keyword">is</span> three</code></pre><pre class='output'><code>1 + 2 is three</code></pre><h2 id='custom-operators'>Custom operators</h2>
+<p>Backticks make any function infix.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-number">3</span> <span class="t-operator">`max`</span> <span class="t-number">9</span><span class="t-punctuation">)</span> <span class="t-punctuation">([</span><span class="t-number">1</span><span class="t-punctuation">]</span> <span class="t-operator">`list.__add__`</span> <span class="t-punctuation">[</span><span class="t-number">2</span><span class="t-punctuation">])</span></code></pre><pre class='output'><code>9 [1 2]</code></pre>
+<p><code>defop</code> defines a symbolic operator: its precedence (1 loosest to 13
+tightest, 6 is the custom level), its associativity (<code>left</code>, <code>right</code> or
+<code>none</code>) and its function.</p>
+<pre class='tessh'><code><span class="t-function">def</span> concat a b
+  <span class="t-variable">$a</span> <span class="t-operator">+</span> <span class="t-variable">$b</span>
+<span class="t-function">defop</span> <span class="t-operator">&lt;&gt;</span> <span class="t-number">6</span> left concat
+<span class="t-function">def</span> power a b
+  <span class="t-variable">$a</span> <span class="t-operator">**</span> <span class="t-variable">$b</span>
+<span class="t-function">defop</span> <span class="t-operator">^^</span> <span class="t-number">12</span> right power
+<span class="t-function">print</span> <span class="t-punctuation">([</span><span class="t-number">1</span><span class="t-punctuation">]</span> <span class="t-operator">&lt;&gt;</span> <span class="t-punctuation">[</span><span class="t-number">2</span><span class="t-punctuation">]</span> <span class="t-operator">&lt;&gt;</span> <span class="t-punctuation">[</span><span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span><span class="t-number">2</span> <span class="t-operator">^^</span> <span class="t-number">3</span> <span class="t-operator">^^</span> <span class="t-number">2</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>[1 2 3] 512</code></pre><h1 id='commands'>Commands</h1><h2 id='commands-12'>Commands</h2>
+<p>A line whose first word isn't a Python name runs a program. Its arguments
+are words: barewords, <code>$values</code>, <code>(forms)</code>.</p>
+<pre class='tessh'><code><span class="t-function">echo</span> hello <span class="t-keyword">from</span> echo
+<span class="t-function">name</span> <span class="t-operator">=</span> tessh
+<span class="t-function">echo</span> hi <span class="t-variable">$name</span> <span class="t-punctuation">(</span><span class="t-number">1</span> <span class="t-operator">+</span> <span class="t-number">1</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>hello from echo
+hi tessh 2</code></pre>
+<p>A command on a line of its own is <strong>attached</strong>: its output goes straight to
+the terminal. Used as a value, it's <strong>captured</strong>: you get its output as text,
+without the final newline.</p>
+<pre class='tessh'><code><span class="t-function">who</span> <span class="t-operator">=</span> echo captured
+<span class="t-function">print</span> got <span class="t-variable">$who</span>
+<span class="t-function">out</span> <span class="t-operator">=</span> printf <span class="t-string">"a</span><span class="t-escape">\n</span><span class="t-string">b</span><span class="t-escape">\n</span><span class="t-string">c</span><span class="t-escape">\n</span><span class="t-string">"</span>
+<span class="t-function">print</span> <span class="t-variable">$out.lines</span></code></pre><pre class='output'><code>got captured
+['a' 'b' 'c']</code></pre>
+<p>What a command returns is an <code>Output</code>: a <code>str</code> with <code>.code</code> (the exit
+status), <code>.ok</code> and <code>.lines</code>. Its truth is the exit status. Errors it prints go
+to the terminal; <code>2&gt;&amp;1</code> captures them too.</p>
+<pre class='tessh'><code><span class="t-function">r</span> <span class="t-operator">=</span> sh <span class="t-attribute">-c</span> <span class="t-string">"echo out; exit 3"</span>
+<span class="t-function">print</span> <span class="t-variable">$r</span> <span class="t-variable">$r.code</span> <span class="t-variable">$r.ok</span> <span class="t-punctuation">(</span>bool <span class="t-variable">$r</span><span class="t-punctuation">)</span>
+<span class="t-function">ok</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>true<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>bool <span class="t-variable">$ok</span><span class="t-punctuation">)</span> <span class="t-variable">$ok.code</span>
+<span class="t-function">both</span> <span class="t-operator">=</span> sh <span class="t-attribute">-c</span> <span class="t-string">"echo out; echo err &gt;&amp;2"</span> <span class="t-operator">2&gt;&amp;1</span>
+<span class="t-function">print</span> <span class="t-variable">$both.lines</span></code></pre><pre class='output'><code>out 3 False False
+True 0
+['out' 'err']</code></pre>
+<p>A list inserts one argument per item. Quoted strings aren't split.</p>
+<pre class='tessh'><code><span class="t-function">args</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span>one two<span class="t-punctuation">]</span>
+<span class="t-function">printf</span> <span class="t-string">"&lt;%s&gt;"</span> <span class="t-variable">$args</span>
+<span class="t-function">echo</span>
+<span class="t-function">printf</span> <span class="t-string">"%s|"</span> <span class="t-string">"a b"</span> c
+<span class="t-function">echo</span></code></pre><pre class='output'><code>&lt;one&gt;&lt;two&gt;
+a b|c|</code></pre>
+<p><code>\name</code> runs the program even when a Python function has that name.</p>
+<pre class='tessh'><code><span class="t-function">def</span> echo *words
+  <span class="t-function">print</span> python echo
+<span class="t-function">echo</span> x
+<span class="t-function">\echo</span> program echo</code></pre><pre class='output'><code>python echo
+program echo</code></pre>
+<p>A name tessh doesn't know is looked up when it runs, so functions defined in
+other ways still work. Your own function reads its arguments as words, globs
+included, with <code>@command</code>.</p>
+<pre class='tessh'><code><span class="t-function">@command</span>
+<span class="t-function">def</span> shout *words
+  <span class="t-function">print</span> <span class="t-punctuation">(</span>str.upper <span class="t-punctuation">(</span><span class="t-string">' '</span>.join <span class="t-variable">$words</span><span class="t-punctuation">))</span>
+<span class="t-function">shout</span> hello *.nothing-matches</code></pre><pre class='output'><code>HELLO *.NOTHING-MATCHES</code></pre><h2 id='globs'>Globs</h2>
+<p><code>*</code>, <code>?</code> and <code>[…]</code> in a command's words expand to the matching names, sorted.
+No match leaves the word as written. <code>~</code> at the start is your home folder.</p>
+<pre class='tessh'><code><span class="t-function">touch</span> a.py b.py c.txt
+<span class="t-function">echo</span> *.py
+<span class="t-function">echo</span> ?.txt
+<span class="t-function">echo</span> *.none
+<span class="t-function">print</span> <span class="t-punctuation">(</span>glob *.py<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">((</span>echo ~/x<span class="t-punctuation">)</span> <span class="t-operator">==</span> <span class="t-string">"</span><span class="t-variable">$HOME</span><span class="t-string">/x"</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>a.py b.py
+c.txt
+*.none
+['a.py' 'b.py']
+True</code></pre>
+<p>To Python, a pattern written bare is a <strong>Glob</strong>. There's no glob object in
+Python itself (<code>glob.glob</code> and <code>Path.glob</code> are functions), so tessh has its
+own. Iterating it gives the matching paths, sorted and read again each time.
+<code>len</code>, <code>in</code> and <code>[i]</code> work, and printed (or in <code>"$g"</code>) it's the names, as
+<code>echo</code> shows them. Quote a pattern to keep it text: <code>'*.py'</code>.</p>
+<pre class='tessh'><code><span class="t-function">touch</span> a.py b.py
+<span class="t-function">g</span> <span class="t-operator">=</span> *.py
+<span class="t-function">print</span> <span class="t-variable">$g</span> <span class="t-punctuation">(</span>len <span class="t-variable">$g</span><span class="t-punctuation">)</span> <span class="t-punctuation">([</span><span class="t-variable">$p.stem</span> <span class="t-keyword">for</span> p <span class="t-keyword">in</span> <span class="t-variable">$g</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>repr <span class="t-variable">$g</span><span class="t-punctuation">)</span>
+<span class="t-function">f</span> <span class="t-operator">=</span> ./a.py
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$f</span> <span class="t-keyword">in</span> <span class="t-variable">$g</span><span class="t-punctuation">)</span> <span class="t-variable">$g</span><span class="t-punctuation">[</span><span class="t-number">0</span><span class="t-punctuation">]</span> <span class="t-string">"found: </span><span class="t-variable">$g</span><span class="t-string">"</span></code></pre><pre class='output'><code>a.py b.py 2 ['a' 'b'] Glob('*.py')
+True a.py found: a.py b.py</code></pre><h2 id='regexes'>Regexes</h2>
+<p><code>re'…'</code> (or <code>re"…"</code>) is a regular expression: raw, so <code>\d</code> means a digit,
+compiled once. Perl's flags go after it: <code>i</code> ignores case, <code>m</code> makes <code>^</code> and
+<code>$</code> match at every line, <code>s</code> lets <code>.</code> match a newline, <code>x</code> allows spaces and
+comments, <code>a</code> keeps <code>\w</code> to ASCII. It's Python's <code>re.Pattern</code>, so <code>.sub</code>,
+<code>.findall</code>, <code>.split</code> and the <code>re</code> module all work with it.</p>
+<p><code>=~</code> matches and <code>!~</code> doesn't. What it does depends on what's on the right:</p>
+<ul>
+<li>a regex (<code>re'…'</code>): searched for anywhere in the text; the match (with its
+groups) or <code>None</code>.</li>
+<li>a glob (an unquoted word with wildcards, <code>*.py</code>): whether the whole name
+or path fits it; <code>True</code> or <code>False</code>.</li>
+<li>anything else, such as quoted text: whether the text has it in it, as is
+(<code>$</code>, <code>.</code>, <code>*</code> mean themselves); <code>True</code> or <code>False</code>.</li>
+</ul>
+<pre class='tessh'><code><span class="t-function">line</span> <span class="t-operator">=</span> <span class="t-string">"Build 42 ok"</span>
+<span class="t-function">m</span> <span class="t-operator">=</span> <span class="t-variable">$line</span> <span class="t-operator">=~</span> <span class="t-string">re'(\d+)'</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$m.group</span> <span class="t-number">1</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$m.start</span> <span class="t-number">1</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$line</span> <span class="t-operator">!~</span> <span class="t-string">re'^\d+$'</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>bool <span class="t-punctuation">(</span><span class="t-variable">$line</span> <span class="t-operator">=~</span> <span class="t-string">re'^build'i</span><span class="t-punctuation">))</span> <span class="t-punctuation">(</span>bool <span class="t-punctuation">(</span><span class="t-variable">$line</span> <span class="t-operator">=~</span> <span class="t-string">re'^build'</span><span class="t-punctuation">))</span>
+<span class="t-function">f</span> <span class="t-operator">=</span> ./main.py
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$f</span> <span class="t-operator">=~</span> *.py<span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$f</span> <span class="t-operator">!~</span> *.rs<span class="t-punctuation">)</span>
+<span class="t-function">if</span> <span class="t-variable">$line</span> <span class="t-operator">=~</span> <span class="t-string">re'ok$'</span>
+  <span class="t-function">print</span> done
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$line</span> <span class="t-operator">=~</span> <span class="t-string">'ok'</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$line</span> <span class="t-operator">=~</span> <span class="t-string">'ok$'</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-string">re'o'</span>.sub <span class="t-string">'0'</span> <span class="t-variable">$line</span><span class="t-punctuation">)</span> <span class="t-string">re'\w+'i</span></code></pre><pre class='output'><code>42 6 True
+True False
+True True
+done
+True False
+Build 42 0k re'\w+'i</code></pre><h2 id='pipes'>Pipes</h2>
+<p><code>|</code> pipes one program's output into the next, as in a shell.</p>
+<pre class='tessh'><code><span class="t-function">printf</span> <span class="t-string">"b</span><span class="t-escape">\n</span><span class="t-string">a</span><span class="t-escape">\n</span><span class="t-string">c</span><span class="t-escape">\n</span><span class="t-string">"</span> <span class="t-operator">|</span> sort <span class="t-operator">|</span> head <span class="t-number">-2</span>
+<span class="t-function">n</span> <span class="t-operator">=</span> printf <span class="t-string">"x</span><span class="t-escape">\n</span><span class="t-string">y</span><span class="t-escape">\n</span><span class="t-string">"</span> <span class="t-operator">|</span> wc <span class="t-attribute">-l</span>
+<span class="t-function">print</span> lines: <span class="t-punctuation">(</span><span class="t-variable">$n.strip</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>a
+b
+lines: 2</code></pre>
+<p>A stage can be a Python call. It gets what came before as its last argument:
+the text, or the earlier Python value itself.</p>
+<pre class='tessh'><code><span class="t-function">echo</span> hello <span class="t-operator">|</span> str.upper <span class="t-operator">|</span> print
+<span class="t-function">print</span> <span class="t-punctuation">(</span>printf <span class="t-string">"3</span><span class="t-escape">\n</span><span class="t-string">1</span><span class="t-escape">\n</span><span class="t-string">2</span><span class="t-escape">\n</span><span class="t-string">"</span> <span class="t-operator">|</span> str.split <span class="t-operator">|</span> sorted<span class="t-punctuation">)</span>
+<span class="t-function">import</span> json
+<span class="t-function">echo</span> <span class="t-string">'{"a": [1, 2]}'</span> <span class="t-operator">|</span> json.loads <span class="t-operator">|</span> print</code></pre><pre class='output'><code>HELLO
+['1' '2' '3']
+{a: [1 2]}</code></pre>
+<p>The first stage can be a value: a string is written as it is and any other
+iterable one item per line.</p>
+<pre class='tessh'><code><span class="t-function">text</span> <span class="t-operator">=</span> <span class="t-string">"one two three"</span>
+<span class="t-variable">$text</span> <span class="t-operator">|</span> wc <span class="t-attribute">-w</span>
+<span class="t-punctuation">[</span>c b a<span class="t-punctuation">]</span> <span class="t-operator">|</span> sort</code></pre><pre class='output'><code>3
+a
+b
+c</code></pre>
+<p>When the right side is a value rather than a program or function, <code>|</code> is
+Python's bitwise or.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">({</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">}</span> <span class="t-operator">|</span> <span class="t-punctuation">{</span><span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">})</span> <span class="t-punctuation">(</span><span class="t-number">5</span> <span class="t-operator">|</span> <span class="t-number">2</span><span class="t-punctuation">)</span>
+<span class="t-function">a</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>x: <span class="t-number">1</span><span class="t-punctuation">}</span>
+<span class="t-function">b</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>y: <span class="t-number">2</span><span class="t-punctuation">}</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$a</span> <span class="t-operator">|</span> <span class="t-variable">$b</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>{1 2 3} 7
+{x: 1 y: 2}</code></pre><h2 id='and-or-then'>And, or, then</h2>
+<p><code>&amp;&amp;</code> runs the next command if the last one succeeded, <code>||</code> if it failed, <code>;</code>
+either way.</p>
+<pre class='tessh'><code><span class="t-function">true</span> <span class="t-operator">&amp;&amp;</span> echo yes
+<span class="t-function">false</span> <span class="t-operator">&amp;&amp;</span> echo never
+<span class="t-function">false</span> <span class="t-operator">||</span> echo fallback
+<span class="t-function">false</span> <span class="t-punctuation">;</span> echo anyway</code></pre><pre class='output'><code>yes
+fallback
+anyway</code></pre>
+<p>Python code fails with an exception rather than a status. <code>&amp;&amp;?</code> and <code>||?</code>
+count one as a failure, and a parenthesized command or expression with <code>?</code>
+or <code>!</code> after it converts between the two: <code>(expr)?</code> makes an exception a
+false value, and <code>(cmd)!</code> makes a failed command an exception (see Errors).</p>
+<h2 id='redirections'>Redirections</h2>
+<p>They're bash's. <code>&gt;f</code> writes, <code>&gt;&gt;f</code> appends, <code>&gt;|f</code> writes even over a file
+(tessh has no noclobber), <code>&lt;f</code> reads and <code>&lt;&gt;f</code> opens for both. A number in
+front picks the file descriptor (<code>2&gt;f</code>, <code>2&gt;&gt;f</code>, <code>3&gt;f</code>, <code>0&lt;f</code>); <code>&amp;&gt;f</code> and
+<code>&amp;&gt;&gt;f</code> (or <code>&gt;&amp;f</code>) take output and errors both. <code>2&gt;&amp;1</code> makes errors go where
+output goes, <code>&gt;&amp;2</code> the other way, <code>3&gt;&amp;1</code> and <code>0&lt;&amp;3</code> copy any, and <code>2&gt;&amp;-</code>
+closes one. They're done left to right, as in bash: <code>&gt;f 2&gt;&amp;1</code> puts both in
+the file, <code>2&gt;&amp;1 &gt;f</code> sends errors where output went before. Glued to the file
+they work anywhere, Python calls included (descriptors 0, 1 and 2 there);
+spaced (<code>&gt; f</code>) they work in commands.</p>
+<pre class='tessh'><code><span class="t-function">echo</span> first <span class="t-operator">&gt;</span>out.txt
+<span class="t-function">echo</span> second <span class="t-operator">&gt;&gt;</span> out.txt
+<span class="t-function">print</span> <span class="t-keyword">from</span> python <span class="t-operator">&gt;&gt;</span>out.txt
+<span class="t-function">cat</span> <span class="t-operator">&lt;</span>out.txt
+<span class="t-function">sh</span> <span class="t-attribute">-c</span> <span class="t-string">"echo oops &gt;&amp;2"</span> <span class="t-operator">2&gt;</span>err.txt
+<span class="t-function">cat</span> err.txt
+<span class="t-function">sh</span> <span class="t-attribute">-c</span> <span class="t-string">"echo both &gt;&amp;2"</span> <span class="t-operator">2&gt;&amp;1</span> <span class="t-operator">|</span> tr a-z A-Z
+<span class="t-function">sh</span> <span class="t-attribute">-c</span> <span class="t-string">"echo o; echo e &gt;&amp;2"</span> <span class="t-operator">&amp;&gt;</span>all.txt
+<span class="t-function">sh</span> <span class="t-attribute">-c</span> <span class="t-string">"echo e2 &gt;&amp;2"</span> <span class="t-operator">2&gt;&gt;</span>all.txt
+<span class="t-function">cat</span> all.txt
+<span class="t-function">echo</span> to-stderr <span class="t-operator">&gt;&amp;2</span> <span class="t-operator">2&gt;</span>/dev/null
+<span class="t-function">sh</span> <span class="t-attribute">-c</span> <span class="t-string">"echo three &gt;&amp;3"</span> <span class="t-operator">3&gt;&amp;1</span>
+<span class="t-function">sh</span> <span class="t-attribute">-c</span> <span class="t-string">"echo gone &gt;&amp;2; true"</span> <span class="t-operator">2&gt;&amp;-</span></code></pre><pre class='output'><code>first
+second
+from python
+oops
+BOTH
+o
+e
+e2
+three</code></pre>
+<p><code>&lt;&lt;&lt;word</code> gives a program the word (and a newline) as its input. A heredoc,
+<code>&lt;&lt;END</code>, gives it the lines up to one that's just <code>END</code>; <code>$name</code> and <code>$(…)</code>
+in them are filled in, unless the word is quoted (<code>&lt;&lt;'END'</code>), and <code>&lt;&lt;-END</code>
+takes the tabs off the front of each.</p>
+<pre class='tessh'><code><span class="t-function">tr</span> a-z A-Z <span class="t-operator">&lt;&lt;&lt;</span>hello
+<span class="t-function">name</span> <span class="t-operator">=</span> world
+<span class="t-function">cat</span> <span class="t-operator">&lt;&lt;END</span><span class="t-string">
+hi </span><span class="t-variable">$name</span><span class="t-string">
+  kept as is
+END</span>
+<span class="t-function">cat</span> <span class="t-operator">&lt;&lt;'END'</span><span class="t-string">
+$name stays
+END</span></code></pre><pre class='output'><code>HELLO
+hi world
+  kept as is
+$name stays</code></pre>
+<p><code>&lt;(…)</code> and <code>&gt;(…)</code> with something run in them (a program, a command, a
+function called) are process substitution, as in bash: a path that reads
+what it prints (a function's printing, then what it gives back), or that it
+reads what's written to. With a value in them
+(<code>&gt;$f</code>, <code>&gt;("out" + ".txt")</code>) they're the file it names.</p>
+<pre class='tessh'><code><span class="t-function">diff</span> <span class="t-punctuation">&lt;(</span>printf <span class="t-string">"a</span><span class="t-escape">\n</span><span class="t-string">b</span><span class="t-escape">\n</span><span class="t-string">"</span><span class="t-punctuation">)</span> <span class="t-punctuation">&lt;(</span>printf <span class="t-string">"a</span><span class="t-escape">\n</span><span class="t-string">c</span><span class="t-escape">\n</span><span class="t-string">"</span><span class="t-punctuation">)</span>
+<span class="t-function">echo</span> split <span class="t-operator">|</span> tee <span class="t-punctuation">&gt;(</span>tr a-z A-Z<span class="t-punctuation">)</span> <span class="t-operator">&gt;</span>/dev/null
+<span class="t-function">def</span> numbers
+  <span class="t-function">print</span> <span class="t-number">1</span>
+  <span class="t-function">print</span> <span class="t-number">2</span>
+<span class="t-function">paste</span> <span class="t-punctuation">&lt;(</span>numbers<span class="t-punctuation">)</span> <span class="t-punctuation">&lt;(</span>printf <span class="t-string">"a</span><span class="t-escape">\n</span><span class="t-string">b</span><span class="t-escape">\n</span><span class="t-string">"</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>2c2
+&lt; b
+---
+&gt; c
+SPLIT
+1	a
+2	b</code></pre><h2 id='jobs'>Jobs</h2>
+<p>A trailing <code>&amp;</code> runs a command in the background, and its value is a <code>Job</code>.
+<code>jobs</code> lists them, <code>fg</code> brings one back and <code>bg</code> continues a stopped one.
+At the REPL, Ctrl+Z stops what's running and Ctrl+C interrupts it.</p>
+<pre class='tessh'><code><span class="t-function">j</span> <span class="t-operator">=</span> sleep <span class="t-number">0.5</span> <span class="t-operator">&amp;</span>
+<span class="t-function">jobs</span>
+<span class="t-function">fg</span>
+<span class="t-function">print</span> done</code></pre><pre class='output'><code>[1] running sleep 0.5
+done</code></pre><h2 id='environment-and-folders'>Environment and folders</h2>
+<p><code>export</code> sets environment variables for this shell and the programs it runs,
+and <code>unset</code> removes them. <code>$env</code> is the environment as a mapping.</p>
+<pre class='tessh'><code><span class="t-function">export</span> <span class="t-property">COLOR=blue</span> <span class="t-property">SIZE=10</span>
+<span class="t-function">sh</span> <span class="t-attribute">-c</span> <span class="t-string">'echo $COLOR $SIZE'</span>
+<span class="t-variable">$env.SIZE</span> <span class="t-operator">=</span> <span class="t-number">11</span>
+<span class="t-function">print</span> <span class="t-variable">$env.SIZE</span> <span class="t-variable">$env</span><span class="t-punctuation">[</span><span class="t-string">"COLOR"</span><span class="t-punctuation">]</span> <span class="t-punctuation">(</span><span class="t-string">"COLOR"</span> <span class="t-keyword">in</span> <span class="t-variable">$env</span><span class="t-punctuation">)</span>
+<span class="t-function">unset</span> COLOR
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-string">"COLOR"</span> <span class="t-keyword">in</span> <span class="t-variable">$env</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>blue 10
+11 blue True
+False</code></pre>
+<p><code>NAME=value</code> before a program, as in bash, gives it that variable for just
+that run; the shell's own environment is as it was after.</p>
+<pre class='tessh'><code><span class="t-property">SALUTE=hi</span> sh <span class="t-attribute">-c</span> <span class="t-string">'echo $SALUTE'</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-string">"SALUTE"</span> <span class="t-keyword">in</span> <span class="t-variable">$env</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>hi
+False</code></pre>
+<p><code>cd</code> changes folder (<code>cd</code> alone goes home, <code>cd -</code> goes back), and <code>pushd</code>,
+<code>popd</code> and <code>dirs</code> keep a stack. A line that's only a folder (<code>~</code>, <code>/tmp</code>,
+<code>../src</code>) goes there, as <code>cd</code> would. They take bash's options: <code>cd -P</code> goes by the
+real folders (<code>-L</code>, keeping symlinks in the path, is the default), <code>$CDPATH</code>
+is searched, and <code>pushd</code>/<code>popd</code>/<code>dirs</code> take <code>+N</code>/<code>-N</code>, <code>-n</code>, <code>-v</code> and the rest.</p>
+<pre class='tessh'><code><span class="t-function">mkdir</span> <span class="t-attribute">-p</span> sub/deeper
+<span class="t-function">start</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>pwd<span class="t-punctuation">)</span>
+<span class="t-function">cd</span> sub
+<span class="t-function">print</span> <span class="t-punctuation">((</span>pwd<span class="t-punctuation">)</span>.endswith <span class="t-string">"/sub"</span><span class="t-punctuation">)</span>
+<span class="t-function">cd</span> deeper
+<span class="t-function">cd</span> ../..
+<span class="t-function">print</span> <span class="t-punctuation">((</span>pwd<span class="t-punctuation">)</span> <span class="t-operator">==</span> <span class="t-variable">$start</span><span class="t-punctuation">)</span>
+<span class="t-function">pushd</span> sub <span class="t-operator">&gt;</span>/dev/null
+<span class="t-function">popd</span> <span class="t-operator">&gt;</span>/dev/null
+<span class="t-function">print</span> <span class="t-punctuation">((</span>pwd<span class="t-punctuation">)</span> <span class="t-operator">==</span> <span class="t-variable">$start</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>True
+True
+True</code></pre>
+<p><code>which</code> finds a program: it prints where, and its value is the path.</p>
+<pre class='tessh'><code><span class="t-function">which</span> git
+<span class="t-function">path</span> <span class="t-operator">=</span> which git</code></pre>
+<p><code>source file.tsh</code> runs a tessh file here, its names kept. A script's
+arguments are in <code>$argv</code>.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-string">"x_from_file = 41 + 1"</span> <span class="t-operator">&gt;</span>lib.tsh
+<span class="t-function">source</span> lib.tsh
+<span class="t-function">print</span> <span class="t-variable">$x_from_file</span></code></pre><pre class='output'><code>42</code></pre><h1 id='python-written-as-tessh'>Python, written as tessh</h1><h2 id='assignment'>Assignment</h2><pre class='tessh'><code><span class="t-function">x</span> <span class="t-operator">=</span> <span class="t-number">5</span>
+<span class="t-function">x</span> <span class="t-operator">+=</span> <span class="t-number">1</span>
+<span class="t-function">x</span> <span class="t-operator">*=</span> <span class="t-number">2</span>
+<span class="t-punctuation">[</span>a b<span class="t-punctuation">]</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span>
+<span class="t-function">c</span><span class="t-punctuation">,</span> d <span class="t-operator">=</span> <span class="t-number">3</span><span class="t-punctuation">,</span> <span class="t-number">4</span>
+<span class="t-punctuation">[</span>head *rest<span class="t-punctuation">]</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span> <span class="t-number">4</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-variable">$x</span> <span class="t-variable">$a</span> <span class="t-variable">$b</span> <span class="t-variable">$c</span> <span class="t-variable">$d</span> <span class="t-variable">$head</span> <span class="t-variable">$rest</span></code></pre><pre class='output'><code>12 1 2 3 4 1 [2 3 4]</code></pre>
+<p>Attributes and items are targets too, and <code>del</code> removes.</p>
+<pre class='tessh'><code><span class="t-function">d</span> <span class="t-operator">=</span> <span class="t-punctuation">{}</span>
+<span class="t-variable">$d</span><span class="t-punctuation">[</span>k<span class="t-punctuation">]</span> <span class="t-operator">=</span> <span class="t-number">1</span>
+<span class="t-variable">$d</span><span class="t-punctuation">[</span><span class="t-string">"j"</span><span class="t-punctuation">]</span> <span class="t-operator">=</span> <span class="t-number">2</span>
+<span class="t-function">del</span> <span class="t-variable">$d</span><span class="t-punctuation">[</span>k<span class="t-punctuation">]</span>
+<span class="t-function">import</span> types
+<span class="t-function">o</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>types.SimpleNamespace<span class="t-punctuation">)</span>
+<span class="t-variable">$o.name</span> <span class="t-operator">=</span> thing
+<span class="t-function">print</span> <span class="t-variable">$d</span> <span class="t-variable">$o.name</span></code></pre><pre class='output'><code>{j: 2} thing</code></pre>
+<p>The augmented forms are <code>+= -= *= /= //= %= **= @= &amp;= |= ^= &lt;&lt;= &gt;&gt;=</code>.</p>
+<p><code>name=value</code> glued, as bash writes it, is the same as <code>name = value</code> when it
+starts a line; several on one line are each assigned. Inside a call
+(<code>f a=1</code>) it's still a keyword argument, and <code>==</code> never assigns. <code>a=</code> with
+nothing after is the empty string, as in bash (a program given <code>$a</code> gets an
+empty argument, as bash's <code>"$a"</code> would); <code>a = None</code> is no value, and <code>del a</code> removes the name (<code>unset</code> is for
+environment variables).</p>
+<pre class='tessh'><code><span class="t-property">n=5</span> <span class="t-property">label=total</span>
+<span class="t-function">n</span> <span class="t-operator">+=</span> <span class="t-number">1</span>
+<span class="t-function">print</span> <span class="t-variable">$label</span> <span class="t-variable">$n</span>
+<span class="t-property">note=</span>
+<span class="t-function">print</span> <span class="t-punctuation">[</span><span class="t-variable">$note</span><span class="t-punctuation">]</span> <span class="t-punctuation">(</span>len <span class="t-variable">$note</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>total 6
+[''] 0</code></pre><h2 id='functions'>Functions</h2>
+<p><code>def name params…</code> with an indented body. The value of the last form is
+returned.</p>
+<pre class='tessh'><code><span class="t-function">def</span> greet who <span class="t-property">greeting=hi</span> *more <span class="t-property">punct=</span><span class="t-string">"!"</span> **extra
+  <span class="t-string">"</span><span class="t-variable">$greeting</span><span class="t-string">, </span><span class="t-variable">$who$punct</span><span class="t-string">"</span> <span class="t-operator">+</span> <span class="t-punctuation">(</span>str <span class="t-variable">$more</span><span class="t-punctuation">)</span> <span class="t-operator">+</span> <span class="t-punctuation">(</span>str <span class="t-variable">$extra</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>greet Ben<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>greet Ben hello x y <span class="t-property">punct=?</span> <span class="t-property">z=1</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>hi, Ben!(){}
+hello, Ben?('x', 'y'){'z': 1}</code></pre>
+<p>A one-line <code>def</code> puts the body after <code>=</code>. <code>return</code> leaves early.</p>
+<pre class='tessh'><code><span class="t-function">def</span> sq x <span class="t-operator">=</span> <span class="t-variable">$x</span> <span class="t-operator">*</span> <span class="t-variable">$x</span>
+<span class="t-function">def</span> first_even xs
+  <span class="t-function">for</span> x <span class="t-keyword">in</span> <span class="t-variable">$xs</span>
+    <span class="t-function">if</span> <span class="t-variable">$x</span> <span class="t-operator">%</span> <span class="t-number">2</span> <span class="t-operator">==</span> <span class="t-number">0</span>
+      <span class="t-function">return</span> <span class="t-variable">$x</span>
+  <span class="t-function">None</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>sq <span class="t-number">7</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>first_even <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">3</span> <span class="t-number">4</span> <span class="t-number">5</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>first_even <span class="t-punctuation">[</span><span class="t-number">1</span><span class="t-punctuation">])</span></code></pre><pre class='output'><code>49 4 None</code></pre>
+<p><code>fn [params] body</code> is a lambda. A block body works too.</p>
+<pre class='tessh'><code><span class="t-function">add</span> <span class="t-operator">=</span> <span class="t-keyword">fn</span> <span class="t-punctuation">[</span>a b<span class="t-punctuation">]</span> <span class="t-punctuation">(</span><span class="t-variable">$a</span> <span class="t-operator">+</span> <span class="t-variable">$b</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$add</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>map <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">[</span>x<span class="t-punctuation">]</span> <span class="t-punctuation">(</span><span class="t-variable">$x</span> <span class="t-operator">*</span> <span class="t-number">10</span><span class="t-punctuation">))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]))</span>
+<span class="t-function">pick</span> <span class="t-operator">=</span> <span class="t-keyword">fn</span> <span class="t-punctuation">[</span>x<span class="t-punctuation">]</span>
+  <span class="t-function">if</span> <span class="t-variable">$x</span> <span class="t-keyword">then</span> yes <span class="t-keyword">else</span> no
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$pick</span> <span class="t-number">1</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>5 [10 20]
+yes</code></pre>
+<p>Decorators go on the lines before. <code>yield</code> makes a generator.</p>
+<pre class='tessh'><code><span class="t-function">import</span> functools
+<span class="t-function">@functools.cache</span>
+<span class="t-function">def</span> fib n
+  <span class="t-function">if</span> <span class="t-variable">$n</span> <span class="t-operator">&lt;</span> <span class="t-number">2</span> <span class="t-keyword">then</span> <span class="t-variable">$n</span> <span class="t-keyword">else</span> <span class="t-punctuation">(</span>fib <span class="t-punctuation">(</span><span class="t-variable">$n</span> <span class="t-operator">-</span> <span class="t-number">1</span><span class="t-punctuation">))</span> <span class="t-operator">+</span> <span class="t-punctuation">(</span>fib <span class="t-punctuation">(</span><span class="t-variable">$n</span> <span class="t-operator">-</span> <span class="t-number">2</span><span class="t-punctuation">))</span>
+<span class="t-function">def</span> count_up n
+  <span class="t-function">for</span> i <span class="t-keyword">in</span> <span class="t-punctuation">(</span>range <span class="t-variable">$n</span><span class="t-punctuation">)</span>
+    <span class="t-function">yield</span> <span class="t-variable">$i</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>fib <span class="t-number">50</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>count_up <span class="t-number">3</span><span class="t-punctuation">))</span></code></pre><pre class='output'><code>12586269025 [0 1 2]</code></pre>
+<p><code>global</code> and <code>nonlocal</code> work as in Python.</p>
+<pre class='tessh'><code><span class="t-function">total</span> <span class="t-operator">=</span> <span class="t-number">0</span>
+<span class="t-function">def</span> bump
+  <span class="t-function">global</span> total
+  <span class="t-function">total</span> <span class="t-operator">+=</span> <span class="t-number">1</span>
+<span class="t-function">bump</span> <span class="t-punctuation">;</span> bump
+<span class="t-function">def</span> counter
+  <span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-number">0</span>
+  <span class="t-function">def</span> inc
+    <span class="t-function">nonlocal</span> n
+    <span class="t-function">n</span> <span class="t-operator">+=</span> <span class="t-number">1</span>
+    <span class="t-variable">$n</span>
+  <span class="t-variable">$inc</span>
+<span class="t-function">c</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>counter<span class="t-punctuation">)</span>
+<span class="t-function">c</span> <span class="t-punctuation">;</span> c
+<span class="t-function">print</span> <span class="t-variable">$total</span> <span class="t-punctuation">(</span>c<span class="t-punctuation">)</span></code></pre><pre class='output'><code>2 3</code></pre>
+<p><code>async def</code>, <code>await</code>, <code>async for</code>, <code>async with</code> and async comprehensions
+(<code>[$x async for x in $source]</code>) work as in Python. <code>await</code>, <code>async for</code> and
+<code>async with</code> also work outside a function: in a script, at the prompt and
+in a notebook cell, as in IPython. There's no need for <code>asyncio.run</code>.</p>
+<pre class='tessh'><code><span class="t-function">import</span> asyncio
+<span class="t-function">async</span> <span class="t-keyword">def</span> twice x
+  <span class="t-function">await</span> <span class="t-punctuation">(</span>asyncio.sleep <span class="t-number">0</span><span class="t-punctuation">)</span>
+  <span class="t-variable">$x</span> <span class="t-operator">*</span> <span class="t-number">2</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-keyword">await</span> <span class="t-punctuation">(</span>twice <span class="t-number">21</span><span class="t-punctuation">))</span>
+<span class="t-function">async</span> <span class="t-keyword">def</span> count n
+  <span class="t-function">for</span> i <span class="t-keyword">in</span> <span class="t-punctuation">(</span>range <span class="t-variable">$n</span><span class="t-punctuation">)</span>
+    <span class="t-function">yield</span> <span class="t-variable">$i</span>
+<span class="t-function">print</span> <span class="t-punctuation">[</span><span class="t-variable">$i</span> <span class="t-keyword">async</span> <span class="t-keyword">for</span> i <span class="t-keyword">in</span> <span class="t-punctuation">(</span>count <span class="t-number">3</span><span class="t-punctuation">)]</span></code></pre><pre class='output'><code>42
+[0 1 2]</code></pre>
+<p>Those lines run on one event loop that lasts the whole session, so a task
+or client made on one line is still there on the next. A line without an
+<code>await</code> doesn't run the loop. Start a task with <code>asyncio.ensure_future</code>
+there, because <code>asyncio.create_task</code> wants a loop that's running. The task
+runs while a later line awaits something. Ctrl-C cancels what's being
+awaited. A program run from async code blocks the loop while it runs, as
+<code>subprocess.run</code> does in Python. Use <code>asyncio.create_subprocess_exec</code> to run
+programs alongside other tasks.</p>
+<h2 id='conditionals'>Conditionals</h2>
+<p><code>if</code> is an expression: its value is the branch's.</p>
+<pre class='tessh'><code><span class="t-function">def</span> sign n
+  <span class="t-function">if</span> <span class="t-variable">$n</span> <span class="t-operator">&lt;</span> <span class="t-number">0</span>
+    <span class="t-string">'neg'</span>
+  <span class="t-function">elif</span> <span class="t-variable">$n</span> <span class="t-operator">==</span> <span class="t-number">0</span>
+    <span class="t-string">'zero'</span>
+  <span class="t-function">else</span>
+    <span class="t-string">'pos'</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>sign <span class="t-number">-2</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>sign <span class="t-number">0</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>sign <span class="t-number">5</span><span class="t-punctuation">)</span>
+<span class="t-function">size</span> <span class="t-operator">=</span> <span class="t-keyword">if</span> <span class="t-punctuation">(</span>len <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-operator">&gt;</span> <span class="t-number">2</span> <span class="t-keyword">then</span> big <span class="t-keyword">else</span> small
+<span class="t-function">print</span> <span class="t-variable">$size</span></code></pre><pre class='output'><code>neg zero pos
+big</code></pre>
+<p>An <code>if</code> block can be a value directly.</p>
+<pre class='tessh'><code><span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-number">7</span>
+<span class="t-function">kind</span> <span class="t-operator">=</span> <span class="t-keyword">if</span> <span class="t-variable">$n</span> <span class="t-operator">%</span> <span class="t-number">2</span> <span class="t-operator">==</span> <span class="t-number">0</span>
+  <span class="t-string">'even'</span>
+<span class="t-function">else</span>
+  <span class="t-string">'odd'</span>
+<span class="t-function">print</span> <span class="t-variable">$kind</span></code></pre><pre class='output'><code>odd</code></pre>
+<p>A command as the condition uses its exit status.</p>
+<pre class='tessh'><code><span class="t-function">if</span> grep <span class="t-attribute">-q</span> z <span class="t-operator">&lt;&lt;&lt;</span> <span class="t-string">"abc"</span>
+  <span class="t-function">print</span> never
+<span class="t-function">if</span> printf <span class="t-string">"abc"</span> <span class="t-operator">|</span> grep <span class="t-attribute">-q</span> b
+  <span class="t-function">print</span> found</code></pre><pre class='output'><code>found</code></pre><h2 id='loops'>Loops</h2><pre class='tessh'><code><span class="t-function">for</span> i <span class="t-keyword">in</span> <span class="t-punctuation">(</span>range <span class="t-number">3</span><span class="t-punctuation">)</span>
+  <span class="t-function">print</span> <span class="t-variable">$i</span>
+<span class="t-function">for</span> <span class="t-punctuation">[</span>k v<span class="t-punctuation">]</span> <span class="t-keyword">in</span> <span class="t-punctuation">({</span>a: <span class="t-number">1</span> b: <span class="t-number">2</span><span class="t-punctuation">}</span>.items<span class="t-punctuation">)</span>
+  <span class="t-function">print</span> <span class="t-variable">$k</span> <span class="t-variable">$v</span>
+<span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-number">3</span>
+<span class="t-function">while</span> <span class="t-variable">$n</span> <span class="t-operator">&gt;</span> <span class="t-number">0</span>
+  <span class="t-function">n</span> <span class="t-operator">-=</span> <span class="t-number">1</span>
+  <span class="t-function">if</span> <span class="t-variable">$n</span> <span class="t-operator">==</span> <span class="t-number">1</span>
+    <span class="t-function">continue</span>
+  <span class="t-function">print</span> n <span class="t-keyword">is</span> <span class="t-variable">$n</span>
+<span class="t-function">for</span> x <span class="t-keyword">in</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]</span>
+  <span class="t-function">if</span> <span class="t-variable">$x</span> <span class="t-operator">==</span> <span class="t-number">5</span>
+    <span class="t-function">break</span>
+<span class="t-function">else</span>
+  <span class="t-function">print</span> no five</code></pre><pre class='output'><code>0
+1
+2
+a 1
+b 2
+n is 2
+n is 0
+no five</code></pre>
+<p><code>while</code> takes an <code>else</code> too, run when the loop ends without <code>break</code>.</p>
+<pre class='tessh'><code><span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-number">2</span>
+<span class="t-function">while</span> <span class="t-variable">$n</span> <span class="t-operator">&gt;</span> <span class="t-number">0</span>
+  <span class="t-function">n</span> <span class="t-operator">-=</span> <span class="t-number">1</span>
+<span class="t-function">else</span>
+  <span class="t-function">print</span> ended at <span class="t-variable">$n</span></code></pre><pre class='output'><code>ended at 0</code></pre><h2 id='collections'>Collections</h2>
+<p><code>[1 2 3]</code> is a list; with commas each part is an expression. <code>{a: 1}</code> is a
+dict with string keys from barewords, <code>{$k: 1}</code> uses a variable. <code>{1 2}</code> is a
+set, <code>()</code> the empty tuple, <code>(1, 2)</code> a tuple and <code>{}</code> an empty dict.</p>
+<pre class='tessh'><code><span class="t-function">k</span> <span class="t-operator">=</span> key
+<span class="t-function">print</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-operator">+</span> <span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-number">3</span><span class="t-punctuation">]</span> <span class="t-punctuation">{</span>a: <span class="t-number">1</span> b: <span class="t-punctuation">[</span><span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]}</span> <span class="t-punctuation">{</span><span class="t-variable">$k</span><span class="t-operator">:</span> <span class="t-number">1</span><span class="t-punctuation">}</span> <span class="t-punctuation">{</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">}</span> <span class="t-punctuation">()</span> <span class="t-punctuation">(</span><span class="t-number">1</span><span class="t-punctuation">,</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-punctuation">{}</span>
+<span class="t-function">xs</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>range <span class="t-number">10</span><span class="t-punctuation">))</span>
+<span class="t-function">print</span> <span class="t-variable">$xs</span><span class="t-punctuation">[</span>2:5<span class="t-punctuation">]</span> <span class="t-variable">$xs</span><span class="t-punctuation">[</span>::3<span class="t-punctuation">]</span> <span class="t-variable">$xs</span><span class="t-punctuation">[</span>-2:<span class="t-punctuation">]</span> <span class="t-variable">$xs</span><span class="t-punctuation">[</span>:2<span class="t-punctuation">]</span></code></pre><pre class='output'><code>[1 2 3] [2 3] {a: 1 b: [2 3]} {key: 1} {1 2} () (1, 2) {}
+[2 3 4] [0 3 6 9] [8 9] [0 1]</code></pre>
+<p><code>print</code> shows a list, dict, set, tuple or record (a dataclass or
+namedtuple, as <code>(Point x=1 y=2)</code>) as tessh: paste what it prints back in and
+you get an equal value. One that doesn't fit on a line is laid out over
+indented lines, and it's colored by type on a terminal or in a notebook (not
+when piped, or with <code>NO_COLOR</code>). A cell's or the REPL's value is shown the
+same way. What has no such form, like a function or a file, shows as Python
+shows it. <code>pretty x</code> gives the text, with <code>width=</code> and <code>color=</code> to choose.</p>
+<h2 id='comprehensions'>Comprehensions</h2>
+<p>Written as in Python, inside brackets.</p>
+<pre class='tessh'><code><span class="t-function">xs</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span> <span class="t-number">4</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-punctuation">[</span><span class="t-variable">$x</span> <span class="t-operator">*</span> <span class="t-number">2</span> <span class="t-keyword">for</span> x <span class="t-keyword">in</span> <span class="t-variable">$xs</span> <span class="t-keyword">if</span> <span class="t-variable">$x</span> <span class="t-operator">&gt;</span> <span class="t-number">1</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-punctuation">{</span><span class="t-variable">$x</span><span class="t-operator">:</span> <span class="t-variable">$x</span> <span class="t-operator">**</span> <span class="t-number">2</span> <span class="t-keyword">for</span> x <span class="t-keyword">in</span> <span class="t-variable">$xs</span><span class="t-punctuation">}</span>
+<span class="t-function">print</span> <span class="t-punctuation">{</span><span class="t-variable">$x</span> <span class="t-operator">%</span> <span class="t-number">2</span> <span class="t-keyword">for</span> x <span class="t-keyword">in</span> <span class="t-variable">$xs</span><span class="t-punctuation">}</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>sum <span class="t-punctuation">(</span><span class="t-variable">$x</span> <span class="t-keyword">for</span> x <span class="t-keyword">in</span> <span class="t-variable">$xs</span><span class="t-punctuation">))</span>
+<span class="t-function">print</span> <span class="t-punctuation">[[</span><span class="t-variable">$i</span> <span class="t-variable">$j</span><span class="t-punctuation">]</span> <span class="t-keyword">for</span> i <span class="t-keyword">in</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span> <span class="t-keyword">for</span> j <span class="t-keyword">in</span> <span class="t-punctuation">[</span>a b<span class="t-punctuation">]]</span></code></pre><pre class='output'><code>[4 6 8]
+{1: 1 2: 4 3: 9 4: 16}
+{0 1}
+10
+[[1 'a'] [1 'b'] [2 'a'] [2 'b']]</code></pre>
+<p>As everywhere, a name is bare where it's made (<code>for x</code>) and has <code>$</code> where
+it's read (<code>$x</code>, <code>$xs</code>). Python's <code>[x * 2 for x in xs]</code> is an error saying
+so: a bare <code>x</code> or <code>xs</code> would be the text, and the same goes for a <code>for</code>
+loop's body.</p>
+<h2 id='classes'>Classes</h2><pre class='tessh'><code><span class="t-function">class</span> Animal
+  <span class="t-function">def</span> __init__ self name
+    <span class="t-variable">$self.name</span> <span class="t-operator">=</span> <span class="t-variable">$name</span>
+  <span class="t-function">def</span> speak self <span class="t-operator">=</span> <span class="t-string">"</span><span class="t-variable">$self.name</span><span class="t-string"> makes a sound"</span>
+
+<span class="t-function">class</span> Dog Animal
+  <span class="t-function">def</span> speak self <span class="t-operator">=</span> <span class="t-string">"</span><span class="t-variable">$self.name</span><span class="t-string"> barks"</span>
+
+<span class="t-function">for</span> a <span class="t-keyword">in</span> <span class="t-punctuation">[(</span>Animal cat<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>Dog rex<span class="t-punctuation">)]</span>
+  <span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$a.speak</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>isinstance <span class="t-punctuation">(</span>Dog x<span class="t-punctuation">)</span> <span class="t-variable">$Animal</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>cat makes a sound
+rex barks
+True</code></pre>
+<p>Bases, keywords (<code>metaclass=…</code>), class attributes, annotated fields and
+decorators work as in Python.</p>
+<pre class='tessh'><code><span class="t-function">from</span> dataclasses <span class="t-keyword">import</span> dataclass
+<span class="t-function">@dataclass</span>
+<span class="t-function">class</span> Point
+  <span class="t-function">x:</span> int <span class="t-operator">=</span> <span class="t-number">0</span>
+  <span class="t-function">y:</span> int <span class="t-operator">=</span> <span class="t-number">0</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>Point <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>Point <span class="t-property">y=5</span><span class="t-punctuation">)</span>
+
+<span class="t-function">class</span> Registry type
+  <span class="t-function">names</span> <span class="t-operator">=</span> <span class="t-punctuation">[]</span>
+  <span class="t-function">def</span> __new__ mcs name bases ns
+    <span class="t-variable">$mcs.names.append</span> <span class="t-variable">$name</span>
+    <span class="t-function">type.__new__</span> <span class="t-variable">$mcs</span> <span class="t-variable">$name</span> <span class="t-variable">$bases</span> <span class="t-variable">$ns</span>
+<span class="t-function">class</span> Plugin <span class="t-property">metaclass=Registry</span>
+  <span class="t-function">pass</span>
+<span class="t-function">print</span> <span class="t-variable">$Registry.names</span></code></pre><pre class='output'><code>(Point x=1 y=2) (Point x=0 y=5)
+['Plugin']</code></pre><h2 id='errors'>Errors</h2>
+<p>Commands fail as in bash, with an exit status: a program (<code>mkdir</code>, <code>ls</code>,
+<code>grep</code>) and tessh's builtins (<code>cd</code>, <code>pushd</code>, <code>popd</code>, <code>export</code>, <code>which</code>…)
+alike. <code>||</code> runs what's after it when the command fails, <code>&amp;&amp;</code> when it
+worked, <code>if cmd</code> tests it, and <code>$?</code> holds it. A failing builtin's message
+goes to standard error, so <code>2&gt;/dev/null</code> hides it.</p>
+<pre class='tessh'><code><span class="t-function">cd</span> /no/such/folder <span class="t-operator">2&gt;</span>/dev/null <span class="t-operator">||</span> print <span class="t-string">"no such folder, status"</span> <span class="t-variable">$?</span>
+<span class="t-function">mkdir</span> /proc/nope <span class="t-operator">2&gt;</span>/dev/null <span class="t-operator">||</span> print <span class="t-string">"mkdir failed too"</span>
+<span class="t-function">if</span> <span class="t-keyword">not</span> <span class="t-punctuation">(</span>cd /no/such/folder <span class="t-operator">2&gt;</span>/dev/null<span class="t-punctuation">)</span>
+  <span class="t-function">print</span> <span class="t-string">"still here"</span></code></pre><pre class='output'><code>no such folder, status 1
+mkdir failed too
+still here</code></pre>
+<p>A builtin that fails on a line of its own, where nothing checks it, stops
+the script with its error, the way a Python error does. Bash would go on
+in the wrong folder, and a <code>cd build</code> that failed before <code>rm -rf *</code> is how
+whole home folders go. A program on a line of its own that fails doesn't
+stop the script, as in bash, unless strict mode is on (<code>strict</code> or
+<code>set -e</code>, below).</p>
+<p>Python code fails with an exception. Put <code>?</code> after a parenthesized
+expression to turn one into a value: <code>(expr)?</code> is the expression's value
+when it works, and a <code>Failed</code> (false, with the exception as <code>.error</code>) when
+it raises, with <code>$?</code> 1. So <code>||</code> gives a fallback, as it does for a command.
+A <code>NameError</code> still raises: a misspelled name is a bug, not a failure.</p>
+<pre class='tessh'><code><span class="t-function">n</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>int <span class="t-string">"42"</span><span class="t-punctuation">)</span><span class="t-operator">?</span> <span class="t-operator">||</span> <span class="t-number">0</span>
+<span class="t-function">m</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>int <span class="t-string">"forty-two"</span><span class="t-punctuation">)</span><span class="t-operator">?</span> <span class="t-operator">||</span> <span class="t-number">0</span>
+<span class="t-function">print</span> <span class="t-variable">$n</span> <span class="t-variable">$m</span>
+<span class="t-function">r</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>open /no/such/file<span class="t-punctuation">)</span><span class="t-operator">?</span>
+<span class="t-function">if</span> <span class="t-keyword">not</span> <span class="t-variable">$r</span>
+  <span class="t-function">print</span> <span class="t-string">"couldn't open:"</span> <span class="t-variable">$r.error.strerror</span></code></pre><pre class='output'><code>42 0
+couldn't open: No such file or directory</code></pre>
+<p><code>||?</code> and <code>&amp;&amp;?</code> save the parentheses: they're <code>||</code> and <code>&amp;&amp;</code> with an
+exception on their left counted as a failure. <code>a ||? b</code> is <code>(a)? || b</code>, and
+<code>a &amp;&amp;? b</code> is <code>(a)? &amp;&amp; b</code>.</p>
+<pre class='tessh'><code><span class="t-function">import</span> json
+<span class="t-function">port</span> <span class="t-operator">=</span> int <span class="t-punctuation">(</span><span class="t-variable">$env.get</span> PORT <span class="t-string">""</span><span class="t-punctuation">)</span> <span class="t-operator">||?</span> <span class="t-number">8080</span>
+<span class="t-function">print</span> <span class="t-variable">$port</span>
+<span class="t-function">json.loads</span> <span class="t-string">'{"a": 1}'</span> <span class="t-operator">&amp;&amp;?</span> print <span class="t-string">"valid JSON"</span>
+<span class="t-function">json.loads</span> <span class="t-string">"{oops"</span> <span class="t-operator">&amp;&amp;?</span> print never</code></pre><pre class='output'><code>8080
+valid JSON</code></pre>
+<p>At the prompt, a <code>Failed</code> isn't shown, as a failed command shows nothing:
+its ✘ and <code>$?</code> say it failed. Keep it with <code>r = (expr)?</code> to look at
+<code>$r.error</code>.</p>
+<p>As with <code>or</code>, a value that works but is false (<code>0</code>, <code>""</code>, <code>[]</code>) also takes
+the fallback. To tell those apart, keep the value with <code>(expr)?</code> and test
+<code>isinstance $r $Failed</code>.</p>
+<p>For more than a fallback, <code>try</code> catches exceptions by class. It's an
+expression too.</p>
+<pre class='tessh'><code><span class="t-function">r</span> <span class="t-operator">=</span> <span class="t-keyword">try</span>
+  <span class="t-function">int</span> abc
+<span class="t-function">except</span> ValueError <span class="t-keyword">as</span> e
+  <span class="t-function">print</span> caught: <span class="t-variable">$e</span>
+  <span class="t-number">-1</span>
+<span class="t-function">else</span>
+  <span class="t-number">0</span>
+<span class="t-function">finally</span>
+  <span class="t-function">print</span> cleanup
+<span class="t-function">print</span> <span class="t-variable">$r</span></code></pre><pre class='output'><code>caught: invalid literal for int() with base 10: 'abc'
+cleanup
+-1</code></pre>
+<p><code>raise</code>, <code>raise … from …</code> and <code>assert</code>:</p>
+<pre class='tessh'><code><span class="t-function">def</span> check n
+  <span class="t-function">assert</span> <span class="t-punctuation">(</span><span class="t-variable">$n</span> <span class="t-operator">&gt;</span> <span class="t-number">0</span><span class="t-punctuation">)</span> <span class="t-string">"n must be positive"</span>
+  <span class="t-variable">$n</span>
+<span class="t-function">try</span>
+  <span class="t-function">check</span> <span class="t-number">0</span>
+<span class="t-function">except</span> AssertionError <span class="t-keyword">as</span> e
+  <span class="t-function">print</span> <span class="t-variable">$e</span>
+<span class="t-function">try</span>
+  <span class="t-function">raise</span> <span class="t-punctuation">(</span>ValueError bad<span class="t-punctuation">)</span>
+<span class="t-function">except</span> ValueError <span class="t-keyword">as</span> e
+  <span class="t-function">print</span> got <span class="t-variable">$e.args</span></code></pre><pre class='output'><code>n must be positive
+got ('bad',)</code></pre>
+<p><code>raise X from Y</code> chains, a bare <code>except</code> catches anything, and several
+classes go in a tuple.</p>
+<pre class='tessh'><code><span class="t-function">try</span>
+  <span class="t-function">try</span>
+    <span class="t-number">1</span> <span class="t-operator">/</span> <span class="t-number">0</span>
+  <span class="t-function">except</span> ZeroDivisionError <span class="t-keyword">as</span> e
+    <span class="t-function">raise</span> <span class="t-punctuation">(</span>ValueError <span class="t-string">"wrapped"</span><span class="t-punctuation">)</span> <span class="t-keyword">from</span> <span class="t-variable">$e</span>
+<span class="t-function">except</span> <span class="t-punctuation">(</span>KeyError<span class="t-punctuation">,</span> ValueError<span class="t-punctuation">)</span> <span class="t-keyword">as</span> e
+  <span class="t-function">print</span> <span class="t-variable">$e</span> <span class="t-string">"&lt;-"</span> <span class="t-punctuation">(</span>type <span class="t-variable">$e.__cause__</span><span class="t-punctuation">)</span>.__name__
+<span class="t-function">try</span>
+  <span class="t-function">int</span> not-a-number
+<span class="t-function">except</span>
+  <span class="t-function">print</span> <span class="t-string">"anything goes"</span></code></pre><pre class='output'><code>wrapped &lt;- ZeroDivisionError
+anything goes</code></pre>
+<p>Where Python wants a class (after <code>except</code>, as a base), a bareword is the
+name. Elsewhere pass a class with <code>$</code>: <code>isinstance $x $int</code>.</p>
+<p><code>!</code> goes the other way from <code>?</code>: put it after a parenthesized command or
+expression, <code>(cmd)!</code> or <code>$(cmd)!</code>, and a failure becomes an exception. A
+command with a nonzero status raises <code>CommandFailed</code>, which holds the
+<code>.status</code>, the <code>.stderr</code> (a builtin's message; an attached program's goes
+to the terminal) and the <code>.command</code>. A <code>Failed</code> from <code>?</code> raises its
+exception again. Anything else passes through, so <code>(0)!</code> is <code>0</code>.</p>
+<pre class='tessh'><code><span class="t-function">name</span> <span class="t-operator">=</span> <span class="t-punctuation">$(</span>echo world<span class="t-punctuation">)</span><span class="t-operator">!</span>
+<span class="t-function">print</span> hello <span class="t-variable">$name</span>
+<span class="t-function">try</span>
+  <span class="t-punctuation">(</span>cd /no/such/folder <span class="t-operator">2&gt;</span>/dev/null<span class="t-punctuation">)</span><span class="t-operator">!</span>
+  <span class="t-function">print</span> never
+<span class="t-function">except</span> CommandFailed <span class="t-keyword">as</span> e
+  <span class="t-function">print</span> <span class="t-variable">$e.command</span> <span class="t-string">"-&gt;"</span> <span class="t-variable">$e.status</span></code></pre><pre class='output'><code>hello world
+cd /no/such/folder 2&gt;/dev/null -&gt; 1</code></pre>
+<p>Nothing catching it, a <code>CommandFailed</code> stops the script with one line,
+<code>tessh: build.tsh:4: Unhandled error: make failed (status 2)</code>, and the
+script exits with the command's status. The <code>!</code> has to be glued to the <code>)</code>:
+<code>! cmd</code> is still not, <code>!=</code> still compares, and <code>wow!</code> is a word. For a chain
+put it after the part to check, <code>a &amp;&amp; (b)!</code>, or around it all, <code>(a &amp;&amp; b)!</code>.
+In a program's arguments, <code>$(cmd)!</code> and <code>$(cmd)?</code> are text, as in bash, so
+<code>echo hi $(whoami)!</code> prints <code>hi ben!</code>. To raise there, leave out the <code>$</code>:
+<code>echo hi (whoami)!</code>. Everywhere else, <code>$(cmd)!</code> is the operator:
+<code>x = $(cmd)!</code>, a line of its own, or a Python call's arguments.</p>
+<p>Strict mode does that for every line, as bash's <code>set -e</code> does: after
+<code>strict</code> (or <code>set -e</code>, or <code>tessh -e</code> in the <code>#!</code> line,
+<code>#!/usr/bin/env -S tessh -e</code>), a program or pipe that fails on a line of
+its own raises <code>CommandFailed</code>. A failure something checks doesn't: <code>||</code>,
+<code>&amp;&amp;</code>, <code>if</code>, <code>! cmd</code>, <code>r = (cmd)</code>. <code>strict off</code> (or <code>set +e</code>) ends it.</p>
+<pre class='tessh'><code><span class="t-function">strict</span>
+<span class="t-function">false</span> <span class="t-operator">||</span> print <span class="t-string">"checked, so it goes on"</span>
+<span class="t-function">try</span>
+  <span class="t-function">ls</span> /no/such/folder <span class="t-operator">2&gt;</span>/dev/null
+  <span class="t-function">print</span> never
+<span class="t-function">except</span> CommandFailed <span class="t-keyword">as</span> e
+  <span class="t-function">print</span> stopped at <span class="t-variable">$e.command</span>
+<span class="t-function">strict</span> off
+<span class="t-function">false</span>
+<span class="t-function">print</span> <span class="t-string">"off again"</span></code></pre><pre class='output'><code>checked, so it goes on
+stopped at ls /no/such/folder
+off again</code></pre>
+<p>Errors point at tessh lines: a traceback shows the tessh source with carets
+under the part that failed.</p>
+<h2 id='with'>With</h2><pre class='tessh'><code><span class="t-function">with</span> <span class="t-punctuation">(</span>open data.txt w<span class="t-punctuation">)</span> <span class="t-keyword">as</span> f
+  <span class="t-variable">$f.write</span> <span class="t-string">"line one</span><span class="t-escape">\n</span><span class="t-string">"</span>
+<span class="t-function">with</span> <span class="t-punctuation">(</span>open data.txt<span class="t-punctuation">)</span> <span class="t-keyword">as</span> f
+  <span class="t-function">text</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span><span class="t-variable">$f.read</span><span class="t-punctuation">)</span>
+  <span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$text.strip</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>line one</code></pre>
+<p>Several context managers go on one line, separated by commas.</p>
+<pre class='tessh'><code><span class="t-function">with</span> <span class="t-punctuation">(</span>open a.txt w<span class="t-punctuation">)</span> <span class="t-keyword">as</span> a<span class="t-punctuation">,</span> <span class="t-punctuation">(</span>open b.txt w<span class="t-punctuation">)</span> <span class="t-keyword">as</span> b
+  <span class="t-variable">$a.write</span> A
+  <span class="t-variable">$b.write</span> B
+<span class="t-function">print</span> <span class="t-punctuation">(</span>cat a.txt b.txt<span class="t-punctuation">)</span></code></pre><pre class='output'><code>AB</code></pre><h2 id='match'>Match</h2>
+<p>Barewords in a pattern match strings, <code>$name</code> captures, <code>_</code> is anything.</p>
+<pre class='tessh'><code><span class="t-function">def</span> route cmd
+  <span class="t-function">match</span> <span class="t-variable">$cmd</span>
+    <span class="t-function">case</span> <span class="t-punctuation">[</span>go <span class="t-variable">$dir</span><span class="t-punctuation">]</span>
+      <span class="t-string">"going </span><span class="t-variable">$dir</span><span class="t-string">"</span>
+    <span class="t-function">case</span> <span class="t-punctuation">[</span>take *$items<span class="t-punctuation">]</span>
+      <span class="t-string">"taking </span><span class="t-variable">$items</span><span class="t-string">"</span>
+    <span class="t-function">case</span> <span class="t-punctuation">{</span>kind: circle r: <span class="t-variable">$r</span><span class="t-punctuation">}</span>
+      <span class="t-string">"circle of </span><span class="t-variable">$r</span><span class="t-string">"</span>
+    <span class="t-function">case</span> <span class="t-punctuation">(</span>int<span class="t-punctuation">)</span> <span class="t-operator">|</span> <span class="t-punctuation">(</span>float<span class="t-punctuation">)</span>
+      <span class="t-string">"a number"</span>
+    <span class="t-function">case</span> <span class="t-punctuation">[</span><span class="t-variable">$n</span><span class="t-punctuation">]</span> <span class="t-keyword">if</span> <span class="t-variable">$n</span> <span class="t-operator">&gt;</span> <span class="t-number">10</span>
+      <span class="t-string">"big </span><span class="t-variable">$n</span><span class="t-string">"</span>
+    <span class="t-function">case</span> _
+      <span class="t-string">"what?"</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>route <span class="t-punctuation">[</span>go north<span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>route <span class="t-punctuation">[</span>take lamp key<span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>route <span class="t-punctuation">{</span>kind: circle r: <span class="t-number">2</span><span class="t-punctuation">})</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>route <span class="t-number">3.5</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>route <span class="t-punctuation">[</span><span class="t-number">11</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>route <span class="t-punctuation">[</span><span class="t-number">1</span><span class="t-punctuation">])</span></code></pre>
+<p>Class patterns take positional or keyword sub-patterns, <code>as $name</code> names a
+part, and a dotted name matches a constant.</p>
+<pre class='tessh'><code><span class="t-function">from</span> dataclasses <span class="t-keyword">import</span> dataclass
+<span class="t-function">import</span> enum
+<span class="t-function">@dataclass</span>
+<span class="t-function">class</span> Pt
+  <span class="t-function">x:</span> int
+  <span class="t-function">y:</span> int
+<span class="t-function">class</span> Color enum.Enum
+  <span class="t-function">RED</span> <span class="t-operator">=</span> <span class="t-number">1</span>
+  <span class="t-function">BLUE</span> <span class="t-operator">=</span> <span class="t-number">2</span>
+<span class="t-function">def</span> what v
+  <span class="t-function">match</span> <span class="t-variable">$v</span>
+    <span class="t-function">case</span> <span class="t-punctuation">(</span>Pt <span class="t-number">0</span> <span class="t-number">0</span><span class="t-punctuation">)</span>
+      <span class="t-string">'origin'</span>
+    <span class="t-function">case</span> <span class="t-punctuation">(</span>Pt <span class="t-property">x=0</span> <span class="t-property">y=$y</span><span class="t-punctuation">)</span>
+      <span class="t-string">"on the y axis at </span><span class="t-variable">$y</span><span class="t-string">"</span>
+    <span class="t-function">case</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span> <span class="t-keyword">as</span> <span class="t-variable">$whole</span>
+      <span class="t-string">"the list </span><span class="t-variable">$whole</span><span class="t-string">"</span>
+    <span class="t-function">case</span> Color.RED
+      <span class="t-string">'red'</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>what <span class="t-punctuation">(</span>Pt <span class="t-number">0</span> <span class="t-number">0</span><span class="t-punctuation">))</span> <span class="t-string">"/"</span> <span class="t-punctuation">(</span>what <span class="t-punctuation">(</span>Pt <span class="t-number">0</span> <span class="t-number">5</span><span class="t-punctuation">))</span> <span class="t-string">"/"</span> <span class="t-punctuation">(</span>what <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">])</span> <span class="t-string">"/"</span> <span class="t-punctuation">(</span>what <span class="t-variable">$Color.RED</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>origin / on the y axis at 5 / the list [1, 2] / red</code></pre><pre class='output'><code>going north
+taking ['lamp', 'key']
+circle of 2
+a number big 11 what?</code></pre><h2 id='imports'>Imports</h2><pre class='tessh'><code><span class="t-function">import</span> os sys math
+<span class="t-function">from</span> os.path <span class="t-keyword">import</span> join basename
+<span class="t-function">from</span> collections <span class="t-keyword">import</span> Counter <span class="t-keyword">as</span> C
+<span class="t-function">print</span> <span class="t-punctuation">(</span>join a b<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>basename /x/y.txt<span class="t-punctuation">)</span> <span class="t-punctuation">((</span>C abca<span class="t-punctuation">)</span>.most_common <span class="t-number">1</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>math.sqrt <span class="t-number">16</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>a/b y.txt [('a', 2)]
+4.0</code></pre>
+<p>Packages from PyPI (numpy, pandas, matplotlib, ...) come with <code>need</code>: uv
+installs them once into a cache, and they import from the next line. A module
+that isn't there says so: <code>No module named 'numpy': need numpy installs it</code>.</p>
+<h2 id='do'>Do</h2>
+<p><code>do</code> makes several forms into one; its value is the last one's.</p>
+<pre class='tessh'><code><span class="t-function">r</span> <span class="t-operator">=</span> <span class="t-keyword">do</span>
+  <span class="t-function">a</span> <span class="t-operator">=</span> <span class="t-number">2</span>
+  <span class="t-variable">$a</span> <span class="t-operator">*</span> <span class="t-number">21</span>
+<span class="t-function">print</span> <span class="t-variable">$r</span></code></pre><pre class='output'><code>42</code></pre><h2 id='statements'>Statements</h2>
+<p><code>pass</code>, <code>break</code>, <code>continue</code>, <code>return</code>, <code>yield</code>, <code>yield from</code>, <code>await</code>,
+<code>del</code>, <code>global</code>, <code>nonlocal</code>, <code>raise</code> and <code>assert</code> are forms like any other.</p>
+<pre class='tessh'><code><span class="t-function">def</span> gen
+  <span class="t-function">yield</span> <span class="t-number">1</span>
+  <span class="t-function">yield</span> <span class="t-keyword">from</span> <span class="t-punctuation">[</span><span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>gen<span class="t-punctuation">))</span>
+<span class="t-function">def</span> nothing
+  <span class="t-function">pass</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>nothing<span class="t-punctuation">)</span></code></pre><pre class='output'><code>[1 2 3]
+None</code></pre><h1 id='from-clojure'>From Clojure</h1><h2 id='methods'>Methods</h2>
+<p>As in Clojure, a word starting with <code>.</code> at the head of a call is a method:
+<code>.name obj args…</code> is <code>$obj.name args…</code>, the object first.</p>
+<pre class='tessh'><code><span class="t-function">s</span> <span class="t-operator">=</span> <span class="t-string">"  Hello  "</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>.strip <span class="t-variable">$s</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>.replace <span class="t-variable">$s</span> l L<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>.count <span class="t-variable">$s</span> l<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>.upper <span class="t-punctuation">(</span>.strip <span class="t-variable">$s</span><span class="t-punctuation">))</span></code></pre><pre class='output'><code>Hello   HeLLo   2
+HELLO</code></pre>
+<p><code>.-name obj</code> reads a field rather than calling it. A method you call for
+what it does stands on its own line.</p>
+<pre class='tessh'><code><span class="t-function">import</span> datetime
+<span class="t-function">d</span> <span class="t-operator">=</span> datetime.date <span class="t-number">2024</span> <span class="t-number">3</span> <span class="t-number">9</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>.-year <span class="t-variable">$d</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>.isoformat <span class="t-variable">$d</span><span class="t-punctuation">)</span>
+<span class="t-function">words</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span>b a c<span class="t-punctuation">]</span>
+<span class="t-function">.sort</span> <span class="t-variable">$words</span>
+<span class="t-function">print</span> <span class="t-variable">$words</span></code></pre><pre class='output'><code>2024 2024-03-09
+['a' 'b' 'c']</code></pre>
+<p>Alone in parentheses, <code>(.name)</code> is a function that calls the method on its
+first argument, and <code>(.-name)</code> one that reads the field. (A bare <code>.name</code>
+as an argument is a word, since <code>.bashrc</code> is a file.)</p>
+<pre class='tessh'><code><span class="t-function">up</span> <span class="t-operator">=</span> <span class="t-punctuation">(</span>.upper<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$up</span> hi<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>map <span class="t-punctuation">(</span>.title<span class="t-punctuation">)</span> <span class="t-punctuation">[</span>ann bob<span class="t-punctuation">]))</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>map <span class="t-punctuation">(</span>.-real<span class="t-punctuation">)</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]))</span></code></pre><pre class='output'><code>HI ['Ann' 'Bob']
+[1 2]</code></pre>
+<p>A <code>.name</code> stage in a pipe calls the method on what came in.</p>
+<pre class='tessh'><code><span class="t-function">echo</span> <span class="t-string">" a,b,c "</span> <span class="t-operator">|</span> .strip <span class="t-operator">|</span> .split <span class="t-string">","</span> <span class="t-operator">|</span> print</code></pre><pre class='output'><code>['a' 'b' 'c']</code></pre><h2 id='threading'>Threading</h2>
+<p><code>-&gt; value step…</code> puts the value in as each step's first argument: <code>(f a)</code>
+becomes <code>(f value a)</code>, and a bare step <code>f</code> or <code>.name</code> becomes <code>(f value)</code>.
+<code>-&gt;&gt;</code> puts it in last. So methods chain with <code>-&gt;</code>, and functions that take
+the collection last chain with <code>-&gt;&gt;</code>.</p>
+<pre class='tessh'><code><span class="t-function">s</span> <span class="t-operator">=</span> <span class="t-string">"  Hello World  "</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-operator">-&gt;</span> <span class="t-variable">$s</span> .strip .lower <span class="t-punctuation">(</span>.replace world there<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>.split <span class="t-string">" "</span><span class="t-punctuation">))</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-operator">-&gt;&gt;</span> <span class="t-punctuation">[</span><span class="t-number">3</span> <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span> sorted <span class="t-punctuation">(</span>map <span class="t-variable">$inc</span><span class="t-punctuation">)</span> list<span class="t-punctuation">)</span></code></pre><pre class='output'><code>['hello' 'there']
+[2 3 4]</code></pre>
+<p>Steps can go on indented lines.</p>
+<pre class='tessh'><code><span class="t-function">r</span> <span class="t-operator">=</span> <span class="t-operator">-&gt;&gt;</span> <span class="t-punctuation">(</span>range <span class="t-number">10</span><span class="t-punctuation">)</span>
+  <span class="t-function">filter</span> <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span>$<span class="t-operator">%</span> <span class="t-operator">%</span> <span class="t-number">2</span><span class="t-punctuation">))</span>
+  <span class="t-function">map</span> <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span>$<span class="t-operator">%</span> <span class="t-operator">*</span> $<span class="t-operator">%</span><span class="t-punctuation">))</span>
+  <span class="t-function">sum</span>
+<span class="t-function">print</span> <span class="t-variable">$r</span></code></pre><pre class='output'><code>165</code></pre>
+<p>Mix them by nesting a <code>-&gt;&gt;</code> step inside <code>-&gt;</code>. (A <code>.name</code> step under <code>-&gt;&gt;</code>
+gets the value as its last argument, not as the object.)</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-operator">-&gt;</span> <span class="t-string">"a-b"</span> <span class="t-punctuation">(</span>.split <span class="t-string">"-"</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-operator">-&gt;&gt;</span> <span class="t-punctuation">(</span>map <span class="t-variable">$str.upper</span><span class="t-punctuation">))</span> list<span class="t-punctuation">)</span></code></pre><pre class='output'><code>['A' 'B']</code></pre>
+<p><code>some-&gt;</code> and <code>some-&gt;&gt;</code> stop at the first <code>None</code>: the value is <code>None</code> and
+the later steps don't run.</p>
+<pre class='tessh'><code><span class="t-function">cfg</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>db: <span class="t-punctuation">{</span>host: <span class="t-string">"h1"</span><span class="t-punctuation">}}</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>some-&gt; <span class="t-variable">$cfg</span> <span class="t-punctuation">(</span>.get db<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>.get host<span class="t-punctuation">)</span> .upper<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>some-&gt; <span class="t-variable">$cfg</span> <span class="t-punctuation">(</span>.get web<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>.get host<span class="t-punctuation">)</span> .upper<span class="t-punctuation">)</span></code></pre><pre class='output'><code>H1
+None</code></pre>
+<p><code>as-&gt; value name step…</code> names the value, so it can go anywhere in a step;
+each step's result becomes the name's new value.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">(</span>as-&gt; <span class="t-punctuation">[</span><span class="t-number">3</span> <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span> xs <span class="t-punctuation">(</span>sorted <span class="t-variable">$xs</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-variable">$xs</span> <span class="t-operator">+</span> <span class="t-punctuation">[</span><span class="t-number">9</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>len <span class="t-variable">$xs</span><span class="t-punctuation">))</span></code></pre><pre class='output'><code>4</code></pre><h2 id='doto'>Doto</h2>
+<p><code>doto obj step…</code> calls each step with the object first, then gives back the
+object itself. Steps can go on indented lines.</p>
+<pre class='tessh'><code><span class="t-function">xs</span> <span class="t-operator">=</span> doto <span class="t-punctuation">[]</span>
+  <span class="t-function">.append</span> <span class="t-number">1</span>
+  <span class="t-function">.append</span> <span class="t-number">2</span>
+  <span class="t-function">.extend</span> <span class="t-punctuation">[</span><span class="t-number">3</span> <span class="t-number">4</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-variable">$xs</span></code></pre><pre class='output'><code>[1 2 3 4]</code></pre><h2 id='keywords'>Keywords</h2>
+<p><code>:name</code> used as a function gets <code>name</code>: the item from a dict (<code>None</code>, or the
+second argument, when it's missing) or the attribute from anything else.
+That makes it a ready-made <code>key=</code> and <code>map</code> function.</p>
+<pre class='tessh'><code><span class="t-function">p</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>name: Ann age: <span class="t-number">31</span><span class="t-punctuation">}</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-constant">:name</span> <span class="t-variable">$p</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-constant">:town</span> <span class="t-variable">$p</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span><span class="t-constant">:town</span> <span class="t-variable">$p</span> Oslo<span class="t-punctuation">)</span>
+<span class="t-function">people</span> <span class="t-operator">=</span> <span class="t-punctuation">[{</span>name: Bo age: <span class="t-number">40</span><span class="t-punctuation">}</span> <span class="t-variable">$p</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>map <span class="t-constant">:name</span> <span class="t-variable">$people</span><span class="t-punctuation">))</span> <span class="t-punctuation">(</span><span class="t-constant">:name</span> <span class="t-punctuation">(</span>max <span class="t-variable">$people</span> <span class="t-property">key=:age</span><span class="t-punctuation">))</span></code></pre><pre class='output'><code>Ann None Oslo
+['Bo' 'Ann'] Bo</code></pre><pre class='tessh'><code><span class="t-function">import</span> datetime
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-constant">:year</span> <span class="t-punctuation">(</span>datetime.date <span class="t-number">2024</span> <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">))</span></code></pre><pre class='output'><code>2024</code></pre>
+<p>(A <code>:name</code> is still a symbol, the form a macro gets: see <code>help forms</code>.)</p>
+<h2 id='destructuring'>Destructuring</h2>
+<p><code>{a b} = value</code> takes names out of a dict by key, or out of an object by
+attribute. <code>name=default</code> is for a key that may be missing, and <code>**rest</code>
+(last) gets the other keys. A missing key without a default is a <code>KeyError</code>.</p>
+<pre class='tessh'><code><span class="t-function">p</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>name: Ann age: <span class="t-number">31</span> town: Oslo<span class="t-punctuation">}</span>
+<span class="t-punctuation">{</span>name age<span class="t-punctuation">}</span> <span class="t-operator">=</span> <span class="t-variable">$p</span>
+<span class="t-function">print</span> <span class="t-variable">$name</span> <span class="t-variable">$age</span>
+<span class="t-punctuation">{</span>name <span class="t-property">job=none</span> **more<span class="t-punctuation">}</span> <span class="t-operator">=</span> <span class="t-variable">$p</span>
+<span class="t-function">print</span> <span class="t-variable">$job</span> <span class="t-variable">$more</span>
+<span class="t-function">import</span> datetime
+<span class="t-punctuation">{</span>year month<span class="t-punctuation">}</span> <span class="t-operator">=</span> datetime.date <span class="t-number">2024</span> <span class="t-number">5</span> <span class="t-number">1</span>
+<span class="t-function">print</span> <span class="t-variable">$year</span> <span class="t-variable">$month</span></code></pre><pre class='output'><code>Ann 31
+none {age: 31 town: 'Oslo'}
+2024 5</code></pre><h2 id='short-functions'>Short functions</h2>
+<p><code>fn body</code> without a parameter list makes its parameters from <code>$%</code> (or
+<code>$%1</code>), <code>$%2</code>… and <code>$%&amp;</code> for the rest, like Clojure's <code>#(…)</code>. A body that
+starts with a list goes in parentheses, since <code>fn [</code> starts a parameter
+list. Don't nest short functions.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">(</span>list <span class="t-punctuation">(</span>map <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span>$<span class="t-operator">%</span> <span class="t-operator">*</span> <span class="t-number">10</span><span class="t-punctuation">))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]))</span>
+<span class="t-function">add</span> <span class="t-operator">=</span> <span class="t-keyword">fn</span> <span class="t-punctuation">(</span>$%1 <span class="t-operator">+</span> $%2<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$add</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">)</span>
+<span class="t-function">count</span> <span class="t-operator">=</span> <span class="t-keyword">fn</span> <span class="t-punctuation">(</span>len $<span class="t-operator">%&amp;</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-variable">$count</span> a b c<span class="t-punctuation">)</span></code></pre><pre class='output'><code>[10 20 30]
+5
+3</code></pre><h2 id='discard'>Discard</h2>
+<p><code>#_</code> drops the form after it, in a line or in brackets. First on a line it
+drops the whole line with its indented block.</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-number">1</span> <span class="t-comment">#_ 2 3 #_(4 5) 6</span>
+<span class="t-function">print</span> <span class="t-punctuation">[</span>a <span class="t-comment">#_[b c] d]</span>
+<span class="t-comment">#_ print not this</span>
+  print nor this
+print done</code></pre><pre class='output'><code>1 3 6
+['a' 'd']
+done</code></pre><h2 id='core-functions'>Core functions</h2>
+<p>Clojure's sequence and map functions, with underscores for its dashes.
+Each takes the function first and the collection last, so they work as
+<code>-&gt;&gt;</code> steps and pipe stages. They return lists, except <code>iterate</code> and
+<code>repeatedly</code> without a count, which never end: <code>take</code> some. (<code>last</code> is
+the function: <code>\last</code> runs the program of that name.)</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">(</span>first <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>second <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>last <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>rest <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>butlast <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>take <span class="t-number">3</span> <span class="t-punctuation">(</span>iterate <span class="t-variable">$inc</span> <span class="t-number">10</span><span class="t-punctuation">))</span> <span class="t-punctuation">(</span>drop <span class="t-number">2</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span> <span class="t-number">4</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>take_while <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span>$<span class="t-operator">%</span> <span class="t-operator">&lt;</span> <span class="t-number">3</span><span class="t-punctuation">))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">5</span> <span class="t-number">1</span><span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>frequencies <span class="t-string">"abca"</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>distinct <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">1</span> <span class="t-number">3</span><span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>group_by <span class="t-variable">$len</span> <span class="t-punctuation">[</span>a bb c dd<span class="t-punctuation">])</span> <span class="t-punctuation">(</span>partition <span class="t-number">2</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span> <span class="t-number">4</span> <span class="t-number">5</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>partition_all <span class="t-number">2</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>partition_by <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span>$<span class="t-operator">%</span> <span class="t-operator">&gt;</span> <span class="t-number">0</span><span class="t-punctuation">))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">-1</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>interpose <span class="t-string">","</span> <span class="t-punctuation">[</span>a b c<span class="t-punctuation">])</span> <span class="t-punctuation">(</span>interleave <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span> <span class="t-punctuation">[</span>a b<span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>flatten <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-punctuation">[</span><span class="t-number">2</span> <span class="t-punctuation">[</span><span class="t-number">3</span> <span class="t-number">4</span><span class="t-punctuation">]]])</span> <span class="t-punctuation">(</span>mapcat <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">([</span>$<span class="t-operator">%</span> $<span class="t-operator">%</span><span class="t-punctuation">]))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>keep <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span><span class="t-keyword">if</span> $<span class="t-operator">%</span> <span class="t-operator">&gt;</span> <span class="t-number">1</span> <span class="t-keyword">then</span> $<span class="t-operator">%</span> <span class="t-keyword">else</span> <span class="t-constant">None</span><span class="t-punctuation">))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span></code></pre><pre class='output'><code>1 2 3 [2 3] [1 2]
+[10 11 12] [3 4] [1 2]
+{a: 2 b: 1 c: 1} [1 2 3]
+{1: ['a' 'c'] 2: ['bb' 'dd']} [[1 2] [3 4]] [[1 2] [3]]
+[[1 2] [-1] [3]] ['a' ',' 'b' ',' 'c'] [1 'a' 2 'b']
+[1 2 3 4] [1 1 2 2] [2 3]</code></pre>
+<p><code>comp</code>, <code>juxt</code>, <code>complement</code>, <code>partial</code>, <code>constantly</code>, <code>identity</code>, <code>inc</code>,
+<code>dec</code>, <code>some</code> (the first true result) and <code>every</code>:</p>
+<pre class='tessh'><code><span class="t-function">print</span> <span class="t-punctuation">((</span>comp <span class="t-variable">$str</span> <span class="t-variable">$inc</span><span class="t-punctuation">)</span> <span class="t-number">1</span><span class="t-punctuation">)</span> <span class="t-punctuation">((</span>juxt <span class="t-variable">$min</span> <span class="t-variable">$max</span><span class="t-punctuation">)</span> <span class="t-punctuation">[</span><span class="t-number">3</span> <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">])</span> <span class="t-punctuation">((</span>complement <span class="t-variable">$bool</span><span class="t-punctuation">)</span> <span class="t-number">0</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">((</span>partial <span class="t-variable">$pow</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-number">10</span><span class="t-punctuation">)</span> <span class="t-punctuation">((</span>constantly <span class="t-number">7</span><span class="t-punctuation">)</span> <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>identity x<span class="t-punctuation">)</span> <span class="t-punctuation">(</span>inc <span class="t-number">1</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>dec <span class="t-number">1</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>some <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span><span class="t-keyword">if</span> $<span class="t-operator">%</span> <span class="t-operator">&gt;</span> <span class="t-number">1</span> <span class="t-keyword">then</span> $<span class="t-operator">%</span> <span class="t-operator">*</span> <span class="t-number">10</span> <span class="t-keyword">else</span> <span class="t-constant">None</span><span class="t-punctuation">))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>every <span class="t-punctuation">(</span><span class="t-keyword">fn</span> <span class="t-punctuation">(</span>$<span class="t-operator">%</span> <span class="t-operator">&gt;</span> <span class="t-number">0</span><span class="t-punctuation">))</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">])</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>repeatedly <span class="t-punctuation">(</span>constantly x<span class="t-punctuation">)</span> <span class="t-number">3</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>2 [1 3] True
+1024 7 x 2 0
+20 True
+['x' 'x' 'x']</code></pre>
+<p><code>get_in</code>, <code>assoc_in</code> and <code>update_in</code> reach into nested data by a path.
+<code>assoc_in</code> and <code>update_in</code> return a changed copy and leave the original
+alone. Also <code>zipmap</code>, <code>select_keys</code> and <code>merge_with</code>.</p>
+<pre class='tessh'><code><span class="t-function">d</span> <span class="t-operator">=</span> <span class="t-punctuation">{</span>a: <span class="t-punctuation">{</span>b: <span class="t-punctuation">[</span><span class="t-number">10</span> <span class="t-number">20</span><span class="t-punctuation">]}}</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>get_in <span class="t-variable">$d</span> <span class="t-punctuation">[</span>a b <span class="t-number">1</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>get_in <span class="t-variable">$d</span> <span class="t-punctuation">[</span>a z<span class="t-punctuation">]</span> none<span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>assoc_in <span class="t-variable">$d</span> <span class="t-punctuation">[</span>a c<span class="t-punctuation">]</span> <span class="t-number">5</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>update_in <span class="t-variable">$d</span> <span class="t-punctuation">[</span>a b<span class="t-punctuation">]</span> <span class="t-variable">$len</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>zipmap <span class="t-punctuation">[</span>x y<span class="t-punctuation">]</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">])</span> <span class="t-punctuation">(</span>select_keys <span class="t-punctuation">{</span>x: <span class="t-number">1</span> y: <span class="t-number">2</span><span class="t-punctuation">}</span> <span class="t-punctuation">[</span>y<span class="t-punctuation">])</span> <span class="t-punctuation">(</span>merge_with <span class="t-variable">$max</span> <span class="t-punctuation">{</span>a: <span class="t-number">1</span><span class="t-punctuation">}</span> <span class="t-punctuation">{</span>a: <span class="t-number">5</span> b: <span class="t-number">2</span><span class="t-punctuation">})</span>
+<span class="t-function">print</span> <span class="t-variable">$d</span></code></pre><pre class='output'><code>20 none
+{a: {b: [10 20] c: 5}} {a: {b: 2}}
+{x: 1 y: 2} {y: 2} {a: 5 b: 2}
+{a: {b: [10 20]}}</code></pre><h1 id='from-hy'>From Hy</h1><h2 id='modules'>Modules</h2>
+<p><code>import name</code> finds <code>name.tsh</code> as well as Python's modules: a tessh file is
+a module, and a folder with an <code>__init__.tsh</code> a package. The folder you're
+in is on the path, and a script's own folder comes first.</p>
+<pre class='tessh'><code><span class="t-function">echo</span> <span class="t-string">'def hello who = "hello, $who"'</span> <span class="t-operator">&gt;</span> greeting.tsh
+<span class="t-function">echo</span> <span class="t-string">'answer = 42'</span> <span class="t-operator">&gt;&gt;</span> greeting.tsh
+<span class="t-function">import</span> greeting
+<span class="t-function">print</span> <span class="t-punctuation">(</span>greeting.hello Ann<span class="t-punctuation">)</span> <span class="t-variable">$greeting.answer</span>
+<span class="t-function">from</span> greeting <span class="t-keyword">import</span> hello
+<span class="t-function">print</span> <span class="t-punctuation">(</span>hello Bo<span class="t-punctuation">)</span></code></pre><pre class='output'><code>hello, Ann 42
+hello, Bo</code></pre>
+<p>Python code that tessh runs imports tessh modules the same way.</p>
+<pre class='tessh'><code><span class="t-function">echo</span> <span class="t-string">'import greeting2'</span> <span class="t-operator">&gt;</span> helper.py
+<span class="t-function">echo</span> <span class="t-string">'VALUE = greeting2.hello("python")'</span> <span class="t-operator">&gt;&gt;</span> helper.py
+<span class="t-function">echo</span> <span class="t-string">'def hello who = "hi from tessh, $who"'</span> <span class="t-operator">&gt;</span> greeting2.tsh
+<span class="t-function">import</span> helper
+<span class="t-function">print</span> <span class="t-variable">$helper.VALUE</span></code></pre><pre class='output'><code>hi from tessh, python</code></pre>
+<p>(Where a folder has both <code>name.py</code> and <code>name.tsh</code>, Python's is imported.)</p>
+<h2 id='require'>Require</h2>
+<p><code>require module</code> brings in that module's macros (and <code>defop</code> operators) for
+the code after it, imported while the code compiles. <code>require module name…</code>
+takes only those macros.</p>
+<pre class='tessh'><code><span class="t-function">py</span> <span class="t-string">"""
+open("loud.tsh", "w").write('''
+defmacro loudly *body
+  quasi
+    print "--"
+    ~@body
+    print "--"
+''')
+"""</span>
+<span class="t-function">require</span> loud
+<span class="t-function">loudly</span>
+  <span class="t-function">print</span> inside</code></pre><pre class='output'><code>--
+inside
+--</code></pre><h2 id='let'>Let</h2>
+<p><code>let name=value …</code> then a block (or a form on the same line) makes names
+that only that block sees, each bound in order, so a later one can use an
+earlier one. The value is the block's last form's. Outside it, a name of
+the same name is untouched.</p>
+<pre class='tessh'><code><span class="t-function">x</span> <span class="t-operator">=</span> outside
+<span class="t-function">r</span> <span class="t-operator">=</span> let <span class="t-property">x=2</span> <span class="t-property">y=</span><span class="t-punctuation">(</span><span class="t-variable">$x</span> <span class="t-operator">*</span> <span class="t-number">10</span><span class="t-punctuation">)</span>
+  <span class="t-variable">$x</span> <span class="t-operator">+</span> <span class="t-variable">$y</span>
+<span class="t-function">print</span> <span class="t-variable">$r</span> <span class="t-variable">$x</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>let <span class="t-property">a=5</span> <span class="t-punctuation">(</span><span class="t-variable">$a</span> <span class="t-operator">*</span> <span class="t-variable">$a</span><span class="t-punctuation">))</span></code></pre><pre class='output'><code>22 outside
+25</code></pre>
+<p>Assigning to a <code>let</code> name in its block changes the block's own.</p>
+<pre class='tessh'><code><span class="t-function">let</span> <span class="t-property">total=0</span>
+  <span class="t-function">for</span> n <span class="t-keyword">in</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]</span>
+    <span class="t-function">total</span> <span class="t-operator">+=</span> <span class="t-variable">$n</span>
+  <span class="t-function">print</span> total <span class="t-variable">$total</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-string">"total"</span> <span class="t-keyword">in</span> <span class="t-punctuation">(</span>globals<span class="t-punctuation">))</span></code></pre><pre class='output'><code>total 6
+False</code></pre><h2 id='python-inline'>Python inline</h2>
+<p><code>py "code"</code> is Python as written: an expression's value, or statements
+(defining functions, classes, …) when it's more. Use single or triple
+quotes, so tessh doesn't read <code>$</code> or <code>{…}</code> in it, and indent a triple-quoted
+block as you like. Names are shared with the tessh around it.</p>
+<pre class='tessh'><code><span class="t-function">xs</span> <span class="t-operator">=</span> <span class="t-punctuation">[</span><span class="t-number">3</span> <span class="t-number">1</span> <span class="t-number">2</span><span class="t-punctuation">]</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>py <span class="t-string">"sorted(xs, reverse=True)"</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>py <span class="t-string">"{k: v for k, v in zip('ab', xs)}"</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>[3 2 1]
+{a: 3 b: 1}</code></pre><pre class='tessh'><code><span class="t-function">py</span> <span class="t-string">'''
+import re
+def words(s):
+    return re.findall(r"\w+", s)
+'''</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>words <span class="t-string">"one, two; three"</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>['one' 'two' 'three']</code></pre><h1 id='macros'>Macros</h1><h2 id='macros-49'>Macros</h2>
+<p>A macro runs while the code compiles: it takes forms and returns forms.
+<code>quasi</code> with an indented template builds them; <code>~x</code> inserts a form,
+<code>~@xs</code> splices a list of them and <code>$~x</code> makes a variable from a name.</p>
+<pre class='tessh'><code><span class="t-function">defmacro</span> unless cond:expr *body
+  <span class="t-function">quasi</span>
+    <span class="t-function">if</span> <span class="t-punctuation">(</span><span class="t-keyword">not</span> <span class="t-embedded">~cond</span><span class="t-punctuation">)</span>
+      <span class="t-embedded">~@body</span>
+<span class="t-function">x</span> <span class="t-operator">=</span> <span class="t-number">2</span>
+<span class="t-function">unless</span> <span class="t-variable">$x</span> <span class="t-operator">&gt;</span> <span class="t-number">3</span>
+  <span class="t-function">print</span> small
+  <span class="t-function">print</span> really</code></pre><pre class='output'><code>small
+really</code></pre>
+<p>Parameters: <code>name</code> takes one item, <code>*name</code> the rest (indented lines
+included), and <code>name:expr</code> the rest of the line as one expression.</p>
+<p>Macros are <strong>hygienic</strong>. Names a macro binds never clash with yours, and
+names it uses mean what they meant where it was defined.</p>
+<pre class='tessh'><code><span class="t-function">defmacro</span> swap a b
+  <span class="t-function">quasi</span>
+    <span class="t-function">tmp</span> <span class="t-operator">=</span> <span class="t-variable">$~a</span>
+    <span class="t-embedded">~a</span> <span class="t-operator">=</span> <span class="t-variable">$~b</span>
+    <span class="t-embedded">~b</span> <span class="t-operator">=</span> <span class="t-variable">$tmp</span>
+<span class="t-function">tmp</span> <span class="t-operator">=</span> <span class="t-number">1</span>
+<span class="t-function">other</span> <span class="t-operator">=</span> <span class="t-number">2</span>
+<span class="t-function">swap</span> tmp other
+<span class="t-function">print</span> <span class="t-variable">$tmp</span> <span class="t-variable">$other</span></code></pre><pre class='output'><code>2 1</code></pre>
+<p><code>capture name</code> breaks hygiene on purpose, for anaphoric macros.</p>
+<pre class='tessh'><code><span class="t-function">defmacro</span> aif cond:expr *body
+  <span class="t-function">it</span> <span class="t-operator">=</span> capture <span class="t-string">"it"</span>
+  <span class="t-function">quasi</span>
+    <span class="t-embedded">~it</span> <span class="t-operator">=</span> <span class="t-embedded">~cond</span>
+    <span class="t-function">if</span> <span class="t-variable">$~it</span>
+      <span class="t-embedded">~@body</span>
+<span class="t-function">aif</span> <span class="t-punctuation">(</span>len <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">])</span>
+  <span class="t-function">print</span> got <span class="t-variable">$it</span></code></pre><pre class='output'><code>got 3</code></pre>
+<p><code>:(form)</code> is an inline template and <code>~(expr)</code> inserts a value computed when
+the macro runs. Numbers, strings and lists a macro returns become literals.</p>
+<pre class='tessh'><code><span class="t-function">defmacro</span> twice x
+  <span class="t-punctuation">:(</span><span class="t-embedded">~x</span> <span class="t-operator">+</span> <span class="t-embedded">~x</span><span class="t-punctuation">)</span>
+<span class="t-function">defmacro</span> answer
+  <span class="t-function">quasi</span>
+    <span class="t-embedded">~(</span><span class="t-number">6</span><span class="t-embedded"> </span><span class="t-operator">*</span><span class="t-embedded"> </span><span class="t-number">7</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>twice <span class="t-number">21</span><span class="t-punctuation">)</span> <span class="t-punctuation">(</span>answer<span class="t-punctuation">)</span></code></pre><pre class='output'><code>42 42</code></pre><h2 id='forms'>Forms</h2>
+<p><code>quote form</code> and <code>:name</code> are forms not evaluated. A macro gets its arguments
+as <code>Form</code> objects: <code>.kind</code>, <code>.name</code>, <code>.items</code>, <code>.children</code>, <code>.value</code>,
+<code>.inner</code>, <code>.op</code>, <code>.bracket</code>, indexing and <code>len</code>. <code>str</code> shows one as tessh.</p>
+<pre class='tessh'><code><span class="t-function">f</span> <span class="t-operator">=</span> <span class="t-keyword">quote</span> <span class="t-punctuation">(</span>print a <span class="t-variable">$b</span> <span class="t-number">1</span><span class="t-punctuation">)</span>
+<span class="t-function">print</span> <span class="t-variable">$f.kind</span> <span class="t-punctuation">(</span>len <span class="t-variable">$f</span><span class="t-punctuation">)</span> <span class="t-variable">$f</span><span class="t-punctuation">[</span><span class="t-number">0</span><span class="t-punctuation">]</span>.name <span class="t-variable">$f</span><span class="t-punctuation">[</span><span class="t-number">2</span><span class="t-punctuation">]</span>.kind <span class="t-variable">$f</span><span class="t-punctuation">[</span><span class="t-number">3</span><span class="t-punctuation">]</span>.value
+<span class="t-function">s</span> <span class="t-operator">=</span> <span class="t-constant">:sym</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>str <span class="t-variable">$f</span><span class="t-punctuation">)</span> <span class="t-variable">$s.kind</span></code></pre><pre class='output'><code>Group 4 print Var 1
+(print a $b 1) Sym</code></pre>
+<p>A macro can look at its forms and build code from them.</p>
+<pre class='tessh'><code><span class="t-function">defmacro</span> show_args *args
+  <span class="t-function">names</span> <span class="t-operator">=</span> <span class="t-punctuation">[(</span>str <span class="t-variable">$a</span><span class="t-punctuation">)</span> <span class="t-keyword">for</span> a <span class="t-keyword">in</span> <span class="t-variable">$args</span><span class="t-punctuation">]</span>
+  <span class="t-function">quasi</span>
+    <span class="t-function">print</span> <span class="t-embedded">~names</span>
+<span class="t-function">show_args</span> a <span class="t-variable">$b</span> <span class="t-punctuation">(</span><span class="t-number">1</span> <span class="t-operator">+</span> <span class="t-number">2</span><span class="t-punctuation">)</span></code></pre><pre class='output'><code>['a' '$b' '(1 + 2)']</code></pre>
+<p><code>macroexpand</code> shows what a form becomes, and <code>gensym "hint"</code> makes a fresh
+name (hygiene makes it rarely needed).</p>
+<pre class='tessh'><code><span class="t-function">defmacro</span> inc v
+  <span class="t-function">quasi</span>
+    <span class="t-embedded">~v</span> <span class="t-operator">=</span> <span class="t-variable">$~v</span> <span class="t-operator">+</span> <span class="t-number">1</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span>str <span class="t-punctuation">(</span>macroexpand <span class="t-punctuation">(</span><span class="t-keyword">quote</span> <span class="t-punctuation">(</span>inc n<span class="t-punctuation">))))</span>
+<span class="t-function">print</span> <span class="t-punctuation">(</span><span class="t-string">"tmp"</span> <span class="t-keyword">in</span> <span class="t-punctuation">(</span>str <span class="t-punctuation">(</span>gensym tmp<span class="t-punctuation">)))</span></code></pre><pre class='output'><code>n = $n + 1
+True</code></pre>
+<p>Macro code runs before the template: compute with the forms, then insert
+the results (<code>~name</code> for a name, <code>~(expr)</code> for anything else). A name the
+macro makes for <em>your</em> code to use goes through <code>capture</code>; <code>sym "name"</code> makes
+a hygienic one and <code>var s</code> makes <code>$s</code>. Strings and numbers become literals.</p>
+<pre class='tessh'><code><span class="t-function">defmacro</span> getter name
+  <span class="t-function">key</span> <span class="t-operator">=</span> <span class="t-variable">$name.name</span>
+  <span class="t-function">quasi</span>
+    <span class="t-function">def</span> <span class="t-embedded">~(capture </span><span class="t-string">"get_</span><span class="t-variable">$key</span><span class="t-string">"</span><span class="t-punctuation">)</span> obj
+      <span class="t-variable">$obj</span><span class="t-punctuation">[</span><span class="t-embedded">~key</span><span class="t-punctuation">]</span>
+<span class="t-function">getter</span> color
+<span class="t-function">print</span> <span class="t-punctuation">(</span>get_color <span class="t-punctuation">{</span>color: teal<span class="t-punctuation">})</span></code></pre><pre class='output'><code>teal</code></pre><h1 id='running-tessh'>Running tessh</h1><h2 id='dependencies'>Dependencies</h2>
+<p><code>need</code> names PyPI packages a script, a cell or the REPL uses: uv installs
+them once into a cache, and they import from the next line. Quote a version
+range, so its <code>&gt;</code> isn't a redirection.</p>
+<pre class='tessh'><code><span class="t-function">need</span> requests <span class="t-string">"rich&gt;=13"</span>
+<span class="t-function">import</span> requests
+<span class="t-function">print</span> <span class="t-punctuation">(</span>requests.get <span class="t-string">"https://example.com"</span><span class="t-punctuation">)</span>.status_code</code></pre>
+<p>From the command line, <code>--with</code> (any number of times, or comma-separated)
+does the same before the script runs, as <code>uv run --with</code> does.</p>
+<pre><code>tessh --with requests --with "rich&gt;=13" fetch.tsh
+tessh --with requests,rich -c 'import rich; rich.print "[bold]hi"'</code></pre>
+<p>A PEP 723 inline metadata block, the one <code>uv run</code> reads, works too, and
+says which Python it wants:</p>
+<pre class='tessh'><code><span class="t-comment"># /// script</span>
+<span class="t-comment"># requires-python = "&gt;=3.11"</span>
+<span class="t-comment"># dependencies = ["requests", "rich&gt;=13"]</span>
+<span class="t-comment"># ///</span>
+<span class="t-function">import</span> requests
+<span class="t-function">print</span> <span class="t-punctuation">(</span>requests.get <span class="t-string">"https://example.com"</span><span class="t-punctuation">)</span>.status_code</code></pre><h2 id='the-repl'>The REPL</h2>
+<p><code>tessh</code> alone starts the REPL: an editor for commands that works in any
+terminal (xterm, kitty, foot, tmux, ssh, the Linux console), with what
+Tessera's input editor has.</p>
+<ul>
+<li>Enter runs what's complete. After a line that opens a block (<code>def</code>, <code>if</code>,
+<code>for</code>, <code>x = if …</code>, a macro) or with brackets or a string open, Enter starts
+a new line, indented for it; Enter on a blank line ends the block and runs
+it, as in IPython. An <code>else</code>, <code>elif</code>, <code>except</code> or <code>finally</code> typed too deep
+goes back to its <code>if</code> or <code>try</code>.</li>
+<li>Alt+Enter (or Ctrl+J) adds a line anywhere. Tab in a line's indentation
+indents, Shift+Tab outdents, and Backspace there takes a whole level.</li>
+<li>Tab completes names, programs, paths (quoted where they need it) and <code>$</code>
+variables, in a list with each one's help beside it.</li>
+<li>Colors are tree-sitter's, as in Tessera. The line under the input says
+what's wrong as you type (<code>✗ unmatched ')'</code>), the check <code>tessh --check</code>
+makes.</li>
+<li>Grey text after the cursor is the newest command from history that starts
+with what's typed, or else the AI's guess (<code>help ai</code>): → or End takes it,
+Alt+F one word of it, Ctrl+Space takes it or asks the AI for one.</li>
+<li>↑ and ↓ go line by line, then through history; PgUp and PgDn a whole entry
+at a time; Ctrl+R searches it. History is kept in
+<code>~/.local/share/tessh/history</code>, and <code>~/.config/tessh/rc.tsh</code> runs first.</li>
+<li>F1 (or Alt+H) shows help for the word at the cursor, or the keys on an
+empty line. Ctrl+Alt+J lists background jobs; Ctrl+Alt+D, the folders
+you have been in (cd history).</li>
+<li>Ctrl+C interrupts, Ctrl+Z stops a program (<code>fg</code> brings it back), Ctrl+D
+exits. Emacs keys by default; <code>TESSH_KEYS=vi</code> for vi's.</li>
+</ul>
+<h2 id='keys-a-terminal-cant-send'>Keys a terminal can't send</h2>
+<p>Tessera's editor has keys on a tap of left or right Shift or Ctrl alone, and
+on Shift+Enter and Ctrl+Enter, which most terminals send as nothing or as
+plain Enter. Here they have keys every terminal sends:</p>
+<table><thead><tr><th>In Tessera</th><th>Does</th><th>Here</th></tr></thead><tbody>
+<tr><td>Right Shift (tap), Shift+Enter</td><td>New line</td><td>Alt+Enter or Ctrl+J</td></tr>
+<tr><td>Left Shift (tap)</td><td>Take the grey suggestion; with none, ask the AI</td><td>→ or End takes it; Ctrl+Space takes it or asks</td></tr>
+<tr><td>Right Ctrl (tap), Ctrl+Enter</td><td>Run in the background (a trailing <code>&amp;</code>)</td><td>Alt+&amp;</td></tr>
+<tr><td>Left Ctrl (tap)</td><td>Switch between the editor and the terminal</td><td>Not needed: the editor is the terminal here, and what's typed while a command runs waits for the prompt</td></tr>
+</tbody></table>
+<p>Where the terminal speaks the kitty keyboard protocol (kitty, foot, WezTerm,
+Ghostty, Alacritty, iTerm2) the real keys work as well: the taps, Shift+Enter
+and Ctrl+Enter. <code>TESSH_KITTY_KEYS=0</code> leaves the protocol off. <code>help keys</code>
+(or <code>tessh --keys</code>) lists every key.</p>
+<h2 id='the-ai'>The AI</h2>
+<p><code># what you want</code>, then Enter: the AI writes the command, and it waits in
+the editor for you to check and run (or change). As you type a <code>#</code> request,
+grey text finishes it, and after a pause <code>→ the command</code> shows; → takes it.
+On other lines the AI's guess is the grey text when history has none.</p>
+<p>tessh uses Tessera's AI settings when there are any (its providers, keys and
+models: the suggestion model for grey text, the chat model for requests).
+Without them, <code>TESSH_AI_MODEL=provider/model</code> picks one (<code>ollama/qwen3.5:4b</code>,
+<code>anthropic/claude-…</code>, <code>openai/…</code>, with the key in <code>ANTHROPIC_API_KEY</code>,
+<code>OPENAI_API_KEY</code> and so on), or else a local Ollama is used if one is
+running. <code>TESSH_AI=0</code> turns it off.</p>
+<h2 id='the-guide-in-a-terminal'>The guide in a terminal</h2>
+<p><code>help guide</code> (or <code>tessh --guide</code>) prints this whole guide, drawn for the
+terminal: headings, wrapped text, tables and highlighted examples.
+<code>tessh --guide pipes</code> prints one part, as <code>help pipes</code> does.</p>
+<h2 id='a-tessh-for-any-linux'>A tessh for any Linux</h2>
+<p><code>nix build github:benwbooth/tessera#tessh-static</code> (or
+<code>scripts/tessh-static.sh</code>) makes <code>tessh</code> as one file that runs on any
+x86-64 or ARM64 Linux with nothing else installed: NixOS, a bare container, a
+server over ssh. <code>scripts/tessh-static-macos.sh</code> does the same for macOS
+(Apple Silicon or Intel). Ready-made ones are on the <code>tessh-dev</code> release
+(<code>tessh-x86_64-linux</code>, <code>tessh-aarch64-linux</code>, <code>tessh-aarch64-macos</code>,
+<code>tessh-x86_64-macos</code>) and on each Tessera release.</p>
+<p>The Linux file carries uv and two builds of tessh (built against Python's
+stable ABI): one for glibc and one for musl, with musl's program loader.
+The first time it runs, it uses the glibc build when the system has glibc's
+loader and that build runs. Otherwise, as on Alpine or a bare container, it
+uses the musl build. It remembers the choice; <code>TESSH_LIBC=gnu</code> or <code>musl</code>
+forces one. Then it gets a CPython for that C library with uv
+(python-build-standalone's: about 30 MB to download, 93 MB unpacked) and
+keeps it under <code>~/.cache/tessh</code> and uv's folder. On macOS it gets uv's macOS
+CPython the same way.</p>
+<ul>
+<li>Which Python: <code>tessh --python 3.14</code>, <code>TESSH_PYTHON=3.14</code>, or a line in
+<code>~/.config/tessh/python</code>; otherwise the newest one uv offers (3.12 or
+later), looked at once a day, so a new CPython in uv is taken up. A uv on
+<code>PATH</code> is used when it's newer than the one inside.</li>
+<li><code>need numpy</code> and <code>--with</code> install with uv, as everywhere: C extensions
+(manylinux or musllinux wheels: numpy, pandas, lxml) load as in any Python,
+since a real loader runs tessh. A package with no wheel for the system is
+built from source, which needs a C compiler.</li>
+<li>Where uv can't tell the system's C library (a system with no dynamic
+loader at all, like a static busybox), tessh fetches the same CPython
+build directly.</li>
+<li><code>python3</code> beside it in <code>~/.cache/tessh/rt-*/py/*/bin</code> is that Python, for
+programs that want one.</li>
+<li>No Windows build: tessh is built on Unix processes, signals and terminals.
+Under WSL, use the Linux file.</li>
+</ul>
+<h2 id='tessh-as-your-login-shell'>tessh as your login shell</h2>
+<p>tessh takes the flags a login shell gets:</p>
+<ul>
+<li><code>-l</code> or <code>--login</code>, or a <code>-</code> before its name (how <code>login</code> and <code>sshd</code>
+start one): first it imports the environment that <code>/etc/profile</code>,
+<code>/etc/profile.d</code>, <code>~/.profile</code> and NixOS's <code>set-environment</code> set up, by
+running <code>sh -l</code> once. It doesn't take that sh's working folder or <code>SHLVL</code>.
+Then it runs <code>~/.config/tessh/login.tsh</code>, before <code>rc.tsh</code>. A profile that
+takes more than 10 s is cut off, with a message.</li>
+<li><code>-i</code>: accepted, for programs that pass it. The REPL needs a terminal,
+so without one tessh runs stdin as a script.</li>
+<li><code>-s [ARGS…]</code>: run the script read from stdin, with ARGS as <code>sys.argv[1:]</code>.
+This also happens when stdin isn't a terminal and no file is given, as in
+<code>cmd | tessh</code>.</li>
+<li><code>-c CMD</code>: CMD is tessh code. One exception: when sshd starts tessh, as for
+<code>ssh host cmd</code>, <code>scp</code>, <code>rsync</code> or VS Code's remote server, CMD goes to
+<code>/bin/sh</code>, because those programs send sh commands. <code>TESSH_SH_C=1</code> or <code>0</code>
+overrides this either way.</li>
+</ul>
+<p>Short flags combine: <code>tessh -li</code>, or <code>tessh -lc CMD</code>, the same as
+<code>-l -c CMD</code>.</p>
+<p>To make it your login shell, list it in <code>/etc/shells</code> first; <code>chsh</code>
+accepts only shells listed there. On NixOS, set
+<code>environment.shells</code> to include tessh (<code>tessera.packages.${system}.tessh</code>
+from this flake, or a path) and then
+<code>users.users.&lt;you&gt;.shell</code>. Elsewhere, add its full path to <code>/etc/shells</code> and
+run <code>chsh -s /path/to/tessh</code>. If <code>~/.profile</code> runs <code>exec tessh</code>, that's fine:
+tessh notices it's being started while it reads the profile and doesn't
+start a second REPL.</p>
+<h2 id='scripts-and-checks'>Scripts and checks</h2><pre><code>tessh file.tsh args…      run a script (#!/usr/bin/env tessh works)
+tessh -c 'code'           run a string
+tessh --check [file]      check without running; line:col: message per problem
+tessh --check --json      the same as JSON
+tessh --py file.tsh       print the Python it compiles to
+tessh --guide [topic]     the guide, or a part of it, for the terminal
+tessh --kernel -f conn    the Jupyter kernel</code></pre><h2 id='notebooks'>Notebooks</h2>
+<p>In Tessera's notebook, tessh is the default kernel. A cell's last value
+shows with its richest form: HTML, Markdown, images, matplotlib figures.
+<code>display x</code> shows a value partway through, and <code>input</code> asks in the card.
+The folder and exported variables go back and forth with the pane's shell.</p>
+<p>Programs a cell runs run in the pane's terminal, as a shell cell's do, with
+the cell's folder and variables. What they print goes in the card in order
+with the rest; a terminal app (vim, less, htop: one that takes the whole
+screen) gets the live terminal in the card while it runs. The cell goes on
+when it exits, with its status in <code>$?</code>.</p>
+<pre class='tessh'><code><span class="t-function">need</span> pandas matplotlib
+<span class="t-function">import</span> pandas <span class="t-keyword">as</span> pd
+<span class="t-function">df</span> <span class="t-operator">=</span> pd.DataFrame <span class="t-punctuation">{</span>a: <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">2</span> <span class="t-number">3</span><span class="t-punctuation">]</span> b: <span class="t-punctuation">[</span><span class="t-number">4</span> <span class="t-number">5</span> <span class="t-number">6</span><span class="t-punctuation">]}</span>
+<span class="t-function">display</span> <span class="t-variable">$df</span>
+<span class="t-function">import</span> matplotlib.pyplot <span class="t-keyword">as</span> plt
+<span class="t-function">plt.plot</span> <span class="t-punctuation">[</span><span class="t-number">1</span> <span class="t-number">4</span> <span class="t-number">9</span><span class="t-punctuation">]</span>
+<span class="t-function">name</span> <span class="t-operator">=</span> input <span class="t-string">"Your name? "</span></code></pre></main></body></html>

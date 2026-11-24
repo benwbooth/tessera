@@ -1,6 +1,6 @@
-# The GitHub Pages site: the website from docs/ at the root, tessh's
-# documentation under /tessh/ (scripts/tessh-docs-site.sh), and the Flatpak
-# repo from the latest release under /flatpak/.
+# The GitHub Pages site: the website from docs/ at the root (tessh's
+# documentation in docs/tessh, made by scripts/tessh-docs-site.sh), and the
+# Flatpak repo from the latest release under /flatpak/.
 #
 # Runs after the Release workflow attaches a new Flatpak repo (it starts this
 # workflow), or by hand (Actions > Pages > Run workflow) for site-only updates.
@@ -50,12 +50,6 @@ jobs:
           HTML
           fi
           touch public/.nojekyll
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: mdbook@0.5.2
-      - name: tessh's documentation, at /tessh/
-        run: |
-          scripts/tessh-docs-site.sh public/tessh
           find public -maxdepth 2 | head -40
       - uses: actions/upload-pages-artifact@v3
         with:

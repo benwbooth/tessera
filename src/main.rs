@@ -65,6 +65,21 @@ fn main() {
         }
         return;
     }
+    // tessh's guides as pages, as the Guide tab shows them, for the
+    // documentation site (scripts/tessh-docs-site.sh): no window.
+    if args.get(1).map(String::as_str) == Some("--guide-html") {
+        let (Some(lang), Some(out)) = (args.get(2), args.get(3)) else {
+            eprintln!("usage: tessera --guide-html tessh|tessh-advanced OUT.html");
+            std::process::exit(2);
+        };
+        match guides::page_html(lang, false).and_then(|body| std::fs::write(out, body).map_err(|e| e.to_string())) {
+            Ok(()) => return,
+            Err(e) => {
+                eprintln!("tessera --guide-html: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     // Options for the QML side (screenshots, a first command for testing).
     let mut i = 1;
     while i < args.len() {

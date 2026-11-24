@@ -18,7 +18,8 @@ an interactive shell with its own line editor, as scripts (`tessh file.tsh`,
 
 ## Documentation
 
-Read it as a site, with contents and search:
+Read it as a site, the same pages as Tessera's Guide tab (bash and tessh
+tabs on every example of the Advanced guide):
 **[benwbooth.github.io/tessera/tessh](https://benwbooth.github.io/tessera/tessh/)**.
 
 - **[The tessh guide](doc/guide.md):** the whole language, a part at a time,

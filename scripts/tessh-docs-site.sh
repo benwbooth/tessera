@@ -1,45 +1,36 @@
 #!/usr/bin/env bash
-# tessh's documentation as a site: scripts/tessh-docs-site.sh OUT
-# The guide, the language reference and the Advanced tessh Scripting Guide,
-# as an mdBook (contents, search, themes), its tessh code coloured by tessh's
-# own highlighting (tree-sitter-tessh's md_html example). The Pages workflow
-# puts it at /tessh/. Needs cargo and mdbook.
+# tessh's documentation as a site, made by Tessera's own Guide renderer so it
+# reads as the Guide tab does (contents, highlighting, bash/tessh tabs):
+#   scripts/tessh-docs-site.sh [OUT]   (OUT: docs/tessh, served at /tessh/)
+# TESSERA: the tessera binary to render with (default: tessera on PATH).
+# The Pages workflow serves docs/ as the site: run this and commit docs/tessh
+# when the guides change.
 set -euo pipefail
-out=$(realpath -m "${1:?usage: tessh-docs-site.sh OUT}")
 root=$(cd "$(dirname "$0")/.." && pwd)
+out=${1:-$root/docs/tessh}
+tessera=${TESSERA:-tessera}
+head=$root/tessh/doc/site/head.html
+mkdir -p "$out"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-cargo build --release --quiet --manifest-path "$root/Cargo.toml" -p tree-sitter-tessh --example md_html
-hl=${CARGO_TARGET_DIR:-$root/target}/release/examples/md_html
+# page LANG FILE TITLE: one guide as a page, the two guides linked at the top
+# of the contents.
+page() {
+  local lang=$1 file=$2 title=$3
+  "$tessera" --guide-html "$lang" "$work/$lang.html"
+  local on_g='' on_a=''
+  if [ "$lang" = tessh ]; then on_g=' class="on"'; else on_a=' class="on"'; fi
+  local switch="<div class='home'><a href='https://github.com/benwbooth/tessera/tree/main/tessh'>tessh on GitHub</a></div><div class='guides'><a href='index.html'$on_g>Guide</a><a href='advanced.html'$on_a>Advanced</a></div>"
+  {
+    printf '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title>\n' "$title"
+    cat "$head"
+    printf '</head><body>'
+    sed "0,/<nav>/s||<nav>$switch|" "$work/$lang.html"
+    printf '</body></html>\n'
+  } > "$out/$file"
+}
 
-cp "$root/tessh/doc/site/book.toml" "$root/tessh/doc/site/tessh.css" "$work/"
-src=$work/src
-mkdir -p "$src/advanced"
-# (Links as the site has them: the guide, the reference and the chapters side by side.)
-sed -e 's|(doc/guide.md)|(guide.md)|g' -e 's|(\.\./docs/TESSH.md)|(reference.md)|g' \
-    -e 's|(doc/advanced/|(advanced/|g' -e 's|(\.\./README.md)|(https://github.com/benwbooth/tessera)|g' \
-    "$root/tessh/README.md" | "$hl" > "$src/README.md"
-"$hl" < "$root/tessh/doc/guide.md" > "$src/guide.md"
-sed -e 's|(\.\./tessh/doc/guide.md)|(guide.md)|g' "$root/docs/TESSH.md" | "$hl" > "$src/reference.md"
-for f in "$root"/tessh/doc/advanced/*.md; do
-  "$hl" < "$f" > "$src/advanced/$(basename "$f")"
-done
-
-# The contents: the chapters in the guide's order, each by its first heading.
-{
-  echo "# Summary"
-  echo
-  echo "[tessh](README.md)"
-  echo
-  echo "- [The tessh guide](guide.md)"
-  echo "- [Language reference](reference.md)"
-  echo "- [Advanced tessh Scripting Guide](advanced/00-introduction.md)"
-  for f in $(cd "$root/tessh/doc/advanced" && ls *.md | LC_ALL=C sort | grep -v '^00-' | awk '/^[0-9]/{print; next} {rest=rest $0 "\n"} END{printf "%s", rest}'); do
-    t=$(head -1 "$root/tessh/doc/advanced/$f" | sed 's/^#* *//')
-    echo "  - [$t](advanced/$f)"
-  done
-} > "$src/SUMMARY.md"
-
-mdbook build "$work" --dest-dir "$out"
+page tessh index.html "The tessh guide"
+page tessh-advanced advanced.html "Advanced tessh Scripting Guide"
 echo "tessh docs: $out"
