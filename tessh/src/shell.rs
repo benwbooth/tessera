@@ -30,7 +30,7 @@ pub fn usage(name: &str) -> Option<&'static str> {
         "caller" => "caller\n\nNot in tessh: a function's caller is Python's frame. traceback.print_stack shows the calls (import traceback), inspect.stack gives them as values.",
         "builtin" => "builtin name [arg …]\n\nRun tessh's builtin of that name, even when a function of yours has the name (def cd … that ends with builtin cd $dir).",
         "enable" => "enable\n\nNot in tessh: its builtins can't be turned off. A function of the same name takes a builtin's place, and \\name runs the program of that name.",
-        "type" => "type [-afptP] name …\n\nWhat each name is as a command: a tessh keyword, a function (yours, or a command function), a variable, a tessh builtin, a Python builtin, or a program (and where). -t says only which (keyword, function, variable, builtin or file), -p only a program's path, -P looks only for a program, -a shows everything the name is. Given a value instead of words (type $x), it's Python's type.",
+        "type" => "type [-afptP] name …\n\nWhat each name is as a command: an alias, a tessh keyword, a function (yours, or a command function), a variable, a tessh builtin, a Python builtin, or a program (and where). -t says only which (alias, keyword, function, variable, builtin or file), -p only a program's path, -P looks only for a program, -a shows everything the name is. Given a value instead of words (type $x), it's Python's type.",
         "hash" => "hash [-r] [-t name …] [name …]\n\ntessh doesn't remember where programs are: it looks each one up on $PATH as it runs it, so hash -r has nothing to forget. hash name checks it's there (and fails if not); -t prints where. Given a value (hash $x), it's Python's hash.",
         "exec" => "exec [-cl] [-a name] program [arg …]\n\nReplace tessh with the program (exec zsh, exec tmux): it never comes back. -c gives it an empty environment, -l starts it as a login shell (a - before its name), -a gives it another name. With only redirections (exec >log, exec 2>&1, exec 3<file) they stay in force, for tessh and every program after. Given code (exec $code, exec \"x = 1\"), it's Python's exec; builtins.exec is Python's whatever it's given.",
         "eval" => "eval text …\n\nRun the words joined as tessh text, here, as bash's eval does: eval \"echo hi\", eval $\"(ssh-agent -c)\" (tessh doesn't read sh: give it tessh, or run sh -c). Its value is the last form's, so x = (eval \"1 + 2\") is 3. Given a value (eval $code), it's Python's eval.",
@@ -43,7 +43,9 @@ pub fn usage(name: &str) -> Option<&'static str> {
         "select" => "select item …\n\nbash's menu, as a loop: for choice in (select red green blue) prints the items numbered (to stderr), asks $PS3 (#? without it) and gives the item picked each time; a number that isn't on the menu gives None, Enter alone shows the menu again, and the end of the input ends the loop (break ends it too). $REPLY is what was typed.",
         "complete" => "complete [-fdcbkv] [-W words] [-F function] [-A action] name …\ncomplete -r [name …]   complete [-p] [name …]\n\nWhat Tab offers after a command: -W the words (a string split at spaces), -F a function given (word, words of the line so far) that returns a list, -f files, -d folders, -c commands, -v variables, -k keywords, -b builtins. -r forgets a command's, -p (or complete alone) lists them.",
         "compgen" => "compgen [-fdcbkv] [-W words] [-F function] [-A action] [--] [word]\n\nThe completions complete would offer for word, one a line: -W words, -f files, -d folders, -c commands (programs, builtins and functions), -v variables, -k keywords, -b builtins, -A function the functions.",
-        "declare" | "typeset" | "local" | "alias" | "unalias" | "shopt" | "bind" => return idiom(name),
+        "alias" => "alias [-p] [name=value …] [name …]\n\nbash's aliases: name runs value with its words after it (alias ll='ls -l', then ll /tmp is ls -l /tmp). The value is tessh text, run where the alias is used, so a pipe or a call works too; an alias that starts with its own name runs the program (alias ls='ls --color'). alias alone, or -p, lists them; alias name shows one. unalias name removes one, unalias -a all. A @command def does the same with its arguments anywhere.",
+        "unalias" => "unalias [-a] name …\n\nRemove aliases (all of them with -a).",
+        "declare" | "typeset" | "local" | "shopt" | "bind" => return idiom(name),
         _ => return None,
     })
 }
@@ -51,7 +53,6 @@ pub fn usage(name: &str) -> Option<&'static str> {
 /// bash's builtins tessh does another way: what to do instead.
 fn idiom(name: &str) -> Option<&'static str> {
     Some(match name {
-        "alias" | "unalias" => "tessh has no aliases: a command function does what one does, and can take its arguments anywhere:\n\n  @command\n  def ll *args\n    ls -l *$args\n\nA def replaces it; del ll removes it. (help commands)",
         "declare" | "typeset" => "tessh's variables are Python's: name = value sets one, of any type (bash's -i, -a and -A are an int, a list and a dict), export NAME=value sets an environment variable (declare -x), a name set in a def is the def's own (declare in a function), and print $name or pretty $name shows one (declare -p).",
         "local" => "a name set in a def is already the def's own (Python's scopes): no local is needed. global name or nonlocal name sets one outside instead.",
         "shopt" => "tessh has no shell options: globs, strings and folders work one way (help globs), strict on is bash's set -e, and help abs-options says what to do for the rest.",
@@ -62,7 +63,7 @@ fn idiom(name: &str) -> Option<&'static str> {
 
 /// Whether the builtin is given the namespace it runs in (to set names, run text there).
 pub fn wants_ns(name: &str) -> bool {
-    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash" | "readonly" | "select" | "complete" | "compgen" | "compopt" | "fc" | "set" | "mapfile" | "readarray" | "time" | "coproc")
+    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash" | "readonly" | "select" | "complete" | "compgen" | "compopt" | "fc" | "alias" | "unalias" | "set" | "mapfile" | "readarray" | "time" | "coproc")
 }
 
 /// Run builtin `name` with its words: the Python function `sh_name`, or the
@@ -1630,11 +1631,96 @@ def sh_compopt(*args, _ns=None):
         sp["opts"] -= off
     return None
 
+class Alias:
+    """An alias: its text, with the words it's given after it, run as tessh
+    in the namespace it's used in (bash's alias, expanded when it runs)."""
+    _tessh_command = True
+    _tessh_wants_ns = True
+    def __init__(self, name, text):
+        self.name = name
+        self.text = text
+    @property
+    def _tessh_usage(self):
+        return f"{self.name}: an alias for {self.text}"
+    def __call__(self, *words, _ns=None):
+        # (An alias that starts with its own name runs the program or
+        # builtin of that name, not itself again: alias ls='ls --color'.)
+        ns = _ns if _ns is not None else {}
+        return _tessh().eval_tessh(self._line(words), ns)
+    def _tessh_pipe(self, *rest, _ns=None, last=False):
+        """In a pipe: what comes in is the alias's input (… | alias args),
+        and its output goes on (or is shown, last)."""
+        words, data = rest[:-1], rest[-1]
+        if data is None:
+            return self(*words, _ns=_ns) if last else _tessh().eval_tessh("(" + self._line(words) + ")", _ns)
+        key = "__tessh_pipe_in__"
+        # (A captured value lost its last newline: back, for the program's lines.)
+        if isinstance(data, str) and data and not data.endswith("\n"):
+            data = str(data) + "\n"
+        _ns[key] = data
+        try:
+            expr = f"${key} | " + self._line(words)
+            return _tessh().eval_tessh(expr if last else "(" + expr + ")", _ns)
+        finally:
+            _ns.pop(key, None)
+    def _line(self, words):
+        text = self.text
+        first = text.split(None, 1)[0] if text.strip() else ""
+        if first == self.name:
+            text = "\\" + text.lstrip()
+        return text + "".join(" " + _quote_word(w) for w in words)
+    def __repr__(self):
+        import shlex
+        return f"alias {self.name}={shlex.quote(self.text)}"
+
+def _aliases(ns):
+    return {k: v for k, v in (ns or {}).items() if isinstance(v, Alias)}
+
+def sh_alias(*args, _ns=None):
+    """alias [-p] [name[=value] …]"""
+    args = [a for a in args if a != "-p"]
+    if not args:
+        for k, v in sorted(_aliases(_ns).items()):
+            print(repr(v))
+        return None
+    code = 0
+    for a in args:
+        name, eq, text = a.partition("=")
+        if not eq:
+            v = (_ns or {}).get(name)
+            if isinstance(v, Alias):
+                print(repr(v))
+            else:
+                _err(f"alias: {name}: not found")
+                code = 1
+            continue
+        if not name or any(c in name for c in " \t\n/$`=\\'\"|&;()<>"):
+            raise ValueError(f"alias: {name}: invalid alias name")
+        _ns[name] = Alias(name, text)
+    return _status(code) if code else None
+
+def sh_unalias(*args, _ns=None):
+    """unalias [-a] name …"""
+    if "-a" in args:
+        for k in list(_aliases(_ns)):
+            del _ns[k]
+        return None
+    if not args:
+        raise ValueError("unalias: usage: unalias [-a] name [name …]")
+    code = 0
+    for n in args:
+        if isinstance((_ns or {}).get(n), Alias):
+            del _ns[n]
+        else:
+            _err(f"unalias: {n}: not found")
+            code = 1
+    return _status(code) if code else None
+
 # ---- complete, compgen ---------------------------------------------------------------
 
 _complete = {}
 
-_ACTIONS = {"file": "f", "directory": "d", "command": "c", "builtin": "b", "keyword": "k", "variable": "v", "function": "F*", "export": "e", "user": "u", "hostname": "h", "job": "j", "signal": "s", "alias": ""}
+_ACTIONS = {"file": "f", "directory": "d", "command": "c", "builtin": "b", "keyword": "k", "variable": "v", "function": "F*", "export": "e", "user": "u", "hostname": "h", "job": "j", "signal": "s", "alias": "a"}
 _OPTIONS = {"default", "dirnames", "filenames", "nospace", "plusdirs", "bashdefault", "noquote", "nosort", "fullquote"}
 
 def _parse_spec(args):
@@ -1651,7 +1737,7 @@ def _parse_spec(args):
         else:
             k += 1
     flags, vals, rest = _split_opts(args, "WFAGXPSC")
-    spec = {"flags": set(f for f in flags if f in "fdcbkveuhjs"), "words": vals.get("W"), "func": vals.get("F"),
+    spec = {"flags": set(f for f in flags if f in "fdcbkveuhjsa"), "words": vals.get("W"), "func": vals.get("F"),
             "command": vals.get("C"), "glob": vals.get("G"), "filter": vals.get("X"),
             "prefix": vals.get("P", ""), "suffix": vals.get("S", ""), "opts": opts, "functions": False}
     a = vals.get("A")
@@ -1739,6 +1825,8 @@ def _gen(spec, word, line_words, ns, line=None, point=None):
         out += sorted(n for n in (ns or {}) if n.startswith(word) and not n.startswith("_") and not callable(ns[n]))
     if "e" in fl:
         out += sorted(n for n in os.environ if n.startswith(word))
+    if "a" in fl:
+        out += sorted(n for n in _aliases(ns) if n.startswith(word))
     if "u" in fl:
         out += sorted({p.pw_name for p in pwd.getpwall() if p.pw_name.startswith(word)})
     if "h" in fl:
@@ -2025,7 +2113,9 @@ def _what(name, ns, every=False, path_only=False):
         if name in _keywords():
             out.append(("keyword", f"{name} is a tessh keyword", None))
         v = ns.get(name, None) if ns is not None and name in ns else None
-        if ns is not None and name in ns:
+        if ns is not None and name in ns and isinstance(v, Alias):
+            out.append(("alias", f"{name} is aliased to `{v.text}'", None))
+        elif ns is not None and name in ns:
             if (type(v).__name__ == "Builtin" and type(v).__module__ == "__tessh__") or getattr(v, "__module__", None) in ("__tessh__", "__tessh_shell__", "__tessh_prelude__"):
                 out.append(("builtin", f"{name} is a tessh builtin", None))
             elif callable(v):

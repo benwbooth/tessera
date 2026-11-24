@@ -1465,8 +1465,6 @@ fn builtin_history_logout() {
 #[test]
 fn idioms_say_what_to_do() {
     for (line, says) in [
-        ("alias ll='ls -l'", "@command"),
-        ("unalias ll", "@command"),
         ("declare -i n=1", "Python's"),
         ("local x=1", "def's own"),
         ("shopt -s nullglob", "shell options"),
@@ -1819,4 +1817,30 @@ fn time_and_coproc_open_blocks() {
     assert!(crate::repl::opens_block("coproc WORKER", &[]));
     assert!(!crate::repl::opens_block("coproc sh", &[]));
     assert!(!crate::repl::opens_block("coproc sh -c 'cat'", &[]));
+}
+
+/// alias and unalias, as bash's: the text with the words after it.
+#[test]
+fn aliases() {
+    let (ns, out) = run(concat!(
+        "alias say='echo said:'\n",
+        "say hi there\n",
+        "alias up='tr a-z A-Z'\n",
+        "echo quiet | up\n",
+        "alias echo='echo E:'\n",
+        "echo looped\n",
+        "alias say\n",
+        "type say\n",
+        "type -t say\n",
+        "unalias echo\n",
+        "echo plain\n",
+        "missing = (alias nosuch 2>/dev/null)\n",
+        "unalias -a\n",
+        "gone = (type -t say 2>/dev/null)\n",
+    ));
+    assert_eq!(out, "said: hi there\nQUIET\nE: looped\nalias say='echo said:'\nsay is aliased to `echo said:'\nalias\nplain\n");
+    Python::attach(|py| {
+        let code = |k: &str| ns.bind(py).get_item(k).unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap();
+        assert_eq!([code("missing"), code("gone")], [1, 1]);
+    });
 }

@@ -41,7 +41,8 @@ them as bash would:
   and `readarray`; `time` as a builtin (`\time` is the program); `while
   read line <file` reads the file once, line after line; and history's
   `!?text?`, `!#`, word designators, modifiers and `^old^new^`.
-- `alias`, `declare`, `local`, `shopt`, `bind`, `caller`, `enable`: not
+- `alias` and `unalias`, as bash's.
+- `declare`, `local`, `shopt`, `bind`, `caller`, `enable`: not
   in tessh, but each now says what to do instead, rather than "command not
   found".
 - `$PWD` is right when tessh starts.
@@ -70,7 +71,6 @@ them as bash would:
   failing *program* stops a script only in strict mode (`strict`, `set
   -e`, `tessh -e`) or with `(cmd)!` (chapters 32, 33).
 - **`$!`** by that name: `$j.pid`, after `j = cmd &` (chapters 9, 15).
-- **`alias`**: none; `@command def` (chapter 25).
 
 ## Variables
 <!-- help: abs-gaps-variables $UID $RANDOM $LINENO $SECONDS -->

@@ -16,9 +16,9 @@ change the shell itself: `read`, `getopts`, `shift`, `eval`, `exec`,
 -- args`. They take bash's options; `help NAME`
 describes each. Others do things that in tessh are plain Python: a
 variable is set with `=`, arithmetic is Python's, text is formatted with
-f-strings. A few of bash's (`alias`, `declare`, `local`, `readonly`,
-`shopt`, `bind`, `caller`, `enable`) say what to do in tessh
-instead. Where that leaves a real hole, this chapter says so.
+f-strings. `alias` and `unalias` work as bash's. A few of bash's
+(`declare`, `local`, `shopt`, `bind`, `caller`, `enable`) say what to do
+in tessh instead. Where that leaves a real hole, this chapter says so.
 
 A builtin used as a value gives what it prints (`m = (umask)`), and in a
 pipe its output goes down the pipe (`history | grep ssh`). `type`, `hash`,

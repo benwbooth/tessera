@@ -9,8 +9,12 @@ aren't expanded inside `if`s, loops and functions defined at the same time,
 and they don't expand recursively. A function does all an alias does, and
 more.
 
-**Gap:** tessh has no aliases; a function is the way. (`alias` and
-`unalias` say so, and fail.) A plain `def` gets
+tessh has `alias` and `unalias`, as bash's: `alias lm='ls -l | less'`,
+then `lm /tmp` runs `ls -l | less /tmp`, the text (tessh) with the
+words after it. Unlike bash's, a tessh alias works in a script without
+any option, in `if`s, loops and functions too, since it's expanded when
+it runs; an alias that starts with its own name runs the program, as
+bash's don't expand recursively. A function does more. A plain `def` gets
 its arguments as values. With `@command` before it, it gets them as the
 words a program would, globs and all, so it reads like a command and
 passes its arguments on: `def ll *words` then `ls -l *$words`. Unlike an

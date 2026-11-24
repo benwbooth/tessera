@@ -935,7 +935,8 @@ Besides `cd`, `export` and the jobs, tessh has the builtins a login shell
 needs, with bash's options: `trap`, `ulimit`, `umask`, `read`, `getopts`,
 `shift`, `select`, `mapfile` (`readarray`), `coproc`, `time`, `times`,
 `history`, `fc`, `type`, `command -v`, `hash`, `exec`, `eval`,
-`builtin`, `readonly`, `complete`, `compgen`, `logout` and `suspend`, and
+`builtin`, `readonly`, `alias`, `unalias`, `complete`, `compgen`, `logout`
+and `suspend`, and
 `set`'s `-x`, `-v`, `-u`, `-C`, `-f`, `-n`, `-o pipefail`, `-o ignoreeof`
 and `--`. `help NAME` describes each.
 
@@ -1043,9 +1044,14 @@ line 4
 ```
 
 Some of bash's builtins are tessh's own idioms instead, and say so when
-used: `alias` (a `@command` def, see Commands), `declare`, `typeset` and
-`local` (variables are Python's: a name set in a def is already local),
-`shopt`, `bind`, `caller` and `enable`.
+used: `declare`, `typeset` and `local` (variables are Python's: a name set
+in a def is already local), `shopt`, `bind`, `caller` and `enable`.
+
+`alias ll='ls -l'` works as in bash: `ll /tmp` runs `ls -l /tmp`. The text
+is tessh, run where the alias is used, so `alias lm='ls -l | less'` works
+too, and `alias ls='ls --color'` runs the program rather than itself.
+`alias` lists them, `unalias` removes them. A `@command` def does the same
+and can put its arguments anywhere (see Commands).
 
 # Python, written as tessh
 

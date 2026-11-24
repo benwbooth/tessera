@@ -951,8 +951,9 @@ What changes, part by part:
 - **Colors** are a dict of escape strings; `"\x1b"` is bash's `\e`.
 - **The exit trap** is `trap _exit EXIT` in tessh too; the version here
   uses Python's `atexit.register`.
-- **Aliases.** tessh has no aliases; a function does the job. With
-  `@command` it reads its arguments as words (globs included), as a
+- **Aliases.** `alias` works in tessh as in bash, so the alias lines
+  could stay; this port uses functions, which do more. With
+  `@command` one reads its arguments as words (globs included), as a
   command does, and passes them on with `$args`. A function named after a
   program runs the program itself as `\name`.
 - **The prompt.** **Gap:** tessh's prompt is fixed: the folder, then `❯`,

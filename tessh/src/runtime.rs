@@ -1398,6 +1398,17 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
                 // (A builtin in a pipe: what it prints goes down the pipe, and
                 // what comes in is its input, so `history | grep x` and
                 // `echo hi | read v` work. Last in the pipe, its output is shown.)
+                // (An alias: its own way in a pipe, … | its text.)
+                if let Ok(pf) = f.getattr("_tessh_pipe") {
+                    let mut pargs: Vec<Bound<'py, PyAny>> = vec![pf];
+                    pargs.extend(words.iter().map(|w| PyString::new(py, w).into_any()));
+                    let pargs = PyTuple::new(py, pargs)?;
+                    let p = partial.call(&pargs, Some(&kw))?;
+                    let kw_last = kw.copy()?;
+                    kw_last.set_item("last", true)?;
+                    p.setattr("_tessh_last", partial.call(&pargs, Some(&kw_last))?)?;
+                    return Ok(Py::new(py, call_stage(p.unbind()))?.into_any());
+                }
                 if f.cast::<Builtin>().is_ok() {
                     let staged = py.import("__tessh_shell__")?.getattr("staged")?;
                     let mut sargs: Vec<Bound<'py, PyAny>> = vec![staged];
