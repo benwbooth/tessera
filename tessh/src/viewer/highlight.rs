@@ -132,27 +132,40 @@ fn make(name: &str) -> Option<Lang> {
     let (language, query): (Language, String) = match name {
         "bash" => (tree_sitter_bash::LANGUAGE.into(), format!("{}\n(variable_name) @variable\n(simple_expansion) @variable\n(expansion) @variable\n", tree_sitter_bash::HIGHLIGHT_QUERY)),
         "python" => (tree_sitter_python::LANGUAGE.into(), tree_sitter_python::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "javascript" => (tree_sitter_javascript::LANGUAGE.into(), tree_sitter_javascript::HIGHLIGHT_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "typescript" => (
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             format!("{}\n{}", tree_sitter_javascript::HIGHLIGHT_QUERY, tree_sitter_typescript::HIGHLIGHTS_QUERY),
         ),
+        #[cfg(feature = "builtin-grammars")]
         "tsx" => (
             tree_sitter_typescript::LANGUAGE_TSX.into(),
             format!("{}\n{}", tree_sitter_javascript::HIGHLIGHT_QUERY, tree_sitter_typescript::HIGHLIGHTS_QUERY),
         ),
+        #[cfg(feature = "builtin-grammars")]
         "rust" => (tree_sitter_rust::LANGUAGE.into(), tree_sitter_rust::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "go" => (tree_sitter_go::LANGUAGE.into(), tree_sitter_go::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "c" => (tree_sitter_c::LANGUAGE.into(), tree_sitter_c::HIGHLIGHT_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "cpp" => (tree_sitter_cpp::LANGUAGE.into(), format!("{}\n{}", tree_sitter_c::HIGHLIGHT_QUERY, tree_sitter_cpp::HIGHLIGHT_QUERY)),
+        #[cfg(feature = "builtin-grammars")]
         "java" => (tree_sitter_java::LANGUAGE.into(), tree_sitter_java::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "ruby" => (tree_sitter_ruby::LANGUAGE.into(), tree_sitter_ruby::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "lua" => (tree_sitter_lua::LANGUAGE.into(), tree_sitter_lua::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "sql" => (tree_sitter_sequel::LANGUAGE.into(), tree_sitter_sequel::HIGHLIGHTS_QUERY.into()),
         "json" => (tree_sitter_json::LANGUAGE.into(), tree_sitter_json::HIGHLIGHTS_QUERY.into()),
         "yaml" => (tree_sitter_yaml::LANGUAGE.into(), tree_sitter_yaml::HIGHLIGHTS_QUERY.into()),
         "toml" => (tree_sitter_toml_ng::LANGUAGE.into(), tree_sitter_toml_ng::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "html" => (tree_sitter_html::LANGUAGE.into(), tree_sitter_html::HIGHLIGHTS_QUERY.into()),
+        #[cfg(feature = "builtin-grammars")]
         "css" => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.into()),
         "markdown" => (tree_sitter_md::LANGUAGE.into(), tree_sitter_md::HIGHLIGHT_QUERY_BLOCK.into()),
         "tessh" => (tree_sitter_tessh::LANGUAGE.into(), tree_sitter_tessh::HIGHLIGHTS_QUERY.into()),
@@ -164,7 +177,10 @@ fn make(name: &str) -> Option<Lang> {
     Some(Lang { language, query })
 }
 
+#[cfg(feature = "builtin-grammars")]
 const BUILTIN: &[&str] = &["bash", "python", "javascript", "typescript", "tsx", "rust", "go", "c", "cpp", "java", "ruby", "lua", "sql", "json", "yaml", "toml", "html", "css", "markdown", "tessh"];
+#[cfg(not(feature = "builtin-grammars"))]
+const BUILTIN: &[&str] = &["bash", "python", "json", "yaml", "toml", "markdown", "tessh"];
 
 fn lang(name: &str) -> Option<&'static Lang> {
     static CACHE: OnceLock<Mutex<HashMap<String, Option<&'static Lang>>>> = OnceLock::new();

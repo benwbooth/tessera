@@ -119,14 +119,24 @@
                   musl = "sha256-dpPyfF8VNrbEt1EIrm04iLf4T6HUMAAfoPDMmy/Arzs=";
                   gnu = "sha256-yFgR01lx0GYSWFoFfbO3GAY3jfbqhHYnX7Fqpcn+VqA=";
                   uv = "sha256-WMz18XkrilqI0BvJEOoTGos9tKMZoXrV+tdeCEWj4nE=";
+                  pyMusl = "sha256-QgkyPGvS0XT9Xbl/imR0iWxPF/9mPW6/zL+KA1PbzYg=";
+                  pyGnu = "sha256-GMVuEFuncTYCU29Jl2xp0U1zzqfTLP4sto64p5Vo3kc=";
                 };
                 aarch64 = {
                   musl = "sha256-a6ocPUQsOAoFIdakUAVDDch3tweJ9WcTczvqeJSQL0I=";
                   gnu = "sha256-l7yh0JYCQLchtuWOwtwIBRn80R+Xm/ZDVkNK6dD5aUc=";
                   uv = "sha256-N/u3xbxmz5nBKqiBlJ0hYYHiAd7ESXcsQynlZIfWEXk=";
+                  pyMusl = "sha256-hsCbjHjb70HvMGI5gJxT/96FZdekkrSe+owpGU8SkIw=";
+                  pyGnu = "sha256-ibsHYwxwVvX+4Gbl//x8moFB9vKlpEAusccrM1jiaAk=";
                 };
               }.${arch};
               pbsUrl = libc: "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-3.12.16%2B20261123-${arch}-unknown-linux-${libc}-install_only_stripped.tar.gz";
+              # The CPython each file carries (the newest released one).
+              pyVersion = "3.15.2";
+              pyBundled = libc: pkgs.fetchurl {
+                url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-${pyVersion}%2B20261123-${arch}-unknown-linux-${libc}-install_only_stripped.tar.gz";
+                hash = if libc == "musl" then hashes.pyMusl else hashes.pyGnu;
+              };
               cross = if arch == "aarch64" then pkgs.pkgsCross.aarch64-multiplatform-musl else pkgs.pkgsCross.musl64;
               pbs = pkgs.fetchurl { url = pbsUrl "musl"; hash = hashes.musl; };
               # uv, carried along (its own static build): Python, and packages.
@@ -153,12 +163,57 @@
                 pointer_width=64
                 suppress_build_script_link_lines=false
               '';
+              # Built in a persistent target directory (/var/tmp/cargo-nix/NAME,
+              # exposed to the sandbox by Ben's system flake through
+              # extra-sandbox-paths), incremental and without LTO: a change
+              # recompiles what it touches, not every dependency from
+              # scratch. Without that directory, a throwaway one as before.
+              # (The sources go in by content: cargo's freshness check reads
+              # mtimes, and the store's are all the same.)
+              persistentBuild = { name, deps, cargo, artifact }: ''
+                runHook preBuild
+                workDir=$TMPDIR/cargo-nix
+                if [ -w /var/tmp/cargo-nix ]; then
+                  workDir=/var/tmp/cargo-nix/${name}
+                fi
+                sed -i "s|^directory = .*|directory = \"${deps}\"|" "$NIX_BUILD_TOP/.cargo/config.toml"
+                (
+                  # (Writable by everyone: each build may run as another nixbld user.)
+                  umask 000
+                  mkdir -p "$workDir/src" "$workDir/target"
+                  touch "$workDir"
+                  rsync -rc --no-times --no-perms --chmod=a+rwX --delete --exclude /target ./ "$workDir/src/"
+                  # (Build scripts' outputs another build user left: made this
+                  # one's. A build script's fs::copy sets the copy's mode,
+                  # which only a file's owner may.)
+                  find "$workDir/target" -path '*/build/*/out/*' -type f ! -user "$(id -u)" \
+                    -exec sh -c 'for f; do cp -p "$f" "$f.own" && mv -f "$f.own" "$f"; done' _ {} + 2>/dev/null || true
+                  # (The linker wrapper rejects output paths outside the build dir.)
+                  export NIX_ENFORCE_PURITY=0
+                  cd "$workDir/src"
+                  export CARGO_HOME="$NIX_BUILD_TOP/.cargo" CARGO_TARGET_DIR="$workDir/target" \
+                    CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_LTO=false
+                  ${cargo}
+                  find "$workDir/target" -mindepth 1 -user "$(id -u)" ! -perm -o+w -exec chmod a+rwX {} + 2>/dev/null || true
+                )
+                install -Dm755 "$workDir/target/${artifact}" $out/bin/tessh
+                runHook postBuild
+              '';
+              muslTarget = cross.stdenv.hostPlatform.rust.rustcTargetSpec;
+              muslDeps = cross.rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
               tesshMusl = cross.rustPlatform.buildRustPackage {
                 pname = "tessh-musl";
                 version = (pkgs.lib.importTOML ./tessh/Cargo.toml).package.version;
                 inherit src;
-                cargoLock.lockFile = ./Cargo.lock;
-                cargoBuildFlags = [ "-p" "tessh" "--features" "standalone" ];
+                cargoDeps = muslDeps;
+                nativeBuildInputs = [ pkgs.rsync ];
+                buildPhase = persistentBuild {
+                  name = "tessh-musl";
+                  deps = muslDeps;
+                  cargo = "cargo build --release --offline -p tessh --no-default-features --features standalone --target ${muslTarget} -j $NIX_BUILD_CORES";
+                  artifact = "${muslTarget}/release/tessh";
+                };
+                installPhase = "true";
                 doCheck = false;
                 # (Its loader is a placeholder the launcher fills in, and it
                 # finds libpython beside itself: leave both be.)
@@ -186,25 +241,26 @@
                 pointer_width=64
                 suppress_build_script_link_lines=false
               '';
+              gnuDeps = pkgs.rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
               tesshGnu = pkgs.rustPlatform.buildRustPackage {
                 pname = "tessh-gnu";
                 version = (pkgs.lib.importTOML ./tessh/Cargo.toml).package.version;
                 inherit src;
-                cargoLock.lockFile = ./Cargo.lock;
-                nativeBuildInputs = [ pkgs.cargo-zigbuild pkgs.zig_0_15 ];
+                cargoDeps = gnuDeps;
+                nativeBuildInputs = [ pkgs.cargo-zigbuild pkgs.zig_0_15 pkgs.rsync ];
                 dontUseZigBuild = true;
                 dontUseZigInstall = true;
                 dontUseZigCheck = true;
                 doCheck = false;
                 buildPhase = ''
-                  runHook preBuild
                   export HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR/cache ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig
-                  cargo zigbuild --release --offline -p tessh --features standalone --target ${arch}-unknown-linux-gnu.2.17
-                  runHook postBuild
-                '';
-                installPhase = ''
-                  install -Dm755 target/${arch}-unknown-linux-gnu/release/tessh $out/bin/tessh
-                '';
+                '' + persistentBuild {
+                  name = "tessh-gnu";
+                  deps = gnuDeps;
+                  cargo = "cargo zigbuild --release --offline -p tessh --no-default-features --features standalone --target ${arch}-unknown-linux-gnu.2.17 -j $NIX_BUILD_CORES";
+                  artifact = "${arch}-unknown-linux-gnu/release/tessh";
+                };
+                installPhase = "true";
                 # (The system's loader, libpython beside it: leave both be.)
                 dontPatchELF = true;
                 dontAutoPatchelf = true;
@@ -218,34 +274,63 @@
                 cargoBuildFlags = [ "-p" "tessh-launcher" ];
                 doCheck = false;
               };
-              payload = pkgs.runCommand "tessh-payload" { nativeBuildInputs = [ pkgs.zstd pkgs.binutils ]; } ''
+              # One payload per C library: that tessh (stripped), the CPython
+              # it runs with (stripped by python-build-standalone; its tests,
+              # IDLE, Tk, pip and its python program left out), uv, and for musl the loader and
+              # libgcc_s. zstd -19 with a 128 MiB window (--long=27): -22 is
+              # 1% smaller (39.5 MB, not 39.8) but takes 114 s, not 49, on
+              # every rebuild. Unpacked once, at the first run.
+              payload = libc: pkgs.runCommand "tessh-payload-${libc}" { nativeBuildInputs = [ pkgs.zstd pkgs.binutils pkgs.patchelf ]; } ''
                 mkdir -p root/bin root/lib $out
-                cp ${tesshMusl}/bin/tessh root/bin/tessh
-                cp ${tesshGnu}/bin/tessh root/bin/tessh-gnu
-                cp ${cross.stdenv.cc.libc}/lib/libc.so root/lib/ld-musl-${arch}.so.1
+                cp ${if libc == "musl" then tesshMusl else tesshGnu}/bin/tessh root/bin/tessh
+                chmod u+w root/bin/tessh
+                strip --strip-all root/bin/tessh
+                patchelf --set-rpath '$ORIGIN/../lib' root/bin/tessh
                 tar xzf ${uvStatic} --strip-components=1 -C root/bin uv-${arch}-unknown-linux-musl/uv
-                # (What else it needs: libgcc_s, for unwinding.)
-                for n in $(readelf -d root/bin/tessh | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p'); do
-                  case $n in libc.so|libpython3.so) ;; *)
-                    f=$(find -L ${cross.stdenv.cc.cc.lib}/ ${cross.stdenv.cc.libc}/lib -name "$n" | head -1)
-                    [ -n "$f" ] || { echo "no $n"; exit 1; }
-                    cp -L "$f" root/lib/ ;;
-                  esac
-                done
-                chmod -R u+w,a+rX root
-                chmod 755 root/bin/* root/lib/*
-                tar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name -C root -cf - . | zstd -19 -q > $out/payload.tar.zst
+                echo ${libc} > root/libc
+                tar xzf ${pyBundled libc} -C root
+                echo cpython-${pyVersion}-linux-${arch}-${libc} > root/pyname
+                chmod -R u+w root
+                ( cd root/python/lib
+                  rm -rf python3.*/test python3.*/idlelib python3.*/tkinter python3.*/turtledemo python3.*/turtle.py \
+                    python3.*/lib-dynload/_tkinter* python3.*/lib-dynload/*_test*.so tcl* tk* itcl* thread* libtcl* libtk* pkgconfig
+                  find . -name '*.a' -delete )
+                # (tessh is its own python3, and uv installs packages: no
+                # second python program, no pip.)
+                rm -rf root/python/share root/python/bin root/python/lib/python3.*/site-packages/pip*
+                ${if libc == "musl" then ''
+                  cp ${cross.stdenv.cc.libc}/lib/libc.so root/lib/ld-musl-${arch}.so.1
+                  # (What else it needs: libgcc_s, for unwinding.)
+                  for n in $(readelf -d root/bin/tessh | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p'); do
+                    case $n in libc.so|libpython3.so) ;; *)
+                      f=$(find -L ${cross.stdenv.cc.cc.lib}/ ${cross.stdenv.cc.libc}/lib -name "$n" | head -1)
+                      [ -n "$f" ] || { echo "no $n"; exit 1; }
+                      cp -L "$f" root/lib/ ;;
+                    esac
+                  done
+                  chmod u+w root/lib/*
+                  strip --strip-unneeded root/lib/*
+                '' else ""}
+                chmod -R a+rX root
+                chmod 755 root/bin/*
+                tar --owner=0 --group=0 --numeric-owner --mtime=@0 --sort=name -C root -cf - . | zstd -19 --long=27 -T0 -q > $out/payload.tar.zst
               '';
-            in
-            {
-              tessh-static = pkgs.runCommand "tessh-static-${tesshMusl.version}" { nativeBuildInputs = [ pkgs.coreutils ]; meta.mainProgram = "tessh"; } ''
+              single = libc: pkgs.runCommand "tessh-static-${libc}-${tesshMusl.version}" { nativeBuildInputs = [ pkgs.coreutils ]; meta.mainProgram = "tessh"; } ''
                 mkdir -p $out/bin
+                p=${payload libc}/payload.tar.zst
                 off=$(stat -c%s ${launcher}/bin/tessh)
-                cat ${launcher}/bin/tessh ${payload}/payload.tar.zst > $out/bin/tessh
-                hash=$(sha256sum ${payload}/payload.tar.zst | cut -c1-16)
+                cat ${launcher}/bin/tessh $p > $out/bin/tessh
+                hash=$(sha256sum $p | cut -c1-16)
                 printf '%-63s\n' "TESSH-PAYLOAD $(printf %020d $off) $hash" >> $out/bin/tessh
                 chmod 755 $out/bin/tessh
               '';
+            in
+            rec {
+              # musl's runs on any Linux with nothing installed; glibc's takes
+              # manylinux wheels. tessh-static is musl's (the login shell's).
+              tessh-static-musl = single "musl";
+              tessh-static-gnu = single "gnu";
+              tessh-static = tessh-static-musl;
             });
           tessera = pkgs.rustPlatform.buildRustPackage {
             pname = "tessera";

@@ -1,25 +1,23 @@
-//! The static `tessh`: one file that runs on any Linux of its architecture,
-//! NixOS (no system program loader) and bare containers included.
+//! The static `tessh`: one file that runs on any Linux of its architecture
+//! (NixOS and bare containers included), or on macOS.
 //!
-//! It carries, appended to itself, tessh built for musl against Python's
-//! stable ABI, musl's program loader, libgcc_s, and uv (static). On the first run they're
-//! unpacked to `~/.cache/tessh/rt-<hash>/`, and tessh's loader path is set
-//! to that folder's loader. The Python comes from uv: its musl build of
-//! CPython (python-build-standalone), installed once with `uv python
-//! install`, which version picked by `--python X.Y`, $TESSH_PYTHON,
-//! ~/.config/tessh/python, or else the newest uv offers (3.12 or later;
-//! looked at again once a day, so a new CPython in uv is taken up). Each
-//! version gets `rt-<hash>/py/<name>/`: tessh hard-linked into bin (with
-//! `python3` links to it), libpython and the standard library linked into
-//! lib. A real loader runs it, so C extensions (musllinux wheels: numpy,
-//! pandas) load as in any Python.
+//! It carries, appended to itself (built in, on macOS), a payload: tessh
+//! built against Python's stable ABI, a CPython (python-build-standalone's,
+//! stripped), uv, and for musl, musl's program loader and libgcc_s. Each
+//! file is for one C library, named in the payload's `libc`:
 //!
-//! Two builds of tessh come along: for musl (above: runs anywhere) and for
-//! glibc. Where the system has glibc's loader (any usual distribution;
-//! NixOS with nix-ld), the glibc one runs, with uv's glibc CPython: the
-//! Python and wheels the system's own uv uses. It's tried once (tessh
-//! --version) and, if it doesn't start, musl from then on (the choice is
-//! kept in rt-<hash>/libc). TESSH_LIBC=gnu or =musl picks one.
+//! - `tessh-<arch>-linux-musl`: runs anywhere, with nothing on the system.
+//!   C extensions come as musllinux wheels (numpy, pandas, lxml have them).
+//! - `tessh-<arch>-linux-gnu`: needs glibc's loader (any usual distribution;
+//!   NixOS with nix-ld). manylinux wheels, the ones most packages ship.
+//!
+//! On the first run the payload is unpacked to `~/.cache/tessh/rt-<hash>/`
+//! (musl's tessh gets that folder's loader as its own) and tessh runs with
+//! the CPython that came with it: no download. `--python X.Y`,
+//! $TESSH_PYTHON or ~/.config/tessh/python ask for another version, which
+//! uv installs once (its build for the same C library). Each Python gets
+//! `rt-<hash>/py/<name>/`: tessh hard-linked into bin (with `python3` links
+//! to it), libpython and the standard library linked into lib.
 //!
 //! The file is this program, then the payload (a zstd-compressed tar), then
 //! a 64-byte trailer: `TESSH-PAYLOAD <offset, 20 digits> <hash>`.
@@ -114,12 +112,14 @@ fn unpack(payload: &dyn Fn() -> std::io::Result<Box<dyn Read>>, rt: &Path) -> st
     fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(".unpack-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
-    let dec = ruzstd::decoding::StreamingDecoder::new(payload()?).map_err(|e| std::io::Error::other(format!("payload: {e}")))?;
+    // (Packed with zstd --long=27: a 128 MiB window, 128 MiB of memory once.)
+    let dec = ruzstd::decoding::StreamingDecoder::new_with_max_window_size(payload()?, 1 << 27).map_err(|e| std::io::Error::other(format!("payload: {e}")))?;
     let mut ar = tar::Archive::new(dec);
     ar.set_preserve_permissions(true);
     ar.unpack(&tmp)?;
-    // (Linux: musl's tessh gets the loader beside it. macOS has only dyld.)
-    if cfg!(target_os = "linux") {
+    // (musl's tessh gets the loader beside it. glibc's has the system's,
+    // macOS has only dyld.)
+    if libc_of(&tmp) == Libc::Musl {
         let loader_name = fs::read_dir(tmp.join("lib"))?.flatten().map(|e| e.file_name()).find(|n| n.as_bytes().starts_with(b"ld-musl-")).ok_or_else(|| std::io::Error::other("payload has no loader"))?;
         patch_loader(&tmp.join("bin/tessh"), &rt.join("lib").join(&loader_name))?;
     }
@@ -149,13 +149,6 @@ impl Libc {
             Libc::None => "none",
         }
     }
-    /// This libc's tessh in the unpacked payload.
-    fn tessh(self, rt: &Path) -> PathBuf {
-        rt.join(match self {
-            Libc::Gnu => "bin/tessh-gnu",
-            Libc::Musl | Libc::None => "bin/tessh",
-        })
-    }
 }
 
 /// The system, as uv's Python names say it.
@@ -176,34 +169,24 @@ fn libpython_link() -> &'static str {
     }
 }
 
-/// glibc's program loader, where the system has one.
-fn gnu_loader() -> &'static str {
-    match std::env::consts::ARCH {
-        "aarch64" => "/lib/ld-linux-aarch64.so.1",
-        _ => "/lib64/ld-linux-x86-64.so.2",
+/// The C library this file's tessh and Python are built for (the payload's
+/// `libc`; macOS: none).
+fn libc_of(rt: &Path) -> Libc {
+    if cfg!(target_os = "macos") {
+        return Libc::None;
+    }
+    match fs::read_to_string(rt.join("libc")).as_deref().map(str::trim) {
+        Ok("gnu") => Libc::Gnu,
+        _ => Libc::Musl,
     }
 }
 
-/// Which tessh to run: TESSH_LIBC, else the one found to work here before,
-/// else glibc's where the system has its loader.
-fn pick_libc(rt: &Path) -> (Libc, bool) {
-    if cfg!(target_os = "macos") {
-        return (Libc::None, true);
-    }
-    match std::env::var("TESSH_LIBC").as_deref() {
-        Ok("musl") => return (Libc::Musl, true),
-        Ok("gnu") | Ok("glibc") => return (Libc::Gnu, true),
-        _ => {}
-    }
-    if !Libc::Gnu.tessh(rt).is_file() {
-        return (Libc::Musl, true);
-    }
-    match fs::read_to_string(rt.join("libc")).as_deref().map(str::trim) {
-        Ok("musl") => (Libc::Musl, true),
-        Ok("gnu") => (Libc::Gnu, true),
-        _ if Path::new(gnu_loader()).exists() => (Libc::Gnu, false),
-        _ => (Libc::Musl, true),
-    }
+/// The CPython that came in the payload (`python/`, its name in `pyname`).
+fn embedded_python(rt: &Path, libc: Libc) -> Option<Py> {
+    let name = fs::read_to_string(rt.join("pyname")).ok()?.trim().to_string();
+    let (version, pre) = parse_name(&name, libc)?;
+    let dir = rt.join("python");
+    dir.join("lib").is_dir().then_some(Py { name, dir, version, pre })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -424,8 +407,8 @@ fn version_dir(rt: &Path, py: &Py, libc: Libc) -> std::io::Result<PathBuf> {
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(tmp.join("bin"))?;
     fs::create_dir_all(tmp.join("lib"))?;
-    if fs::hard_link(libc.tessh(rt), tmp.join("bin/tessh")).is_err() {
-        fs::copy(libc.tessh(rt), tmp.join("bin/tessh"))?;
+    if fs::hard_link(rt.join("bin/tessh"), tmp.join("bin/tessh")).is_err() {
+        fs::copy(rt.join("bin/tessh"), tmp.join("bin/tessh"))?;
     }
     for n in ["python", "python3", &stdlib] {
         symlink(Path::new("tessh"), &tmp.join("bin").join(n))?;
@@ -440,7 +423,7 @@ fn version_dir(rt: &Path, py: &Py, libc: Libc) -> std::io::Result<PathBuf> {
         symlink(&py.dir.join("include"), &tmp.join("include"))?;
     }
     // (musl's loader and libgcc_s, for the musl build; the glibc one has the system's.)
-    if libc == Libc::Musl {
+    if libc == Libc::Musl && rt.join("lib").is_dir() {
         for e in fs::read_dir(rt.join("lib"))?.flatten() {
             symlink(&e.path(), &tmp.join("lib").join(e.file_name()))?;
         }
@@ -453,8 +436,12 @@ fn version_dir(rt: &Path, py: &Py, libc: Libc) -> std::io::Result<PathBuf> {
     Ok(vdir)
 }
 
-/// This libc's tessh with the Python wanted (installed with uv when needed).
+/// tessh with the Python wanted: the one it came with when nothing else is
+/// asked for (or it's the one asked for), else installed with uv.
 fn python_for(rt: &Path, libc: Libc, want: &[u32], want_text: &str) -> PathBuf {
+    if let Some(e) = embedded_python(rt, libc).filter(|e| want_text.is_empty() || matches(want, e.version)) {
+        return version_dir(rt, &e, libc).unwrap_or_else(|e| die(&format!("couldn't set up its Python: {e}")));
+    }
     let have = best(installed(&uv_python_dirs(), libc), want);
     let checked = cache_base().join(format!("python-checked-{}", libc.suffix()));
     let due = want_text.is_empty() && check_due(&checked);
@@ -527,21 +514,7 @@ fn main() {
     if let Err(e) = unpack(&*payload, &rt) {
         die(&format!("couldn't unpack into {}: {e}", rt.display()));
     }
-    let (mut libc, mut settled) = pick_libc(&rt);
-    let vdir = loop {
-        let vdir = python_for(&rt, libc, &want, &want_text);
-        if settled {
-            break vdir;
-        }
-        // (glibc's tessh, the first time: does it start here? If not, musl's.)
-        let ok = Command::new(vdir.join("bin/tessh")).arg("--version").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
-        let _ = fs::write(rt.join("libc"), if ok { "gnu" } else { "musl" });
-        if ok {
-            break vdir;
-        }
-        libc = Libc::Musl;
-        settled = true;
-    };
+    let vdir = python_for(&rt, libc_of(&rt), &want, &want_text);
     let err = Command::new(vdir.join("bin/tessh")).arg0(&args[0]).args(&args[1..]).exec();
     die(&format!("couldn't run {}: {err}", vdir.join("bin/tessh").display()));
 }

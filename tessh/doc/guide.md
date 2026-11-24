@@ -2455,37 +2455,41 @@ terminal: headings, wrapped text, tables and highlighted examples.
 ## A tessh for any Linux
 <!-- help: static standalone install uv python version --python portable macos glibc musl -->
 
-`nix build github:benwbooth/tessera#tessh-static` (or
-`scripts/tessh-static.sh`) makes `tessh` as one file that runs on any
-x86-64 or ARM64 Linux with nothing else installed: NixOS, a bare container, a
-server over ssh. `scripts/tessh-static-macos.sh` does the same for macOS
-(Apple Silicon or Intel). Ready-made ones are on the `tessh-dev` release
-(`tessh-x86_64-linux`, `tessh-aarch64-linux`, `tessh-aarch64-macos`,
-`tessh-x86_64-macos`) and on each Tessera release.
+tessh comes as one file, with everything it needs inside: tessh, a CPython
+(3.15, python-build-standalone's) and uv. Nothing is downloaded when it
+first runs. There are two files for each Linux architecture (x86-64 and
+ARM64), one per C library:
 
-The Linux file carries uv and two builds of tessh (built against Python's
-stable ABI): one for glibc and one for musl, with musl's program loader.
-The first time it runs, it uses the glibc build when the system has glibc's
-loader and that build runs. Otherwise, as on Alpine or a bare container, it
-uses the musl build. It remembers the choice; `TESSH_LIBC=gnu` or `musl`
-forces one. Then it gets a CPython for that C library with uv
-(python-build-standalone's: about 30 MB to download, 93 MB unpacked) and
-keeps it under `~/.cache/tessh` and uv's folder. On macOS it gets uv's macOS
-CPython the same way.
+- `tessh-<arch>-linux-musl` runs on any Linux with nothing installed:
+  NixOS, Alpine, a bare container, a server over ssh. C extensions come as
+  musllinux wheels, which numpy, pandas and lxml have. This is the one to
+  use as a login shell.
+- `tessh-<arch>-linux-gnu` needs glibc's program loader, which any usual
+  distribution has (NixOS only with nix-ld). It takes manylinux wheels, the
+  ones every package with C code ships.
 
-- Which Python: `tessh --python 3.14`, `TESSH_PYTHON=3.14`, or a line in
-  `~/.config/tessh/python`; otherwise the newest one uv offers (3.12 or
-  later), looked at once a day, so a new CPython in uv is taken up. A uv on
-  `PATH` is used when it's newer than the one inside.
+`tessh-aarch64-macos` and `tessh-x86_64-macos` are the macOS ones. All of
+them are on each Tessera release and on the `tessh-dev` release. To build
+them: `nix build github:benwbooth/tessera#tessh-static-musl` (or
+`#tessh-static-gnu`), `scripts/tessh-static.sh` for both, and
+`scripts/tessh-static-macos.sh` on a Mac.
+
+The first time it runs, the file unpacks itself into `~/.cache/tessh` (about
+130 MB; under 2 s). After that it starts as fast as tessh itself.
+
+- Which Python: the one inside, unless you ask for another with
+  `tessh --python 3.14`, `TESSH_PYTHON=3.14`, or a line in
+  `~/.config/tessh/python`. uv then installs that version once, built for
+  the same C library. A uv on `PATH` is used when it's newer than the one
+  inside.
 - `need numpy` and `--with` install with uv, as everywhere: C extensions
-  (manylinux or musllinux wheels: numpy, pandas, lxml) load as in any Python,
-  since a real loader runs tessh. A package with no wheel for the system is
-  built from source, which needs a C compiler.
-- Where uv can't tell the system's C library (a system with no dynamic
-  loader at all, like a static busybox), tessh fetches the same CPython
-  build directly.
+  load as in any Python, since a real loader runs tessh. A package with no
+  wheel for the system is built from source, which needs a C compiler.
 - `python3` beside it in `~/.cache/tessh/rt-*/py/*/bin` is that Python, for
   programs that want one.
+- The viewer's built-in grammars are left out of these files (SQL's alone is
+  10 MB). Those languages are colored by bat's syntaxes, or by Helix's
+  grammar, fetched the first time `view` needs it.
 - No Windows build: tessh is built on Unix processes, signals and terminals.
   Under WSL, use the Linux file.
 

@@ -14,6 +14,12 @@ path = "src/main.rs"
 # one binary runs on whichever CPython uv provides (3.12 on), and acting as
 # that Python's `python3` for uv and sys.executable.
 standalone = ["pyo3/abi3-py312"]
+# The viewer's own grammars for the bigger languages (SQL alone is 10 MB):
+# without them those are highlighted by bat's syntaxes or the Helix grammar
+# fetched once, as every other language is. The single-file builds leave
+# them out (--no-default-features).
+default = ["builtin-grammars"]
+builtin-grammars = ["dep:tree-sitter-c", "dep:tree-sitter-cpp", "dep:tree-sitter-css", "dep:tree-sitter-go", "dep:tree-sitter-html", "dep:tree-sitter-java", "dep:tree-sitter-javascript", "dep:tree-sitter-lua", "dep:tree-sitter-ruby", "dep:tree-sitter-rust", "dep:tree-sitter-sequel", "dep:tree-sitter-typescript"]
 
 [dependencies]
 chumsky = "1.0.0-alpha.8"
@@ -45,22 +51,22 @@ async-trait = "0.1"
 # the grammars Tessera's editor has built in (src/syntax.rs, same versions),
 # pictures decoded as Tessera's are (src/images.rs) and sent as kitty,
 # iTerm2 or sixel graphics, tables, YAML, archives' lists and PDFs' text.
-tree-sitter-c = "0.24.2"
-tree-sitter-cpp = "0.23.4"
-tree-sitter-css = "0.25.0"
-tree-sitter-go = "0.25.0"
-tree-sitter-html = "0.23.2"
-tree-sitter-java = "0.23.5"
-tree-sitter-javascript = "0.25.0"
+tree-sitter-c = { version = "0.24.2", optional = true }
+tree-sitter-cpp = { version = "0.23.4", optional = true }
+tree-sitter-css = { version = "0.25.0", optional = true }
+tree-sitter-go = { version = "0.25.0", optional = true }
+tree-sitter-html = { version = "0.23.2", optional = true }
+tree-sitter-java = { version = "0.23.5", optional = true }
+tree-sitter-javascript = { version = "0.25.0", optional = true }
 tree-sitter-json = "0.24.8"
-tree-sitter-lua = "0.5.0"
+tree-sitter-lua = { version = "0.5.0", optional = true }
 tree-sitter-md = "0.5.4"
 tree-sitter-python = "0.25.0"
-tree-sitter-ruby = "0.23.1"
-tree-sitter-rust = "0.24.2"
-tree-sitter-sequel = "0.3.13"
+tree-sitter-ruby = { version = "0.23.1", optional = true }
+tree-sitter-rust = { version = "0.24.2", optional = true }
+tree-sitter-sequel = { version = "0.3.13", optional = true }
 tree-sitter-toml-ng = "0.7.0"
-tree-sitter-typescript = "0.23.2"
+tree-sitter-typescript = { version = "0.23.2", optional = true }
 tree-sitter-yaml = "0.7.2"
 # Helix's ~250 grammars, loaded and fetched as Tessera does it (src/grammars.rs
 # and src/detect.rs, shared: same files, same runtime folder, same cache).

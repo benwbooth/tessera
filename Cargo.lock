@@ -3272,15 +3272,6 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "ruzstd"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7c1c839d570d835527c9a5e4db7cb2198683a988cb9d7293fc8674e6bd58fc8"
-dependencies = [
- "twox-hash",
-]
-
-[[package]]
-name = "ruzstd"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69e4ce4a039f42bf25920b95667e4d789e98749ab11bbb8d2c2936f788421bb5"
@@ -3958,7 +3949,7 @@ dependencies = [
  "pdf-extract",
  "pyo3",
  "reedline",
- "ruzstd 0.9.1",
+ "ruzstd",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4002,7 +3993,7 @@ name = "tessh-launcher"
 version = "0.1.0"
 dependencies = [
  "flate2",
- "ruzstd 0.8.3",
+ "ruzstd",
  "serde_json",
  "tar",
  "ureq",

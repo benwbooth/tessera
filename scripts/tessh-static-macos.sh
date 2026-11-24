@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The single-file tessh for macOS (CI's macOS runners; also by hand on a
-# Mac): tessh against Python's stable ABI, with uv, built into the launcher
-# (a signed program can't have data appended, as Linux's has). The Python
-# comes from uv at the first run, as on Linux. Output: dist/tessh-<arch>-macos.
+# Mac): tessh against Python's stable ABI, with a CPython and uv, built into
+# the launcher (a signed program can't have data appended, as Linux's has).
+# No download at the first run, as on Linux. Output: dist/tessh-<arch>-macos.
 #
 #   scripts/tessh-static-macos.sh
 set -euo pipefail
@@ -30,8 +30,9 @@ suppress_build_script_link_lines=false
 EOF
 
 # tessh (its own binary first: the launcher's is also called tessh).
-PYO3_CONFIG_FILE="$work/pyo3.txt" cargo build --release --locked -p tessh --features standalone
+PYO3_CONFIG_FILE="$work/pyo3.txt" cargo build --release --locked -p tessh --no-default-features --features standalone
 cp target/release/tessh "$work/root/bin/tessh"
+strip -x "$work/root/bin/tessh"
 otool -L "$work/root/bin/tessh"
 
 # uv.
@@ -39,8 +40,17 @@ curl -fsSL "https://github.com/astral-sh/uv/releases/download/0.13.9/uv-${arch}-
 cp "$work/uv-${arch}-apple-darwin/uv" "$work/root/bin/uv"
 chmod 755 "$work/root/bin/"*
 
+# The CPython it runs with (its tests, IDLE and Tk left out).
+py=3.15.2
+curl -fsSL "https://github.com/astral-sh/python-build-standalone/releases/download/20261123/cpython-${py}%2B20261123-${arch}-apple-darwin-install_only_stripped.tar.gz" | tar xz -C "$work/root"
+(cd "$work/root/python/lib" && rm -rf python3.*/test python3.*/idlelib python3.*/tkinter python3.*/turtledemo python3.*/turtle.py \
+  python3.*/lib-dynload/_tkinter* python3.*/lib-dynload/*_test*.so tcl* tk* itcl* thread* libtcl* libtk* pkgconfig && find . -name '*.a' -delete)
+rm -rf "$work/root/python/share" "$work/root/python/bin" "$work/root/python/lib"/python3.*/site-packages/pip*
+echo "cpython-${py}-macos-${arch}-none" > "$work/root/pyname"
+echo none > "$work/root/libc"
+
 # The payload, built into the launcher.
-(cd "$work/root" && tar -cf - --uid 0 --gid 0 bin) | zstd -19 -q > "$work/payload.tar.zst"
+(cd "$work/root" && tar -cf - --uid 0 --gid 0 .) | zstd -19 --long=27 -T0 -q > "$work/payload.tar.zst"
 TESSH_PAYLOAD="$work/payload.tar.zst" cargo build --release --locked -p tessh-launcher
 out="dist/tessh-${arch}-macos"
 cp target/release/tessh "$out"
