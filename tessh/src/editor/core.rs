@@ -201,6 +201,9 @@ pub struct Ed {
     /// (Tessera's folder view: editor/ls.rs), and whether it has the keys.
     pub ls: Option<Box<super::ls::Ls>>,
     pub ls_focus: bool,
+    /// The shared history read again in the background (other windows and
+    /// sessions' commands): taken in when it comes.
+    pub history_in: std::sync::Arc<std::sync::Mutex<Option<Vec<String>>>>,
 }
 
 const CONT: &[&str] = &["else", "elif", "except", "except*", "finally"];
@@ -299,6 +302,7 @@ impl Ed {
             cmd: super::vi::CmdLine::new(),
             ls: None,
             ls_focus: false,
+            history_in: Default::default(),
         }
     }
 
@@ -1722,6 +1726,23 @@ impl Ed {
                     self.done = Some(Outcome::Host(format!("chip:{name}")));
                 }
             }
+            // (A list's scrollbar: a page up or down.)
+            Hit::Scroll(up) => {
+                let page = 13;
+                if let Some(m) = self.menu.as_mut() {
+                    m.top = if up { m.top.saturating_sub(page) } else { m.top + page };
+                    let shown = self.menu_shown();
+                    let m = self.menu.as_mut().unwrap();
+                    if let Some(p) = shown.iter().position(|&i| i == m.sel) {
+                        let to = if up { p.saturating_sub(page) } else { (p + page).min(shown.len().saturating_sub(1)) };
+                        m.sel = shown[to];
+                    }
+                } else if self.comp.open {
+                    let n = self.comp.items.len();
+                    self.comp.index = if up { self.comp.index.saturating_sub(page) } else { (self.comp.index + page).min(n.saturating_sub(1)) };
+                    self.comp.top = if up { self.comp.top.saturating_sub(page) } else { self.comp.top + page };
+                }
+            }
             Hit::Path(p) => self.done = Some(Outcome::Host(format!("run:cd {}", crate::repl::quote_path(&p)))),
             Hit::Widget(w) => {
                 let same = matches!(&self.menu, Some(m) if m.kind == MenuKind::Choices(w.clone()));
@@ -1758,6 +1779,17 @@ impl Ed {
     }
 
     pub fn tick(&mut self, h: &mut dyn Hooks, tooltip_for: fn(&Ed, &Hit) -> String, hit_at: impl Fn(u16, u16) -> Option<Hit>) {
+        // (Not while stepping through it with ↑↓: the places would move.)
+        if self.hist_index.is_none() {
+            let fresh = self.history_in.lock().unwrap().take();
+            if let Some(hs) = fresh {
+                self.history = hs;
+                if self.comp.open && self.comp.hist {
+                    self.search_history();
+                }
+                self.dirty = true;
+            }
+        }
         let since = self.edited.map(|t| t.elapsed());
         if let Some(d) = since {
             if self.comp.typing && d >= Duration::from_millis(300) {

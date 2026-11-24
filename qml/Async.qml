@@ -18,9 +18,14 @@ QtObject {
         }
         const k = "a" + (++seq)
         if (done) waiting[k] = done
+        // (Test hook: TESSERA_TEST_ASYNC_LOG logs each call and its answer.)
+        if (logging < 0) logging = controller.testEnv("ASYNC_LOG") !== "" ? 1 : 0
+        if (logging) console.log("async call " + k + ": " + start.toString().slice(0, 90))
         start(k)
     }
+    property int logging: -1
     function reply(k, json) {
+        if (logging > 0) console.log("async reply " + k + ": " + json.length + " chars " + json.slice(0, 120))
         const done = waiting[k]
         if (!done) return
         delete waiting[k]

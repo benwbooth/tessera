@@ -149,9 +149,6 @@ fn indent_menu(ed: &crate::editor::core::Ed) -> Vec<MenuItem> {
 
 // ---- history -----------------------------------------------------------------------
 
-fn read_all_history(f: &std::path::Path) -> Vec<String> {
-    std::fs::read_to_string(f).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(|l| l.replace("<\\n>", "\n")).collect()
-}
 fn append_history(f: &std::path::Path, text: &str) {
     use std::io::Write;
     if let Ok(mut o) = std::fs::OpenOptions::new().create(true).append(true).open(f) {
@@ -266,7 +263,7 @@ fn run_line(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str) -> Option<i32> {
 pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) -> i32 {
     let mut editor = Editor::new(bar.unwrap_or_else(real_bar));
     apply_settings(&mut editor.ed);
-    editor.ed.history = read_all_history(&hist);
+    editor.ed.history = crate::editor::promptbar::shared_history();
     {
         let ai = editor.ed.ai.clone();
         std::thread::spawn(move || {
@@ -298,6 +295,12 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
             }
             editor.ed.cwd = cwd;
             fresh = false;
+            // (Other windows' and sessions' commands since: read in the background.)
+            let slot = editor.ed.history_in.clone();
+            std::thread::spawn(move || {
+                let h = crate::editor::promptbar::shared_history();
+                *slot.lock().unwrap() = Some(h);
+            });
         }
         let out = editor.read(&mut hooks);
         let mut run: Option<(String, bool, bool)> = None;
@@ -430,6 +433,7 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                 editor.ed.history.retain(|h| *h != text);
                 editor.ed.history.push(text.clone());
                 append_history(&hist, &text);
+                crate::editor::promptbar::record_history(&text, &std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default());
             }
             last_cmd = text.clone();
         }

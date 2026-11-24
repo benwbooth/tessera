@@ -77,6 +77,8 @@ pub enum Hit {
     Path(String),
     /// A prompt bar widget ("dir", "git", "starship", "star:<module>", …).
     Widget(String),
+    /// A popup list's scrollbar: above the thumb (true) or below it (a click pages).
+    Scroll(bool),
     /// The ls listing above the prompt (an entry, a heading, a button…).
     Ls(ls::LsHit),
 }

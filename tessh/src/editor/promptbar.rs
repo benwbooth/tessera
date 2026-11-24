@@ -1591,6 +1591,108 @@ fn histories() -> Vec<Hist> {
     out
 }
 
+/// Every command, as Tessera's input editor has them (src/history.rs): the
+/// shells' history files, tessh's own, and Tessera's (every window's and
+/// tessh's, with times), merged by time, each once at its latest; newest
+/// last.
+pub fn shared_history() -> Vec<String> {
+    let h = PathBuf::from(home());
+    let mut lists: Vec<Vec<(u64, String)>> = vec![];
+    let zsh = std::env::var_os("HISTFILE").map(PathBuf::from).filter(|p| p.to_string_lossy().contains("zsh")).unwrap_or_else(|| h.join(".zsh_history"));
+    if let Some(text) = read_lossy(&zsh) {
+        let mut v: Vec<(u64, String)> = vec![];
+        let mut cont = false;
+        for line in text.lines() {
+            if cont {
+                if let Some(last) = v.last_mut() {
+                    last.1.push('\n');
+                    last.1.push_str(line.strip_suffix('\\').unwrap_or(line));
+                }
+            } else {
+                let (t, cmd) = match line.strip_prefix(": ").and_then(|r| r.split_once(';')) {
+                    Some((meta, cmd)) => (meta.split(':').next().and_then(|s| s.trim().parse().ok()).unwrap_or(0), cmd),
+                    None => (0, line),
+                };
+                v.push((t, cmd.strip_suffix('\\').unwrap_or(cmd).to_string()));
+            }
+            cont = line.ends_with('\\');
+        }
+        lists.push(v);
+    }
+    if let Some(text) = read_lossy(&h.join(".bash_history")) {
+        let mut v = vec![];
+        let mut t = 0;
+        for line in text.lines() {
+            if let Some(ts) = line.strip_prefix('#').and_then(|s| s.trim().parse::<u64>().ok()) {
+                t = ts;
+                continue;
+            }
+            v.push((t, line.to_string()));
+            t = 0;
+        }
+        lists.push(v);
+    }
+    if let Some(text) = read_lossy(&h.join(".local/share/fish/fish_history")) {
+        let mut v: Vec<(u64, String)> = vec![];
+        for line in text.lines() {
+            if let Some(c) = line.strip_prefix("- cmd: ") {
+                v.push((0, c.to_string()));
+            } else if let Some(w) = line.trim().strip_prefix("when: ") {
+                if let Some(e) = v.last_mut() {
+                    e.0 = w.trim().parse().unwrap_or(0);
+                }
+            }
+        }
+        lists.push(v);
+    }
+    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| h.join(".local/share"));
+    if let Some(text) = read_lossy(&data.join("tessh/history")) {
+        lists.push(text.lines().filter(|l| !l.trim().is_empty()).map(|l| (0, l.replace("<\\n>", "\n"))).collect());
+    }
+    if let Some(text) = read_lossy(&state_dir().join("history.jsonl")) {
+        lists.push(
+            text.lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .map(|v| (v.get("t").and_then(|x| x.as_u64()).unwrap_or(0), v.get("cmd").and_then(|x| x.as_str()).unwrap_or("").to_string()))
+                .collect(),
+        );
+    }
+    // (By time where known; one without keeps its place after the timed one before it.)
+    let mut all: Vec<(u64, usize, String)> = vec![];
+    let mut seq = 0;
+    for list in lists {
+        let mut last = 0;
+        for (t, c) in list {
+            let t = if t == 0 { last } else { t };
+            last = t;
+            all.push((t, seq, c));
+            seq += 1;
+        }
+    }
+    all.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<String> = all.into_iter().rev().map(|x| x.2).filter(|c| !c.trim().is_empty() && seen.insert(c.trim().to_string())).collect();
+    out.truncate(50_000);
+    out.reverse();
+    out
+}
+
+/// A command run here, into Tessera's history: every window and tessh
+/// session sees it, with its folder and time.
+pub fn record_history(cmd: &str, cwd: &str) {
+    let cmd = cmd.trim_end();
+    if cmd.trim().is_empty() {
+        return;
+    }
+    let d = state_dir();
+    let _ = std::fs::create_dir_all(&d);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(d.join("history.jsonl")) {
+        use std::io::Write;
+        let _ = writeln!(f, "{}", serde_json::json!({"cmd": cmd, "t": t, "cwd": cwd, "lang": "tessh"}));
+    }
+}
+
 /// Folders by how recently and often they've been used: zoxide's, the
 /// folders commands ran in (Tessera's history), and where `cd`s went.
 pub fn frecent_dirs() -> Vec<(String, f64)> {

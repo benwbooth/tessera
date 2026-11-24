@@ -910,7 +910,7 @@ Item {
                 height: Math.min(370, contentHeight)
                 clip: true
                 model: addPop.options
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: ScrollBar { policy: addList.contentHeight > addList.height + 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
                 MomentumWheel { flick: addList }
                 delegate: Rectangle {
                     required property var modelData
@@ -1030,7 +1030,8 @@ Item {
             height: Math.min(380, contentHeight)
             clip: true
             model: bar.shownChoices
-            ScrollBar.vertical: ScrollBar {}
+            // (Always there when there's more than shows, not only while scrolling.)
+            ScrollBar.vertical: ScrollBar { policy: choiceList.contentHeight > choiceList.height + 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
             MomentumWheel { flick: choiceList }
             delegate: Rectangle {
                 required property var modelData

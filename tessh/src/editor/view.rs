@@ -348,7 +348,8 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         let top = m.top.min(shown.len().saturating_sub(room));
         let sel_at = shown.iter().position(|&i| i == m.sel).unwrap_or(0);
         let top = if sel_at < top { sel_at } else if sel_at >= top + room { sel_at + 1 - room } else { top };
-        for &i in shown.iter().skip(top).take(room) {
+        let bar = scrollbar(shown.len(), room, top);
+        for (k, &i) in shown.iter().skip(top).take(room).enumerate() {
             let it = &m.items[i];
             let mut st = if it.section { v.pal.dimmed().bold() } else if it.enabled { Sty::default() } else { v.pal.dimmed() };
             let on = i == m.sel && !it.section;
@@ -357,8 +358,13 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
             }
             let mark = if it.checked { "✓ " } else { "  " };
             let text = format!("{mark}{}", it.label);
-            let pad = w.saturating_sub(cols_of(&text));
-            lines.push(fit(vec![Span::new(format!("{text}{}", " ".repeat(pad)), st).hit(Hit::Row(i))], w));
+            let iw = if bar.is_empty() { w } else { w - 1 };
+            let pad = iw.saturating_sub(cols_of(&text));
+            let mut row = fit(vec![Span::new(format!("{text}{}", " ".repeat(pad)), st).hit(Hit::Row(i))], iw);
+            if let Some(b) = bar.get(k) {
+                row.push(b.clone());
+            }
+            lines.push(row);
         }
         if shown.is_empty() {
             lines.push(vec![Span::new("  Nothing matches.", v.pal.dimmed())]);
@@ -383,14 +389,20 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         let mut lines = vec![search, vec![Span::new("─".repeat(w), Sty { fg: Some(Col::Ansi(8)), ..Default::default() })]];
         let room = 14usize.min(v.rows.saturating_sub(12)).max(3);
         let top = if ed.comp.index < ed.comp.top { ed.comp.index } else if ed.comp.index >= ed.comp.top + room { ed.comp.index + 1 - room } else { ed.comp.top.min(n.saturating_sub(room)) };
-        for (i, it) in ed.comp.items.iter().enumerate().skip(top).take(room) {
+        let bar = scrollbar(n, room, top);
+        let iw = if bar.is_empty() { w } else { w - 1 };
+        for (k, (i, it)) in ed.comp.items.iter().enumerate().skip(top).take(room).enumerate() {
             let on = i == ed.comp.index;
             let bg = if on { Some(sel_bg) } else if v.hovered == Some(&Hit::Row(i)) { v.pal.mix(0.14) } else { None };
             let mut row = vec![Span::new(" ↺ ", v.pal.dimmed().with_bg(bg)).hit(Hit::Row(i))];
             row.extend(colored(&it.label, &spans_for(&it.label), bg, Hit::Row(i)));
             let rw = super::width(&row);
-            row.push(Span::new(" ".repeat(w.saturating_sub(rw)), Sty { bg, ..Default::default() }).hit(Hit::Row(i)));
-            lines.push(fit(row, w));
+            row.push(Span::new(" ".repeat(iw.saturating_sub(rw)), Sty { bg, ..Default::default() }).hit(Hit::Row(i)));
+            let mut row = fit(row, iw);
+            if let Some(b) = bar.get(k) {
+                row.push(b.clone());
+            }
+            lines.push(row);
         }
         if n == 0 {
             lines.push(vec![Span::new("   No commands match.", v.pal.dimmed())]);
@@ -461,6 +473,22 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         return Some((boxed(lines, w, v), x));
     }
     None
+}
+
+/// A list's scrollbar, a cell a row: the thumb where the rows shown are
+/// ("┃"), the track ("│"); none when everything shows.
+fn scrollbar(n: usize, room: usize, top: usize) -> Vec<Span> {
+    if n <= room || room == 0 {
+        return vec![];
+    }
+    let thumb = (room * room).div_ceil(n).max(1);
+    let at = ((top * room) / n).min(room - thumb);
+    (0..room)
+        .map(|k| {
+            let on = k >= at && k < at + thumb;
+            Span::new(if on { "┃" } else { "│" }, Sty::fg(Col::Ansi(if on { 7 } else { 8 }))).hit(Hit::Scroll(k < at))
+        })
+        .collect()
 }
 
 /// A text colored by highlight spans.

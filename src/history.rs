@@ -123,6 +123,12 @@ pub fn all() -> Vec<Entry> {
             lists.push(parse(&text));
         }
     }
+    // (tessh's own file, from before it wrote here too: its lines, a
+    // command's line breaks as <\n>.)
+    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| h.join(".local/share"));
+    if let Some(text) = read_lossy(&data.join("tessh/history")) {
+        lists.push(text.lines().filter(|l| !l.trim().is_empty()).map(|l| Entry { cmd: l.replace("<\\n>", "\n"), t: 0, cwd: String::new(), lang: "tessh".into() }).collect());
+    }
     if let Some(text) = read_lossy(&own_file()) {
         lists.push(text.lines().filter_map(|l| serde_json::from_str::<Entry>(l).ok()).collect());
     }
