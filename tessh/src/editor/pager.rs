@@ -519,11 +519,33 @@ impl Guide {
         let n = self.plain.get(i)?.trim_end().chars().count();
         Some(((i, 0), (i, n)))
     }
-    /// A drag begun with a double or triple click: the pick grows a whole
+    /// The paragraph a line is in: the lines around it up to blank ones.
+    fn para_range(&self, i: usize) -> Option<((usize, usize), (usize, usize))> {
+        let blank = |k: usize| self.plain.get(k).is_none_or(|l| l.trim().is_empty());
+        if i >= self.plain.len() {
+            return None;
+        }
+        if blank(i) {
+            return self.line_range(i);
+        }
+        let (mut a, mut b) = (i, i);
+        while a > 0 && !blank(a - 1) {
+            a -= 1;
+        }
+        while b + 1 < self.plain.len() && !blank(b + 1) {
+            b += 1;
+        }
+        Some(((a, 0), self.line_range(b)?.1))
+    }
+    /// A drag begun with a double, triple or quadruple click: the pick grows a whole
     /// word or line at a time, from the one first picked to the one under
     /// the pointer, either way.
     fn extend_by(&mut self, unit: u8, first: ((usize, usize), (usize, usize)), p: (usize, usize)) {
-        let here = if unit == 2 { self.word_range(p) } else { self.line_range(p.0) };
+        let here = match unit {
+            2 => self.word_range(p),
+            3 => self.line_range(p.0),
+            _ => self.para_range(p.0),
+        };
         let Some(here) = here else { return };
         self.sel = Some(if here.0 < first.0 { (first.1, here.0) } else { (first.0, here.1.max(first.1)) });
     }
@@ -1521,7 +1543,7 @@ pub fn show(md: &str, at: &str) {
 enum Drag {
     None,
     Text,
-    /// Words (2) or lines (3), from the first picked.
+    /// Words (2), lines (3) or paragraphs (4), from the first picked.
     Units(u8, ((usize, usize), (usize, usize))),
     VThumb(usize),
     SThumb(usize),
@@ -2014,19 +2036,21 @@ pub(crate) fn run(mut g: Guide, at: &str) {
                         }
                         let p = g.pos_at(col, row, geo);
                         let n = match last_click {
-                            Some((t, q, n)) if q.0 == p.0 && t.elapsed() < std::time::Duration::from_millis(450) => n % 3 + 1,
+                            Some((t, q, n)) if q.0 == p.0 && t.elapsed() < std::time::Duration::from_millis(450) => n % 4 + 1,
                             _ => 1,
                         };
                         last_click = Some((std::time::Instant::now(), p, n));
-                        // (Twice: the word; three times: the line.)
+                        // (Twice: the word; three times: the line; four: the paragraph.)
                         g.rect = false;
                         match n {
-                            2 | 3 => {
-                                if n == 2 {
-                                    g.pick_word(p)
-                                } else {
-                                    g.pick_line(p.0)
+                            2..=4 => {
+                                g.rect = false;
+                                g.sel = match n {
+                                    2 => g.word_range(p),
+                                    3 => g.line_range(p.0),
+                                    _ => g.para_range(p.0),
                                 }
+                                .or(g.sel);
                                 if let Some(first) = g.sel {
                                     drag = Drag::Units(n, first);
                                     g.dragging = true;
