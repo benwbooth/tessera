@@ -3,9 +3,8 @@
 
 Porting the ABS Guide's examples turned up what bash has and tessh hasn't.
 Each one is marked **Gap** where it comes up; here they are together, with
-what to use meanwhile. Some are by design (tessh's values are Python's, so
-there's no word splitting, and `$IFS` is only for `read`), and those say
-so.
+what to use meanwhile. Some are by design, where Python already does the
+job: those are together under "By design", with the Python for each.
 
 ## Fixed along the way
 <!-- help: abs-gaps-fixed -->
@@ -59,6 +58,37 @@ them as bash would:
   true), a `for`/`while`/`if` with no indented block (bash's missing
   `done`), `set +u`, a method not called given to a program.
 
+## By design: Python does it
+<!-- help: abs-by-design by-design parameter-expansion bashisms -->
+
+Where Python already does something well, tessh uses Python's way and
+doesn't port bash's syntax for it. `${…}` holds a tessh expression and
+nothing else, so bash's forms inside it aren't read as bash's.
+
+| bash | tessh |
+|---|---|
+| `${x#pre}`, `${x%.gz}` | `$x.removeprefix "pre"`, `$x.removesuffix ".gz"` |
+| `${x%.*}`, `${x%%.*}` | `($x.rpartition ".")[0]`, `($x.partition ".")[0]` |
+| `${x#*.}`, `${0##*/}` | `($x.partition ".")[2]`, `($0.rpartition "/")[2]` (or `os.path.basename`) |
+| `${x/a/b}`, `${x//a/b}` | `$x.replace "a" "b" 1`, `$x.replace "a" "b"` |
+| a glob pattern in any of those | `re.sub`, or `fnmatch` |
+| `${#x}` | `len $x` |
+| `${x:-d}`, `${x:=d}` | `$x or "d"`; an environment variable: `$env.get "X" "d"` |
+| `${x:?msg}` | `$env["X"]` (a KeyError), or `raise SystemExit "msg"` |
+| `${x:+w}` | `if $x then "w" else ""` |
+| `${x^^}`, `${x,,}`, `${x^}` | `$x.upper()`, `$x.lower()`, `$x.capitalize()` |
+| `${x:2:3}` | `$x[2:5]` |
+| `${!name}`, `${!pre*}` | `(globals)[$name]`, `[$n for n in (globals) if $n.startswith "pre"]` |
+| `file{1,2}`, `{a..e}` | `["file$i" for i in [1 2]]`, `[chr $c for c in range (ord "a") (ord "f")]`; `{…}` glued to text is a set literal |
+| `{b*,c*}` | `glob b* c*` |
+| `[[:digit:]]` in a glob or regex | `[0-9]`, `\d`, `str.isdigit` (`re'[[:digit:]]'` means something else to Python) |
+| `~+`, `~-` | `(pwd)`, `$env.OLDPWD` |
+| `$!` | `$j.pid`, after `j = cmd &` |
+| `$IFS` word splitting | none: a value is one word; `.split` when you want several (`$IFS` is only `read`'s) |
+| `$RANDOM`, `$UID`, `$SECONDS`… | Python's forms, below (Variables) |
+| `/dev/tcp/host/port` | `socket` (chapter 29) |
+| `case` fall-through (`;&`, `;;&`) | none in `match`; test the cases with `if` |
+
 ## Builtins
 <!-- help: abs-gaps-builtins read eval exec trap wait type -->
 
@@ -70,7 +100,6 @@ them as bash would:
   `shopt` (it says so). `set -u` is always on, so `set +u` fails. A
   failing *program* stops a script only in strict mode (`strict`, `set
   -e`, `tessh -e`) or with `(cmd)!` (chapters 32, 33).
-- **`$!`** by that name: `$j.pid`, after `j = cmd &` (chapters 9, 15).
 
 ## Variables
 <!-- help: abs-gaps-variables $UID $RANDOM $LINENO $SECONDS -->
@@ -88,17 +117,8 @@ is where `read` splits; otherwise tessh never splits a value into words,
 by design.
 
 ## Words and expansion
-<!-- help: abs-gaps-expansion brace-expansion posix-classes -->
+<!-- help: abs-gaps-expansion -->
 
-- **Brace expansion** (`file{1,2}`, `{a..z}`, `{b*,c*}`): none; a list
-  comprehension or `glob` with several patterns. `{…}` glued to text is a
-  set literal, without an error (chapters 3, 18, 33).
-- **POSIX classes** (`[[:digit:]]`): not in globs, and `re'[[:digit:]]'`
-  silently means something else (use `\d`, or `str.isdigit`) (chapter 18).
-- **`${s#pat}`, `##`, `%`, `%%` and `${s/pat/rep}` with glob patterns**:
-  `removeprefix`, `removesuffix`, `partition`, `re.sub`, or `fnmatch` by hand
-  (chapter 10). `${!prefix*}`, `${!name}`: `globals()`.
-- **`~+`, `~-`** (current and previous folder): `(pwd)` and `$env.OLDPWD`.
 - `\z` (a backslash before an ordinary letter) outside quotes stays `\z`;
   `echo foo\` glued to the end of a line doesn't continue it (with a space,
   `\` does).
@@ -124,7 +144,6 @@ by design.
 - `<file cmd` (redirection first) and a bare `>file` line are errors.
 - No `|&`.
 - `break N`, `continue N`: a function and `return`, or `for … else`.
-- `case` fall-through (`;&`, `;;&`): no `match` counterpart.
 - A bareword next to `and`/`or` is a word, by design (`print it is
   ready`), so `$x == PREV and …` and `$x or default` need the word quoted.
 - Captured as a value, a command's words stop at Python operators:
@@ -135,7 +154,6 @@ by design.
 ## Elsewhere
 <!-- help: abs-gaps-elsewhere dev-tcp completion history prompt -->
 
-- **`/dev/tcp/host/port`**: not a redirection; Python's `socket` (chapter 29).
 - **Completion**: `complete -o filenames` and `-o nospace` are accepted
   but do nothing (Appendix J).
 - **History**: no `$HISTTIMEFORMAT` or `$HISTCMD`, and `$HISTFILE` is

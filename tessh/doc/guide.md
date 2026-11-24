@@ -138,7 +138,10 @@ raw: $name \n
 ```
 
 `${…}` takes any expression, a `!r` or `!s` conversion and a format spec, as
-f-strings do. Use it to glue text right after a variable.
+f-strings do. Use it to glue text right after a variable. Inside is plain
+tessh, nothing else: bash's `${x%.gz}`, `${x:-d}`, `${#x}` and the rest are
+Python's string methods here, `${x.removesuffix ".gz"}`, `${$x or "d"}`,
+`${len $x}` (help abs-by-design lists them).
 
 ```tessh
 items = [a b]
