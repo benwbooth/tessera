@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The static tessh, for a release: two files for this machine's architecture
-# (flake.nix: tessh-static-musl and tessh-static-gnu; tessh/launcher), each
+# (flake.nix: tessh-release-musl and tessh-release-gnu, tessh with full LTO:
+# about 20 minutes from scratch; tessh/launcher), each
 # with its tessh, a CPython and uv inside. Built in their own memory-capped
 # scope, checked to be static, copied to dist/tessh-$arch-linux-{musl,gnu}.
 #
@@ -11,7 +12,7 @@ arch=$(uname -m)
 mkdir -p dist
 for libc in "${@:-musl gnu}"; do
   for l in $libc; do
-    out=$(systemd-run --user --scope -q -p MemoryMax=16G nix build ".#tessh-static-$l" --no-link --print-out-paths)
+    out=$(systemd-run --user --scope -q -p MemoryMax=16G nix build ".#tessh-release-$l" --no-link --print-out-paths)
     f=dist/tessh-$arch-linux-$l
     install -m755 "$out/bin/tessh" "$f"
     if ldd "$f" 2>&1 | grep -qv 'not a dynamic executable\|statically linked'; then

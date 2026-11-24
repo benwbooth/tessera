@@ -1,7 +1,7 @@
 # tessh as one file per platform, nothing to install first, with its own
 # CPython and uv inside: Linux on x86_64 and aarch64 (flake.nix:
-# tessh-static-musl, which runs on any distribution, NixOS and bare
-# containers included; tessh-static-gnu, for glibc systems and manylinux
+# tessh-release-musl, which runs on any distribution, NixOS and bare
+# containers included; tessh-release-gnu, for glibc systems and manylinux
 # wheels), macOS on Apple Silicon and Intel (scripts/tessh-static-macos.sh).
 # No Windows build: tessh is built on Unix processes, signals and terminals
 # (WSL runs the Linux one).
@@ -46,11 +46,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
-      - name: nix build .#tessh-static-musl .#tessh-static-gnu
+      - name: nix build .#tessh-release-musl .#tessh-release-gnu
         run: |
           mkdir -p dist
           for l in musl gnu; do
-            nix build -L ".#tessh-static-$l" -o "result-$l"
+            nix build -L ".#tessh-release-$l" -o "result-$l"
             install -m755 "result-$l/bin/tessh" "dist/tessh-${{ matrix.arch }}-linux-$l"
           done
           file dist/*

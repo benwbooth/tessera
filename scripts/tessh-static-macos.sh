@@ -30,7 +30,9 @@ suppress_build_script_link_lines=false
 EOF
 
 # tessh (its own binary first: the launcher's is also called tessh).
-PYO3_CONFIG_FILE="$work/pyo3.txt" cargo build --release --locked -p tessh --no-default-features --features standalone
+# (Full LTO, one codegen unit, as Linux's release files.)
+PYO3_CONFIG_FILE="$work/pyo3.txt" CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+  cargo build --release --locked -p tessh --no-default-features --features standalone
 cp target/release/tessh "$work/root/bin/tessh"
 strip -x "$work/root/bin/tessh"
 otool -L "$work/root/bin/tessh"
@@ -51,7 +53,10 @@ echo none > "$work/root/libc"
 
 # The payload, built into the launcher.
 (cd "$work/root" && tar -cf - --uid 0 --gid 0 .) | zstd -19 --long=27 -T0 -q > "$work/payload.tar.zst"
-TESSH_PAYLOAD="$work/payload.tar.zst" cargo build --release --locked -p tessh-launcher
+# (The launcher built for size, as the flake's.)
+TESSH_PAYLOAD="$work/payload.tar.zst" CARGO_PROFILE_RELEASE_OPT_LEVEL=z CARGO_PROFILE_RELEASE_LTO=fat \
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_PANIC=abort CARGO_PROFILE_RELEASE_STRIP=symbols \
+  cargo build --release --locked -p tessh-launcher
 out="dist/tessh-${arch}-macos"
 cp target/release/tessh "$out"
 # (Ad hoc: Apple Silicon runs nothing unsigned.)
