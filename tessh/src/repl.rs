@@ -1270,6 +1270,8 @@ pub fn run() -> i32 {
     loop {
         Python::attach(|py| {
             apply_handover(py);
+            // (prompt_hooks, direnv's among them: before the environment's written out.)
+            runtime::run_prompt_hooks(py);
             shared.lock().unwrap().macros = runner::macro_names(ns.bind(py));
         });
         write_env();

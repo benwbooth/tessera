@@ -124,6 +124,36 @@ class Failed:
     def __repr__(self):
         return f"Failed({self.error!r})"
 
+# ---- before each prompt -----------------------------------------------------
+
+def direnv_hook():
+    """direnv, as `eval "$(direnv hook bash)"` has it: before each prompt
+    (and notebook cell), the environment of the folder's .envrc, or what it
+    set taken back on leaving. Nothing when direnv isn't installed.
+    TESSH_DIRENV=0, or prompt_hooks.remove(direnv_hook), turns it off."""
+    import __tessh__
+    __tessh__.direnv_export()
+
+# The functions run before each prompt (and each notebook cell), in order:
+# bash's PROMPT_COMMAND. @before_prompt adds one.
+prompt_hooks = [direnv_hook]
+
+def before_prompt(f):
+    """@before_prompt on a def: run it before each prompt (and each notebook
+    cell), as bash's PROMPT_COMMAND. Gives back the function."""
+    prompt_hooks.append(f)
+    return f
+
+def run_prompt_hooks():
+    import sys
+    for f in list(prompt_hooks):
+        try:
+            f()
+        except KeyboardInterrupt:
+            raise
+        except BaseException as e:
+            print(f"tessh: before_prompt {getattr(f, '__name__', f)}: {e}", file=sys.stderr)
+
 _runner = None
 
 def run_top(coro):
@@ -2870,6 +2900,40 @@ fn fg(py: Python<'_>, n: Option<String>) -> PyResult<Py<PyAny>> {
     output(py, "", code, true)
 }
 
+/// Before each prompt (and notebook cell): prompt_hooks, run.
+pub fn run_prompt_hooks(py: Python<'_>) {
+    let r = py.import("__tessh__").and_then(|m| m.getattr("run_prompt_hooks")).and_then(|f| f.call0());
+    if let Err(e) = r {
+        e.print(py);
+    }
+}
+
+/// `direnv export json`, applied: what the folder's .envrc sets, set, what
+/// it unsets (or set before, on leaving), unset. Its messages ("direnv:
+/// loading", a blocked .envrc) go to stderr, Python's (a notebook card's).
+#[pyfunction]
+fn direnv_export(py: Python<'_>) -> PyResult<()> {
+    if std::env::var("TESSH_DIRENV").as_deref() == Ok("0") {
+        return Ok(());
+    }
+    let Some(bin) = which("direnv") else { return Ok(()) };
+    let out = py.detach(|| Command::new(&bin).args(["export", "json"]).stdin(Stdio::null()).output());
+    let Ok(out) = out else { return Ok(()) };
+    if !out.stderr.is_empty() {
+        let sys = py.import("sys")?;
+        sys.getattr("stderr")?.call_method1("write", (String::from_utf8_lossy(&out.stderr).to_string(),))?;
+        let _ = sys.getattr("stderr")?.call_method0("flush");
+    }
+    if out.stdout.iter().all(|b| b.is_ascii_whitespace()) {
+        return Ok(());
+    }
+    let map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&out.stdout).map_err(|e| PyValueError::new_err(format!("direnv export json: {e}")))?;
+    for (k, v) in map {
+        setenv(py, &k, v.as_str())?;
+    }
+    Ok(())
+}
+
 pub fn which(n: &str) -> Option<String> {
     if n.contains('/') {
         return std::path::Path::new(n).is_file().then(|| n.to_string());
@@ -2930,6 +2994,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         wrap_pyfunction!(cmd, &m)?,
         wrap_pyfunction!(pipe, &m)?,
         wrap_pyfunction!(procsub, &m)?,
+        wrap_pyfunction!(direnv_export, &m)?,
         wrap_pyfunction!(ps_mark, &m)?,
         wrap_pyfunction!(ps_done, &m)?,
         wrap_pyfunction!(call_stage, &m)?,
@@ -2946,6 +3011,9 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     m.add("Failed", prelude(py)?.getattr("Failed")?)?;
     m.add("CommandFailed", prelude(py)?.getattr("CommandFailed")?)?;
     m.add("run_top", prelude(py)?.getattr("run_top")?)?;
+    for n in ["prompt_hooks", "before_prompt", "run_prompt_hooks", "direnv_hook"] {
+        m.add(n, prelude(py)?.getattr(n)?)?;
+    }
     m.add("pick", prelude(py)?.getattr("pick")?)?;
     for n in CORE {
         m.add(*n, prelude(py)?.getattr(*n)?)?;
@@ -2971,7 +3039,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "Failed", "CommandFailed", "help", "print", "pretty", "Path", "Glob"].iter()).chain(CORE.iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "Failed", "CommandFailed", "help", "print", "pretty", "Path", "Glob", "prompt_hooks", "before_prompt", "direnv_hook"].iter()).chain(CORE.iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }

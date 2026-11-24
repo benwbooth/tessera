@@ -282,7 +282,11 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
     let mut fresh = true;
     loop {
         if fresh {
-            Python::attach(|py| apply_handover(py));
+            Python::attach(|py| {
+                apply_handover(py);
+                // (prompt_hooks, direnv's among them: before the environment's written out.)
+                runtime::run_prompt_hooks(py);
+            });
             write_env();
             let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
             osc(&format!("7;file://{host}{cwd}"));

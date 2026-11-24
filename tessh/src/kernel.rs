@@ -373,6 +373,11 @@ fn execute(py: Python<'_>, ns: &Bound<'_, PyDict>, msg: &Msg) -> Value {
     // earlier cell moved, before the pane's shell hears of it.)
     let start_cwd = std::env::var("PWD").ok().filter(|p| p.starts_with('/'))
         .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string())).unwrap_or_default();
+    // (prompt_hooks before each cell, as before each prompt: direnv's, for
+    // the folder an earlier cell went to.)
+    if !silent {
+        crate::runtime::run_prompt_hooks(py);
+    }
     let r = runner::run_source(py, &code, ns, &filename, !silent);
     show_figures(py);
     drain(py);

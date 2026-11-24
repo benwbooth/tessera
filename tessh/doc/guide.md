@@ -895,6 +895,33 @@ print $x_from_file
 
 # Python, written as tessh
 
+## Before each prompt
+<!-- help: before_prompt prompt_hooks prompt_command precmd direnv envrc hook -->
+
+`@before_prompt` on a `def` runs it before each prompt, and before each cell
+in a notebook: bash's `PROMPT_COMMAND`, zsh's `precmd`. `prompt_hooks` is the
+list they're kept in, in order; take one out with `prompt_hooks.remove f`.
+
+```tessh
+@before_prompt
+def remember_folder
+  $env.LAST_FOLDER = (str (pwd))
+print ($prompt_hooks[-1].__name__)
+```
+
+```output
+remember_folder
+```
+
+[direnv](https://direnv.net) works with nothing to set up, as
+`eval "$(direnv hook bash)"` does for bash. When `direnv` is installed, the
+first of `prompt_hooks`, `direnv_hook`, runs `direnv export json` before each
+prompt: going into a folder with an allowed `.envrc` sets what it exports,
+and leaving takes it back. direnv's own messages (`direnv: loading`, an
+`.envrc` that's blocked until `direnv allow`) show as they do in bash, in a
+notebook card too. It costs a few milliseconds a prompt (about 8 ms outside
+any `.envrc`, 30 ms inside one). `TESSH_DIRENV=0` turns it off.
+
 ## Assignment
 <!-- help: assignment assign = += name=value destructuring unpacking del -->
 
