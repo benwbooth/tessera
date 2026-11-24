@@ -14,6 +14,7 @@ mod editor;
 mod forms;
 mod help;
 mod kernel;
+mod login;
 mod pyforms;
 mod reader;
 mod repl;
@@ -31,12 +32,79 @@ use std::io::Read;
 const USAGE: &str = "tessh                      the REPL
 tessh FILE [ARGS…]         run a script
 tessh -c CODE [ARGS…]      run CODE
+tessh -s [ARGS…]           run the script on stdin (also: stdin not a terminal, no FILE)
+  -l, --login              first: a login shell (the profile's environment, then login.tsh)
+  -i                       first: interactive (accepted; the REPL needs a terminal)
 tessh --check [FILE]       check without running (stdin without FILE); --json for JSON
 tessh --py FILE            print the Python it compiles to
 tessh --kernel -f CONN     the Jupyter kernel
 tessh --guide [TOPIC]      the guide (or a topic of it), drawn for the terminal; --keys: the editor's keys
 tessh --complete [DIR]     completions for {\"text\", \"cursor\"} on stdin, in DIR (Tessera's editor)
   --with PKG[,PKG…]        first: PyPI packages to have (uv installs them once), as `need` does";
+
+/// A login shell: its login.tsh runs in the first namespace (the REPL's, or
+/// the script's).
+pub static LOGIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// login.tsh in NS, for a login shell.
+pub fn run_login_file(py: Python<'_>, ns: &Bound<'_, pyo3::types::PyDict>) {
+    if !LOGIN.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let f = login::login_file();
+    if f.is_file() {
+        if let Err(e) = runner::run_file(py, &f.to_string_lossy(), ns) {
+            runner::report(py, e, &f.to_string_lossy());
+        }
+    }
+}
+
+/// The script on stdin (`tessh -s ARGS…`, `cmd | tessh`): ARGS are sys.argv[1:].
+fn run_stdin(args: Vec<String>) -> i32 {
+    let mut text = String::new();
+    if let Err(e) = std::io::stdin().read_to_string(&mut text) {
+        eprintln!("tessh: stdin: {e}");
+        return 1;
+    }
+    let mut argv = vec!["-".to_string()];
+    argv.extend(args);
+    Python::attach(|py| {
+        if let Err(e) = runner::init(py) {
+            e.print(py);
+            return 1;
+        }
+        let ns = match runner::new_namespace(py, "__main__", argv) {
+            Ok(ns) => ns,
+            Err(e) => {
+                e.print(py);
+                return 1;
+            }
+        };
+        run_login_file(py, &ns);
+        finish(py, runner::run_source(py, &text, &ns, "<stdin>", false), "<stdin>")
+    })
+}
+
+/// A script's status from its result (an exit, ^C, an error reported).
+fn finish(py: Python<'_>, result: Result<(), runner::TesshError>, name: &str) -> i32 {
+    match result {
+        Ok(()) => runtime::STATUS.load(std::sync::atomic::Ordering::SeqCst),
+        Err(runner::TesshError::Py(e)) => {
+            if let Some(c) = exit_code(py, &e) {
+                return c;
+            }
+            if e.is_instance_of::<pyo3::exceptions::PyKeyboardInterrupt>(py) {
+                return 130;
+            }
+            runner::report(py, runner::TesshError::Py(e), name);
+            1
+        }
+        Err(e) => {
+            runner::report(py, e, name);
+            1
+        }
+    }
+}
 
 fn exit_code(py: Python<'_>, e: &PyErr) -> Option<i32> {
     if e.is_instance_of::<pyo3::exceptions::PySystemExit>(py) {
@@ -53,8 +121,13 @@ fn main() {
         standalone::python_main();
         standalone::prepare();
     }
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let code = run(args);
+    let mut argv = std::env::args();
+    let argv0 = argv.next().unwrap_or_default();
+    let (opts, args) = login::parse(&argv0, argv.collect());
+    if args.is_empty() {
+        login::probe_guard();
+    }
+    let code = run(opts, args);
     // (Embedded Python never finalizes: run its atexit work, flush its output.)
     Python::attach(|py| {
         if let Ok(a) = py.import("atexit") {
@@ -71,7 +144,19 @@ fn main() {
     std::process::exit(code);
 }
 
-fn run(args: Vec<String>) -> i32 {
+fn run(opts: login::Opts, args: Vec<String>) -> i32 {
+    // (`ssh host cmd`, scp, rsync: their -c is sh's.)
+    if args.first().map(String::as_str) == Some("-c") && login::sh_for_c() {
+        let mut a = args;
+        if opts.login {
+            a.insert(0, "-l".into());
+        }
+        return login::run_sh_c(&a);
+    }
+    if opts.login {
+        login::import_profile();
+        LOGIN.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     // (--with PKG, any number, before the rest: packages to have, as uv run's.)
     let mut args = args;
     let mut with: Vec<String> = vec![];
@@ -101,6 +186,13 @@ fn run(args: Vec<String>) -> i32 {
         }
     }
     let a = args.first().map(String::as_str).unwrap_or("");
+    let tty_in = unsafe { libc::isatty(0) } == 1;
+    // (-i: the REPL, which needs a terminal; without one, as bash -i | …
+    // reads its commands, the script on stdin.)
+    let _ = opts.interactive;
+    if opts.stdin || (a.is_empty() && !tty_in) {
+        return run_stdin(args);
+    }
     if a.is_empty() {
         return repl::run();
     }
@@ -217,6 +309,7 @@ fn run(args: Vec<String>) -> i32 {
                             return 1;
                         }
                     };
+                    run_login_file(py, &ns);
                     (None::<()>, runner::run_source(py, code, &ns, "<string>", false), "<string>".to_string())
                 } else {
                     let ns = match runner::new_namespace(py, "__main__", args.clone()) {
@@ -231,26 +324,11 @@ fn run(args: Vec<String>) -> i32 {
                     if let (Some(d), Ok(path)) = (dir, py.import("sys").and_then(|s| s.getattr("path"))) {
                         let _ = path.call_method1("insert", (0, d));
                     }
+                    run_login_file(py, &ns);
                     (None, runner::run_file(py, a, &ns), a.to_string())
                 };
                 let _ = ns_argv;
-                match result {
-                    Ok(()) => runtime::STATUS.load(std::sync::atomic::Ordering::SeqCst),
-                    Err(runner::TesshError::Py(e)) => {
-                        if let Some(c) = exit_code(py, &e) {
-                            return c;
-                        }
-                        if e.is_instance_of::<pyo3::exceptions::PyKeyboardInterrupt>(py) {
-                            return 130;
-                        }
-                        runner::report(py, runner::TesshError::Py(e), &name);
-                        1
-                    }
-                    Err(e) => {
-                        runner::report(py, e, &name);
-                        1
-                    }
-                }
+                finish(py, result, &name)
             }
         }
     })

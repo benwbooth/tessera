@@ -1251,6 +1251,7 @@ pub fn run() -> i32 {
     let kitty = tty && std::env::var("TESSH_KITTY_KEYS").map(|v| v != "0").unwrap_or(true) && reedline::kitty_protocol_available();
     let config_dir = std::env::var("XDG_CONFIG_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"));
     let rc = config_dir.join("tessh/rc.tsh");
+    Python::attach(|py| crate::run_login_file(py, ns.bind(py)));
     if rc.is_file() {
         Python::attach(|py| {
             if let Err(e) = runner::run_file(py, &rc.to_string_lossy(), ns.bind(py)) {

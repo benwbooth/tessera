@@ -2240,30 +2240,74 @@ terminal: headings, wrapped text, tables and highlighted examples.
 `tessh --guide pipes` prints one part, as `help pipes` does.
 
 ## A tessh for any Linux
-<!-- help: static standalone install uv python version --python portable -->
+<!-- help: static standalone install uv python version --python portable macos glibc musl -->
 
 `nix build github:benwbooth/tessera#tessh-static` (or
 `scripts/tessh-static.sh`) makes `tessh` as one file that runs on any
-x86-64 Linux with nothing else installed: NixOS, a bare container, a
-server over ssh. It carries uv, musl's program loader and tessh itself
-(built against Python's stable ABI). The first time it runs it gets a CPython
-with uv (python-build-standalone's musl build: a 30 MB download, 93 MB
-unpacked) and keeps
-it under `~/.cache/tessh` and uv's folder.
+x86-64 or ARM64 Linux with nothing else installed: NixOS, a bare container, a
+server over ssh. `scripts/tessh-static-macos.sh` does the same for macOS
+(Apple Silicon or Intel). Ready-made ones are on the `tessh-dev` release
+(`tessh-x86_64-linux`, `tessh-aarch64-linux`, `tessh-aarch64-macos`,
+`tessh-x86_64-macos`) and on each Tessera release.
+
+The Linux file carries uv and two builds of tessh (built against Python's
+stable ABI): one for glibc and one for musl, with musl's program loader.
+The first time it runs, it uses the glibc build when the system has glibc's
+loader and that build runs. Otherwise, as on Alpine or a bare container, it
+uses the musl build. It remembers the choice; `TESSH_LIBC=gnu` or `musl`
+forces one. Then it gets a CPython for that C library with uv
+(python-build-standalone's: about 30 MB to download, 93 MB unpacked) and
+keeps it under `~/.cache/tessh` and uv's folder. On macOS it gets uv's macOS
+CPython the same way.
 
 - Which Python: `tessh --python 3.14`, `TESSH_PYTHON=3.14`, or a line in
   `~/.config/tessh/python`; otherwise the newest one uv offers (3.12 or
   later), looked at once a day, so a new CPython in uv is taken up. A uv on
   `PATH` is used when it's newer than the one inside.
 - `need numpy` and `--with` install with uv, as everywhere: C extensions
-  (musllinux wheels: numpy, pandas, lxml) load as in any Python, since a
-  real loader runs tessh. A package with no musllinux wheel is built from
-  source, which needs a C compiler.
+  (manylinux or musllinux wheels: numpy, pandas, lxml) load as in any Python,
+  since a real loader runs tessh. A package with no wheel for the system is
+  built from source, which needs a C compiler.
 - Where uv can't tell the system's C library (a system with no dynamic
   loader at all, like a static busybox), tessh fetches the same CPython
   build directly.
 - `python3` beside it in `~/.cache/tessh/rt-*/py/*/bin` is that Python, for
   programs that want one.
+- No Windows build: tessh is built on Unix processes, signals and terminals.
+  Under WSL, use the Linux file.
+
+## tessh as your login shell
+<!-- help: login shell chsh -l --login -i -s profile /etc/profile /etc/shells sshd scp rsync login.tsh -->
+
+tessh takes the flags a login shell gets:
+
+- `-l` or `--login`, or a `-` before its name (how `login` and `sshd`
+  start one): first it imports the environment that `/etc/profile`,
+  `/etc/profile.d`, `~/.profile` and NixOS's `set-environment` set up, by
+  running `sh -l` once. It doesn't take that sh's working folder or `SHLVL`.
+  Then it runs `~/.config/tessh/login.tsh`, before `rc.tsh`. A profile that
+  takes more than 10 s is cut off, with a message.
+- `-i`: accepted, for programs that pass it. The REPL needs a terminal,
+  so without one tessh runs stdin as a script.
+- `-s [ARGS…]`: run the script read from stdin, with ARGS as `sys.argv[1:]`.
+  This also happens when stdin isn't a terminal and no file is given, as in
+  `cmd | tessh`.
+- `-c CMD`: CMD is tessh code. One exception: when sshd starts tessh, as for
+  `ssh host cmd`, `scp`, `rsync` or VS Code's remote server, CMD goes to
+  `/bin/sh`, because those programs send sh commands. `TESSH_SH_C=1` or `0`
+  overrides this either way.
+
+Short flags combine: `tessh -li`, or `tessh -lc CMD`, the same as
+`-l -c CMD`.
+
+To make it your login shell, list it in `/etc/shells` first; `chsh`
+accepts only shells listed there. On NixOS, set
+`environment.shells` to include tessh (`tessera.packages.${system}.tessh`
+from this flake, or a path) and then
+`users.users.<you>.shell`. Elsewhere, add its full path to `/etc/shells` and
+run `chsh -s /path/to/tessh`. If `~/.profile` runs `exec tessh`, that's fine:
+tessh notices it's being started while it reads the profile and doesn't
+start a second REPL.
 
 ## Scripts and checks
 <!-- help: scripts script running run check --check --py -c shebang -->
