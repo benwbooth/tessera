@@ -1017,6 +1017,19 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
         }
         return (start, pos, items);
     }
+    // (A command `complete` was told about: its words, function, files…)
+    if !first && !var {
+        let own = py.import("__tessh_shell__").and_then(|m| m.getattr("complete_for")).and_then(|f| f.call1((&before[..start], word, ns)));
+        if let Ok(list) = own {
+            if let Ok(names) = list.extract::<Vec<String>>() {
+                for n in names {
+                    let dir = n.ends_with('/');
+                    items.push(Item { insert: n.clone(), label: n, kind: if dir { "dir" } else { "option" }, detail: "complete".into(), doc: String::new() });
+                }
+                return (start, pos, items);
+            }
+        }
+    }
     let builtins = py.import("builtins").ok();
     for n in completions(py, ns, word, first, &before[..start]) {
         let mut doc = String::new();
@@ -1292,7 +1305,12 @@ pub fn run() -> i32 {
         let text = match sig {
             Ok(Signal::Success(t)) => t,
             Ok(Signal::CtrlC(_)) | Ok(Signal::ExternalBreak(_)) => continue,
-            Ok(Signal::CtrlD) => break,
+            Ok(Signal::CtrlD) => {
+                if Python::attach(|py| crate::jobs::exit_check(py).unwrap_or(true)) {
+                    break;
+                }
+                continue;
+            }
             Ok(Signal::HostCommand(c)) => {
                 let buf = rl.current_buffer_contents().to_string();
                 let pos = rl.current_insertion_point();

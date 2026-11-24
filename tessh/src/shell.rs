@@ -18,7 +18,7 @@ pub fn usage(name: &str) -> Option<&'static str> {
         "kill" => "kill [-s SIG | -n NUM | -SIG] %job | pid …\nkill -l [NUM | SIG …]\n\nSend a signal (TERM without one) to jobs (%1, %%, %-, %name, $job: every program in it) and processes. A stopped job sent TERM or HUP is continued, so it can act on it. -l lists the signals, or names one by number (an exit status above 128 too). \\kill runs the program instead.",
         "suspend" => "suspend [-f]\n\nAt the prompt: stop tessh, as Ctrl+Z stops a program, until the shell that started it brings it back (fg). A login shell only with -f.",
         "logout" => "logout [status]\n\nEnd a login shell (exit, for one that isn't).",
-        "trap" => "trap 'tessh text' SIGNAL …\ntrap - SIGNAL …   trap '' SIGNAL …   trap [-p] [SIGNAL …]   trap -l\n\nRun the text (tessh, in this shell: a function's name calls it) when a signal comes, or EXIT when tessh ends (a script, -c, the REPL). - puts a signal back as it was, '' ignores it; -p, or trap alone, lists the traps, -l the signals. Signals are named INT, SIGINT or 2. bash's ERR, DEBUG and RETURN aren't in tessh: try/except CommandFailed catches a failing command (strict mode), and Python's sys.settrace traces.",
+        "trap" => "trap 'tessh text' SIGNAL …\ntrap - SIGNAL …   trap '' SIGNAL …   trap [-p] [SIGNAL …]   trap -l\n\nRun the text (tessh, in this shell: a function's name calls it) when a signal comes, or EXIT when tessh ends (a script, -c, the REPL). - puts a signal back as it was, '' ignores it; -p, or trap alone, lists the traps, -l the signals. Signals are named INT, SIGINT or 2. ERR runs when a command on a line of its own fails (as bash's: not one that if, ||, && or r = (…) checks), before strict mode stops the script. DEBUG and RETURN aren't in tessh: Python's sys.settrace does both.",
         "ulimit" => "ulimit [-SHa] [-cdefilmnqrstuvx] [limit]\n\nShow or set a resource limit for tessh and the programs it runs: -c core file size, -d data, -f file size (the default), -l locked memory, -m resident memory, -n open files, -s stack, -t CPU seconds, -u processes, -v virtual memory, -e nice, -i pending signals, -q message queues, -r real-time priority, -x file locks. Sizes are in KiB (-c and -f too). limit is a number, unlimited, soft or hard. -S the soft limit, -H the hard one (setting without either sets both, as bash does); -a shows them all. Python: import resource.",
         "umask" => "umask [-p] [-S] [mode]\n\nThe file mode mask: the permissions new files don't get. Alone, it prints it (0022); -S as u=rwx,g=rx,o=rx. mode is octal (077) or symbolic (u=rwx,g=,o=, g-w, a+r).",
         "read" => "read [-rs] [-p prompt] [-n N | -N N] [-t secs] [-d delim] [-a list] [-u fd] [name …]\n\nRead a line from standard input (what <, <<< or a pipe gives this line) into names: split at $IFS (spaces, tabs and newlines without one), the last name getting the rest. No name: $REPLY, the whole line. -a: a list of all the words. -r keeps backslashes (without it, \\ joins lines and quotes the next character), -s doesn't echo (a password), -n N stops after N characters, -N after exactly N, -t gives up after secs (status 142), -d reads to delim instead of a newline, -p shows a prompt (on a terminal). The status is 1 at the end of the input, so `while read line` loops over lines. It sets the module's names; in Python, input reads a line.",
@@ -32,9 +32,13 @@ pub fn usage(name: &str) -> Option<&'static str> {
         "enable" => "enable\n\nNot in tessh: its builtins can't be turned off. A function of the same name takes a builtin's place, and \\name runs the program of that name.",
         "type" => "type [-afptP] name …\n\nWhat each name is as a command: a tessh keyword, a function (yours, or a command function), a variable, a tessh builtin, a Python builtin, or a program (and where). -t says only which (keyword, function, variable, builtin or file), -p only a program's path, -P looks only for a program, -a shows everything the name is. Given a value instead of words (type $x), it's Python's type.",
         "hash" => "hash [-r] [-t name …] [name …]\n\ntessh doesn't remember where programs are: it looks each one up on $PATH as it runs it, so hash -r has nothing to forget. hash name checks it's there (and fails if not); -t prints where. Given a value (hash $x), it's Python's hash.",
-        "exec" => "exec [-cl] [-a name] program [arg …]\n\nReplace tessh with the program (exec zsh, exec tmux): it never comes back. -c gives it an empty environment, -l starts it as a login shell (a - before its name), -a gives it another name. Given code (exec $code, exec \"x = 1\"), it's Python's exec. exec with only redirections (exec >log) isn't in tessh: redirect a block with with or a function.",
+        "exec" => "exec [-cl] [-a name] program [arg …]\n\nReplace tessh with the program (exec zsh, exec tmux): it never comes back. -c gives it an empty environment, -l starts it as a login shell (a - before its name), -a gives it another name. With only redirections (exec >log, exec 2>&1, exec 3<file) they stay in force, for tessh and every program after. Given code (exec $code, exec \"x = 1\"), it's Python's exec; builtins.exec is Python's whatever it's given.",
         "eval" => "eval text …\n\nRun the words joined as tessh text, here, as bash's eval does: eval \"echo hi\", eval $\"(ssh-agent -c)\" (tessh doesn't read sh: give it tessh, or run sh -c). Its value is the last form's, so x = (eval \"1 + 2\") is 3. Given a value (eval $code), it's Python's eval.",
-        "readonly" | "declare" | "typeset" | "local" | "alias" | "unalias" | "shopt" | "bind" | "complete" | "compgen" => return idiom(name),
+        "readonly" => "readonly [-p] [NAME[=value] …]\n\nMake module names read-only: a later NAME = … (at the prompt, or further on in the script) is an error. NAME=value sets it first (to the text value). Alone, or with -p, it lists them. A def's own names, and globals() from Python, aren't checked.",
+        "select" => "select item …\n\nbash's menu, as a loop: for choice in (select red green blue) prints the items numbered (to stderr), asks $PS3 (#? without it) and gives the item picked each time; a number that isn't on the menu gives None, Enter alone shows the menu again, and the end of the input ends the loop (break ends it too). $REPLY is what was typed.",
+        "complete" => "complete [-fdcbkv] [-W words] [-F function] [-A action] name …\ncomplete -r [name …]   complete [-p] [name …]\n\nWhat Tab offers after a command: -W the words (a string split at spaces), -F a function given (word, words of the line so far) that returns a list, -f files, -d folders, -c commands, -v variables, -k keywords, -b builtins. -r forgets a command's, -p (or complete alone) lists them.",
+        "compgen" => "compgen [-fdcbkv] [-W words] [-F function] [-A action] [--] [word]\n\nThe completions complete would offer for word, one a line: -W words, -f files, -d folders, -c commands (programs, builtins and functions), -v variables, -k keywords, -b builtins, -A function the functions.",
+        "declare" | "typeset" | "local" | "alias" | "unalias" | "shopt" | "bind" => return idiom(name),
         _ => return None,
     })
 }
@@ -45,18 +49,15 @@ fn idiom(name: &str) -> Option<&'static str> {
         "alias" | "unalias" => "tessh has no aliases: a command function does what one does, and can take its arguments anywhere:\n\n  @command\n  def ll *args\n    ls -l *$args\n\nA def replaces it; del ll removes it. (help commands)",
         "declare" | "typeset" => "tessh's variables are Python's: name = value sets one, of any type (bash's -i, -a and -A are an int, a list and a dict), export NAME=value sets an environment variable (declare -x), a name set in a def is the def's own (declare in a function), and print $name or pretty $name shows one (declare -p).",
         "local" => "a name set in a def is already the def's own (Python's scopes): no local is needed. global name or nonlocal name sets one outside instead.",
-        "readonly" => "tessh has no read-only names: by Python's convention a NAME in capitals is a constant (typing.Final marks one for a type checker). export NAME=value sets an environment variable.",
         "shopt" => "tessh has no shell options: globs, strings and folders work one way (help globs), strict on is bash's set -e, and help abs-options says what to do for the rest.",
         "bind" => "tessh's editor keys are its own, not readline's: help keys (or tessh --keys) lists them.",
-        "complete" => "tessh completes programs, their options, files, folders and Python names by itself; completions can't be added to it per command.",
-        "compgen" => "tessh has no compgen: glob \"pre*\" lists files, which finds a program, and dir($module) lists names.",
         _ => return None,
     })
 }
 
 /// Whether the builtin is given the namespace it runs in (to set names, run text there).
 pub fn wants_ns(name: &str) -> bool {
-    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash")
+    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash" | "readonly" | "select" | "complete" | "compgen")
 }
 
 /// Run builtin `name` with its words: the Python function `sh_name`, or the
@@ -89,6 +90,89 @@ pub fn command_opts(py: Python<'_>, args: &[Bound<'_, PyAny>]) -> PyResult<Py<Py
     let ns = py.import("sys")?.getattr("_getframe")?.call1((0,))?.getattr("f_globals")?;
     let f = py.import("__tessh_shell__")?.getattr("command_opts")?;
     Ok(f.call1((words, ns))?.unbind())
+}
+
+/// bash's history expansion, at the prompt: `!!` the last command, `!$`
+/// its last word, `!^` its first argument, `!*` all its arguments, `!n`
+/// entry n (as history numbers them), `!-n` the nth back, `!prefix` the
+/// latest starting with prefix. Not inside '…', and `!` before a space, =,
+/// ( or the end is left as it is (tessh's ! and !=). None: nothing to expand.
+pub fn expand_history(text: &str, file: &std::path::Path) -> Result<Option<String>, String> {
+    let entries: Vec<String> = std::fs::read_to_string(file).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(|l| l.replace("<\\n>", "\n")).collect();
+    let words = |e: &str| -> Vec<String> { e.split_whitespace().map(String::from).collect() };
+    let last = || entries.last().cloned().ok_or_else(|| "!!: no history yet".to_string());
+    let cs: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut changed = false;
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < cs.len() {
+        let c = cs[i];
+        if let Some(q) = quote {
+            if c == '\\' && q == '"' && i + 1 < cs.len() {
+                out.push(c);
+                out.push(cs[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == q {
+                quote = None;
+            } else if q == '\'' || c != '!' {
+                out.push(c);
+                i += 1;
+                continue;
+            }
+        } else if c == '\'' || c == '"' {
+            quote = Some(c);
+        } else if c == '\\' && i + 1 < cs.len() {
+            out.push(c);
+            out.push(cs[i + 1]);
+            i += 2;
+            continue;
+        }
+        if c != '!' || i + 1 >= cs.len() {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        let at_start = i == 0 || cs[i - 1].is_whitespace() || "(;|&".contains(cs[i - 1]);
+        let n = cs[i + 1];
+        let rest: String = cs[i + 1..].iter().take_while(|c| !c.is_whitespace() && !"();|&'\"".contains(**c)).collect();
+        let (with, used) = match n {
+            '!' => (last()?, 2),
+            '$' => (words(&last()?).last().cloned().unwrap_or_default(), 2),
+            '^' => (words(&last()?).get(1).cloned().unwrap_or_default(), 2),
+            '*' => (words(&last()?).get(1..).map(|w| w.join(" ")).unwrap_or_default(), 2),
+            _ if !at_start => {
+                out.push(c);
+                i += 1;
+                continue;
+            }
+            '-' if rest.len() > 1 && rest[1..].chars().all(|c| c.is_ascii_digit()) => {
+                let k: usize = rest[1..].parse().map_err(|_| format!("!{rest}: event not found"))?;
+                let e = entries.len().checked_sub(k).and_then(|j| entries.get(j)).ok_or_else(|| format!("!{rest}: event not found"))?;
+                (e.clone(), 1 + rest.chars().count())
+            }
+            _ if n.is_ascii_digit() && rest.chars().all(|c| c.is_ascii_digit()) => {
+                let k: usize = rest.parse().map_err(|_| format!("!{rest}: event not found"))?;
+                let e = k.checked_sub(1).and_then(|j| entries.get(j)).ok_or_else(|| format!("!{rest}: event not found"))?;
+                (e.clone(), 1 + rest.chars().count())
+            }
+            _ if n.is_alphabetic() || "_./~".contains(n) => {
+                let e = entries.iter().rev().find(|e| e.starts_with(&rest)).ok_or_else(|| format!("!{rest}: event not found"))?;
+                (e.clone(), 1 + rest.chars().count())
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+                continue;
+            }
+        };
+        out.push_str(&with);
+        changed = true;
+        i += used;
+    }
+    Ok(changed.then_some(out))
 }
 
 /// Tessh text, run in ns (a trap's, eval's): the last form's value.
@@ -173,6 +257,16 @@ fn builtin_named<'py>(py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py,
 }
 
 #[pyfunction]
+fn builtin_names() -> Vec<&'static str> {
+    crate::runtime::COMMAND_BUILTINS.to_vec()
+}
+
+#[pyfunction]
+fn set_err_trap(on: bool) {
+    crate::runtime::ERR_TRAP.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[pyfunction]
 fn is_login() -> bool {
     crate::LOGIN.load(std::sync::atomic::Ordering::SeqCst)
 }
@@ -184,12 +278,17 @@ pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(restore_signal, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_named, m)?)?;
     m.add_function(wrap_pyfunction!(is_login, m)?)?;
+    m.add_function(wrap_pyfunction!(set_err_trap, m)?)?;
+    m.add_function(wrap_pyfunction!(builtin_names, m)?)?;
     let code = std::ffi::CString::new(SHELL_PY).unwrap();
     let sh = PyModule::from_code(py, &code, c"<tessh builtins>", c"__tessh_shell__")?;
     py.import("sys")?.getattr("modules")?.set_item("__tessh_shell__", &sh)?;
     // (An interactive tessh's jobs get SIGHUP when it ends, or its terminal does.)
     py.import("atexit")?.call_method1("register", (m.getattr("hup_jobs")?,))?;
     crate::jobs::on_hangup();
+    // (SHLVL one deeper, as every shell has it.)
+    let lvl = std::env::var("SHLVL").ok().and_then(|v| v.trim().parse::<i64>().ok()).unwrap_or(0);
+    crate::runtime::setenv(py, "SHLVL", Some(&(lvl.max(0) + 1).to_string()))?;
     // ($SHELL, when nothing set it: this tessh, as bash sets it.)
     if std::env::var_os("SHELL").is_none() {
         if let Ok(exe) = std::env::current_exe() {
@@ -294,8 +393,8 @@ def _signum(s):
     return _tessh().signal_number(s)
 
 def _signame(k):
-    if k == "EXIT":
-        return "EXIT"
+    if k in ("EXIT", "ERR"):
+        return k
     names = {v: n for n, v in _tessh().signal_names()}
     return "SIG" + names[k] if k in names else str(k)
 
@@ -309,6 +408,19 @@ def _run_trap(k):
         raise
     except BaseException as e:
         _err(f"trap {_signame(k)}: {type(e).__name__}: {e}")
+
+_in_err_trap = False
+
+def run_err_trap():
+    """A command failed on a line of its own: the ERR trap (not from inside it)."""
+    global _in_err_trap
+    if _in_err_trap:
+        return
+    _in_err_trap = True
+    try:
+        _run_trap("ERR")
+    finally:
+        _in_err_trap = False
 
 def _on_exit():
     k = "EXIT"
@@ -349,8 +461,16 @@ def sh_trap(*args, _ns=None):
         k = _signum(s)
         if k is None:
             raise ValueError(f"trap: {s}: invalid signal specification")
-        if k in ("ERR", "DEBUG", "RETURN"):
-            raise NotImplementedError(f"trap: {k}: not in tessh. try/except CommandFailed catches a failing command (with strict on, bash's set -e), and Python's sys.settrace traces each line.")
+        if k in ("DEBUG", "RETURN"):
+            raise NotImplementedError(f"trap: {k}: not in tessh: Python's sys.settrace runs a function for each line (DEBUG) and each return (RETURN).")
+        if k == "ERR":
+            if action == "-" or action == "":
+                _traps.pop(k, None)
+            else:
+                _traps[k] = action
+                _trap_ns[k] = _ns
+            _tessh().set_err_trap(k in _traps)
+            continue
         if k == "EXIT":
             _tessh().set_exit_trap(action != "-")
             if action == "-":
@@ -738,6 +858,174 @@ def sh_shift(n="1", *rest, _ns=None):
     del a[1:1 + n]
     return None
 
+def sh_readonly(*args, _ns=None):
+    flags, _, names = _split_opts(args)
+    ro = _ns.setdefault("__tessh_readonly__", set())
+    if not names:
+        for n in sorted(ro):
+            print(f"readonly {n}={_ns.get(n)!r}")
+        return None
+    for a in names:
+        n, eq, v = a.partition("=")
+        if not n.isidentifier():
+            raise ValueError(f"readonly: {n}: not a valid name")
+        if n in ro and eq:
+            raise ValueError(f"readonly: {n}: read-only already")
+        if eq:
+            _ns[n] = v
+        elif n not in _ns:
+            _ns[n] = None
+        ro.add(n)
+    return None
+
+def sh_select(*items, _ns=None):
+    """The menu loop, as a generator: for x in (select a b c)."""
+    items = list(items)
+    # (Its input and output as they are now: select <<< … and 2>… hold for
+    # the whole loop, which runs after this call.)
+    inp, err = sys.stdin, sys.stderr
+    def menu():
+        w = len(str(len(items)))
+        for k, it in enumerate(items, 1):
+            err.write(f"{k:>{w}}) {it}\n")
+    def gen():
+        menu()
+        while True:
+            ps3 = (_ns or {}).get("PS3") or os.environ.get("PS3") or "#? "
+            err.write(str(ps3))
+            err.flush()
+            line = inp.readline()
+            if not line:
+                err.write("\n")
+                return
+            reply = line.rstrip("\n")
+            if _ns is not None:
+                _ns["REPLY"] = reply
+            if not reply.strip():
+                menu()
+                continue
+            try:
+                k = int(reply.strip())
+            except ValueError:
+                k = 0
+            yield items[k - 1] if 1 <= k <= len(items) else None
+    return gen()
+
+# ---- complete, compgen ---------------------------------------------------------------
+
+_complete = {}
+
+_ACTIONS = {"file": "f", "directory": "d", "command": "c", "builtin": "b", "keyword": "k", "variable": "v", "function": "F*", "alias": ""}
+
+def _parse_spec(args):
+    flags, vals, rest = _split_opts(args, "WFAGXPSo")
+    spec = {"flags": set(f for f in flags if f in "fdcbkv"), "words": vals.get("W"), "func": vals.get("F"), "functions": False}
+    a = vals.get("A")
+    if a:
+        k = _ACTIONS.get(a)
+        if k is None:
+            raise ValueError(f"-A {a}: unknown action")
+        if k == "F*":
+            spec["functions"] = True
+        elif k:
+            spec["flags"].add(k)
+    return flags, spec, rest
+
+def _gen(spec, word, line_words, ns):
+    import glob as _glob, keyword, builtins
+    out = []
+    if spec.get("words"):
+        out += [w for w in str(spec["words"]).split() if w.startswith(word)]
+    fl = spec.get("flags", ())
+    if "f" in fl or "d" in fl:
+        pat = os.path.expanduser(word) + "*"
+        for p in sorted(_glob.glob(pat)):
+            isdir = os.path.isdir(p)
+            if "f" in fl or isdir:
+                shown = word + p[len(os.path.expanduser(word)):] if word.startswith("~") else p
+                out.append(shown + ("/" if isdir else ""))
+    if "c" in fl or "b" in fl:
+        names = set(_tessh().builtin_names()) | set(_DUALS)
+        if "c" in fl:
+            for d in os.environ.get("PATH", "").split(os.pathsep):
+                try:
+                    names |= {n for n in os.listdir(d or ".") if os.access(os.path.join(d or ".", n), os.X_OK)}
+                except OSError:
+                    pass
+            names |= {n for n, v in (ns or {}).items() if callable(v) and not n.startswith("_")}
+        out += sorted(n for n in names if n.startswith(word))
+    if "k" in fl:
+        out += sorted(k for k in _keywords() if k.startswith(word))
+    if "v" in fl:
+        out += sorted(n for n in (ns or {}) if n.startswith(word) and not n.startswith("_") and not callable(ns[n]))
+    if spec.get("functions"):
+        out += sorted(n for n, v in (ns or {}).items() if n.startswith(word) and callable(v) and getattr(v, "__module__", "") == (ns or {}).get("__name__"))
+    if spec.get("func"):
+        f = (ns or {}).get(spec["func"])
+        if not callable(f):
+            raise ValueError(f"{spec['func']}: not a function")
+        got = f(word, list(line_words))
+        out += [str(x) for x in (got or [])]
+    seen, res = set(), []
+    for x in out:
+        if x not in seen:
+            seen.add(x)
+            res.append(x)
+    return res
+
+def sh_complete(*args, _ns=None):
+    import shlex
+    flags, spec, names = _parse_spec(args)
+    if "r" in flags:
+        for n in names or list(_complete):
+            _complete.pop(n, None)
+        return None
+    if not names or "p" in flags:
+        for n in (names or sorted(_complete)):
+            sp = _complete.get(n)
+            if sp is None:
+                continue
+            parts = ["-" + "".join(sorted(sp["flags"]))] if sp["flags"] else []
+            if sp["words"] is not None:
+                parts += ["-W", shlex.quote(sp["words"])]
+            if sp["func"]:
+                parts += ["-F", sp["func"]]
+            if sp["functions"]:
+                parts += ["-A", "function"]
+            print("complete " + " ".join(parts + [n]))
+        return None
+    for n in names:
+        _complete[n] = spec
+    return None
+
+def sh_compgen(*args, _ns=None):
+    flags, spec, rest = _parse_spec(args)
+    word = rest[0] if rest else ""
+    got = _gen(spec, word, [], _ns)
+    for x in got:
+        print(x)
+    return None if got else _status(1)
+
+def complete_for(before, word, ns):
+    """Tab after a command complete was told about: its list (None: tessh's own)."""
+    import re, shlex
+    if not _complete:
+        return None
+    seg = re.split(r"\|\||&&|[|;&(]", before)[-1]
+    try:
+        ws = shlex.split(seg)
+    except ValueError:
+        ws = seg.split()
+    if not ws:
+        return None
+    spec = _complete.get(os.path.basename(ws[0]))
+    if spec is None:
+        return None
+    try:
+        return _gen(spec, word, ws, ns)
+    except Exception:
+        return None
+
 # ---- history, fc -----------------------------------------------------------------------
 
 def _history_file():
@@ -957,7 +1245,7 @@ def sh_exec(*args):
         if f not in "cl":
             raise ValueError(f"exec: -{f}: invalid option\nexec: usage: exec [-cl] [-a name] program [arg …]")
     if not rest:
-        raise NotImplementedError("exec: which program? exec with only redirections (exec >log, exec 3<file) isn't in tessh: redirect a block (with open …) or a function's call instead")
+        return None
     prog = rest[0]
     argv0 = vals.get("a", prog)
     if "l" in flags:

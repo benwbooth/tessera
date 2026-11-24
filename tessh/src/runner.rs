@@ -172,6 +172,10 @@ pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     if !ns.contains("argv")? {
         ns.set_item("argv", PyList::empty(py))?;
     }
+    // (builtins.type, builtins.exec …: Python's, whatever the arguments.)
+    if !ns.contains("builtins")? {
+        ns.set_item("builtins", py.import("builtins")?)?;
+    }
     if !ns.contains("__tessh_state__")? {
         ns.set_item("__tessh_state__", Py::new(py, StateBox { st: Mutex::new(State::default()) })?)?;
     }
@@ -254,12 +258,16 @@ pub fn run_source(py: Python<'_>, text: &str, ns: &Bound<'_, PyDict>, filename: 
         // coroutine then, run on the session's event loop.)
         let code = compile.call1((module, filename, "exec", TOP_LEVEL_AWAIT))?;
         let flags: i64 = code.getattr("co_flags")?.extract()?;
+        // (A line that runs no command succeeds, as at the prompt: a script
+        // ending `false` then `print done` exits 0, as bash's would.)
+        crate::runtime::begin_line();
         if flags & CO_COROUTINE != 0 {
             let coro = builtins.getattr("eval")?.call1((code, ns))?;
             py.import("__tessh__")?.getattr("run_top")?.call1((coro,))?;
         } else {
             exec.call1((code, ns))?;
         }
+        crate::runtime::end_line();
     }
     Ok(())
 }

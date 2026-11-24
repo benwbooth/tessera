@@ -265,9 +265,9 @@ Greetings, Earthling.
 Greetings, Earthling.
 ```
 
-**Gap:** no read-only variables (`declare -r`, `readonly`): a name can
-always be assigned again. `typing.Final` marks one for a type checker, but
-nothing stops the assignment when it runs.
+tessh's `readonly NAME=value` makes a read-only name: a later assignment
+to it in the module is an error. (`declare -r` says to use `readonly`;
+`typing.Final` marks a constant for a type checker.)
 
 `printf` to standard error makes a handy error function. In tessh the
 function formats with Python's `%`, and since a failed `cd` is an error
@@ -2155,9 +2155,9 @@ exit 0
 **declare** and **typeset** give a variable properties (integer, array,
 read-only, exported), and **readonly** is `declare -r`. tessh's values
 carry their types themselves (an `int` is an int, a list a list), `export`
-covers exporting, and there's no read-only (see the gap under Example
-15-2). Run in tessh, `declare`, `typeset`, `local` and `readonly` say so
-and fail: a name set in a `def` is already local.
+covers exporting, and `readonly` makes a read-only name. Run in tessh,
+`declare`, `typeset` and `local` say so and fail: a name set in a `def`
+is already local.
 
 **getopts** reads a script's options one at a time: letters after a `-`,
 several in one word (`-abc`), a letter followed by `:` in its list taking an
@@ -2468,12 +2468,12 @@ message2 (from data-file) is "Enough for now. Goodbye."
 This is the message-print function in the data-file. 
 ```
 
-**Gap:** no `$LINENO`: `(inspect.currentframe).f_lineno` gives it.
+tessh has `$LINENO` too, the line it's on; `(inspect.currentframe).f_lineno`
+is Python's.
 
 bash passes extra arguments of `source file arg…` to the file as its `$1`,
-`$2`….
-
-**Gap:** `source` takes only the file; it can't pass arguments to it.
+`$2`…. tessh's `source` does the same: `$argv` is `[file arg…]` while the
+file runs.
 
 ### Example 15-23. A (useless) script that sources itself (`self-source.sh`)
 
@@ -2604,9 +2604,9 @@ exit 99
 Exiting "ex.tsh" at line 5.
 ```
 
-**Gap:** `exec` with only redirections isn't in tessh: there's no
-`exec 3<file` to open a descriptor for the rest of the script, and no
-`exec >log`.
+`exec` with only redirections keeps them, as bash's does: `exec 3<file`
+opens a descriptor for the rest of the script, and `exec >log 2>&1` sends
+its output to `log`.
 
 ### Example 15-25. A script that exec's itself (`self-exec.sh`)
 

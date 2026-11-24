@@ -1102,7 +1102,17 @@ fn ensure<'py>(py: Python<'py>, v: Bound<'py, PyAny>, cmd: &str) -> PyResult<Bou
 
 /// After a program or pipe on a line of its own: in strict mode, a failure
 /// raises CommandFailed.
+/// Whether `trap … ERR` is set (shell.rs): run for a failing command on a
+/// line of its own, before strict mode stops the script.
+pub static ERR_TRAP: AtomicBool = AtomicBool::new(false);
+
 fn strict_check(py: Python<'_>, v: Py<PyAny>, cmd: &str) -> PyResult<Py<PyAny>> {
+    if ERR_TRAP.load(Ordering::SeqCst) && STATUS.load(Ordering::SeqCst) != 0 {
+        let code = STATUS.load(Ordering::SeqCst);
+        py.import("__tessh_shell__")?.getattr("run_err_trap")?.call0()?;
+        // ($? in it, and after, is the command's.)
+        set_status(code);
+    }
     if STRICT.load(Ordering::SeqCst) {
         let code = STATUS.load(Ordering::SeqCst);
         if code != 0 {
@@ -1322,6 +1332,13 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
             // (type ls, hash -r, exec zsh, eval "…": the compiler made them
             // commands, for their words; the shell's, not Python's.)
             let f = shell_dual(py, &head_s, &f)?.unwrap_or(f);
+            // (exec with only redirections: they stay, for tessh and every
+            // program after, as bash's `exec >log`, `exec 3<file`, `exec 2>&1`.)
+            if words.is_empty() && !red.is_empty() && mode != "stage" && f.cast::<Builtin>().is_ok_and(|b| b.get().name == "exec") {
+                exec_redirs(py, &red)?;
+                set_status(0);
+                return output(py, "", 0, mode != "capture");
+            }
             let kw = PyDict::new(py);
             if f.hasattr("_tessh_wants_ns")? {
                 kw.set_item("_ns", &ns)?;
@@ -1691,6 +1708,41 @@ fn child_redirs(command: &mut Command, redirs: &[(String, Option<String>)]) -> P
         });
     }
     Ok(keep)
+}
+
+/// `exec` with redirections: tessh's own descriptors changed, for good.
+fn exec_redirs(py: Python<'_>, redirs: &[(String, Option<String>)]) -> PyResult<()> {
+    use std::os::fd::{AsRawFd, OwnedFd};
+    flush_python(py);
+    for (op, target) in redirs {
+        let Some((fd, k)) = parse_redir(op) else { return Err(PyValueError::new_err(format!("exec: unknown redirection {op}"))) };
+        let put = |src: i32, dst: i32| -> PyResult<()> {
+            if src != dst && unsafe { libc::dup2(src, dst) } < 0 {
+                return Err(PyOSError::new_err(format!("exec: {op}: {}", std::io::Error::last_os_error())));
+            }
+            Ok(())
+        };
+        match k {
+            RKind::Out | RKind::Append | RKind::In | RKind::ReadWrite => {
+                let f: OwnedFd = open_redir(match k { RKind::Out => ">", RKind::Append => ">>", RKind::In => "<", _ => "<>" }, target)?.into();
+                put(f.as_raw_fd(), fd)?;
+            }
+            RKind::Both | RKind::BothAppend => {
+                let f: OwnedFd = open_redir(if k == RKind::Both { ">" } else { ">>" }, target)?.into();
+                put(f.as_raw_fd(), 1)?;
+                put(f.as_raw_fd(), 2)?;
+            }
+            RKind::Here => {
+                let r: OwnedFd = data_pipe(here_text(op, target).into_bytes())?.into();
+                put(r.as_raw_fd(), fd)?;
+            }
+            RKind::Dup(m) => put(m, fd)?,
+            RKind::Close => unsafe {
+                libc::close(fd);
+            },
+        }
+    }
+    Ok(())
 }
 
 fn open_redir(op: &str, target: &Option<String>) -> PyResult<File> {
@@ -2497,7 +2549,7 @@ pub const COMMAND_BUILTINS: &[&str] = &[
     // (Job control and the login shell's: jobs.rs. The rest: shell.rs.)
     "wait", "disown", "kill", "suspend", "logout",
     "trap", "ulimit", "umask", "read", "history", "fc", "shift", "getopts", "times", "caller", "builtin", "enable",
-    "readonly", "declare", "typeset", "local", "alias", "unalias", "shopt", "bind", "complete", "compgen",
+    "readonly", "declare", "typeset", "local", "alias", "unalias", "shopt", "bind", "complete", "compgen", "select",
 ];
 
 pub fn is_command_builtin(n: &str) -> bool {
@@ -2523,7 +2575,7 @@ impl Builtin {
             "export" => "export NAME=value …\n\nSet environment variables for this shell and every program it runs. export NAME alone exports the tessh variable $NAME's value.",
             "unset" => "unset NAME …\n\nRemove environment variables.",
             "exit" => "exit [status]\n\nEnd tessh (a script, or the REPL) with status: without one, the last command's ($?). At the prompt, with jobs still running or stopped, it says so and stays; exit again ends them (they get SIGHUP) and leaves.",
-            "source" => "source file\n\nRun a tessh file here: its names and folder changes stay in this shell.",
+            "source" => "source file [arg …]\n\nRun a tessh file here: its names and folder changes stay in this shell. With args, $argv is [file arg …] while it runs.",
             "which" => "which name …\n\nWhere each program is on PATH (name: path, or name: not found); its value is the first path found.",
             "glob" => "glob pattern …\n\nThe names matching the patterns (*, ?, […]), sorted, as a list.",
             "jobs" => "jobs [-lprs] [%job …]\n\nThe background jobs (commands run with a trailing &, programs stopped with Ctrl+Z): [n] running, stopped, done or exit N, then the command. + marks the current job (%+, what fg and bg take without one) and - the one before (%-). -l adds the process IDs, -p prints only them, -r lists only running jobs, -s only stopped ones.",
@@ -2746,6 +2798,18 @@ impl Builtin {
             "source" => {
                 let path = words.first().ok_or_else(|| PyTypeError::new_err("source: which file?"))?;
                 let ns = _ns.ok_or_else(|| PyTypeError::new_err("source: no namespace"))?;
+                // (source file args…: $argv is [file args…] while it runs, as bash's $@.)
+                if words.len() > 1 {
+                    let old = ns.get_item("argv")?;
+                    ns.set_item("argv", PyList::new(py, &words)?)?;
+                    let r = crate::runner::run_file(py, &expanduser(path), &ns).map_err(|e| e.into_pyerr(py));
+                    match old {
+                        Some(o) => ns.set_item("argv", o)?,
+                        None => ns.del_item("argv")?,
+                    }
+                    r?;
+                    return Ok(none);
+                }
                 crate::runner::run_file(py, &expanduser(path), &ns).map_err(|e| e.into_pyerr(py))?;
                 Ok(none)
             }

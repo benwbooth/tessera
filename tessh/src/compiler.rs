@@ -462,6 +462,10 @@ impl<'py, 's> Compiler<'py, 's> {
         if !is_ident(&name) {
             return err(format!("'{name}' can't be a name (names are letters, digits and _)"), Some(s));
         }
+        // (A name `readonly` made can't be set again in the module.)
+        if self.scopes.is_empty() && marks.is_empty() && self.ns_get("__tessh_readonly__").is_some_and(|ro| ro.contains(&name).unwrap_or(false)) {
+            return err(format!("{name} is read-only (readonly made it so)"), Some(s));
+        }
         let key = (name.clone(), marks.clone());
         let sc = self.scope();
         if let Some(p) = sc.names.get(&key) {
@@ -2087,6 +2091,12 @@ impl<'py, 's> Compiler<'py, 's> {
         if self.is_known(s) || !s.marks().is_empty() || self.ns_get(name).is_some() {
             let e = self.name_load(s)?;
             return Ok(self.at(e, v));
+        }
+        // ($LINENO: the line it's on, as bash's.)
+        if name == "LINENO" {
+            if let Some(p) = v.pos.as_ref().or(s.pos.as_ref()) {
+                return Ok(self.at(self.c(p.line as i64)?, v));
+            }
         }
         let e = self.rcall("lookup", vec![self.globals()?, self.c(name)?])?;
         Ok(self.at(e, v))

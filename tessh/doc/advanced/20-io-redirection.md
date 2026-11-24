@@ -214,8 +214,9 @@ has no form with only redirections. What it has instead:
   back;
 - for the descriptors themselves, `os.dup2`, as above.
 
-**Gap:** `exec` with only redirections (`exec <file`, `exec >log`,
-`exec 3<file`), for redirecting the rest of a script.
+`exec` with only redirections (`exec <file`, `exec >log`, `exec 3<file`)
+redirects the rest of the script, as in bash; the ports below show
+`os.dup2`, which does it by hand.
 
 ### Example 20-1. Redirecting stdin using exec (`redir1.sh`)
 

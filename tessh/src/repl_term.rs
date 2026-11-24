@@ -309,7 +309,14 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
         let out = editor.read(&mut hooks);
         let mut run: Option<(String, bool, bool)> = None;
         match out {
-            Outcome::Eof => break,
+            // (Ctrl+D with jobs left: a word first, as exit gives; again, it ends.)
+            Outcome::Eof => {
+                if Python::attach(|py| crate::jobs::exit_check(py).unwrap_or(true)) {
+                    break;
+                }
+                fresh = true;
+                continue;
+            }
             Outcome::Interrupt => {
                 fresh = true;
                 continue;
@@ -430,6 +437,28 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
             fresh = true;
             continue;
         }
+        // (!!, !$, !n, !prefix: bash's history expansion, said as it runs.)
+        let text = if from_editor && text.contains('!') {
+            match crate::shell::expand_history(&text, &hist) {
+                Ok(Some(t)) => {
+                    println!("{t}");
+                    t
+                }
+                Ok(None) => text,
+                Err(e) => {
+                    // (The line goes, as bash drops it: the next starts empty.)
+                    eprintln!("tessh: {e}");
+                    if from_editor {
+                        editor.ed.t.reset();
+                        editor.ed.hist_index = None;
+                    }
+                    fresh = true;
+                    continue;
+                }
+            }
+        } else {
+            text
+        };
         if from_editor {
             editor.ed.t.reset();
             editor.ed.hist_index = None;

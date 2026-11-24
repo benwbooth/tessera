@@ -2965,10 +2965,8 @@ exit 0
 ```
 
 `$argv[0]` is the script's path, so it needs no `basename` (which would
-only work from the script's own folder). tessh has no `$LINENO`; Python's
-`inspect` knows the line it's on.
-
-**Gap:** no `$LINENO`; `(inspect.currentframe).f_lineno` is the stand-in.
+only work from the script's own folder). tessh has `$LINENO` too; this
+port asks Python's `inspect`, which knows the line it's on.
 
 ```tessh
 #!/usr/bin/env tessh

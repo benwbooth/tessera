@@ -61,12 +61,10 @@ are descriptors 1 and 2 too. A redirection on a Python call (`f >file`)
 points them, and the descriptors of the programs the call runs, at the
 file for the length of the call.
 
-**Gap:** bash's `exec 2>/dev/null` (or `exec 3>file`), which redirects a
-descriptor for the rest of the script, has no tessh form: tessh's `exec`
-only replaces the shell with a program, and a redirection lasts one
-command or call. Python's `os.dup2` can do it by hand, and a
-function holding the rest of the script can be called with the
-redirection.
+bash's `exec 2>/dev/null` (or `exec 3>file`), which redirects a
+descriptor for the rest of the script, works the same in tessh. Any other
+redirection lasts one command or call; Python's `os.dup2` does it by
+hand.
 
 The appendix ends with an exercise: a script that opens two FIFOs and
 descriptors 3 to 8, nests three subshells each with its own redirections,

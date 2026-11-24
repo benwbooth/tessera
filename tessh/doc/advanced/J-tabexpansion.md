@@ -45,10 +45,11 @@ complete -F _UseGetOpt-2 -o filenames ./UseGetOpt-2.sh
 #        ^^ ^^^^^^^^^^^^  Invokes the function _UseGetOpt-2.
 ```
 
-**Gap:** tessh has no programmable completion: no `complete` or
-`compgen` (each says so, and fails), and no hook for a script's own completer, so Tab after a
-program's name offers files. What the function works out, the matches for
-the word being typed, is a one-line filter in tessh:
+tessh has `complete` and `compgen`: `complete -W "words" cmd` (or `-F
+func`, `-f`, `-d`, `-c`) sets what Tab offers after a command. A `-F`
+function is given the word being typed and the line's words so far, and
+returns the matches as a list, rather than setting `COMPREPLY`. What it
+works out is a one-line filter in tessh:
 
 ```tessh
 OPTIONS = [-a -d -f -l -t -h --aoption --debug --file --log --test --help --]

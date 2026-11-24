@@ -12,7 +12,7 @@ script becomes; and Python's own tools (`pdb`, `sys.settrace`, `inspect`,
 
 What tessh does not have is most of bash's switches: `set -u`, `set -x`
 and `set -v` don't exist (a `set -x` line is an error that says so), and
-`trap` has no `ERR`, `DEBUG` or `RETURN`. `set -e` is tessh's strict mode (`strict`, chapter 33). This chapter shows what to use instead.
+`trap` has `ERR` but no `DEBUG` or `RETURN`. `set -e` is tessh's strict mode (`strict`, chapter 33). This chapter shows what to use instead.
 
 ### Example 32-1. A buggy script (`ex74.sh`)
 
@@ -450,8 +450,8 @@ Traceback (most recent call last):
 AssertionError: a should be less than b
 ```
 
-**`$LINENO` and `caller`.** **Gap:** tessh has neither by name (its
-`caller` builtin says what to use instead).
+**`$LINENO` and `caller`.** tessh has `$LINENO`; its `caller` builtin
+says what to use instead.
 `(inspect.currentframe).f_lineno` is the current line,
 `(inspect.stack)[1]` the caller's file, line and function, and
 `traceback.print_stack` prints the whole chain of calls.
@@ -485,9 +485,9 @@ a function's name calls the function. `trap - SIG` puts the default back,
 lists the signals. The examples here show the Python way, which works too:
 `atexit.register` for `EXIT`, `try`/`finally` for cleaning up however a
 block ends, `KeyboardInterrupt` for Control-C, and `signal.signal` for the
-rest. **Gap:** there's no `ERR`, `DEBUG` or `RETURN` trap: `try`/`except
-CommandFailed` with strict on stands in for `ERR`, and `sys.settrace` for
-`DEBUG`.
+rest. `trap … ERR` runs when a command on a line of its own fails, as
+bash's does. **Gap:** there's no `DEBUG` or `RETURN` trap: `sys.settrace`
+stands in for both.
 
 ### Example 32-5. Trapping at exit (`ex76.sh`)
 

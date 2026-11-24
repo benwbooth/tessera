@@ -31,9 +31,13 @@ them as bash would:
   (bash's `$!`), `.pids` and `.status`. A builtin used as a value gives
   what it prints, and in a pipe its output goes down the pipe
   (chapter 15).
-- `alias`, `declare`, `local`, `readonly`, `shopt`, `bind`, `complete`,
-  `caller`, `enable`: not in tessh, but each now says what to do instead,
-  rather than "command not found".
+- `exec` with only redirections (`exec >log 2>&1`, `exec 3<file`),
+  `source file args…`, `select` (`for x in (select …)`), `readonly`,
+  `trap … ERR`, `complete` and `compgen`, `$LINENO`, `$SHLVL`, and `!!`,
+  `!$`, `!n`, `!prefix` at the prompt.
+- `alias`, `declare`, `local`, `shopt`, `bind`, `caller`, `enable`: not
+  in tessh, but each now says what to do instead, rather than "command not
+  found".
 - `$PWD` is right when tessh starts.
 - A heredoc's word is the whole word (`<<End-Of-Session`).
 - A redirection on a function call (`f >file`, `f <file`, `f 2>file`) reaches
@@ -49,15 +53,11 @@ them as bash would:
   `done`), `set -x`, a method not called given to a program.
 
 ## Builtins
-<!-- help: abs-gaps-builtins read eval exec trap wait type readonly -->
+<!-- help: abs-gaps-builtins read eval exec trap wait type -->
 
 - **`eval $code`**: given a bare value, `eval` is Python's; tessh text
   held in a variable runs with `eval "$code"` (chapters 15, 36, A-30).
-- **`exec` with only redirections**: no `exec >file` / `exec 3<file` for
-  the rest of a script (reassign `$sys.stdout`, or `os.dup2`) (chapters
-  15, 20, F).
-- **`trap` on `ERR`, `DEBUG`, `RETURN`**: none. `try`/`except
-  CommandFailed` with strict on, and `sys.settrace` (chapter 32).
+- **`trap` on `DEBUG`, `RETURN`**: none; `sys.settrace` (chapter 32).
 - **`set -u`, `-x`, `-v`, `-o pipefail`, `shopt`**: none (a `set -x`
   line is an error; `shopt` says so). Python errors stop a script and unset names are
   always errors; a failing *program* stops one only in strict mode
@@ -65,10 +65,7 @@ them as bash would:
   pipeline's status is its last stage's (no pipefail, no `$PIPESTATUS`).
   `sys.settrace` traces (chapters 32, 33).
 - **`$!`** by that name: `$j.pid`, after `j = cmd &` (chapters 9, 15).
-- **`readonly`** / `declare -r`: no read-only names (chapters 9, 15).
-- **`source file args`**: the arguments are dropped.
-- **`select`** menus, **`coproc`**, **`mapfile`**: a few lines of Python
-  each (chapters 11, 37).
+- **`coproc`**, **`mapfile`**: a few lines of Python each (chapters 11, 37).
 - **`time`** keyword: `time` runs `/usr/bin/time`, so a pipeline, a Python
   call or a block can't be timed with it (chapter 16).
 - **`alias`**: none; `@command def` (chapter 25).
@@ -80,12 +77,14 @@ them as bash would:
 None of bash's internal variables are tessh variables; each has a Python
 form, listed in chapter 9: `$UID`/`$EUID` (`os.getuid`), `$$`/`$PPID`
 (`os.getpid`, `os.getppid`), `$RANDOM` (`random.randrange 32768`),
-`$SECONDS` (`time.monotonic`), `$LINENO`/`$FUNCNAME`/`caller` (`inspect`),
+`$SECONDS` (`time.monotonic`), `$FUNCNAME`/`caller` (`inspect`),
 `$HOSTNAME`/`$OSTYPE` (`socket`, `sys.platform`), `$BASH_VERSION`, `$_`,
-`$-`, `$DIRSTACK` (`dirs` only prints), `$BASH_SUBSHELL`, `$SHLVL`,
-`$GLOBIGNORE`, `$PS1`–`$PS4`, `$PROMPT_COMMAND`, `$TMOUT` (`read -t`
-times one read). `$REPLY` is set by `read`, and `$IFS` is where `read`
-splits; otherwise tessh never splits a value into words, by design.
+`$-`, `$DIRSTACK` (`dirs` only prints), `$BASH_SUBSHELL`,
+`$GLOBIGNORE`, `$PS1`, `$PS2`, `$PS4`, `$PROMPT_COMMAND`, `$TMOUT`
+(`read -t` times one read). `$LINENO` is tessh's too, `$SHLVL` counts
+tessh, `$PS3` is `select`'s prompt, `$REPLY` is set by `read`, and `$IFS`
+is where `read` splits; otherwise tessh never splits a value into words,
+by design.
 
 ## Words and expansion
 <!-- help: abs-gaps-expansion brace-expansion posix-classes -->
@@ -136,10 +135,11 @@ splits; otherwise tessh never splits a value into words, by design.
 <!-- help: abs-gaps-elsewhere dev-tcp completion history prompt -->
 
 - **`/dev/tcp/host/port`**: not a redirection; Python's `socket` (chapter 29).
-- **Programmable completion** (`complete`, `compgen`): the REPL completes
-  names, programs and paths, not a script's own options (Appendix J).
-- **History**: no `!` expansion, no `fc` but `fc -l`, and no history
-  variables (Appendix L).
+- **Completion**: `complete -F` functions return a list; bash's
+  `COMPREPLY`/`COMP_WORDS` and `-o` options aren't there (Appendix J).
+- **History**: `!!`, `!$`, `!^`, `!*`, `!n`, `!-n` and `!prefix` at the
+  prompt, but no `!?text?`, `:s` modifiers or `^old^new`, no `fc` but
+  `fc -l`, and no history variables (Appendix L).
 - **The prompt** can't be set (`PS1`), and there's no logout file
   (Appendices H, M).
 - **Restricted mode**: none, and with Python underneath it couldn't mean

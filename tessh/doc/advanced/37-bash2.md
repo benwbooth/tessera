@@ -223,7 +223,8 @@ exit 0
 ```
 
 It reads a menu choice from the terminal, so it isn't run here. **Gap:**
-tessh has no `select`; the menu is a short loop, and the choice is canned.
+tessh's `select` works as a loop (`for item in (select …)`); here the menu
+is a short loop and the choice is canned, so it runs without a terminal.
 The lookups are the same indirect references as above, with names made
 with `"${catalog_number}_value"`. The second exercise asks for arrays
 instead: in tessh that would be a dict of dicts,

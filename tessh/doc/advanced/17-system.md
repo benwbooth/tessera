@@ -524,7 +524,7 @@ File access rights: -rw-rw-r--
 
 **logger** adds a line to the system log; **logrotate** keeps the logs
 from growing for ever. A script can log its progress with `logger`; bash's
-`$LINENO` is Python's frame line in tessh. (Not run here: it writes to the
+`$LINENO` is tessh's `$LINENO` too. (Not run here: it writes to the
 real system log.)
 
 ```bash no-run

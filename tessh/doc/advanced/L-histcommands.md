@@ -17,8 +17,11 @@ End takes it). `history [N]` lists the entries (the last N), and
 an entry and add one; `fc -l [-nr] [first [last]]` lists them as bash's
 does. Like any builtin, `history` used as a value gives what it prints,
 and in a pipe its output goes down the pipe: `history | grep ssh`.
-**Gap:** there's no `!` expansion, no `fc` but `fc -l` (↑ and Ctrl+R edit
-a past command instead), and no history variables.
+At the prompt, `!!`, `!$`, `!^`, `!*`, `!n`, `!-n` and `!prefix` bring
+back a past command or its words, as bash's do, and the line is shown as
+it runs. **Gap:** no `!?text?`, `:s` modifiers or `^old^new`, no `fc` but
+`fc -l` (↑ and Ctrl+R edit a past command instead), and no history
+variables.
 
 The ABS Guide notes that history is no use in a script anyway: it's
 turned off there.

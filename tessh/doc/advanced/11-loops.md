@@ -2436,8 +2436,10 @@ digit_check $i
 `select` prints a numbered menu of its list, reads a choice with the `$PS3`
 prompt, and runs its body with the variable set to the item chosen.
 
-**Gap:** tessh has no `select`. A few lines do it: print the menu, read
-the number with `input`, pick the item.
+tessh's `select` is a loop over the choices: `for color in (select red
+green blue)` prints the menu, asks `$PS3`, and gives the item picked each
+time, until the input ends. The port below does it by hand, with `input`,
+so its answers can be canned.
 
 ### Example 11-30. Creating menus using select (`ex31.sh`)
 

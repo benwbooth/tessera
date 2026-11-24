@@ -23,7 +23,7 @@ other exported variables are). The rest:
 | `$BASH_ENV` | none; `~/.config/tessh/rc.tsh` is for the REPL |
 | `$BASHPID`, `$$` | `os.getpid` |
 | `$PPID` | `os.getppid` |
-| `$BASH_SUBSHELL`, `$SHLVL` | none (tessh has no subshells; `$env.SHLVL` is whatever bash set) |
+| `$BASH_SUBSHELL`, `$SHLVL` | `$env.SHLVL`, one more than the shell that started tessh; no `$BASH_SUBSHELL` (tessh has no subshells) |
 | `$CDPATH` | `$CDPATH`, which `cd` searches, as in bash |
 | `$DIRSTACK` | `dirs` |
 | `$OLDPWD` | `$OLDPWD` in the environment, which `cd` sets; `cd -` goes there |
@@ -41,7 +41,8 @@ other exported variables are). The rest:
 | `$REPLY` | `$REPLY`, set by `read` with no name; `input` returns the line |
 | `$SECONDS` | `time.monotonic`, less the time it was at the start |
 | `$TMOUT` | none: `read -t secs`, or `select` or `signal.alarm` (examples 9-2 and 9-4) |
-| `$PS1`…`$PS4`, `$PROMPT_COMMAND`, `$IGNOREEOF`, `$SHELLOPTS`, `$-` | none (no `select` menus, no `-x` tracing) |
+| `$PS3` | `select`'s prompt, as in bash |
+| `$PS1`, `$PS2`, `$PS4`, `$PROMPT_COMMAND`, `$IGNOREEOF`, `$SHELLOPTS`, `$-` | none (no `-x` tracing; `@before_prompt` is `$PROMPT_COMMAND`) |
 | `$0`, `$1`…, `$#` | `$argv[0]`, `$argv[1]`…, `(len $argv) - 1` |
 | `$*`, `$@` | `" ".join $argv[1:]`, `$argv[1:]` |
 | `$!` | `$j.pid`, after `j = cmd &`; `subprocess.Popen` has `.pid` too |
@@ -1485,13 +1486,11 @@ there's no need to declare one. What each option was for:
 
 - `-i`: make the value an `int` (`int "23"`). Arithmetic on numbers needs
   no `let` or `$((…))`; `int stringval` is an error rather than 0.
-- `-r`: Python has no read-only variables. A frozen dataclass's fields
-  can't be changed, which does the job for a group of constants.
+- `-r`: tessh's `readonly NAME=value`. A frozen dataclass's fields can't
+  be changed either, which does the job for a group of constants.
 - `-a`: a list, `[…]`.
 - `-x`: `export NAME=value`, or `$env.NAME = value`.
 - `-f`: `inspect.getsource` shows a function's tessh source.
-
-**Gap:** no `readonly`/`declare -r`: a name can always be assigned again.
 
 ```bash
 declare -i intvar

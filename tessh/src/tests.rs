@@ -1296,8 +1296,8 @@ fn traps() {
         "time.sleep 0.05\n",
         "trap - USR1\n",
         "bad = (trap 'x' NOSUCH 2>/dev/null)\n",
-        "err = (trap 'x' ERR 2>/dev/null)\n",
-        "print $got $bad.code ('CommandFailed' in $err.err)\n",
+        "err = (trap 'x' DEBUG 2>/dev/null)\n",
+        "print $got $bad.code ('settrace' in $err.err)\n",
     ));
     assert_eq!(out, "trap -- 'got += 1' SIGUSR1\n1 1 True\n");
 }
@@ -1466,11 +1466,8 @@ fn idioms_say_what_to_do() {
         ("unalias ll", "@command"),
         ("declare -i n=1", "Python's"),
         ("local x=1", "def's own"),
-        ("readonly X=1", "read-only"),
         ("shopt -s nullglob", "shell options"),
         ("bind -x foo", "help keys"),
-        ("complete -F f cmd", "completes"),
-        ("compgen -c", "glob"),
         ("caller", "traceback"),
         ("enable -n cd", "can't be turned off"),
         ("fc -e vi", "Ctrl+R"),
@@ -1483,4 +1480,88 @@ fn idioms_say_what_to_do() {
             assert!(err.contains(says), "{line}: {err}");
         });
     }
+}
+
+/// exec with only redirections keeps them; source passes arguments; a
+/// script ending in a Python line exits 0; SHLVL is one deeper.
+#[test]
+fn exec_redirections_source_args_status() {
+    let dir = std::env::temp_dir().join(format!("tessh-execredir-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("log");
+    let (out, _, code) = run_forked(&format!("exec >{} 2>&1\necho to-log\nsh -c 'echo err >&2'\nprint python too", log.display()));
+    assert_eq!((out.as_str(), code), ("", 0));
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "to-log\nerr\npython too\n");
+    let lib = dir.join("lib.tsh");
+    std::fs::write(&lib, "got = $argv[1:]\n").unwrap();
+    let (out, _, _) = run_forked(&format!("source {} a b\nprint $got $argv", lib.display()));
+    assert_eq!(out, "['a' 'b'] ['-c']\n");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(run_forked("false\nprint done").2, 0);
+    assert_eq!(run_forked("print first\nfalse").2, 1);
+    let (out, _, _) = run_forked("print ((int $env.SHLVL) > 0)");
+    assert_eq!(out, "True\n");
+}
+
+/// Forcing one meaning: builtin NAME is the shell's, builtins.NAME Python's.
+#[test]
+fn force_shell_or_python() {
+    let (ns, out) = run("builtin type cd\nt = builtins.type ls\nh = builtins.hash cd");
+    assert_eq!(out, "cd is a tessh builtin\n");
+    assert_eq!(repr(&ns, "t"), "<class 'str'>");
+    Python::attach(|py| assert!(ns.bind(py).get_item("h").unwrap().unwrap().extract::<i64>().is_ok()));
+}
+
+/// select, readonly, $LINENO, trap ERR, complete and compgen.
+#[test]
+fn select_readonly_lineno_err_complete() {
+    let (ns, out) = run(concat!(
+        "picked = []\n",
+        "for c in (select red green blue <<< \"2\\nx\\n3\\n\")\n",
+        "  picked.append $c\n",
+        "readonly LIMIT=10\n",
+        "r = (eval 'LIMIT = 11' 2>/dev/null)\n",
+        "line = $LINENO\n",
+        "def check w words = [one two]\n",
+        "complete -F check mycmd\n",
+        "complete -W 'start stop' svc\n",
+        "complete -p svc\n",
+        "compgen -W 'alpha beta alto' al\n",
+    ));
+    assert_eq!(repr(&ns, "picked"), "['green', None, 'blue']");
+    assert_eq!(get::<String>(&ns, "LIMIT"), "10");
+    assert_eq!(get::<i64>(&ns, "line"), 6);
+    assert_eq!(out, "complete -W 'start stop' svc\nalpha\nalto\n");
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        assert_eq!(ns.get_item("r").unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap(), 1);
+        let f = py.import("__tessh_shell__").unwrap().getattr("complete_for").unwrap();
+        let got: Vec<String> = f.call1(("svc ", "st", ns)).unwrap().extract().unwrap();
+        assert_eq!(got, ["start", "stop"]);
+        let got: Vec<String> = f.call1(("ls | mycmd x ", "", ns)).unwrap().extract().unwrap();
+        assert_eq!(got, ["one", "two"]);
+        assert!(f.call1(("other ", "", ns)).unwrap().is_none());
+    });
+    let (out, _, code) = run_forked("trap 'print failed $?' ERR\nfalse\nfalse || true\nsh -c 'exit 3'\nprint end");
+    assert_eq!((out.as_str(), code), ("failed 1\nfailed 3\nend\n", 0));
+}
+
+/// History expansion at the prompt: !!, !$, !^, !*, !n, !-n, !prefix; not
+/// in '…', nor tessh's own ! and !=.
+#[test]
+fn history_expansion() {
+    let f = std::env::temp_dir().join(format!("tessh-hexp-{}", std::process::id()));
+    std::fs::write(&f, "ls -l /tmp\necho one two three\ngit status\n").unwrap();
+    let x = |t: &str| crate::shell::expand_history(t, &f);
+    assert_eq!(x("sudo !!").unwrap().as_deref(), Some("sudo git status"));
+    assert_eq!(x("cat !$").unwrap().as_deref(), Some("cat status"));
+    assert_eq!(x("echo !^ !*").unwrap().as_deref(), Some("echo status status"));
+    assert_eq!(x("!2").unwrap().as_deref(), Some("echo one two three"));
+    assert_eq!(x("!-3").unwrap().as_deref(), Some("ls -l /tmp"));
+    assert_eq!(x("!ec | wc").unwrap().as_deref(), Some("echo one two three | wc"));
+    assert_eq!(x("echo '!!' ok").unwrap(), None);
+    assert_eq!(x("! true").unwrap(), None);
+    assert_eq!(x("$a != $b").unwrap(), None);
+    assert!(x("!nosuch").is_err());
+    let _ = std::fs::remove_file(&f);
 }

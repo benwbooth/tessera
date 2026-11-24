@@ -5656,9 +5656,8 @@ Usage: ex.sh [-dhlt] {OPTION...}
 
 The tessh version takes sample options when it's given none.
 
-**Gap:** bash's `complete -W "…" UseGetOpt-2.sh` makes Tab offer the
-script's options. tessh's REPL completes names, programs and paths, but
-has no way to tell it a command's options.
+bash's `complete -W "…" UseGetOpt-2.sh` makes Tab offer the script's
+options, and tessh's `complete -W` does the same.
 
 ```tessh
 #!/usr/bin/env tessh
