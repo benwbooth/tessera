@@ -481,12 +481,20 @@ impl Guide {
     }
     /// The word at (line, char): letters, digits and _ (or the run of
     /// other non-blank chars there), picked.
-    fn pick_word(&mut self, (i, c): (usize, usize)) {
-        let Some(line) = self.plain.get(i) else { return };
+    fn pick_word(&mut self, p: (usize, usize)) {
+        if let Some(r) = self.word_range(p) {
+            self.rect = false;
+            self.sel = Some(r);
+            self.dragging = false;
+        }
+    }
+    /// The word (or run of spaces, or of punctuation) at a place.
+    fn word_range(&self, (i, c): (usize, usize)) -> Option<((usize, usize), (usize, usize))> {
+        let line = self.plain.get(i)?;
         let chars: Vec<char> = line.chars().collect();
         let (lo, _) = self.picked_span(i, ((i, 0), (i, chars.len())));
         let c = c.min(chars.len().saturating_sub(1)).max(lo);
-        let Some(&at) = chars.get(c) else { return };
+        let &at = chars.get(c)?;
         let word = |x: char| x.is_alphanumeric() || x == '_';
         let same = |x: char| if word(at) { word(x) } else if at.is_whitespace() { x.is_whitespace() } else { !word(x) && !x.is_whitespace() };
         let mut a = c;
@@ -497,17 +505,27 @@ impl Guide {
         while b < chars.len() && same(chars[b]) {
             b += 1;
         }
-        self.rect = false;
-        self.sel = Some(((i, a), (i, b)));
-        self.dragging = false;
+        Some(((i, a), (i, b)))
     }
     /// Line i, picked (a code line without its gutter).
     fn pick_line(&mut self, i: usize) {
-        let Some(line) = self.plain.get(i) else { return };
-        let n = line.trim_end().chars().count();
-        self.rect = false;
-        self.sel = Some(((i, 0), (i, n)));
-        self.dragging = false;
+        if let Some(r) = self.line_range(i) {
+            self.rect = false;
+            self.sel = Some(r);
+            self.dragging = false;
+        }
+    }
+    fn line_range(&self, i: usize) -> Option<((usize, usize), (usize, usize))> {
+        let n = self.plain.get(i)?.trim_end().chars().count();
+        Some(((i, 0), (i, n)))
+    }
+    /// A drag begun with a double or triple click: the pick grows a whole
+    /// word or line at a time, from the one first picked to the one under
+    /// the pointer, either way.
+    fn extend_by(&mut self, unit: u8, first: ((usize, usize), (usize, usize)), p: (usize, usize)) {
+        let here = if unit == 2 { self.word_range(p) } else { self.line_range(p.0) };
+        let Some(here) = here else { return };
+        self.sel = Some(if here.0 < first.0 { (first.1, here.0) } else { (first.0, here.1.max(first.1)) });
     }
     /// The text picked, lines joined with newlines.
     fn sel_text(&self) -> String {
@@ -767,12 +785,14 @@ impl Guide {
             };
             let picked = sel.filter(|((l0, _), (l1, _))| (*l0..=*l1).contains(&i));
             let shown = if let Some(r @ (_, (l1, _))) = picked {
-                // (A line in the pick: the picked part lit; a gutter never is.)
-                let chars: Vec<char> = self.plain[i].chars().collect();
+                // (A line in the pick: the picked part lit, its colors kept
+                // (only the background changes); a gutter never is.)
                 let (from, to) = self.picked_span(i, r);
-                let (a, b, c): (String, String, String) = (chars[..from].iter().collect(), chars[from..to].iter().collect(), chars[to..].iter().collect());
-                let b = if b.is_empty() && i != l1 && !self.rect { " ".to_string() } else { b };
-                format!("{a}{}{b}{}{c}", t.sel, t.base)
+                let mut x = light(l, from, to, t.sel_fg, t.sel_bg);
+                if from == to && i != l1 && !self.rect {
+                    x.push_str(&format!("\x1b[{}m \x1b[49m", t.sel_bg));
+                }
+                x
             } else if !q.is_empty() && self.lower[i].contains(&q) {
                 let (p, lp) = (&self.plain[i], &self.lower[i]);
                 let mut at = 0;
@@ -997,6 +1017,10 @@ struct Theme {
     frame: &'static str,
     title: &'static str,
     sel: &'static str,
+    /// The pick's background alone, as SGR parameters (its text keeps its colors).
+    sel_bg: &'static str,
+    /// The pick's text color, for text in the window's own color.
+    sel_fg: &'static str,
     found: &'static str,
     bar: &'static str,
     bar_hot: &'static str,
@@ -1111,6 +1135,8 @@ fn build(s: &Scheme) -> Theme {
         frame: pair((s.frame, s.win.1)),
         title: pair(s.chrome),
         sel: pair(s.sel),
+        sel_bg: leak(param(s.sel.1, false)),
+        sel_fg: leak(param(s.sel.0, true)),
         found: pair(s.found),
         bar: pair(s.chrome),
         bar_hot: pair((s.hot, cb)),
@@ -1186,6 +1212,77 @@ fn theme() -> &'static Theme {
 /// window's colors (not the terminal's), a reverse swaps them, colors that
 /// vanish on it are swapped for ones that don't, and a monochrome scheme
 /// has every text color its one.
+/// A styled line with its characters from..to (counted without the
+/// escapes) on the background `bg`, their own colors kept (text in the
+/// window's own color takes `fg`, the pick's): said again after every escape
+/// inside, the window's after.
+fn light(s: &str, from: usize, to: usize, fg: &str, bg: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 32);
+    let mut n = 0;
+    let mut it = s.char_indices().peekable();
+    let mut lit = false;
+    // (Whether the text's color is the window's own: no color said, or reset.)
+    let mut plain_fg = true;
+    let on = |plain_fg: bool| if plain_fg { format!("\x1b[{fg};{bg}m") } else { format!("\x1b[{bg}m") };
+    while let Some((i, ch)) = it.next() {
+        if ch == '\x1b' {
+            // (A whole escape: ESC [ … letter.)
+            let mut end = i + 1;
+            if s[end..].starts_with('[') {
+                end += 1;
+                while let Some((j, c)) = it.peek().copied() {
+                    if j < end {
+                        it.next();
+                        continue;
+                    }
+                    it.next();
+                    end = j + c.len_utf8();
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            let esc = &s[i..end];
+            if let Some(params) = esc.strip_prefix("\x1b[").and_then(|r| r.strip_suffix('m')) {
+                let ps: Vec<&str> = params.split(';').collect();
+                let mut k = 0;
+                while k < ps.len() {
+                    match ps[k] {
+                        "" | "0" | "39" => plain_fg = true,
+                        "38" => {
+                            plain_fg = false;
+                            k += if ps.get(k + 1) == Some(&"2") { 4 } else { 2 };
+                        }
+                        "48" => k += if ps.get(k + 1) == Some(&"2") { 4 } else { 2 },
+                        x if matches!(x.parse::<u32>(), Ok(30..=37 | 90..=97)) => plain_fg = false,
+                        _ => {}
+                    }
+                    k += 1;
+                }
+            }
+            out.push_str(esc);
+            if lit {
+                out.push_str(&on(plain_fg));
+            }
+            continue;
+        }
+        if n == from && from < to {
+            out.push_str(&on(plain_fg));
+            lit = true;
+        }
+        if n == to && lit {
+            out.push_str(if plain_fg { "\x1b[39;49m" } else { "\x1b[49m" });
+            lit = false;
+        }
+        out.push(ch);
+        n += 1;
+    }
+    if lit {
+        out.push_str(if plain_fg { "\x1b[39;49m" } else { "\x1b[49m" });
+    }
+    out
+}
+
 fn recolor(s: &str, t: &Theme) -> String {
     let mut out = String::with_capacity(s.len() + 32);
     let mut rest = s;
@@ -1424,6 +1521,8 @@ pub fn show(md: &str, at: &str) {
 enum Drag {
     None,
     Text,
+    /// Words (2) or lines (3), from the first picked.
+    Units(u8, ((usize, usize), (usize, usize))),
     VThumb(usize),
     SThumb(usize),
     HThumb(usize),
@@ -1781,6 +1880,16 @@ pub(crate) fn run(mut g: Guide, at: &str) {
                             }
                             continue;
                         }
+                        Drag::Units(unit, first) => {
+                            if row < 2 {
+                                g.top = g.top.saturating_sub(1);
+                            } else if row >= rows.saturating_sub(2) {
+                                g.top += 1;
+                            }
+                            let p = g.pos_at(col, row, geo);
+                            g.extend_by(unit, first, p);
+                            continue;
+                        }
                         Drag::None => {}
                     }
                 }
@@ -1912,8 +2021,17 @@ pub(crate) fn run(mut g: Guide, at: &str) {
                         // (Twice: the word; three times: the line.)
                         g.rect = false;
                         match n {
-                            2 => g.pick_word(p),
-                            3 => g.pick_line(p.0),
+                            2 | 3 => {
+                                if n == 2 {
+                                    g.pick_word(p)
+                                } else {
+                                    g.pick_line(p.0)
+                                }
+                                if let Some(first) = g.sel {
+                                    drag = Drag::Units(n, first);
+                                    g.dragging = true;
+                                }
+                            }
                             _ => {
                                 g.sel = Some((p, p));
                                 g.dragging = true;
