@@ -23,6 +23,14 @@ mod runtime;
 #[cfg(feature = "standalone")]
 mod standalone;
 mod viewer;
+// Helix's grammars and the language a file is in, as Tessera finds them
+// (its own files, shared).
+#[allow(dead_code)]
+#[path = "../../src/grammars.rs"]
+mod grammars;
+#[allow(dead_code)]
+#[path = "../../src/detect.rs"]
+mod detect;
 
 #[cfg(test)]
 mod tests;
@@ -116,6 +124,8 @@ fn exit_code(py: Python<'_>, e: &PyErr) -> Option<i32> {
 }
 
 fn main() {
+    // (A grammar tried in a child before it's trusted: this program again.)
+    grammars::check_from_args();
     // (The standalone build: as python3, or Python pointed at uv's.)
     #[cfg(feature = "standalone")]
     {

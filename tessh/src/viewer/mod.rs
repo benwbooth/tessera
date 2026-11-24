@@ -207,6 +207,8 @@ pub fn view(p: &Path, hex: bool) -> i32 {
         return 1;
     }
     let kind = if hex { Kind::Binary } else { classify(p) };
+    // (Shown full screen: a Helix grammar it lacks may be fetched, once.)
+    highlight::FETCH.store(true, std::sync::atomic::Ordering::Relaxed);
     if kind == Kind::Dir {
         return list_dir(p);
     }

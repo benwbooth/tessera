@@ -1,19 +1,22 @@
 //! Code highlighted for the viewer: the grammars Tessera's editor has built
 //! in (src/syntax.rs: same crates, same capture kinds), in the colors tessh's
-//! own editor uses for tessh (repl::kind_style), a file's lines each styled
-//! on its own (so any line can be shown, picked or scrolled alone).
+//! own editor uses for tessh (repl::kind_style), and Helix's ~250 more as
+//! Tessera loads and fetches them (src/grammars.rs, shared); then bat's
+//! syntaxes as Grove has them. A file's lines each styled on its own (so
+//! any line can be shown, picked or scrolled alone).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
-/// The language a file's name says, as Tessera's viewer (qml/FilePreview.qml)
-/// reads it: tree-sitter's names; "" for plain text.
+/// The language a file's name says, as Tessera's viewer reads it
+/// (qml/FileView.qml's detectedLang): tree-sitter's and Helix's names; ""
+/// when the name doesn't say.
 pub fn lang_for(path: &std::path::Path) -> &'static str {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     match name.as_str() {
         "Makefile" | "makefile" | "GNUmakefile" => return "make",
-        "Dockerfile" => return "dockerfile",
+        "Dockerfile" | "Containerfile" => return "dockerfile",
         "CMakeLists.txt" => return "cmake",
         ".bashrc" | ".zshrc" | ".profile" | ".bash_profile" | ".zprofile" | ".envrc" => return "bash",
         "Cargo.lock" | "uv.lock" | "poetry.lock" => return "toml",
@@ -23,7 +26,7 @@ pub fn lang_for(path: &std::path::Path) -> &'static str {
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
         "rs" => "rust",
-        "py" | "pyi" | "pyw" => "python",
+        "py" | "pyi" | "pyw" | "xsh" => "python",
         "js" | "mjs" | "cjs" | "jsx" => "javascript",
         "ts" | "mts" | "cts" => "typescript",
         "tsx" => "tsx",
@@ -31,37 +34,94 @@ pub fn lang_for(path: &std::path::Path) -> &'static str {
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "ino" => "cpp",
         "go" => "go",
         "java" => "java",
+        "kt" | "kts" => "kotlin",
         "rb" | "rake" | "gemspec" => "ruby",
         "lua" => "lua",
-        "sh" | "bash" | "zsh" | "ksh" | "fish" => "bash",
+        "sh" | "bash" | "zsh" | "ksh" => "bash",
+        "fish" => "fish",
         "json" | "jsonc" | "json5" | "ipynb" | "jsonl" | "ndjson" | "geojson" => "json",
         "yaml" | "yml" => "yaml",
         "toml" => "toml",
-        "html" | "htm" | "xhtml" | "xml" | "svg" | "plist" | "xsl" | "rss" | "atom" | "ui" | "qrc" => "html",
-        "css" | "scss" | "less" => "css",
+        "html" | "htm" | "xhtml" => "html",
+        "css" => "css",
+        "scss" => "scss",
         "md" | "markdown" | "mdx" => "markdown",
         "sql" => "sql",
+        "nix" => "nix",
+        "hs" => "haskell",
+        "ml" | "mli" => "ocaml",
+        "scala" | "sc" => "scala",
+        "swift" => "swift",
+        "zig" => "zig",
+        "php" => "php",
+        "pl" | "pm" => "perl",
+        "r" => "r",
+        "jl" => "julia",
+        "ex" | "exs" => "elixir",
+        "erl" | "hrl" => "erlang",
+        "cs" => "c-sharp",
+        "fs" | "fsx" => "fsharp",
+        "dart" => "dart",
+        "qml" => "qmljs",
+        "ini" | "cfg" | "conf" => "ini",
+        "dockerfile" => "dockerfile",
+        "make" | "mk" => "make",
+        "cmake" => "cmake",
+        "tex" | "sty" | "cls" => "latex",
+        "vim" => "vim",
+        "nu" => "nu",
+        "ps1" | "psm1" => "powershell",
+        "diff" | "patch" => "diff",
+        "xml" | "xaml" | "xsd" | "xsl" | "xslt" | "svg" | "plist" | "csproj" | "vbproj" | "fsproj" | "vcxproj" | "props" | "targets" | "resx" | "nuspec"
+        | "wsdl" | "rss" | "atom" | "kml" | "gpx" | "ui" | "qrc" => "xml",
         "tsh" | "tessh" => "tessh",
         _ => "",
     }
 }
 
-/// A first line that says what the file is written in (#!/usr/bin/env
-/// python, …): its language, else "".
-pub fn lang_from_shebang(first: &str) -> &'static str {
+/// What a text's first line says, when its name doesn't (FileView's sniff):
+/// <!doctype html, <?xml or a tag, a #! line.
+pub fn lang_from_shebang(head: &str) -> &'static str {
+    let s = head.trim_start_matches('\u{feff}').trim_start();
+    let lower: String = s.chars().take(64).collect::<String>().to_lowercase();
+    if lower.starts_with("<!doctype html") || lower.starts_with("<html") {
+        return "html";
+    }
+    if lower.starts_with("<?xml") || lower.starts_with("<!--") {
+        return "xml";
+    }
+    let first = head.lines().next().unwrap_or("");
     let Some(rest) = first.strip_prefix("#!") else { return "" };
-    let prog = rest.split_whitespace().filter(|w| !w.ends_with("/env") && !w.starts_with('-')).next().unwrap_or("");
-    let prog = prog.rsplit('/').next().unwrap_or(prog);
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    let prog = match words.as_slice() {
+        [env, p, ..] if env.ends_with("/env") => p.trim_start_matches("-S"),
+        [p, ..] => p,
+        [] => "",
+    };
+    let prog = prog.rsplit('/').next().unwrap_or(prog).trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
     match prog {
-        p if p.starts_with("python") => "python",
-        "node" | "deno" | "bun" => "javascript",
-        p if p.starts_with("ruby") => "ruby",
-        p if p.starts_with("lua") => "lua",
+        "python" => "python",
         "bash" | "sh" | "zsh" | "dash" | "ksh" => "bash",
+        "fish" => "fish",
+        "node" => "javascript",
+        "deno" => "typescript",
+        "perl" => "perl",
+        "ruby" => "ruby",
+        "lua" => "lua",
+        "php" => "php",
         "tessh" => "tessh",
+        "nu" => "nu",
+        "pwsh" => "powershell",
+        "Rscript" => "r",
+        "julia" => "julia",
+        "elixir" => "elixir",
         _ => "",
     }
 }
+
+/// Whether the viewer may fetch a Helix grammar it lacks (view: yes, once
+/// per language, as Tessera does; cat: never waits on the network).
+pub static FETCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 struct Lang {
     language: Language,
@@ -96,16 +156,107 @@ fn make(name: &str) -> Option<Lang> {
         "css" => (tree_sitter_css::LANGUAGE.into(), tree_sitter_css::HIGHLIGHTS_QUERY.into()),
         "markdown" => (tree_sitter_md::LANGUAGE.into(), tree_sitter_md::HIGHLIGHT_QUERY_BLOCK.into()),
         "tessh" => (tree_sitter_tessh::LANGUAGE.into(), tree_sitter_tessh::HIGHLIGHTS_QUERY.into()),
-        _ => return None,
+        // Anything else: Helix's grammar for it, as Tessera loads it (tried in
+        // a child first, so one that crashes can't take tessh with it).
+        other => (crate::grammars::load(other)?, crate::grammars::highlights(other)),
     };
-    let query = Query::new(&language, &query).ok()?;
+    let query = salvaged_query(&language, &query).or_else(|| Query::new(&language, "").ok())?;
     Some(Lang { language, query })
 }
+
+const BUILTIN: &[&str] = &["bash", "python", "javascript", "typescript", "tsx", "rust", "go", "c", "cpp", "java", "ruby", "lua", "sql", "json", "yaml", "toml", "html", "css", "markdown", "tessh"];
 
 fn lang(name: &str) -> Option<&'static Lang> {
     static CACHE: OnceLock<Mutex<HashMap<String, Option<&'static Lang>>>> = OnceLock::new();
     let mut c = CACHE.get_or_init(Default::default).lock().unwrap();
-    *c.entry(name.to_string()).or_insert_with(|| make(name).map(|l| &*Box::leak(Box::new(l))))
+    if let Some(l) = c.get(name) {
+        return *l;
+    }
+    // (A Helix language that isn't here yet isn't remembered as missing: it
+    // may be fetched in a moment.)
+    let l = make(name).map(|l| &*Box::leak(Box::new(l)));
+    if l.is_some() || BUILTIN.contains(&name) {
+        c.insert(name.to_string(), l);
+    }
+    l
+}
+
+/// A highlights query less the rules this tree-sitter can't read (Helix's
+/// are written for its own version), each error's rule taken out and the
+/// query tried again: Tessera's syntax.rs salvaged_query.
+fn salvaged_query(language: &Language, src: &str) -> Option<Query> {
+    let mut src = src.to_string();
+    for _ in 0..40 {
+        match Query::new(language, &src) {
+            Ok(q) => return Some(q),
+            Err(e) => {
+                let (start, end) = top_level_form(&src, e.offset)?;
+                src.replace_range(start..end, "");
+            }
+        }
+    }
+    None
+}
+
+/// The byte range of the top-level form (a rule) that `at` is in (Tessera's).
+fn top_level_form(src: &str, at: usize) -> Option<(usize, usize)> {
+    let b = src.as_bytes();
+    let (mut depth, mut start, mut i, mut in_str) = (0i32, None::<usize>, 0usize, false);
+    let mut forms: Vec<(usize, usize)> = vec![];
+    while i < b.len() {
+        let c = b[i];
+        if in_str {
+            if c == b'\\' {
+                i += 1;
+            } else if c == b'"' {
+                in_str = false;
+            }
+        } else if c == b';' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if c == b'"' {
+            in_str = true;
+        } else if c == b'(' || c == b'[' {
+            if depth == 0 && start.is_none() {
+                start = Some(i);
+            }
+            depth += 1;
+        } else if c == b')' || c == b']' {
+            depth -= 1;
+            if depth == 0 {
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'(' && b[j] != b'[' && b[j] != b';' && b[j] != b'\n' {
+                    j += 1;
+                }
+                if let Some(s) = start.take() {
+                    forms.push((s, j));
+                }
+            }
+        }
+        i += 1;
+    }
+    forms.iter().copied().find(|&(s, e)| s <= at && at < e.max(s + 1)).or_else(|| forms.iter().copied().filter(|&(s, _)| s <= at).last()).or(forms.first().copied())
+}
+
+/// A Helix language made usable: fetched and unpacked from Helix's release
+/// the first time (when FETCH allows), and tried. Whether it's there.
+fn ensure_helix(name: &str) -> bool {
+    if BUILTIN.contains(&name) || !crate::grammars::is_known(name) {
+        return BUILTIN.contains(&name);
+    }
+    let here = crate::grammars::available().iter().any(|n| n == name);
+    if !here && !FETCH.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
+    if !here {
+        eprint!("\x1b[2mview: getting Helix's {name} grammar (once)…\x1b[0m\r");
+    }
+    let ok = crate::grammars::ensure(name).is_ok();
+    if !here {
+        eprint!("\x1b[2K");
+    }
+    ok
 }
 
 /// A capture's color kind, as Tessera's syntax.rs reads it: its first part,
@@ -381,19 +532,25 @@ pub fn guess_ext(text: &str) -> Option<&'static str> {
     None
 }
 
-/// A text file's lines highlighted, and what it's written in: Tessera's
-/// tree-sitter grammars for the languages its editor has built in, else
-/// bat's syntaxes (Grove's), for the name or, when it doesn't say, for what
-/// the content looks like; (plain lines, "") when nothing fits.
+/// A text file's lines highlighted, and what it's written in, as Tessera
+/// finds it: the name (FileView's table), the first line (a tag, a #!), then
+/// Linguist's rules and Magika's model (src/detect.rs); highlighted with
+/// Tessera's built-in grammars or Helix's. Else bat's syntaxes (Grove's), by
+/// the name or what the content looks like; (plain lines, "") when nothing
+/// fits.
 pub fn highlight_file(path: &std::path::Path, text: &str) -> (Vec<String>, String) {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let mut lang = lang_for(path);
+    let head: String = text.chars().take(16 * 1024).collect();
+    let mut lang = lang_for(path).to_string();
     if lang.is_empty() {
-        lang = lang_from_shebang(text.lines().next().unwrap_or(""));
+        lang = lang_from_shebang(&head).to_string();
     }
-    if !lang.is_empty() {
-        if let Some(l) = highlight_lines(lang, text) {
-            return (l, label(lang));
+    if lang.is_empty() {
+        lang = crate::detect::language_of_file(&path.to_string_lossy(), false, &head);
+    }
+    if !lang.is_empty() && ensure_helix(&lang) {
+        if let Some(l) = highlight_lines(&lang, text) {
+            return (l, label(&lang));
         }
     }
     if let Some((l, n)) = highlight_bat(&name, text) {
@@ -417,7 +574,10 @@ pub fn label(lang: &str) -> String {
         "javascript" => "JavaScript", "typescript" => "TypeScript", "tsx" => "TSX", "cpp" => "C++", "json" => "JSON", "yaml" => "YAML",
         "toml" => "TOML", "html" => "HTML", "css" => "CSS", "sql" => "SQL", "bash" => "Shell", "c" => "C", "go" => "Go", "rust" => "Rust",
         "python" => "Python", "java" => "Java", "ruby" => "Ruby", "lua" => "Lua", "markdown" => "Markdown", "tessh" => "tessh",
-        other => return other.to_string(),
+        other => {
+            let mut c = other.chars();
+            return c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
+        }
     }.to_string()
 }
 
@@ -452,5 +612,16 @@ mod tests {
         // (No name to go by: the content says JSON.)
         let (_, n) = highlight_file(std::path::Path::new("noext"), "{\"a\": [1, 2]}");
         assert_eq!(n, "JSON");
+    }
+
+    #[test]
+    fn helix_grammars_load_as_tesseras_do() {
+        // (Only where Helix's runtime or Tessera's unpacked copy has Haskell.)
+        if !crate::grammars::available().iter().any(|n| n == "haskell") {
+            return;
+        }
+        let (l, n) = highlight_file(std::path::Path::new("Main.hs"), "main :: IO ()\nmain = putStrLn \"hi\"\n");
+        assert_eq!(n, "Haskell");
+        assert!(l[1].contains("\x1b[32m\"hi\""), "{:?}", l[1]);
     }
 }
