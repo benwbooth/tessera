@@ -681,10 +681,9 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
 
     // ---- the toolbar row ----
     if !v.final_ {
-        // (An error or note wraps onto more rows, never cut short.)
-        let note: Option<(String, Sty)> = if !ed.problem.is_empty() {
-            Some((format!("⚠ {}", ed.problem), Sty { fg: Some(Col::Ansi(9)), bold: true, ..Default::default() }))
-        } else if !v.ai_busy.is_empty() {
+        // (A note wraps onto more rows, never cut short. A problem with the
+        // text goes under the editor instead: the prompt line stays put.)
+        let note: Option<(String, Sty)> = if !v.ai_busy.is_empty() {
             let what = if v.ai_busy == "fix" { "fixing the command…" } else { "writing the command…" };
             Some((format!("◜ {what}  esc cancels"), Sty::fg(Col::Ansi(4))))
         } else if !ed.ai_note.is_empty() {
@@ -700,7 +699,7 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
             let mut row: Line = vec![Span::new(if i == 0 { " " } else { "   " }, Sty::default())];
             if let Some((_, sty)) = &note {
                 let sp = Span::new(text, sty.clone());
-                row.push(if v.ai_busy.is_empty() || !ed.problem.is_empty() { sp.hit(Hit::Chip("note")) } else { sp });
+                row.push(if v.ai_busy.is_empty() { sp.hit(Hit::Chip("note")) } else { sp });
             }
             if i == 0 {
                 let lw = super::width(&row);
@@ -732,6 +731,13 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
     }
     let editor_top = rows.len();
     rows.extend(shown);
+    // ---- a problem with the text: under it, whole, wrapped ----
+    if !v.final_ && !ed.problem.is_empty() {
+        let sty = Sty { fg: Some(Col::Ansi(9)), bold: true, ..Default::default() };
+        for (i, t) in wrap_text(&format!("⚠ {}", ed.problem), cols.saturating_sub(4).max(10)).into_iter().enumerate() {
+            rows.push(vec![Span::new(if i == 0 { "  " } else { "    " }, Sty::default()), Span::new(t, sty.clone()).hit(Hit::Chip("note"))]);
+        }
+    }
     let cursor = if v.final_ { None } else { Some((editor_top + cur_r.saturating_sub(skip), text_x + cur_c)) };
 
     // ---- the popup: drawn over what's around the editor, never moving it ----
