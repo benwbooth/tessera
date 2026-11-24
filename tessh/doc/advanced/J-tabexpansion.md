@@ -52,7 +52,8 @@ matches), `-P prefix`, `-S suffix`, `-A action` (file, directory, command,
 builtin, keyword, variable, function, export, user, hostname, job,
 signal) and `-o default`, `bashdefault`, `dirnames`, `plusdirs` and
 `nosort`; `-o filenames` and `-o nospace` are accepted and do nothing.
-`compgen` takes the same. There's no `compopt`.
+`compgen` takes the same, and `compopt -o`/`+o` changes the options,
+for a command or, inside a `-F` function, for the completion it's making.
 
 A `-F` function comes in two forms. tessh's has two parameters: it's
 given the word being typed and the line's words so far, and returns the

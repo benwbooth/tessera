@@ -1333,6 +1333,7 @@ fn read_builtin() {
     let (ns, _) = run(concat!(
         "read a b <<< 'one two  three '\n",
         "read <<< '  whole line  '\n",
+        "read one <<< '  all of  it  '\n",
         "read -a parts <<< '1 2 3'\n",
         "read -r raw <<< 'back\\slash'\n",
         "read cooked <<< 'back\\slash'\n",
@@ -1347,6 +1348,7 @@ fn read_builtin() {
     assert_eq!(get::<String>(&ns, "a"), "one");
     assert_eq!(get::<String>(&ns, "b"), "two  three");
     assert_eq!(get::<String>(&ns, "REPLY"), "  whole line  ");
+    assert_eq!(get::<String>(&ns, "one"), "all of  it", "one name: the whole line");
     assert_eq!(repr(&ns, "parts"), "['1', '2', '3']");
     assert_eq!(get::<String>(&ns, "raw"), "back\\slash");
     assert_eq!(get::<String>(&ns, "cooked"), "backslash");
@@ -1471,7 +1473,6 @@ fn idioms_say_what_to_do() {
         ("bind -x foo", "help keys"),
         ("caller", "traceback"),
         ("enable -n cd", "can't be turned off"),
-        ("fc -e vi", "Ctrl+R"),
     ] {
         let (ns, _) = run(&format!("r = ({line} 2>&1)"));
         Python::attach(|py| {
@@ -1712,4 +1713,98 @@ fn noclobber() {
     assert_eq!(out, "1 False\n");
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "e\nf\n");
     let _ = std::fs::remove_file(&f);
+}
+
+/// time and coproc with an indented block.
+#[test]
+fn time_and_coproc_blocks() {
+    let (out, err, _) = run_forked(concat!(
+        "time\n",
+        "  echo in block\n",
+        "  x = 2\n",
+        "print $x\n",
+        "greeting = hello\n",
+        "coproc UP\n",
+        "  read line\n",
+        "  print $greeting (.upper $line)\n",
+        "import os\n",
+        "os.write $UP[1] b\"there\\n\"\n",
+        "os.close $UP[1]\n",
+        "read -u $UP[0] back\n",
+        "print $back\n",
+        "wait $UP_PID\n",
+    ));
+    assert_eq!(out, "in block\n2\nhello THERE\n", "{err}");
+    assert!(err.contains("\nreal\t"), "{err}");
+}
+
+/// set -f (noglob), set -n (noexec), set -o ignoreeof, $IGNOREEOF.
+#[test]
+fn noglob_noexec_ignoreeof() {
+    let dir = std::env::temp_dir().join(format!("tessh-noglob-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.txt"), "").unwrap();
+    let (out, _, _) = run_forked(&format!("cd {}\necho *.txt\nset -f\necho *.txt\nset +f\nset -n\necho not run", dir.display()));
+    assert_eq!(out, "a.txt\n*.txt\n");
+    let _ = std::fs::remove_dir_all(&dir);
+    let (ns, _) = run("IGNOREEOF = 2");
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        crate::shell::eof_reset();
+        assert!(crate::shell::ignore_eof(py, ns));
+        assert!(crate::shell::ignore_eof(py, ns));
+        assert!(!crate::shell::ignore_eof(py, ns));
+        crate::shell::eof_reset();
+        ns.del_item("IGNOREEOF").unwrap();
+        assert!(!crate::shell::ignore_eof(py, ns));
+    });
+}
+
+/// $HISTCONTROL, $HISTIGNORE, $HISTSIZE and $HISTFILESIZE.
+#[test]
+fn history_variables() {
+    let f = std::env::temp_dir().join(format!("tessh-histvars-{}", std::process::id()));
+    std::fs::write(&f, "ls\npwd\nls\n").unwrap();
+    let (ns, _) = run("HISTCONTROL = 'ignoreboth:erasedups'\nHISTIGNORE = 'cd *:&'\nHISTFILESIZE = 3\nHISTSIZE = 5");
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        let p = |t: &str| crate::shell::history_policy(py, ns, t, &f);
+        assert!(!p("ls").keep, "a dup of the last");
+        assert!(!p(" secret").keep, "a leading space");
+        assert!(!p("cd /tmp").keep, "HISTIGNORE");
+        let keep = p("pwd");
+        assert!(keep.keep && keep.erase);
+        assert_eq!(keep.size, Some(5));
+        std::fs::write(&f, "ls\npwd\nls\npwd\n").unwrap();
+        crate::shell::history_trim(&f, &keep);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "ls\nls\npwd\n");
+        std::fs::write(&f, "a\nb\nc\nd\ne\n").unwrap();
+        crate::shell::history_trim(&f, &p("e"));
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "c\nd\ne\n");
+    });
+    let _ = std::fs::remove_file(&f);
+}
+
+/// fc -s and fc -e (an editor run on the commands), read -i (no terminal:
+/// plain read), compopt.
+#[test]
+fn fc_and_compopt() {
+    let dir = std::env::temp_dir().join(format!("tessh-fc-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("tessh")).unwrap();
+    std::fs::write(dir.join("tessh/history"), "echo one\necho two\nfc -s two=three\n").unwrap();
+    let ed = dir.join("ed.sh");
+    std::fs::write(&ed, "#!/bin/sh\nsed -i 's/one/edited/' \"$1\"\n").unwrap();
+    std::fs::set_permissions(&ed, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let (out, _, _) = run_forked(&format!(
+        "$env.XDG_DATA_HOME = '{d}'\nfc -s two=three\nfc -e {ed} 1\n",
+        d = dir.display(),
+        ed = ed.display()
+    ));
+    assert_eq!(out, "echo three\nthree\necho edited\nedited\n");
+    let hist = std::fs::read_to_string(dir.join("tessh/history")).unwrap();
+    assert!(hist.ends_with("echo three\necho edited\n"), "{hist}");
+    let _ = std::fs::remove_dir_all(&dir);
+    let (ns, out) = run("complete -W 'a b' x\ncompopt -o nosort -o default x\ncompopt x\nread -e -i pre v <<< typed");
+    assert!(out.contains("-o default") && out.contains("-o nosort") && out.contains("+o dirnames"), "{out}");
+    assert_eq!(get::<String>(&ns, "v"), "typed");
 }

@@ -934,10 +934,10 @@ print $x_from_file
 Besides `cd`, `export` and the jobs, tessh has the builtins a login shell
 needs, with bash's options: `trap`, `ulimit`, `umask`, `read`, `getopts`,
 `shift`, `select`, `mapfile` (`readarray`), `coproc`, `time`, `times`,
-`history` (and `fc -l`), `type`, `command -v`, `hash`, `exec`, `eval`,
+`history`, `fc`, `type`, `command -v`, `hash`, `exec`, `eval`,
 `builtin`, `readonly`, `complete`, `compgen`, `logout` and `suspend`, and
-`set`'s `-x`, `-v`, `-u`, `-o pipefail` and `--`. `help NAME` describes
-each.
+`set`'s `-x`, `-v`, `-u`, `-C`, `-f`, `-n`, `-o pipefail`, `-o ignoreeof`
+and `--`. `help NAME` describes each.
 
 `trap` runs tessh text when a signal comes, `EXIT` when tessh ends, `ERR`
 when a command on a line of its own fails, `DEBUG` before each command
@@ -1006,7 +1006,9 @@ of the script's output to `log`, `exec 3<file` opens a descriptor. `select`
 is bash's menu as a loop, `for choice in (select red green blue)`.
 `mapfile -t lines <file` reads the lines into a list. `coproc cmd` runs a
 program with its input and output piped back, `$COPROC` its two
-descriptors. `time cmd …` says how long it took. `set -x` shows each
+descriptors. `time cmd …` says how long it took. `time` and `coproc` take
+an indented block too, as bash's `time { …; }` and `coproc NAME { …; }`
+do. `set -x` shows each
 command as it runs, and with `set -o pipefail` a pipe fails if any of its
 programs does; `$PIPESTATUS` has each one's status.
 `readonly NAME=value` makes a name that a later assignment can't change.
@@ -1015,7 +1017,9 @@ and the rest) sets what Tab offers after a command; a `-F` function fills
 `$COMPREPLY` from `$COMP_WORDS` as bash's do, or returns a list.
 `$LINENO` is the line it's on, and at the prompt bash's history expansion
 works: `!!`, `!$`, `!n`, `!prefix`, `!?text?`, `:s/old/new/`, `:h`, `:t`,
-`^old^new` and the rest.
+`^old^new` and the rest. `fc` edits past commands in `$EDITOR` and runs
+them, and `$HISTSIZE`, `$HISTCONTROL`, `$HISTIGNORE` and `$IGNOREEOF`
+work as bash's, set in `rc.tsh`.
 
 ```tessh
 readonly LIMIT=10

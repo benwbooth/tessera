@@ -80,6 +80,16 @@ fn job_done(j: &mut JobInfo, py: Python<'_>) -> bool {
     if j.stopped {
         return false;
     }
+    // (A process forked from Python (coproc with a block): no Child handle, its pid waited for.)
+    if j.children.is_empty() && !j.pids.is_empty() {
+        let mut st = 0;
+        let r = unsafe { libc::waitpid(j.pids[0], &mut st, libc::WNOHANG) };
+        if r == 0 {
+            return false;
+        }
+        j.status = Some(if r < 0 { 0 } else if libc::WIFEXITED(st) { libc::WEXITSTATUS(st) } else { 128 + libc::WTERMSIG(st) });
+        return true;
+    }
     let mut code = None;
     for c in j.children.iter_mut() {
         match c.try_wait() {
@@ -286,7 +296,20 @@ pub fn fg(py: Python<'_>, spec: Option<&str>) -> PyResult<Py<PyAny>> {
     unsafe { libc::killpg(job.pgid, libc::SIGCONT) };
     let words = job.words.clone();
     let again = (job.id, job.n);
-    let code = if tty_ok() {
+    let code = if job.children.is_empty() && !job.pids.is_empty() {
+        // (A forked block: waited for by its pid.)
+        let pid = job.pids[0];
+        py.detach(|| {
+            let mut st = 0;
+            if unsafe { libc::waitpid(pid, &mut st, 0) } < 0 {
+                0
+            } else if libc::WIFEXITED(st) {
+                libc::WEXITSTATUS(st)
+            } else {
+                128 + libc::WTERMSIG(st)
+            }
+        })
+    } else if tty_ok() {
         py.detach(|| wait_foreground(job.children, job.pgid, words, Some(again)))
     } else {
         let mut children = job.children;
@@ -986,6 +1009,22 @@ pub fn wait_foreground(children: Vec<Child>, pgid: i32, words: String, again: Op
     }
 }
 
+/// A process Python forked (coproc with a block), as a job: its Job.
+#[pyfunction]
+fn adopt_job(py: Python<'_>, pid: i32, words: String) -> PyResult<Py<PyAny>> {
+    let id = JOB_N.fetch_add(1, Ordering::SeqCst) + 1;
+    let n = {
+        let mut jobs = JOBS.lock().unwrap();
+        let n = next_n(&jobs);
+        jobs.push(JobInfo { id, n, pgid: pid, pids: vec![pid], words, stopped: false, thread: None, children: vec![], seq: next_seq(), nohup: false, status: None, reported: false });
+        n
+    };
+    if INTERACTIVE.load(Ordering::SeqCst) {
+        eprintln!("[{n}] {pid}");
+    }
+    job_ref(py, id)
+}
+
 /// The jobs' commands, for `complete -A job`.
 #[pyfunction]
 fn job_words() -> Vec<String> {
@@ -1025,6 +1064,7 @@ fn start_coproc(py: Python<'_>, words: Vec<String>) -> PyResult<(Py<PyAny>, i32,
 pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<JobRef>()?;
     m.add_function(wrap_pyfunction!(job_words, m)?)?;
+    m.add_function(wrap_pyfunction!(adopt_job, m)?)?;
     m.add_function(wrap_pyfunction!(start_coproc, m)?)?;
     m.add_function(wrap_pyfunction!(job_notices, m)?)?;
     m.add_function(wrap_pyfunction!(hup_jobs, m)?)?;

@@ -79,7 +79,7 @@ _test_CGI_
 A CGI script gets the request in environment variables, so in tessh they
 are `$env.get name ""` (a missing one is an empty string, as bash's unset
 variable is). The seventeen `echo` lines become a loop over the names.
-There's no `set -f` to turn off: a tessh variable's value is never globbed.
+No `set -f` is needed (tessh has one): a tessh variable's value is never globbed.
 Bash's `set` would list every variable, which is more than a web page
 should show; this lists the request's. To try it, the script first sets up a
 made-up request as a web server would.

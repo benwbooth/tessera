@@ -269,6 +269,10 @@ pub fn run_source(py: Python<'_>, text: &str, ns: &Bound<'_, PyDict>, filename: 
         let flags: i64 = code.getattr("co_flags")?.extract()?;
         // (A line that runs no command succeeds, as at the prompt: a script
         // ending `false` then `print done` exits 0, as bash's would.)
+        // (set -n: checked, not run; at the prompt it's ignored, as bash's.)
+        if crate::runtime::NOEXEC.load(std::sync::atomic::Ordering::SeqCst) && !crate::runtime::INTERACTIVE.load(std::sync::atomic::Ordering::SeqCst) {
+            continue;
+        }
         crate::runtime::begin_line();
         if flags & CO_COROUTINE != 0 {
             let coro = builtins.getattr("eval")?.call1((code, ns))?;

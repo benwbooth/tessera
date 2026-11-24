@@ -43,7 +43,9 @@ other exported variables are). The rest:
 | `$TMOUT` | none: `read -t secs`, or `select` or `signal.alarm` (examples 9-2 and 9-4) |
 | `$PS3` | `select`'s prompt, as in bash |
 | `$PS4` | `$PS4`, shown before each command `set -x` traces (`+ ` if unset) |
-| `$PS1`, `$PS2`, `$PROMPT_COMMAND`, `$IGNOREEOF`, `$SHELLOPTS`, `$-` | none (`@before_prompt` is `$PROMPT_COMMAND`) |
+| `$IGNOREEOF` | `$IGNOREEOF`: Ctrl+Ds at the prompt before it leaves |
+| `$HISTSIZE`, `$HISTFILESIZE`, `$HISTCONTROL`, `$HISTIGNORE` | the same, read at the prompt (Appendix L) |
+| `$PS1`, `$PS2`, `$PROMPT_COMMAND`, `$SHELLOPTS`, `$-` | none (`@before_prompt` is `$PROMPT_COMMAND`) |
 | `$0`, `$1`…, `$#` | `$argv[0]`, `$argv[1]`…, `(len $argv) - 1` |
 | `$*`, `$@` | `" ".join $argv[1:]`, `$argv[1:]` |
 | `$!` | `$j.pid`, after `j = cmd &`; `subprocess.Popen` has `.pid` too |

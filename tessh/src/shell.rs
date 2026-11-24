@@ -21,12 +21,12 @@ pub fn usage(name: &str) -> Option<&'static str> {
         "trap" => "trap 'tessh text' SIGNAL …\ntrap - SIGNAL …   trap '' SIGNAL …   trap [-p] [SIGNAL …]   trap -l\n\nRun the text (tessh, in this shell: a function's name calls it) when a signal comes, or EXIT when tessh ends (a script, -c, the REPL). - puts a signal back as it was, '' ignores it; -p, or trap alone, lists the traps, -l the signals. Signals are named INT, SIGINT or 2. ERR runs when a command on a line of its own fails (as bash's: not one that if, ||, && or r = (…) checks), before strict mode stops the script. DEBUG and RETURN aren't in tessh: Python's sys.settrace does both.",
         "ulimit" => "ulimit [-SHa] [-cdefilmnqrstuvx] [limit]\n\nShow or set a resource limit for tessh and the programs it runs: -c core file size, -d data, -f file size (the default), -l locked memory, -m resident memory, -n open files, -s stack, -t CPU seconds, -u processes, -v virtual memory, -e nice, -i pending signals, -q message queues, -r real-time priority, -x file locks. Sizes are in KiB (-c and -f too). limit is a number, unlimited, soft or hard. -S the soft limit, -H the hard one (setting without either sets both, as bash does); -a shows them all. Python: import resource.",
         "umask" => "umask [-p] [-S] [mode]\n\nThe file mode mask: the permissions new files don't get. Alone, it prints it (0022); -S as u=rwx,g=rx,o=rx. mode is octal (077) or symbolic (u=rwx,g=,o=, g-w, a+r).",
-        "read" => "read [-rs] [-p prompt] [-n N | -N N] [-t secs] [-d delim] [-a list] [-u fd] [name …]\n\nRead a line from standard input (what <, <<< or a pipe gives this line) into names: split at $IFS (spaces, tabs and newlines without one), the last name getting the rest. No name: $REPLY, the whole line. -a: a list of all the words. -r keeps backslashes (without it, \\ joins lines and quotes the next character), -s doesn't echo (a password), -n N stops after N characters, -N after exactly N, -t gives up after secs (status 142), -d reads to delim instead of a newline, -p shows a prompt (on a terminal). The status is 1 at the end of the input, so `while read line` loops over lines. It sets the module's names; in Python, input reads a line.",
+        "read" => "read [-ers] [-i text] [-p prompt] [-n N | -N N] [-t secs] [-d delim] [-a list] [-u fd] [name …]\n\nRead a line from standard input (what <, <<< or a pipe gives this line) into names: split at $IFS (spaces, tabs and newlines without one), the last name getting the rest. No name: $REPLY, the whole line. -a: a list of all the words. -r keeps backslashes (without it, \\ joins lines and quotes the next character), -s doesn't echo (a password), -n N stops after N characters, -N after exactly N, -t gives up after secs (status 142), -d reads to delim instead of a newline, -p shows a prompt (on a terminal), -e reads the line with readline (editable, ↑ for earlier ones) and -i gives it text to start with. The status is 1 at the end of the input, so `while read line` loops over lines. It sets the module's names; in Python, input reads a line.",
         "getopts" => "getopts optstring name [arg …]\n\nbash's option parser, for a script's $argv (or the args): each call sets $name to the next option letter and $OPTARG to its argument (a letter followed by : in optstring takes one; None for one that doesn't), and $OPTIND to the index of the next argument; at the end it fails, so `while getopts \"ab:\" opt` loops. An unknown option gives ?, with a message (none, and $OPTARG the letter, when optstring starts with :). Then `shift ($OPTIND - 1)` leaves the rest. Python's argparse does more.",
         "shift" => "shift [n]\n\nDrop the first n (1) arguments after the script's name from $argv: $argv[1] goes, and the next takes its place. Fails, changing nothing, if there aren't that many.",
         "times" => "times\n\nThe CPU time tessh has used (user, then system) and, on the next line, its children's. Python: os.times.",
         "history" => "history [N]\nhistory -c   history -d N   history -s text\n\nThe commands typed at tessh's prompt, numbered, the last N of them with N. -c clears the history file, -d N deletes entry N, -s adds text. The file is $XDG_DATA_HOME/tessh/history (~/.local/share/tessh/history); the editor's ↑ and Ctrl+R search it with bash's and zsh's.",
-        "fc" => "fc -l [-nr] [first [last]]\n\nList past commands, as history does. To run one again or edit it, ↑ or Ctrl+R at the prompt.",
+        "fc" => "fc [-e editor] [-r] [first [last]]\nfc -l [-nr] [first [last]]   fc -s [old=new] [command]\n\nEdit past commands (the last without first: a number, -n back, or the start of one) in $FCEDIT, $EDITOR or vi, and run what's saved, shown first. -l lists them instead, as history does; -s runs one again at once, with old made new.",
         "caller" => "caller\n\nNot in tessh: a function's caller is Python's frame. traceback.print_stack shows the calls (import traceback), inspect.stack gives them as values.",
         "builtin" => "builtin name [arg …]\n\nRun tessh's builtin of that name, even when a function of yours has the name (def cd … that ends with builtin cd $dir).",
         "enable" => "enable\n\nNot in tessh: its builtins can't be turned off. A function of the same name takes a builtin's place, and \\name runs the program of that name.",
@@ -34,10 +34,11 @@ pub fn usage(name: &str) -> Option<&'static str> {
         "hash" => "hash [-r] [-t name …] [name …]\n\ntessh doesn't remember where programs are: it looks each one up on $PATH as it runs it, so hash -r has nothing to forget. hash name checks it's there (and fails if not); -t prints where. Given a value (hash $x), it's Python's hash.",
         "exec" => "exec [-cl] [-a name] program [arg …]\n\nReplace tessh with the program (exec zsh, exec tmux): it never comes back. -c gives it an empty environment, -l starts it as a login shell (a - before its name), -a gives it another name. With only redirections (exec >log, exec 2>&1, exec 3<file) they stay in force, for tessh and every program after. Given code (exec $code, exec \"x = 1\"), it's Python's exec; builtins.exec is Python's whatever it's given.",
         "eval" => "eval text …\n\nRun the words joined as tessh text, here, as bash's eval does: eval \"echo hi\", eval $\"(ssh-agent -c)\" (tessh doesn't read sh: give it tessh, or run sh -c). Its value is the last form's, so x = (eval \"1 + 2\") is 3. Given a value (eval $code), it's Python's eval.",
-        "set" => "set [-exvuC] [+exvC] [-o NAME | +o NAME] [-o] [-- arg …]\n\nbash's options: -e (errexit, strict mode), -C (noclobber: > won't overwrite a file, >| will), -x (xtrace: each command shown before it runs, after $PS4 or +), -v (verbose: each line shown as it's read), -u (nounset: always so in tessh), -o pipefail (a pipe fails if any of its programs does; $PIPESTATUS has each one's status). + turns one off, -o alone lists them. set -- a b (or set a b) makes $argv [script a b]. set with a value is Python's set.",
+        "set" => "set [-exvuCfn] [+exvCfn] [-o NAME | +o NAME] [-o] [-- arg …]\n\nbash's options: -e (errexit, strict mode), -C (noclobber: > won't overwrite a file, >| will), -f (noglob: globs stay as written), -n (noexec: a script is read and checked, not run), -o ignoreeof (Ctrl+D ten times at the prompt before it leaves; $IGNOREEOF sets how many), -x (xtrace: each command shown before it runs, after $PS4 or +), -v (verbose: each line shown as it's read), -u (nounset: always so in tessh), -o pipefail (a pipe fails if any of its programs does; $PIPESTATUS has each one's status). + turns one off, -o alone lists them. set -- a b (or set a b) makes $argv [script a b]. set with a value is Python's set.",
         "mapfile" | "readarray" => "mapfile [-t] [-d delim] [-n count] [-O origin] [-s count] [-u fd] [-C callback] [-c quantum] [name]\n\nThe lines of standard input (what <, <<< or a pipe gives: cat f | mapfile -t lines) into a list, $MAPFILE without a name. -t drops each line's newline (delim with -d), -n reads at most count, -s skips the first count, -O puts them from index origin on (keeping what's before), -u reads descriptor fd, -C calls callback (index, line) every quantum lines (-c, 5000).",
-        "time" => "time [-p] command …\n\nRun the command (a program, a pipe, a call: tessh text), then say how long it took, real, user and sys, to stderr, as bash's time. -p in POSIX's form. Its value is the command's. \\time runs the time program (/usr/bin/time -v …).",
-        "coproc" => "coproc [NAME --] command [arg …]\n\nRun the command in the background with its input and output piped to tessh: $COPROC is [read fd, write fd] (from its output, to its input), $COPROC_PID its process ID, and its value is its Job (jobs, wait and kill take it). NAME -- names them $NAME and $NAME_PID instead. Write with cmd >&$COPROC[1] or os.write, read with read -u $COPROC[0] or os.read; exec $COPROC[1]>&- closes its input.",
+        "time" => "time [-p] command …\ntime [-p]\n    block\n\nRun the command (a program, a pipe, a call: tessh text), or the indented block under it, then say how long it took, real, user and sys, to stderr, as bash's time. -p in POSIX's form. Its value is the command's. \\time runs the time program (/usr/bin/time -v …).",
+        "coproc" => "coproc [NAME --] command [arg …]\ncoproc [NAME]\n    block\n\nRun the command (or the indented block, in a fork of tessh that sees its names) in the background with its input and output piped to tessh: $COPROC is [read fd, write fd] (from its output, to its input), $COPROC_PID its process ID, and its value is its Job (jobs, wait and kill take it). NAME -- names them $NAME and $NAME_PID instead. Write with cmd >&$COPROC[1] or os.write, read with read -u $COPROC[0] or os.read; exec $COPROC[1]>&- closes its input.",
+        "compopt" => "compopt [-o option] [+o option] [name …]\n\nTurn complete's -o options (default, bashdefault, dirnames, plusdirs, nosort, filenames, nospace) on (-o) or off (+o) for the named commands, or, inside a -F function, for the completion it's making. Alone, it lists them.",
         "readonly" => "readonly [-p] [NAME[=value] …]\n\nMake module names read-only: a later NAME = … (at the prompt, or further on in the script) is an error. NAME=value sets it first (to the text value). Alone, or with -p, it lists them. A def's own names, and globals() from Python, aren't checked.",
         "select" => "select item …\n\nbash's menu, as a loop: for choice in (select red green blue) prints the items numbered (to stderr), asks $PS3 (#? without it) and gives the item picked each time; a number that isn't on the menu gives None, Enter alone shows the menu again, and the end of the input ends the loop (break ends it too). $REPLY is what was typed.",
         "complete" => "complete [-fdcbkv] [-W words] [-F function] [-A action] name …\ncomplete -r [name …]   complete [-p] [name …]\n\nWhat Tab offers after a command: -W the words (a string split at spaces), -F a function given (word, words of the line so far) that returns a list, -f files, -d folders, -c commands, -v variables, -k keywords, -b builtins. -r forgets a command's, -p (or complete alone) lists them.",
@@ -61,7 +62,7 @@ fn idiom(name: &str) -> Option<&'static str> {
 
 /// Whether the builtin is given the namespace it runs in (to set names, run text there).
 pub fn wants_ns(name: &str) -> bool {
-    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash" | "readonly" | "select" | "complete" | "compgen" | "set" | "mapfile" | "readarray" | "time" | "coproc")
+    matches!(name, "trap" | "read" | "getopts" | "shift" | "type" | "eval" | "builtin" | "hash" | "readonly" | "select" | "complete" | "compgen" | "compopt" | "fc" | "set" | "mapfile" | "readarray" | "time" | "coproc")
 }
 
 /// Run builtin `name` with its words: the Python function `sh_name`, or the
@@ -370,6 +371,103 @@ pub fn expand_history(text: &str, file: &std::path::Path) -> Result<Option<(Stri
     Ok(changed.then_some((out, print_only)))
 }
 
+/// A shell variable bash reads (HISTSIZE, IGNOREEOF…): the REPL's name
+/// first, then the environment's.
+fn shell_var(ns: &Bound<'_, PyDict>, name: &str) -> Option<String> {
+    if let Ok(Some(v)) = ns.get_item(name) {
+        if !v.is_none() {
+            return v.str().ok().map(|s| s.to_string());
+        }
+    }
+    std::env::var(name).ok()
+}
+
+/// What happens to a line typed at the prompt, for history.
+pub struct HistPolicy {
+    /// Kept in history ($HISTCONTROL, $HISTIGNORE and a leading space can say no).
+    pub keep: bool,
+    /// erasedups: earlier copies go.
+    pub erase: bool,
+    /// $HISTSIZE: how many the editor keeps.
+    pub size: Option<usize>,
+    /// $HISTFILESIZE: how many the file keeps.
+    pub file_size: Option<usize>,
+    text: String,
+}
+
+/// $HISTCONTROL (ignorespace, ignoredups, ignoreboth, erasedups),
+/// $HISTIGNORE (patterns, : between them, & the last line), $HISTSIZE and
+/// $HISTFILESIZE, as bash reads them.
+pub fn history_policy(_py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, file: &std::path::Path) -> HistPolicy {
+    let control = shell_var(ns, "HISTCONTROL").unwrap_or_default();
+    let has = |w: &str| control.split(':').any(|c| c == w);
+    let last = std::fs::read_to_string(file).ok().and_then(|t| t.lines().filter(|l| !l.trim().is_empty()).last().map(|l| l.replace("<\\n>", "\n")));
+    let mut keep = !text.starts_with(' ');
+    if (has("ignorespace") || has("ignoreboth")) && text.starts_with(' ') {
+        keep = false;
+    }
+    if (has("ignoredups") || has("ignoreboth")) && last.as_deref() == Some(text) {
+        keep = false;
+    }
+    if let Some(ign) = shell_var(ns, "HISTIGNORE") {
+        for pat in ign.split(':').filter(|p| !p.is_empty()) {
+            let pat = if pat == "&" { last.clone().unwrap_or_default() } else { pat.to_string() };
+            if glob::Pattern::new(&pat).is_ok_and(|p| p.matches(text)) {
+                keep = false;
+            }
+        }
+    }
+    let num = |n: &str| shell_var(ns, n).and_then(|v| v.trim().parse::<i64>().ok()).map(|v| v.max(0) as usize);
+    HistPolicy { keep, erase: has("erasedups"), size: num("HISTSIZE"), file_size: num("HISTFILESIZE").or(num("HISTSIZE")), text: text.to_string() }
+}
+
+/// After a line went in: erasedups and $HISTFILESIZE, in the file.
+pub fn history_trim(file: &std::path::Path, p: &HistPolicy) {
+    if !p.erase && p.file_size.is_none() {
+        return;
+    }
+    let Ok(t) = std::fs::read_to_string(file) else { return };
+    let mut lines: Vec<&str> = t.lines().filter(|l| !l.trim().is_empty()).collect();
+    if p.erase {
+        let me = p.text.replace('\n', "<\\n>");
+        let n = lines.len();
+        let mut k = 0;
+        lines.retain(|l| {
+            k += 1;
+            k == n || *l != me
+        });
+    }
+    if let Some(n) = p.file_size {
+        if lines.len() > n {
+            lines.drain(..lines.len() - n);
+        }
+    }
+    let mut out = lines.join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    let _ = std::fs::write(file, out);
+}
+
+static EOFS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Ctrl+D at the prompt: whether to stay ($IGNOREEOF, or 10 with set -o
+/// ignoreeof, Ctrl+Ds in a row before it leaves).
+pub fn ignore_eof(_py: Python<'_>, ns: &Bound<'_, PyDict>) -> bool {
+    let limit = match shell_var(ns, "IGNOREEOF") {
+        Some(v) => v.trim().parse::<usize>().unwrap_or(10),
+        None if crate::runtime::IGNOREEOF.load(std::sync::atomic::Ordering::SeqCst) => 10,
+        None => return false,
+    };
+    let n = EOFS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    n <= limit
+}
+
+/// A line was typed: Ctrl+Ds count from nothing again.
+pub fn eof_reset() {
+    EOFS.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// Tessh text, run in ns (a trap's, eval's): the last form's value.
 #[pyfunction]
 fn eval_tessh(py: Python<'_>, text: &str, ns: Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
@@ -461,6 +559,9 @@ fn set_option(name: &str, on: bool) -> PyResult<()> {
         "verbose" => &VERBOSE,
         "pipefail" => &PIPEFAIL,
         "noclobber" => &NOCLOBBER,
+        "noglob" => &NOGLOB,
+        "noexec" => &NOEXEC,
+        "ignoreeof" => &IGNOREEOF,
         _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("set: {name}: invalid option name"))),
     };
     flag.store(on, std::sync::atomic::Ordering::SeqCst);
@@ -477,6 +578,9 @@ fn get_option(name: &str) -> bool {
         "verbose" => VERBOSE.load(o),
         "pipefail" => PIPEFAIL.load(o),
         "noclobber" => NOCLOBBER.load(o),
+        "noglob" => NOGLOB.load(o),
+        "noexec" => NOEXEC.load(o),
+        "ignoreeof" => IGNOREEOF.load(o),
         _ => false,
     }
 }
@@ -522,6 +626,9 @@ pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let code = std::ffi::CString::new(SHELL_PY).unwrap();
     let sh = PyModule::from_code(py, &code, c"<tessh builtins>", c"__tessh_shell__")?;
     py.import("sys")?.getattr("modules")?.set_item("__tessh_shell__", &sh)?;
+    // (What `time` and `coproc` with a block compile to.)
+    m.add("timed", sh.getattr("timed")?)?;
+    m.add("coproc_block", sh.getattr("coproc_block")?)?;
     // (An interactive tessh's jobs get SIGHUP when it ends, or its terminal does.)
     py.import("atexit")?.call_method1("register", (m.getattr("hup_jobs")?,))?;
     crate::jobs::on_hangup();
@@ -953,9 +1060,10 @@ def _ifs_split(s, ifs, n=None):
         alts.append((f"[{re.escape(ws)}]*" if ws else "") + f"[{re.escape(other)}]" + (f"[{re.escape(ws)}]*" if ws else ""))
     if ws:
         alts.append(f"[{re.escape(ws)}]+")
-    if not alts:
+    if not alts or n == 1:
+        # (One name: the whole line, as bash gives it. re.split's maxsplit=0 would mean no limit.)
         return [s]
-    return re.split("|".join(alts), s, maxsplit=0 if n is None else max(n - 1, 0))
+    return re.split("|".join(alts), s, maxsplit=0 if n is None else n - 1)
 
 _read_pos = {}
 
@@ -983,7 +1091,27 @@ def sh_read(*args, _ns=None):
     redirected = fd == 0 and sys.stdin is not None and sys.stdin is not sys.__stdin__
     stream = sys.stdin if redirected or (fd == 0 and sys.__stdin__ is None) else None
     tty = stream is None and os.isatty(fd)
-    if "p" in vals and (tty or (stream is not None and getattr(stream, "isatty", lambda: False)())):
+    # (-e at a terminal: the line read with readline, editable, -i its text to start with.)
+    readline_line = None
+    if ("e" in flags or "i" in vals) and tty and fd == 0 and nchars is None and not silent and delim == "\n":
+        try:
+            import readline
+            start = vals.get("i", "")
+            readline.set_startup_hook(lambda: readline.insert_text(start))
+            try:
+                readline_line = input(vals.get("p", ""))
+            except EOFError:
+                sys.stderr.write("\n")
+                return _status(1)
+            finally:
+                readline.set_startup_hook(None)
+        except ImportError:
+            pass
+    if readline_line is not None:
+        stream = __import__("io").StringIO(readline_line + "\n")
+        tty = False
+        raw = True
+    elif "p" in vals and (tty or (stream is not None and getattr(stream, "isatty", lambda: False)())):
         sys.stderr.write(vals["p"])
         sys.stderr.flush()
     # (read … <file, in a loop: the file read once, line after line, as
@@ -1233,7 +1361,7 @@ def sh_select(*items, _ns=None):
             yield items[k - 1] if 1 <= k <= len(items) else None
     return gen()
 
-_SET_LONG = {"errexit": "e", "xtrace": "x", "verbose": "v", "nounset": "u", "pipefail": "P", "noclobber": "C"}
+_SET_LONG = {"errexit": "e", "xtrace": "x", "verbose": "v", "nounset": "u", "pipefail": "P", "noclobber": "C", "noglob": "f", "noexec": "n", "ignoreeof": "I"}
 
 def sh_set(*args, _ns=None):
     """bash's set: -e/+e (strict), -x (xtrace), -v (verbose), -u (nounset:
@@ -1241,14 +1369,14 @@ def sh_set(*args, _ns=None):
     T = _tessh()
     args = list(args)
     def flip(letter, on):
-        names = {"e": "errexit", "x": "xtrace", "v": "verbose", "P": "pipefail", "C": "noclobber"}
+        names = {"e": "errexit", "x": "xtrace", "v": "verbose", "P": "pipefail", "C": "noclobber", "f": "noglob", "n": "noexec", "I": "ignoreeof"}
         if letter in names:
             T.set_option(names[letter], on)
         elif letter == "u":
             if not on:
                 raise NotImplementedError("set +u: in tessh an unset name is always an error ($env.get NAME, or (globals).get 'name', gives a default)")
         else:
-            raise ValueError(f"set: -{letter}: invalid option (tessh's are -e, -x, -v, -u, -C, and -o errexit, xtrace, verbose, nounset, pipefail, noclobber)")
+            raise ValueError(f"set: -{letter}: invalid option (tessh's are -e, -x, -v, -u, -C, -f, -n, and -o errexit, xtrace, verbose, nounset, pipefail, noclobber, noglob, noexec, ignoreeof)")
     i = 0
     while i < len(args):
         a = args[i]
@@ -1270,6 +1398,8 @@ def sh_set(*args, _ns=None):
             continue
         if len(a) > 1 and a[0] in "-+":
             for c in a[1:]:
+                if c not in "exvuCfn":
+                    raise ValueError(f"set: -{c}: invalid option (tessh's are -e, -x, -v, -u, -C, -f and -n, and -o NAME)")
                 flip(c, a[0] == "-")
             i += 1
             continue
@@ -1369,15 +1499,7 @@ def sh_time(*args, _ns=None):
             v = _tessh().eval_tessh(" ".join(_quote_word(w) for w in args), _ns)
     finally:
         t1, c1 = _time.monotonic(), os.times()
-        user = (c1.user - c0.user) + (c1.children_user - c0.children_user)
-        system = (c1.system - c0.system) + (c1.children_system - c0.children_system)
-        sys.stdout.flush()
-        if posix:
-            sys.stderr.write(f"real {t1 - t0:.2f}\nuser {user:.2f}\nsys {system:.2f}\n")
-        else:
-            f = lambda x: f"{int(x // 60)}m{x % 60:.3f}s"
-            sys.stderr.write(f"\nreal\t{f(t1 - t0)}\nuser\t{f(user)}\nsys\t{f(system)}\n")
-        sys.stderr.flush()
+        _time_report(t1 - t0, c0, c1, posix)
     return v
 
 def sh_coproc(*args, _ns=None):
@@ -1401,6 +1523,112 @@ def sh_coproc(*args, _ns=None):
     _ns[name] = [rfd, wfd]
     _ns[name + "_PID"] = pid
     return job
+
+class timed:
+    """time with a block: the block's real, user and sys time, after it, to stderr."""
+    def __init__(self, posix=False):
+        self.posix = posix
+    def __enter__(self):
+        import time as _time
+        self.t0, self.c0 = _time.monotonic(), os.times()
+        return self
+    def __exit__(self, *exc):
+        import time as _time
+        t1, c1 = _time.monotonic(), os.times()
+        _time_report(t1 - self.t0, self.c0, c1, self.posix)
+        return False
+
+def _time_report(real, c0, c1, posix):
+    user = (c1.user - c0.user) + (c1.children_user - c0.children_user)
+    system = (c1.system - c0.system) + (c1.children_system - c0.children_system)
+    sys.stdout.flush()
+    if posix:
+        sys.stderr.write(f"real {real:.2f}\nuser {user:.2f}\nsys {system:.2f}\n")
+    else:
+        f = lambda x: f"{int(x // 60)}m{x % 60:.3f}s"
+        sys.stderr.write(f"\nreal\t{f(real)}\nuser\t{f(user)}\nsys\t{f(system)}\n")
+    sys.stderr.flush()
+
+def coproc_block(name, body, ns):
+    """coproc NAME with a block: the block runs in a fork of tessh, its
+    input and output piped back, as bash's `coproc NAME { …; }`."""
+    import warnings
+    r_in, w_in = os.pipe()     # tessh writes, the block reads (its stdin)
+    r_out, w_out = os.pipe()   # the block writes (its stdout), tessh reads
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        pid = os.fork()
+    if pid == 0:
+        code = 0
+        try:
+            os.setpgid(0, 0)
+            # (Out of the way first: a pipe end can be 0 or 1 itself, when
+            # tessh's own was closed.)
+            hi_in, hi_out = os.dup(r_in), os.dup(w_out)
+            for fd in {r_in, w_in, r_out, w_out}:
+                os.close(fd)
+            os.dup2(hi_in, 0)
+            os.dup2(hi_out, 1)
+            os.close(hi_in)
+            os.close(hi_out)
+            sys.stdin = open(0, "r", closefd=False)
+            sys.stdout = open(1, "w", closefd=False, buffering=1)
+            body()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+        except BaseException:
+            import traceback
+            traceback.print_exc()
+            code = 1
+        finally:
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+            os._exit(code)
+    os.close(r_in)
+    os.close(w_out)
+    for fd in (w_in, r_out):
+        os.set_inheritable(fd, False)
+    job = _tessh().adopt_job(pid, f"coproc {name}")
+    ns[name] = [r_out, w_in]
+    ns[name + "_PID"] = pid
+    return job
+
+_compopt_current = None
+
+def sh_compopt(*args, _ns=None):
+    """compopt [-o opt] [+o opt] [name …]: change completion options, of
+    the named commands, or of the completion running now."""
+    args = list(args)
+    on, off, names = set(), set(), []
+    k = 0
+    while k < len(args):
+        a = args[k]
+        if a in ("-o", "+o") and k + 1 < len(args):
+            if args[k + 1] not in _OPTIONS:
+                raise ValueError(f"compopt: {args[k + 1]}: invalid option name")
+            (on if a == "-o" else off).add(args[k + 1])
+            k += 2
+        elif a in ("-D", "-E", "-I"):
+            k += 1
+        else:
+            names.append(a)
+            k += 1
+    specs = [_complete[n] for n in names if n in _complete] if names else ([_compopt_current] if _compopt_current is not None else [])
+    if not specs:
+        raise ValueError("compopt: not completing anything now; name a command complete knows")
+    if not on and not off:
+        for sp in specs:
+            print("compopt " + " ".join(("-o " if o in sp.get("opts", ()) else "+o ") + o for o in sorted(_OPTIONS)))
+        return None
+    for sp in specs:
+        sp.setdefault("opts", set())
+        sp["opts"] |= on
+        sp["opts"] -= off
+    return None
 
 # ---- complete, compgen ---------------------------------------------------------------
 
@@ -1480,6 +1708,8 @@ def _call_completer(f, word, line_words, ns, line, point):
 
 def _gen(spec, word, line_words, ns, line=None, point=None):
     import fnmatch, keyword, builtins, signal, pwd
+    global _compopt_current
+    _compopt_current = spec
     out = []
     if line is None:
         line = " ".join(list(line_words) + [word])
@@ -1677,29 +1907,81 @@ def sh_history(*args):
         _show_history(h)
     return None
 
-def sh_fc(*args):
-    flags, _, rest = _split_opts(args, "e")
-    if "l" not in flags:
-        raise NotImplementedError("fc: tessh edits and runs a past command at the prompt: ↑ or Ctrl+R finds it. fc -l (or history) lists them.")
+def _append_history(text):
+    p = _history_file()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(text.replace("\n", "<\\n>") + "\n")
+
+def sh_fc(*args, _ns=None):
+    """fc -l lists; fc -s [old=new] [cmd] runs one again; fc [-e editor]
+    [first [last]] edits them ($FCEDIT, $EDITOR, vi) and runs what's saved."""
+    import tempfile, subprocess, shlex
+    flags, vals, rest = _split_opts(args, "e")
     h = _history()
+    # (This fc line itself, just put in history at the prompt: not one of them.)
+    if h and h[-1].split()[:1] == ["fc"]:
+        h = h[:-1]
+    if not h:
+        raise ValueError("fc: no history yet")
     def at(s):
         try:
             k = int(s)
-            return k - 1 if k > 0 else len(h) + k
+            k = k - 1 if k > 0 else len(h) + k
+            if not 0 <= k < len(h):
+                raise IndexError
+            return k
         except ValueError:
             for k in range(len(h) - 1, -1, -1):
                 if h[k].startswith(s):
                     return k
             raise ValueError(f"fc: {s}: no command found") from None
-    first = at(rest[0]) if rest else max(len(h) - 16, 0)
-    last = at(rest[1]) if len(rest) > 1 else len(h) - 1
-    lo, hi = sorted((max(first, 0), max(last, 0)))
-    sel = list(enumerate(h[lo:hi + 1], lo + 1))
+        except IndexError:
+            raise ValueError(f"fc: {s}: history position out of range") from None
+    if "l" in flags:
+        first = at(rest[0]) if rest else max(len(h) - 16, 0)
+        last = at(rest[1]) if len(rest) > 1 else len(h) - 1
+        lo, hi = sorted((first, last))
+        sel = list(enumerate(h[lo:hi + 1], lo + 1))
+        if "r" in flags:
+            sel.reverse()
+        for k, e in sel:
+            print(("\t" if "n" in flags else f"{k}\t") + e.replace("\n", "\n\t"))
+        return None
+    def run(text):
+        print(text)
+        sys.stdout.flush()
+        _append_history(text)
+        return _tessh().eval_tessh(text, _ns)
+    if "s" in flags or vals.get("e") == "-":
+        subs = [r for r in rest if "=" in r and not r.startswith("=")]
+        spec = [r for r in rest if r not in subs]
+        line = h[at(spec[0])] if spec else h[-1]
+        for sub in subs:
+            old, new = sub.split("=", 1)
+            line = line.replace(old, new)
+        return run(line)
+    first = at(rest[0]) if rest else len(h) - 1
+    last = at(rest[1]) if len(rest) > 1 else first
+    lo, hi = sorted((first, last))
+    sel = h[lo:hi + 1]
     if "r" in flags:
         sel.reverse()
-    for k, e in sel:
-        print(("\t" if "n" in flags else f"{k}\t") + e.replace("\n", "\n\t"))
-    return None
+    editor = vals.get("e") or os.environ.get("FCEDIT") or os.environ.get("EDITOR") or "vi"
+    with tempfile.NamedTemporaryFile("w", suffix=".tsh", delete=False) as f:
+        f.write("\n".join(sel) + "\n")
+        path = f.name
+    try:
+        code = subprocess.call(shlex.split(editor) + [path])
+        with open(path) as f:
+            text = f.read().strip("\n")
+    finally:
+        os.unlink(path)
+    if code != 0:
+        raise OSError(f"fc: {editor} failed (status {code}): nothing run")
+    if not text.strip():
+        return None
+    return run(text)
 
 def sh_caller(*args):
     raise NotImplementedError("caller: " + "tessh's functions are Python's: traceback.print_stack shows the calls (import traceback), and inspect.stack gives them as values.")

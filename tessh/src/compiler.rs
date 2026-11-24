@@ -535,6 +535,50 @@ impl<'py, 's> Compiler<'py, 's> {
         self.py_builtins.contains(root)
     }
 
+    fn shell_block(&mut self, items: &[Form], children: &[Form], ctx: Ctx) -> R<Option<Res<'py>>> {
+        let Kind::Sym { name, marks } = &items[0].kind else { return Ok(None) };
+        if self.binding(name, marks).is_some() || self.ns_get(name).is_some_and(|v| !Self::is_command_fn(&v)) {
+            return Ok(None);
+        }
+        let pos = items[0].pos.clone();
+        let words: Vec<&str> = items[1..].iter().filter_map(|x| x.sym_name()).collect();
+        if words.len() != items.len() - 1 {
+            return Ok(None);
+        }
+        match name.as_str() {
+            "time" if words.iter().all(|w| *w == "-p") => {
+                let posix = if words.is_empty() { "False" } else { "True" };
+                let head = Form::group('(', vec![Form::sym_at("__tessh__.timed", &[], pos.clone()), Form::sym_at(posix, &[], pos.clone())], pos.clone());
+                let w = Form::line(vec![Form::sym_at("with", &[], pos.clone()), head], children.to_vec(), pos.clone());
+                Ok(Some(self.compile_line(&w, ctx)?))
+            }
+            "coproc" if words.len() <= 1 => {
+                let cname = words.first().copied().unwrap_or("COPROC");
+                if !is_ident(cname) {
+                    return err(format!("coproc: {cname}: not a valid name"), Some(&items[0]));
+                }
+                let body = "__tessh_coproc_body__";
+                let def = Form::line(vec![Form::sym_at("def", &[], pos.clone()), Form::sym_at(body, &[], pos.clone())], children.to_vec(), pos.clone());
+                let call = Form::line(
+                    vec![
+                        Form::sym_at("__tessh__.coproc_block", &[], pos.clone()),
+                        Form::new(Kind::Str { value: cname.to_string(), kind: '\'' }, pos.clone()),
+                        Form::new(Kind::Var(Box::new(Form::sym_at(body, &[], pos.clone()))), pos.clone()),
+                        Form::group('(', vec![Form::sym_at("globals", &[], pos.clone())], pos.clone()),
+                    ],
+                    vec![],
+                    pos.clone(),
+                );
+                let r1 = self.compile_line(&def, Ctx::Stmt)?;
+                let mut stmts = self.as_stmts(r1)?;
+                let r2 = self.compile_line(&call, ctx)?;
+                stmts.extend(r2.stmts);
+                Ok(Some(Res { stmts, expr: r2.expr }))
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// `type ls`, `hash -r`, `exec zsh`, `eval "echo hi"`: Python's type,
     /// hash, exec or eval (not a name of yours) whose first argument is a
     /// word, so the shell's builtin; `type $x`, `hash $s`, `exec $code` stay
@@ -834,6 +878,14 @@ impl<'py, 's> Compiler<'py, 's> {
                 return self.compile_body(children, ctx);
             }
             return Ok(Res::e(self.cnone()?));
+        }
+        // (time with a block under it: the block timed, as bash's
+        // `time { …; }`. coproc [NAME] with a block: the block run as the
+        // coprocess, in a fork of tessh, as bash's `coproc NAME { …; }`.)
+        if !children.is_empty() {
+            if let Some(r) = self.shell_block(items, children, ctx)? {
+                return Ok(r);
+            }
         }
         // (`name: type` and `name: type = value`: an annotated name.)
         if let Kind::Sym { name, marks } = &items[0].kind {

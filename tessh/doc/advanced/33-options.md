@@ -17,7 +17,10 @@ pipefail and noclobber, and `set -o` alone lists them. `set -u` is always on: an
 name is an error, and `set +u` says so and fails. `set -- a b` (or `set a
 b`) makes `$argv` `[script a b]`. The rest of tessh's behavior is fixed,
 mostly at what bash's careful scripters turn on, and Python modules cover
-the rest. `-f`, `-n` and bash's other options aren't there. `set`
+the rest. `set -f` (noglob) leaves globs as written, `set -n` (noexec)
+reads and checks a script without running it, and `set -o ignoreeof`
+keeps Ctrl+D from leaving the prompt. bash's other options aren't there.
+`set`
 given a value is still Python's set type.
 
 ```bash no-run
@@ -47,10 +50,10 @@ Bash's options, and where tessh stands on each:
 | `-c …` | (run a string) | `tessh -c 'code' args…` |
 | `checkjobs` | | none to set: `exit` in an interactive tessh with jobs left warns first |
 | `-e` | errexit | `strict` (or `set -e`, `tessh -e`): a program or pipe failing on a line of its own raises `CommandFailed`; `strict off` / `set +e` ends it. Without it a builtin (`cd`, `pushd`, `source`…) failing on a line of its own still stops the script, and so does a Python error. One command at a time: `(cmd)!` raises if `cmd` fails, and `(expr)?` turns a Python error into a false value |
-| `-f` | noglob | none needed: a variable's value is never globbed, and a quoted pattern is text |
+| `-f` | noglob | `set -f`: globs stay as written (a variable's value is never globbed anyway, and a quoted pattern is text) |
 | `globstar` | | always on: `**/*.py` searches the subfolders |
 | `-i` | interactive | `tessh` alone is the REPL |
-| `-n` | noexec | `tessh --check script`, and better: every script is compiled whole before it runs |
+| `-n` | noexec | `set -n`: the rest of the script is read and checked, not run (ignored at the prompt); `tessh --check script` checks one from outside |
 | `-o posix` | | none |
 | `-o pipefail` | | `set -o pipefail`: a pipe fails if any program in it fails. Without it a pipe's status is its last program's. `$PIPESTATUS` lists every program's status |
 | `-p` | privileged | none |

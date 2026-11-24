@@ -1326,9 +1326,9 @@ On 2007-09-01 at 17:30:24, there were
 `time` is a builtin in tessh, as bash's keyword is: `time cmd …` runs
 the command (a program, a pipe or a call) and prints `real`, `user` and
 `sys` on stderr in bash's format; `time -p` prints POSIX's. `\time` runs
-the `/usr/bin/time` program instead, with its own report. `time` times one
-command line, not an indented block; to time a block of Python code, take
-`time.perf_counter` before and after.
+the `/usr/bin/time` program instead, with its own report. `time` alone
+with an indented block under it times the block, as bash's `time { …; }`;
+`time.perf_counter` before and after does it from Python.
 
 ```tessh no-run
 time sleep 0.2                     # real 0m0.2…s, then user and sys.

@@ -945,7 +945,7 @@ What changes, part by part:
 - **Options.** `set -o nounset` is always on in tessh (an unset variable is
   an error), and `set -o xtrace` works as in bash, so the `debug` alias
   could be a function running `set -o xtrace`; `set -o noclobber` works
-  too. **Gap:** there's no `ignoreeof`, `notify`, or `shopt` (`cdspell`, `cdable_vars`, `checkwinsize`,
+  too, and `set -o ignoreeof`. **Gap:** there's no `notify`, or `shopt` (`cdspell`, `cdable_vars`, `checkwinsize`,
   `histappend`…). `ulimit -S -c 0` works in tessh as it is; the version
   here uses Python's `resource.setrlimit`, which is the same.
 - **Colors** are a dict of escape strings; `"\x1b"` is bash's `\e`.
@@ -959,8 +959,8 @@ What changes, part by part:
   green after success and red after a failure. There's no `PS1` or
   `PROMPT_COMMAND`, so the load, disk and job colors go into a `status`
   function that prints the same line on demand.
-- **History and timing variables** (`HISTIGNORE`, `HISTCONTROL`,
-  `HISTTIMEFORMAT`, `TIMEFORMAT`) have no counterpart (Appendix L).
+- **History variables** `HISTIGNORE` and `HISTCONTROL` work as bash's;
+  `HISTTIMEFORMAT` and `TIMEFORMAT` have no counterpart (Appendix L).
 - **Programmable completion** (the long last section) is left out here.
   tessh's `complete -F` takes bash's form too, a function that fills
   `$COMPREPLY` from `$COMP_WORDS` and `$COMP_CWORD`, and `compgen` takes

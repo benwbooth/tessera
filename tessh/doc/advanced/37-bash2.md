@@ -1126,8 +1126,9 @@ args` for a named one. `$COPROC` (or `$NAME`) is `[read fd, write fd]` and
 `$COPROC_PID` (or `$NAME_PID`) its pid; the value is a Job, so `jobs`,
 `wait` and `kill` work on it. `read -u $COPROC[0] var` reads from it,
 `os.write $COPROC[1] b"…"` (or a program's `>&N`) writes to it, and `os.close
-$COPROC[1]` closes its input. Bash's `coproc NAME { … }` form, with a
-block, isn't there: run `sh -c '…'` instead.
+$COPROC[1]` closes its input. `coproc NAME` with an indented block under
+it runs the block as the coprocess, in a fork of tessh that sees the
+script's names, as bash's `coproc NAME { … }`.
 
 ```tessh no-run
 import os
@@ -1343,8 +1344,9 @@ print $Arr2
 ```
 
 `read -t` takes fractions of a second and `read -i` fills in the edit
-buffer. tessh's `read` has `-t secs` (status 142 when time runs out) but
-no `-i`; Python's `input` has no timeout without `select` or a thread.
+buffer. tessh's `read` has both: `-t secs` (status 142 when time runs
+out), and `-e -i text`, the line read with readline and text already in
+it. Python's `input` has no timeout without `select` or a thread.
 
 **Case conversion** in parameter substitution, and `declare -l`/`-c`:
 

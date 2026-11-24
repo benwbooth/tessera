@@ -513,8 +513,8 @@ a33b
 **Gap:** no POSIX classes (`[[:digit:]]`) in globs, and no brace
 expansion (see 3.6).
 
-bash's `set -f` turns globbing off and `shopt` changes it (`nocaseglob`,
-`nullglob`, `dotglob`). In tessh, quote a word to keep it as it is
+bash's `set -f` turns globbing off (tessh's too) and `shopt` changes it
+(`nocaseglob`, `nullglob`, `dotglob`). In tessh, quote a word to keep it as it is
 (`'*'`), and use the Glob as a value when nothing matching should mean an
 empty list (bash's `nullglob`): `(list *.none)` is `[]`.
 

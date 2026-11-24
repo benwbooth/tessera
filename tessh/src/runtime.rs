@@ -1203,8 +1203,18 @@ fn t(v: Bound<'_, PyAny>) -> PyResult<Bound<'_, PyAny>> {
     }
 }
 
+/// `set -f` (noglob): globs stay as written.
+pub static NOGLOB: AtomicBool = AtomicBool::new(false);
+/// `set -n` (noexec): a script's lines are read and checked, not run.
+pub static NOEXEC: AtomicBool = AtomicBool::new(false);
+/// `set -o ignoreeof`: Ctrl+D at the prompt ten times before it leaves.
+pub static IGNOREEOF: AtomicBool = AtomicBool::new(false);
+
 fn glob_expand(p: &str) -> Vec<String> {
     let p = expanduser(p);
+    if NOGLOB.load(Ordering::SeqCst) {
+        return vec![p];
+    }
     if !p.contains(['*', '?', '[']) {
         return vec![p];
     }
@@ -2641,7 +2651,7 @@ pub const COMMAND_BUILTINS: &[&str] = &[
     "wait", "disown", "kill", "suspend", "logout",
     "trap", "ulimit", "umask", "read", "history", "fc", "shift", "getopts", "times", "caller", "builtin", "enable",
     "readonly", "declare", "typeset", "local", "alias", "unalias", "shopt", "bind", "complete", "compgen", "select",
-    "mapfile", "readarray", "time", "coproc",
+    "mapfile", "readarray", "time", "coproc", "compopt",
 ];
 
 pub fn is_command_builtin(n: &str) -> bool {

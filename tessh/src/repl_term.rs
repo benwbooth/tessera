@@ -311,6 +311,12 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
         match out {
             // (Ctrl+D with jobs left: a word first, as exit gives; again, it ends.)
             Outcome::Eof => {
+                // ($IGNOREEOF, set -o ignoreeof: that many Ctrl+Ds first.)
+                if Python::attach(|py| crate::shell::ignore_eof(py, ns.bind(py))) {
+                    eprintln!("Use \"exit\" to leave the shell.");
+                    fresh = true;
+                    continue;
+                }
                 if Python::attach(|py| crate::jobs::exit_check(py).unwrap_or(true)) {
                     break;
                 }
@@ -321,7 +327,10 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                 fresh = true;
                 continue;
             }
-            Outcome::Submit { text, background } => run = Some((text, background, true)),
+            Outcome::Submit { text, background } => {
+                crate::shell::eof_reset();
+                run = Some((text, background, true))
+            }
             Outcome::Host(c) => {
                 let (what, arg) = c.split_once(':').unwrap_or((c.as_str(), ""));
                 match what {
@@ -475,11 +484,20 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
         if from_editor {
             editor.ed.t.reset();
             editor.ed.hist_index = None;
-            if !text.starts_with(' ') {
+            // ($HISTCONTROL, $HISTIGNORE, $HISTSIZE, $HISTFILESIZE, as bash's.)
+            let policy = Python::attach(|py| crate::shell::history_policy(py, ns.bind(py), &text, &hist));
+            if policy.keep {
                 editor.ed.history.retain(|h| *h != text);
                 editor.ed.history.push(text.clone());
                 append_history(&hist, &text);
+                crate::shell::history_trim(&hist, &policy);
                 crate::editor::promptbar::record_history(&text, &std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default());
+            }
+            if let Some(n) = policy.size {
+                let len = editor.ed.history.len();
+                if len > n {
+                    editor.ed.history.drain(..len - n);
+                }
             }
             last_cmd = text.clone();
         }

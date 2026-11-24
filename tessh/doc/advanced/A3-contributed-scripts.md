@@ -8695,9 +8695,9 @@ done
 exit $?
 ```
 
-tessh's `time` builtin times one command line, not a block; a `with`
-block around a few lines times them, with `time.perf_counter` and a small
-context manager. In tessh
+tessh's `time` times one command line, or the indented block under it;
+here a `with` block around a few lines times them, with
+`time.perf_counter` and a small context manager. In tessh
 `%`, `match` and `if` are Python, so the three ways of doing arithmetic
 and four ways of testing become one or two, and they cost about the same.
 What costs is running a program, as `expr` and `[` are when bash isn't

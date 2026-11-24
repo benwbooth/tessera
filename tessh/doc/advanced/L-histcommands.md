@@ -23,9 +23,13 @@ words, as bash's do, and the line is shown as it runs. Word designators
 pick words (`:0`, `:n`, `:x-y`, `:x-`, `:$`, `:^`, `:*`, `:%`), and the
 modifiers `:h`, `:t`, `:r`, `:e`, `:p`, `:q`, `:x`, `:s/old/new/`,
 `:gs/old/new/`, `:&` and `:g&` change them. `^old^new^` reruns the last
-command with old replaced by new. **Gap:** no `fc` but `fc -l` (↑ and
-Ctrl+R edit a past command instead), and no history variables
-(`$HISTSIZE`, `$HISTCONTROL`…).
+command with old replaced by new. `fc` edits past commands in
+`$FCEDIT`, `$EDITOR` or vi and runs what's saved, and `fc -s old=new`
+runs one again at once. `$HISTSIZE`, `$HISTFILESIZE`, `$HISTCONTROL`
+(`ignorespace`, `ignoredups`, `ignoreboth`, `erasedups`) and
+`$HISTIGNORE` work as bash's, set as tessh variables (in `rc.tsh`) or in
+the environment. **Gap:** no `$HISTTIMEFORMAT` or `$HISTCMD`, and
+`$HISTFILE` is always tessh's own file.
 
 ```tessh no-run
 cp notes.txt /tmp/backup/

@@ -63,18 +63,14 @@ them as bash would:
 
 - **`eval $code`**: given a bare value, `eval` is Python's; tessh text
   held in a variable runs with `eval "$code"` (chapters 15, 36, A-30).
-- **`set` options** other than `-e`, `-x`, `-v`, `-u`, `-C` (noclobber)
-  and `-o pipefail` (`-f`, `-n`, `ignoreeof` and the rest), and
+- **`set` options** other than `-e`, `-x`, `-v`, `-u`, `-C`, `-f`, `-n`,
+  `-o pipefail` and `-o ignoreeof` (`-a`, `-b`, `-h`, `-k`, `-m`, `-P`, `-t`
+  and the rest), and
   `shopt` (it says so). `set -u` is always on, so `set +u` fails. A
   failing *program* stops a script only in strict mode (`strict`, `set
   -e`, `tessh -e`) or with `(cmd)!` (chapters 32, 33).
 - **`$!`** by that name: `$j.pid`, after `j = cmd &` (chapters 9, 15).
-- **`coproc NAME { … }`**: bash's block form; `coproc NAME -- command
-  args` runs a program (chapter 37).
-- **`time`** on a block: it times one command line; `time.perf_counter`
-  around a block (chapter 16).
 - **`alias`**: none; `@command def` (chapter 25).
-- **`read -i`**: no text put in the edit buffer (chapter 37).
 
 ## Variables
 <!-- help: abs-gaps-variables $UID $RANDOM $LINENO $SECONDS -->
@@ -140,10 +136,10 @@ by design.
 <!-- help: abs-gaps-elsewhere dev-tcp completion history prompt -->
 
 - **`/dev/tcp/host/port`**: not a redirection; Python's `socket` (chapter 29).
-- **Completion**: no `compopt`, and `complete -o filenames` and `-o
-  nospace` are accepted but do nothing (Appendix J).
-- **History**: no `fc` but `fc -l`, and no history variables (`HISTSIZE`,
-  `HISTCONTROL`…) (Appendix L).
+- **Completion**: `complete -o filenames` and `-o nospace` are accepted
+  but do nothing (Appendix J).
+- **History**: no `$HISTTIMEFORMAT` or `$HISTCMD`, and `$HISTFILE` is
+  always tessh's own file (Appendix L).
 - **The prompt** can't be set (`PS1`), and there's no logout file
   (Appendices H, M).
 - **Restricted mode**: none, and with Python underneath it couldn't mean
