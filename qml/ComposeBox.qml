@@ -148,7 +148,9 @@ Rectangle {
     // their metrics say, up to ten lines; then it scrolls.)
     // (The toolbar row (modeTag) on top, the prompt bar under it, then the
     // editor.)
-    implicitHeight: Math.ceil(Math.min(Math.max(edit.contentHeight, lineHeight), 10 * lineHeight)) + flickTop + 9
+    // (A problem with the text goes under it, so the prompt line stays put.)
+    implicitHeight: Math.ceil(Math.min(Math.max(edit.contentHeight, lineHeight), 10 * lineHeight)) + flickTop + 9 + noteH
+    readonly property real noteH: problemNote.visible ? problemNote.height + 4 : 0
     readonly property real flickTop: promptBar.visible ? promptBar.y + promptBar.height + 4 : modeTag.y + modeTag.height + 4
 
     color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
@@ -1072,7 +1074,7 @@ Rectangle {
         anchors.leftMargin: 10 + promptChar.implicitWidth + fm.advanceWidth(" ")
         anchors.rightMargin: 10
         anchors.topMargin: box.flickTop
-        anchors.bottomMargin: 7
+        anchors.bottomMargin: 7 + box.noteH
         contentWidth: width
         contentHeight: edit.contentHeight
         clip: true
@@ -1425,6 +1427,26 @@ Rectangle {
         }
     }
 
+    // A problem with the text (tessh's or the shell's check, the language
+    // server's): under the editor, whole, wrapped; nothing above moves.
+    Text {
+        id: problemNote
+        topPadding: 0.001
+        readonly property string msg: box.problem !== "" ? box.problem : box.lspNote
+        visible: msg !== ""
+        x: flick.x + 0.001
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 5
+        width: box.width - x - 10
+        text: "\u26a0 " + msg
+        color: box.problem !== "" ? box.ansi(9, "#e05a5a") : box.ansi(3, "#e5c07b")
+        wrapMode: Text.Wrap
+        opacity: 0.85
+        font.pixelSize: 10
+        font.weight: Font.DemiBold
+        font.letterSpacing: 0.5
+    }
+
     // The toolbar, a row of its own at the top, over the prompt bar (the
     // editor has the whole width): a problem, or the language / vi mode;
     // the history button and the key switch (Emacs, vi, VS Code).
@@ -1455,20 +1477,18 @@ Rectangle {
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: box.problem !== "" ? "\u26a0 " + box.problem
-                  : box.fetchingLang !== "" ? "getting " + box.fetchingLang + "\u2026"
+            // (Problems with the text are under the editor: problemNote.)
+            text: box.fetchingLang !== "" ? "getting " + box.fetchingLang + "\u2026"
                   : box.aiBusy !== "" ? (box.aiBusy === "fix" ? "fixing the command\u2026" : "writing the command\u2026") + "  esc cancels"
                   : box.aiNote !== "" ? "\u2726 " + box.aiNote
-                  : box.lspNote !== "" ? "\u26a0 " + box.lspNote
                   : ""
-            color: box.problem !== "" ? box.ansi(9, "#e05a5a") : spinner.on ? Theme.accent : (box.aiNote !== "" || box.lspNote !== "") ? box.ansi(3, "#e5c07b") : Theme.textDim
-            // (Errors and notes wrap onto more lines, never cut short: the
-            // prompt bar and editor sit under this row and move down.)
+            color: spinner.on ? Theme.accent : box.aiNote !== "" ? box.ansi(3, "#e5c07b") : Theme.textDim
+            // (Notes wrap onto more lines, never cut short.)
             width: Math.min(implicitWidth, box.width * 0.45)
             wrapMode: Text.Wrap
             HoverHandler { id: noteHover }
-            ToolTip.visible: noteHover.hovered && (box.aiNote !== "" || box.lspNote !== "" || box.problem !== "")
-            ToolTip.text: box.problem !== "" ? box.problem : box.aiNote !== "" ? box.aiNote : box.lspNote
+            ToolTip.visible: noteHover.hovered && box.aiNote !== ""
+            ToolTip.text: box.aiNote
             opacity: 0.75
             font.pixelSize: 10
             font.weight: Font.DemiBold
