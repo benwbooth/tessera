@@ -44,6 +44,7 @@ tessh -c CODE [ARGS…]      run CODE
 tessh -s [ARGS…]           run the script on stdin (also: stdin not a terminal, no FILE)
   -l, --login              first: a login shell (the profile's environment, then login.tsh)
   -i                       first: interactive (accepted; the REPL needs a terminal)
+  -e                       first: strict mode (set -e): a program failing on a line of its own raises
 tessh --check [FILE]       check without running (stdin without FILE); --json for JSON
 tessh --py FILE            print the Python it compiles to
 tessh --kernel -f CONN     the Jupyter kernel
@@ -105,8 +106,11 @@ fn finish(py: Python<'_>, result: Result<(), runner::TesshError>, name: &str) ->
             if e.is_instance_of::<pyo3::exceptions::PyKeyboardInterrupt>(py) {
                 return 130;
             }
+            // (An uncaught CommandFailed exits with the command's status, as
+            // bash's set -e does.)
+            let code = runner::unhandled_command(py, &e).and_then(|_| e.value(py).getattr("status").ok()?.extract::<i32>().ok()).filter(|c| *c != 0).unwrap_or(1);
             runner::report(py, runner::TesshError::Py(e), name);
-            1
+            code
         }
         Err(e) => {
             runner::report(py, e, name);
@@ -163,6 +167,9 @@ fn run(opts: login::Opts, args: Vec<String>) -> i32 {
             a.insert(0, "-l".into());
         }
         return login::run_sh_c(&a);
+    }
+    if opts.strict {
+        runtime::STRICT.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if opts.login {
         login::import_profile();

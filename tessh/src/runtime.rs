@@ -124,6 +124,23 @@ class Failed:
     def __repr__(self):
         return f"Failed({self.error!r})"
 
+class CommandFailed(Exception):
+    """What (cmd)! raises when cmd fails, and what a failing program on a
+    line of its own raises in strict mode: .status, .stderr (what it said,
+    when that was kept) and .command (its line)."""
+    def __init__(self, status=1, stderr="", command=""):
+        super().__init__(status, stderr, command)
+        self.status = status
+        self.stderr = stderr
+        self.command = command
+    def __str__(self):
+        s = f"{self.command} failed" if self.command else "command failed"
+        s += f" (status {self.status})"
+        err = (self.stderr or "").strip()
+        return f"{s}: {err}" if err else s
+    def __repr__(self):
+        return f"CommandFailed({self.status!r}, {self.stderr!r}, {self.command!r})"
+
 # ---- pretty printing ------------------------------------------------------
 
 _notebook = False   # (the kernel sets it: cards show color)
@@ -989,6 +1006,51 @@ fn failed(py: Python<'_>, e: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     Ok(prelude(py)?.getattr("Failed")?.call1((e,))?.unbind())
 }
 
+/// Strict mode (`strict`, `set -e`, `tessh -e`): a program that fails on a
+/// line of its own raises CommandFailed, as a builtin there already stops
+/// the script.
+pub static STRICT: AtomicBool = AtomicBool::new(false);
+
+fn command_failed(py: Python<'_>, code: i32, err: &str, cmd: &str) -> PyErr {
+    match prelude(py).and_then(|p| p.getattr("CommandFailed")).and_then(|c| c.call1((code, err, cmd))) {
+        Ok(e) => PyErr::from_value(e),
+        Err(e) => e,
+    }
+}
+
+/// (x)!: x, unless it failed. A Failed raises its exception again; a
+/// command's result with a nonzero status raises CommandFailed (status,
+/// what it said on stderr when that was kept, and cmd, its line).
+#[pyfunction]
+#[pyo3(signature = (v, cmd=""))]
+fn ensure<'py>(py: Python<'py>, v: Bound<'py, PyAny>, cmd: &str) -> PyResult<Bound<'py, PyAny>> {
+    let p = prelude(py)?;
+    if v.is_instance(&p.getattr("Failed")?)? {
+        return Err(PyErr::from_value(v.getattr("error")?));
+    }
+    if v.is_instance(&p.getattr("Output")?)? {
+        let code: i32 = v.getattr("code")?.extract()?;
+        if code != 0 {
+            let err: String = v.getattr("err")?.extract().unwrap_or_default();
+            return Err(command_failed(py, code, &err, cmd));
+        }
+    }
+    Ok(v)
+}
+
+/// After a program or pipe on a line of its own: in strict mode, a failure
+/// raises CommandFailed.
+fn strict_check(py: Python<'_>, v: Py<PyAny>, cmd: &str) -> PyResult<Py<PyAny>> {
+    if STRICT.load(Ordering::SeqCst) {
+        let code = STATUS.load(Ordering::SeqCst);
+        if code != 0 {
+            let err: String = v.bind(py).getattr("err").and_then(|e| e.extract()).unwrap_or_default();
+            return Err(command_failed(py, code, &err, cmd));
+        }
+    }
+    Ok(v)
+}
+
 /// `! cmd`: its status the other way round, 1 for success and 0 for
 /// failure, $? too, as bash's !. (Not a command: Python's not.)
 #[pyfunction]
@@ -1244,11 +1306,22 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
     }
     let mut all = vec![head_s];
     all.extend(words);
+    let line = shell_join(&all);
     let stage = Stage { kind: "cmd", words: all, redirs: red, obj: None };
     if mode == "stage" {
         return Ok(Py::new(py, stage)?.into_any());
     }
-    run_stages(py, vec![stage], mode)
+    let r = run_stages(py, vec![stage], mode)?;
+    if unchecked { strict_check(py, r, &line) } else { Ok(r) }
+}
+
+/// Words as one command line, quoted where they need it (for messages).
+fn shell_join(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|w| if !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%~".contains(c)) { w.clone() } else { format!("'{}'", w.replace('\'', "'\\''")) })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Run a pipe: programs, Python calls (given what came before as their last
@@ -1256,6 +1329,9 @@ fn cmd<'py>(py: Python<'py>, ns: Bound<'py, PyDict>, head: Bound<'py, PyAny>, ar
 #[pyfunction]
 #[pyo3(signature = (stages, mode="attach"))]
 fn pipe(py: Python<'_>, stages: Vec<Bound<'_, PyAny>>, mode: &str) -> PyResult<Py<PyAny>> {
+    // ("stmt": a pipe on a line of its own, which strict mode checks.)
+    let unchecked = mode == "stmt";
+    let mode = if unchecked { "attach" } else { mode };
     let mut ss = vec![];
     for s in stages {
         match s.extract::<PyRef<Stage>>() {
@@ -1263,7 +1339,9 @@ fn pipe(py: Python<'_>, stages: Vec<Bound<'_, PyAny>>, mode: &str) -> PyResult<P
             Err(_) => ss.push(Stage { kind: "value", words: vec![], redirs: vec![], obj: Some(s.unbind()) }),
         }
     }
-    run_stages(py, ss, mode)
+    let line = ss.iter().map(|s| if s.kind == "cmd" { shell_join(&s.words) } else { "…".into() }).collect::<Vec<_>>().join(" | ");
+    let r = run_stages(py, ss, mode)?;
+    if unchecked { strict_check(py, r, &line) } else { Ok(r) }
 }
 
 fn run_stages(py: Python<'_>, stages: Vec<Stage>, mode: &str) -> PyResult<Py<PyAny>> {
@@ -2396,7 +2474,7 @@ fn dump_env(b64_env: &str, b64_pwd: &str) -> PyResult<()> {
 
 // ---- builtins ------------------------------------------------------------------------------
 
-pub const COMMAND_BUILTINS: &[&str] = &["cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg", "need", "view"];
+pub const COMMAND_BUILTINS: &[&str] = &["cd", "pushd", "popd", "dirs", "export", "unset", "exit", "source", "which", "glob", "jobs", "fg", "bg", "need", "view", "strict"];
 
 pub fn is_command_builtin(n: &str) -> bool {
     COMMAND_BUILTINS.contains(&n)
@@ -2428,6 +2506,7 @@ impl Builtin {
             "fg" => "fg [n]\n\nBring background job n (the latest without one) to the foreground and wait for it.",
             "bg" => "bg [n]\n\nLet a stopped job n (the latest without one) run on in the background.",
             "view" => crate::viewer::USAGE,
+            "strict" => "strict [on | off]\n\nStrict mode, bash's set -e: a program or pipe that fails on a line of its own raises CommandFailed (status, stderr, command), so the script stops with \"Unhandled error\" unless a try catches it. On without an argument; strict off ends it. set -e / set +e and tessh -e say the same. A failure something checks (||, &&, if, r = (cmd)) doesn't raise.",
             "need" => "need package \"package>=version\" …\n\nPyPI packages this script, cell or REPL uses: uv installs them once into a cache, and they import from the next line. Quote a version range, so its > isn't a redirection.",
             _ => "A tessh builtin.",
         }
@@ -2614,6 +2693,15 @@ impl Builtin {
                 for a in &words {
                     setenv(py, a, None)?;
                 }
+                Ok(none)
+            }
+            "strict" => {
+                let on = match words.first().map(String::as_str) {
+                    None | Some("on") => true,
+                    Some("off") => false,
+                    Some(w) => return Err(PyTypeError::new_err(format!("strict: on or off, not {w}"))),
+                };
+                STRICT.store(on, Ordering::SeqCst);
                 Ok(none)
             }
             "exit" => {
@@ -2810,6 +2898,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         wrap_pyfunction!(status, &m)?,
         wrap_pyfunction!(negate, &m)?,
         wrap_pyfunction!(failed, &m)?,
+        wrap_pyfunction!(ensure, &m)?,
         wrap_pyfunction!(g, &m)?,
         wrap_pyfunction!(t, &m)?,
         wrap_pyfunction!(cmd, &m)?,
@@ -2829,6 +2918,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     }
     m.add("Output", prelude(py)?.getattr("Output")?)?;
     m.add("Failed", prelude(py)?.getattr("Failed")?)?;
+    m.add("CommandFailed", prelude(py)?.getattr("CommandFailed")?)?;
     m.add("pick", prelude(py)?.getattr("pick")?)?;
     for n in CORE {
         m.add(*n, prelude(py)?.getattr(*n)?)?;
@@ -2854,7 +2944,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
 /// The names every tessh namespace gets.
 pub fn install(py: Python<'_>, ns: &Bound<'_, PyDict>) -> PyResult<()> {
     let m = py.import("__tessh__")?;
-    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "Failed", "help", "print", "pretty", "Path", "Glob"].iter()).chain(CORE.iter()) {
+    for n in COMMAND_BUILTINS.iter().chain(["command", "env", "Output", "Failed", "CommandFailed", "help", "print", "pretty", "Path", "Glob"].iter()).chain(CORE.iter()) {
         if !ns.contains(*n)? {
             ns.set_item(*n, m.getattr(*n)?)?;
         }

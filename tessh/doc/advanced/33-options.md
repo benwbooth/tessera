@@ -6,9 +6,11 @@ Bash's options change how the shell itself behaves: `set -o name` or `set
 letters work after the `#!` line (`#!/bin/bash -x`) or on the command line
 (`bash -v script`). `shopt -s name` sets the newer ones.
 
-tessh has no such switches. Its behavior is fixed, mostly at what bash's
-careful scripters turn on, and Python modules cover the rest. A `set -x`
-line carried over is an error saying so (`set` alone is Python's set type).
+tessh has one such switch, strict mode: `strict` / `strict off`, also
+spelled `set -e` / `set +e`, `set -o errexit` and `tessh -e`. The rest of
+its behavior is fixed, mostly at what bash's careful scripters turn on, and
+Python modules cover the rest. Any other `set -x` line carried over is an
+error saying so (`set` alone is Python's set type).
 
 ```bash no-run
 #!/bin/bash
@@ -36,7 +38,7 @@ Bash's options, and where tessh stands on each:
 | `-b` | notify | none; `jobs` shows finished jobs |
 | `-c …` | (run a string) | `tessh -c 'code' args…` |
 | `checkjobs` | | none |
-| `-e` | errexit | Half: a builtin (`cd`, `pushd`, `source`…) that fails on a line of its own stops the script, and so does a Python error; a failing program doesn't. Check it with `cmd || exit 1`, `if cmd` or `$?`, and turn a Python error into a false value with `(expr)?` |
+| `-e` | errexit | `strict` (or `set -e`, `tessh -e`): a program or pipe failing on a line of its own raises `CommandFailed`; `strict off` / `set +e` ends it. Without it a builtin (`cd`, `pushd`, `source`…) failing on a line of its own still stops the script, and so does a Python error. One command at a time: `(cmd)!` raises if `cmd` fails, and `(expr)?` turns a Python error into a false value |
 | `-f` | noglob | none needed: a variable's value is never globbed, and a quoted pattern is text |
 | `globstar` | | always on: `**/*.py` searches the subfolders |
 | `-i` | interactive | `tessh` alone is the REPL |

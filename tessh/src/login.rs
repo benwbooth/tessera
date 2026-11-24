@@ -26,9 +26,11 @@ pub struct Opts {
     pub login: bool,
     pub interactive: bool,
     pub stdin: bool,
+    /// -e: strict mode (bash's set -e).
+    pub strict: bool,
 }
 
-/// The shell flags before the rest (`-l`, `--login`, `-i`, `-s`, together as
+/// The shell flags before the rest (`-l`, `--login`, `-i`, `-s`, `-e`, together as
 /// in `-li`; `-lc CMD` is `-l -c CMD`), and a `-` before argv[0].
 pub fn parse(argv0: &str, mut args: Vec<String>) -> (Opts, Vec<String>) {
     let mut o = Opts { login: std::path::Path::new(argv0).file_name().map_or(argv0, |n| n.to_str().unwrap_or("")).starts_with('-'), ..Default::default() };
@@ -40,7 +42,7 @@ pub fn parse(argv0: &str, mut args: Vec<String>) -> (Opts, Vec<String>) {
             continue;
         }
         let Some(flags) = a.strip_prefix('-') else { break };
-        if flags.is_empty() || flags.starts_with('-') || !flags.chars().all(|c| "lisc".contains(c)) || flags == "c" {
+        if flags.is_empty() || flags.starts_with('-') || !flags.chars().all(|c| "lisec".contains(c)) || flags == "c" {
             break;
         }
         // (c only last: -lc CMD; -cl isn't a cluster of these.)
@@ -52,6 +54,7 @@ pub fn parse(argv0: &str, mut args: Vec<String>) -> (Opts, Vec<String>) {
                 'l' => o.login = true,
                 'i' => o.interactive = true,
                 's' => o.stdin = true,
+                'e' => o.strict = true,
                 _ => {}
             }
         }
@@ -178,6 +181,7 @@ mod tests {
         assert!(p("-tessh", &[]).0.login);
         assert_eq!(p("tessh", &["-l"]).0, Opts { login: true, ..Default::default() });
         assert_eq!(p("tessh", &["--login", "-i"]).0, Opts { login: true, interactive: true, ..Default::default() });
+        assert_eq!(p("tessh", &["-e", "x.tsh"]), (Opts { strict: true, ..Default::default() }, vec!["x.tsh".into()]));
         assert_eq!(p("tessh", &["-li", "x.tsh"]), (Opts { login: true, interactive: true, ..Default::default() }, vec!["x.tsh".into()]));
         assert_eq!(p("tessh", &["-lc", "ls"]), (Opts { login: true, ..Default::default() }, vec!["-c".into(), "ls".into()]));
         assert_eq!(p("tessh", &["-c", "ls"]).1, vec!["-c".to_string(), "ls".into()]);

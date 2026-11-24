@@ -1251,7 +1251,7 @@ print $Registry.names
 ```
 
 ## Errors
-<!-- help: errors error exceptions exception try except finally raise assert traceback -->
+<!-- help: errors error exceptions exception try except finally raise assert traceback strict CommandFailed bang errexit -->
 
 Commands fail as in bash, with an exit status: a program (`mkdir`, `ls`,
 `grep`) and tessh's builtins (`cd`, `pushd`, `popd`, `export`, `which`…)
@@ -1276,7 +1276,8 @@ A builtin that fails on a line of its own, where nothing checks it, stops
 the script with its error, the way a Python error does. Bash would go on
 in the wrong folder, and a `cd build` that failed before `rm -rf *` is how
 whole home folders go. A program on a line of its own that fails doesn't
-stop the script, as in bash.
+stop the script, as in bash, unless strict mode is on (`strict` or
+`set -e`, below).
 
 Python code fails with an exception. Put `?` after a parenthesized
 expression to turn one into a value: `(expr)?` is the expression's value
@@ -1390,6 +1391,59 @@ anything goes
 
 Where Python wants a class (after `except`, as a base), a bareword is the
 name. Elsewhere pass a class with `$`: `isinstance $x $int`.
+
+`!` goes the other way from `?`: put it after a parenthesized command or
+expression, `(cmd)!` or `$(cmd)!`, and a failure becomes an exception. A
+command with a nonzero status raises `CommandFailed`, which holds the
+`.status`, the `.stderr` (a builtin's message; an attached program's goes
+to the terminal) and the `.command`. A `Failed` from `?` raises its
+exception again. Anything else passes through, so `(0)!` is `0`.
+
+```tessh
+name = $(echo world)!
+print hello $name
+try
+  (cd /no/such/folder 2>/dev/null)!
+  print never
+except CommandFailed as e
+  print $e.command "->" $e.status
+```
+
+```output
+hello world
+cd /no/such/folder 2>/dev/null -> 1
+```
+
+Nothing catching it, a `CommandFailed` stops the script with one line,
+`tessh: build.tsh:4: Unhandled error: make failed (status 2)`, and the
+script exits with the command's status. The `!` has to be glued to the `)`:
+`! cmd` is still not, `!=` still compares, and `wow!` is a word. For a chain
+put it after the part to check, `a && (b)!`, or around it all, `(a && b)!`.
+
+Strict mode does that for every line, as bash's `set -e` does: after
+`strict` (or `set -e`, or `tessh -e` in the `#!` line,
+`#!/usr/bin/env -S tessh -e`), a program or pipe that fails on a line of
+its own raises `CommandFailed`. A failure something checks doesn't: `||`,
+`&&`, `if`, `! cmd`, `r = (cmd)`. `strict off` (or `set +e`) ends it.
+
+```tessh
+strict
+false || print "checked, so it goes on"
+try
+  ls /no/such/folder 2>/dev/null
+  print never
+except CommandFailed as e
+  print stopped at $e.command
+strict off
+false
+print "off again"
+```
+
+```output
+checked, so it goes on
+stopped at ls /no/such/folder
+off again
+```
 
 Errors point at tessh lines: a traceback shows the tessh source with carets
 under the part that failed.

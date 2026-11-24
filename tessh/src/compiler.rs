@@ -1153,6 +1153,7 @@ impl<'py, 's> Compiler<'py, 's> {
             Kind::Num(t) => Ok(Res::e(self.c(t.as_str())?)),
             Kind::Str { value, .. } => Ok(Res::e(self.c(value.as_str())?)),
             Kind::Word(_) if try_inner(x).is_some() => self.try_value(try_inner(x).unwrap()),
+            Kind::Word(_) if bang_inner(x).is_some() => self.ensure_value(bang_inner(x).unwrap()),
             Kind::Word(ps) => {
                 let r = self.word_value(x, false)?;
                 let texts: Vec<&String> = ps.iter().filter_map(|p| if let Part::Text(t) = p { Some(t) } else { None }).collect();
@@ -1201,7 +1202,11 @@ impl<'py, 's> Compiler<'py, 's> {
             stages.push(self.compile_stage(seg, if last { children } else { &[] }, k == 0)?);
         }
         let (stmts, exprs) = self.gather_e(stages)?;
-        let mode = if ctx == Ctx::Value { "capture" } else { "attach" };
+        let mode = match ctx {
+            Ctx::Value => "capture",
+            Ctx::Stmt => "stmt",
+            _ => "attach",
+        };
         let e = self.rcall("pipe", vec![self.list_node(exprs)?, self.c(mode)?])?;
         let r = Res::s(stmts, self.at(e, &segs[0][0]));
         if segs.iter().any(|s| self.has_procsub(s, &[])) || self.has_procsub(&[], children) {
@@ -1587,7 +1592,18 @@ impl<'py, 's> Compiler<'py, 's> {
         // (set -e, set -x, set -euo pipefail: bash's options, which tessh
         // hasn't; Python's set would make a set of the words and go on.)
         if head.is_sym("set") && items.get(1).and_then(|x| x.sym_name()).is_some_and(|n| n.len() > 1 && (n.starts_with('-') || n.starts_with('+')) && !is_number(n)) {
-            return err("tessh has no set options (set -e, -x, -u, -o pipefail): see help abs-options for what to do instead", Some(head));
+            // (set -e / set +e, set -o errexit: strict mode on or off.)
+            let words: Vec<&str> = items[1..].iter().filter_map(|x| x.sym_name()).collect();
+            let on = match words.as_slice() {
+                ["-e"] | ["-o", "errexit"] => Some("on"),
+                ["+e"] | ["+o", "errexit"] => Some("off"),
+                _ => None,
+            };
+            if let (Some(on), true) = (on, words.len() == items.len() - 1) {
+                let f = [Form::sym_at("strict", &[], head.pos.clone()), Form::sym_at(on, &[], items[1].pos.clone())];
+                return self.compile_command(&f, &[], if ctx == Ctx::Value { "capture" } else { "attach" });
+            }
+            return err("tessh has no set options but -e (set -x, -u, -o pipefail): see help abs-options for what to do instead", Some(head));
         }
         let mode = if ctx == Ctx::Value { "capture" } else { "attach" };
         // (True, False, None, ... alone: the constant.)
@@ -1977,6 +1993,7 @@ impl<'py, 's> Compiler<'py, 's> {
                 }
             }
             Kind::Word(_) if try_inner(x).is_some() => return self.try_value(try_inner(x).unwrap()),
+            Kind::Word(_) if bang_inner(x).is_some() => return self.ensure_value(bang_inner(x).unwrap()),
             // (A word with a glob in it: a Glob of what it spells.)
             Kind::Word(_) if is_glob_word(x) => {
                 let w = self.word_value(x, false)?;
@@ -3175,6 +3192,19 @@ impl<'py, 's> Compiler<'py, 's> {
         self.try_res(r, g)
     }
 
+    /// (expr)!: expr's value, unless it failed: a command's nonzero status
+    /// raises CommandFailed, and a Failed (from ? or ||?) raises its
+    /// exception again. (The mirror of ?.)
+    fn ensure_value(&mut self, g: &Form) -> R<Res<'py>> {
+        let r = self.compile_value(g, Ctx::Value)?;
+        let line = match &g.kind {
+            Kind::Group { items, .. } => items.iter().map(crate::forms::show).collect::<Vec<_>>().join(" "),
+            _ => crate::forms::show(g),
+        };
+        let e = self.rcall("ensure", vec![self.val(r.expr)?, self.c(line.as_str())?])?;
+        Ok(Res::s(r.stmts, self.at(e, g)))
+    }
+
     /// r's statements and value in a try: an exception (but a NameError)
     /// gives a Failed instead.
     fn try_res(&mut self, r: Res<'py>, at: &Form) -> R<Res<'py>> {
@@ -4019,6 +4049,21 @@ fn try_inner(x: &Form) -> Option<&Form> {
     let Kind::Word(ps) = &x.kind else { return None };
     let [Part::F(f), Part::Text(q)] = ps.as_slice() else { return None };
     if q != "?" {
+        return None;
+    }
+    let g = match &f.kind {
+        Kind::Interp { expr, conv: None, spec: None, braced: false } => expr.as_ref(),
+        _ => f,
+    };
+    matches!(g.kind, Kind::Group { open: '(', .. }).then_some(g)
+}
+
+/// `(expr)!` and `$(cmd)!`: the group in it. Glued and after a group only:
+/// `! cmd` and `!$x` are not, `!=` compares, and `wow!` is a word.
+fn bang_inner(x: &Form) -> Option<&Form> {
+    let Kind::Word(ps) = &x.kind else { return None };
+    let [Part::F(f), Part::Text(q)] = ps.as_slice() else { return None };
+    if q != "!" {
         return None;
     }
     let g = match &f.kind {

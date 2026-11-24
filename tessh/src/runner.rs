@@ -310,6 +310,22 @@ pub fn check(py: Python<'_>, text: &str, filename: &str) -> Vec<(u32, u32, u32, 
     vec![]
 }
 
+/// An uncaught CommandFailed: the line it was raised on (the last frame's)
+/// and its message.
+pub fn unhandled_command(py: Python<'_>, e: &PyErr) -> Option<(Option<u32>, String)> {
+    let cls = py.import("__tessh__").ok()?.getattr("CommandFailed").ok()?;
+    if !e.value(py).is_instance(&cls).unwrap_or(false) {
+        return None;
+    }
+    let mut line = None;
+    let mut tb = e.traceback(py).map(|t| t.into_any());
+    while let Some(t) = tb {
+        line = t.getattr("tb_lineno").ok().and_then(|l| l.extract::<u32>().ok()).or(line);
+        tb = t.getattr("tb_next").ok().filter(|n| !n.is_none());
+    }
+    Some((line, e.value(py).str().ok()?.to_string()))
+}
+
 /// Print an error: tessh's own as file:line:col, a Python one as a traceback
 /// (its frames point at tessh lines).
 pub fn report(py: Python<'_>, e: TesshError, filename: &str) {
@@ -317,6 +333,16 @@ pub fn report(py: Python<'_>, e: TesshError, filename: &str) {
         TesshError::Py(e) => {
             if e.is_instance_of::<pyo3::exceptions::PySyntaxError>(py) {
                 eprintln!("tessh: {filename}: {}", e.value(py));
+                return;
+            }
+            // (A CommandFailed nothing caught, from ! or strict mode: one
+            // line, where it happened, without a traceback.)
+            if let Some(line) = unhandled_command(py, &e) {
+                let _ = py.import("sys").and_then(|s| s.getattr("stdout")).and_then(|o| o.call_method0("flush"));
+                match line.0 {
+                    Some(l) => eprintln!("tessh: {filename}:{l}: Unhandled error: {}", line.1),
+                    None => eprintln!("tessh: {filename}: Unhandled error: {}", line.1),
+                }
                 return;
             }
             e.print(py);

@@ -10,9 +10,9 @@ and puts carets under the part that failed; `tessh --py` shows the Python a
 script becomes; and Python's own tools (`pdb`, `sys.settrace`, `inspect`,
 `atexit`, `signal`) work on tessh scripts and report tessh line numbers.
 
-What tessh does not have is bash's switches: `set -e`, `set -u`, `set -x`,
+What tessh does not have is most of bash's switches: `set -u`, `set -x`,
 `set -v` and `trap` don't exist (a `set -x` line is an error that says
-so). This chapter shows what to use instead.
+so). `set -e` is tessh's strict mode (`strict`, chapter 33). This chapter shows what to use instead.
 
 ### Example 32-1. A buggy script (`ex74.sh`)
 
@@ -264,8 +264,8 @@ shows what passes through at that point, in tessh as in bash.
   always is.
 
 `set -x` carried over from bash is an error in tessh ("tessh has no set
-options"), as are `set -e`, `set -u` and the rest, so a script doesn't
-quietly run without what it asked for. (`set` alone is Python's set type.)
+options but -e"), as are `set -u` and the rest, so a script doesn't
+quietly run without what it asked for. `set -e` works: it's strict mode. (`set` alone is Python's set type.)
 
 ```bash no-run
 set -u   # Or   set -o nounset

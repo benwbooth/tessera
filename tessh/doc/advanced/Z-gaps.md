@@ -33,7 +33,7 @@ them as bash would:
 - Output is line-buffered, so it stays in order with programs' when piped.
 - Errors instead of silent mistakes: `if [ -n "$x" ]` (a list, always
   true), a `for`/`while`/`if` with no indented block (bash's missing
-  `done`), `set -e`/`set -x`, a method not called given to a program.
+  `done`), `set -x`, a method not called given to a program.
 
 ## Builtins
 <!-- help: abs-gaps-builtins read eval exec trap wait type readonly -->
@@ -49,9 +49,10 @@ them as bash would:
   script (reassign `$sys.stdout`, or `os.dup2`) (chapters 15, 20).
 - **`trap`**: none. `try`/`finally`, `atexit`, `signal.signal` and
   `KeyboardInterrupt` do its jobs (chapter 32).
-- **`set -e`, `-u`, `-x`, `-v`, `-o pipefail`, `shopt`**: none (a `set -x`
+- **`set -u`, `-x`, `-v`, `-o pipefail`, `shopt`**: none (a `set -x`
   line is an error). Python errors stop a script and unset names are
-  always errors; a failing *program* doesn't stop one (no errexit), and a
+  always errors; a failing *program* stops one only in strict mode
+  (`strict`, `set -e`, `tessh -e`) or with `(cmd)!`, and a
   pipeline's status is its last stage's (no pipefail, no `$PIPESTATUS`).
   `sys.settrace` traces (chapters 32, 33).
 - **`wait`** for all jobs, **`$!`**, a Job's process ID, `kill %1`,

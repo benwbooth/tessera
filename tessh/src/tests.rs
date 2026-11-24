@@ -1006,3 +1006,72 @@ fn catching_or_and() {
     assert_eq!(get::<i64>(&ns, "k"), 9);
     assert_eq!(out, "yes\n");
 }
+
+#[test]
+fn bang_turns_a_failure_into_an_exception() {
+    let (ns, out) = run(concat!(
+        "a = (echo hi)!\n",
+        "d = $(echo yo)!\n",
+        "e = (1 + 2)!\n",
+        "z = (0)!\n",
+        "try\n  (false)!\n  print never\nexcept CommandFailed as x\n  print caught $x.status $x.command\n",
+        "err = try\n  (cd /no/such/folder 2>/dev/null)!\nexcept CommandFailed as x\n  $x.stderr\n",
+        "try\n  ((int 'x')?)!\nexcept ValueError\n  print value\n",
+        "try\n  (true && false)!\nexcept CommandFailed\n  print chain\n",
+        "true && (true)! && print both\n",
+        "ne = 1 != 2\nprint wow!\n! false && print negated\n",
+    ));
+    assert_eq!(get::<String>(&ns, "a"), "hi");
+    assert_eq!(get::<String>(&ns, "d"), "yo");
+    assert_eq!(get::<i64>(&ns, "e"), 3);
+    assert_eq!(get::<i64>(&ns, "z"), 0, "false but not a failure");
+    assert!(get::<String>(&ns, "err").contains("no/such/folder"));
+    assert!(get::<bool>(&ns, "ne"));
+    assert_eq!(out, "caught 1 false\nvalue\nchain\nboth\nwow!\nnegated\n");
+}
+
+#[test]
+fn uncaught_bang_reports_unhandled_error() {
+    let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    Python::attach(|py| {
+        let ns = crate::runner::new_namespace(py, "__main__", vec![]).unwrap();
+        let r = crate::runner::run_source(py, "x = 1\n(sh -c 'exit 3')!\nafter = 1", &ns, "<test>", false);
+        let Err(crate::runner::TesshError::Py(e)) = r else { panic!("should raise") };
+        let (line, msg) = crate::runner::unhandled_command(py, &e).expect("a CommandFailed");
+        assert_eq!(line, Some(2));
+        assert!(msg.contains("status 3"), "{msg}");
+        assert!(ns.get_item("after").unwrap().is_none());
+    });
+}
+
+#[test]
+fn strict_mode_stops_on_a_failing_program() {
+    use std::sync::atomic::Ordering;
+    let _g = crate::runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    struct Off;
+    impl Drop for Off {
+        fn drop(&mut self) {
+            crate::runtime::STRICT.store(false, Ordering::SeqCst);
+        }
+    }
+    let _off = Off;
+    Python::attach(|py| {
+        let fails = |src: &str| {
+            let ns = crate::runner::new_namespace(py, "__main__", vec![]).unwrap();
+            let r = crate::runner::run_source(py, src, &ns, "<test>", false);
+            crate::runtime::STRICT.store(false, Ordering::SeqCst);
+            let failed = match &r {
+                Err(crate::runner::TesshError::Py(e)) => crate::runner::unhandled_command(py, e).is_some(),
+                _ => false,
+            };
+            (failed, ns.get_item("after").unwrap().is_some())
+        };
+        assert_eq!(fails("strict\ntrue\nfalse\nafter = 1"), (true, false));
+        assert_eq!(fails("set -e\nfalse\nafter = 1"), (true, false));
+        assert_eq!(fails("set -o errexit\ntrue | false\nafter = 1"), (true, false));
+        // (What something checks doesn't raise, nor does anything after strict off.)
+        assert_eq!(fails("strict\nfalse || true\nif false\n  1\nr = (false)\n! true\nstrict off\nfalse\nafter = 1"), (false, true));
+        assert_eq!(fails("set -e\nset +e\nfalse\nafter = 1"), (false, true));
+        assert_eq!(fails("strict\ntry\n  false\nexcept CommandFailed as e\n  after = $e.status"), (false, true));
+    });
+}

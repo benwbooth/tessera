@@ -183,6 +183,41 @@ if git diff --quiet
 files = (ls *.py).lines
 ```
 
+### Failures and exceptions
+
+A program fails with a status and Python fails with an exception. Four
+forms convert between the two:
+
+| Written | Meaning |
+|---|---|
+| `(expr)?` | `expr`'s value, or, if it raised, a `Failed` (false, the exception as `.error`), `$?` 1. A `NameError` still raises |
+| `a \|\|? b`, `a &&? b` | `(a)? \|\| b`, `(a)? && b` |
+| `(expr)!`, `$(cmd)!` | `expr`'s value, unless it failed: a command result with a nonzero status raises `CommandFailed`, and a `Failed` raises its exception again. Any other value, false ones too, passes through |
+| `strict` / `strict off` | strict mode: a program or pipe that fails on a line of its own raises `CommandFailed`. `set -e` / `set +e`, `set -o errexit` and `tessh -e` say the same |
+
+`CommandFailed` is an `Exception` with `.status`, `.stderr` (what the
+command said, when it was kept: a builtin's message, not an attached
+program's) and `.command` (its line). Uncaught, it ends the script with
+`tessh: file:line: Unhandled error: false failed (status 1)` and no traceback,
+and the script exits with the command's status.
+
+The `!` is glued to a closing parenthesis and only there. `! cmd` and `!$x`
+are still not, `!=` still compares, and `wow!` is still a word. There's no
+`&&!` or `||!`: `a && (b)!` and `(a && b)!` cover them.
+
+A builtin (`cd`, `pushd`, `source`…) that fails on a line of its own stops
+the script in any mode. In strict mode programs and pipes do too. A failure
+that something checks never raises: `cmd || …`, `cmd && …`, `if cmd`,
+`! cmd`, `r = (cmd)`.
+
+```tessh
+cfg = $(cat config.toml)!          # raises if there's no config.toml
+try
+  (make test)!
+except CommandFailed as e
+  print "tests failed with status" $e.status
+```
+
 ## 4. Infix operators
 
 From the loosest binding to the tightest:
@@ -330,6 +365,7 @@ variable). `{1 2 3}` is a set, `()` an empty tuple, and `(1, 2)` a tuple.
 | `a \| b` | pipe `a`'s output into `b` |
 | `a && b`, `a \|\| b` | run `b` if `a` succeeded (failed) |
 | `a ; b` | one after the other |
+| `(cmd)!` | raise `CommandFailed` if `cmd` fails (see "Failures and exceptions") |
 | `cmd &` | in the background (the value is a `Job`; `jobs` lists them) |
 | `>f` `>>f` `<f` `2>f` `2>>f` `&>f` `2>&1` `>&2` | redirections. Glued to the file they work anywhere. Spaced (`> f`) they work in command mode only |
 
@@ -475,6 +511,7 @@ and tessh warns when it isn't met.
   applied before each prompt.
 - `tessh file.tsh args…` runs a script (`#!/usr/bin/env tessh` works).
 - `tessh -c 'code'` runs a string.
+- `tessh -e …` runs it in strict mode (bash's `set -e`): `#!/usr/bin/env -S tessh -e`.
 - `tessh --check [file]` checks without running anything except macro
   definitions. It prints `line:col: message` per problem and exits 1 if there
   are any. `--check --json` prints `[{"line", "col", "end_col", "message"}]`.
