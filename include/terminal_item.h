@@ -409,6 +409,7 @@ private:
     QTimer* m_openTimer = nullptr;
     QTimer* m_resizeTimer = nullptr;
     bool m_resizeWhenShown = false;     // resized while hidden: done when shown
+    bool m_openWhenShown = false;       // a reattach while hidden: done when shown
     QTimer* m_smooth = nullptr;       // (unused)
     qreal m_smoothPending = 0;
     qreal m_decay = 0.95;             // momentum kept per 16 ms frame

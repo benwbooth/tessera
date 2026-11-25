@@ -338,6 +338,10 @@ void TerminalItem::itemChange(ItemChange change, const ItemChangeData& value)
     }
     // (After the layouts around it have settled: a moment after it's shown.)
     if (change == ItemVisibleHasChanged && value.boolValue && m_resizeWhenShown) m_resizeTimer->start();
+    if (change == ItemVisibleHasChanged && value.boolValue && m_openWhenShown) {
+        m_openWhenShown = false;
+        m_openTimer->start();
+    }
     // (Shown again (a notebook card's terminal app moved between its card and
     // the whole pane): all of it drawn afresh, as focus does; what changed
     // while it was hidden isn't all in the next frame.)
@@ -397,6 +401,14 @@ void TerminalItem::updateMetrics()
 void TerminalItem::open()
 {
     if (m_session || m_exited || !m_complete || !m_ready) return;
+    // (Reattaching a session in a tab not shown: its size there means
+    // nothing, and the daemon would rewrap the whole screen and scrollback
+    // to it, for good (what it sends back has hard line ends). Done when
+    // it's shown, at its real size.)
+    if (!m_attachId.isEmpty() && !isVisible()) {
+        m_openWhenShown = true;
+        return;
+    }
     const int cols = qMax(2, int((width() * m_dpr - 2 * m_pad) / m_cw));
     const int rows = qMax(1, int((height() * m_dpr - 2 * m_pad) / m_ch));
     try {
