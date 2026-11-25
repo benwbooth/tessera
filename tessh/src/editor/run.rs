@@ -288,6 +288,10 @@ impl Editor {
             let ready = event::poll(Duration::from_millis(wait)).unwrap_or(false);
             if ready {
                 match event::read() {
+                    Ok(Event::Key(k)) if self.term.late_key(&k) => {
+                        keylog(&format!("late answer {:?} {:?}", k.code, k.modifiers));
+                        self.ed.dirty = true;
+                    }
                     Ok(Event::Key(k)) => {
                         keylog(&format!("tty {:?} {:?} {:?}", k.code, k.modifiers, k.kind));
                         // (Any key: the mouse is the editor's again.)
