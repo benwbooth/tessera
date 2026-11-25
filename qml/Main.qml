@@ -148,6 +148,8 @@ ApplicationWindow {
         id: paneComp
         TerminalPane {
             id: tp
+            // (Kept across restarts with the layout.)
+            onInputHiddenChanged: if (win.startupDone) layoutSaver.restart()
             readonly property var prof: win.profileFor(profileName)
             themeJson: JSON.stringify(win.themeFor(prof))
             fontFamily: prof.font_family
@@ -950,7 +952,7 @@ ApplicationWindow {
     function serializeNode(n, withIds) {
         if (n.view !== undefined)
             return { t: "pane", profile: n.profileName, cwd: n.view.pwd || n.view.cwd, cmd: n.commandOverride,
-                     mode: n.viewMode, doc: n.docPath, id: withIds ? n.view.sessionId : "", host: n.sshHost, w: n.width, h: n.height }
+                     mode: n.viewMode, doc: n.docPath, id: withIds ? n.view.sessionId : "", host: n.sshHost, noInput: n.inputHidden ? true : undefined, w: n.width, h: n.height }
         const c = []
         for (let i = 0; i < n.count; ++i) c.push(serializeNode(n.itemAt(i), withIds))
         return { t: n.orientation === Qt.Horizontal ? "h" : "v", c: c, w: n.width, h: n.height }
@@ -982,7 +984,7 @@ ApplicationWindow {
         }
         function build(n, host, W, H) {
             if (n.t === "pane") {
-                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "", sshHost: n.host || "" }
+                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "", sshHost: n.host || "", inputHidden: !!n.noInput }
                 // (Another host's: whether it's still running there is known
                 // once connected; the pane looks then.)
                 if (alive && n.host) {
