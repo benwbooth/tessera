@@ -1095,7 +1095,10 @@ pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bo
         // here (`*` + `*` would be `**`, every file under every folder),
         // and only so many names are read.)
         let pat = format!("{}*", glob::Pattern::escape(&runtime::expanduser(word)));
-        if let Ok(it) = glob::glob(&pat) {
+        // (Hidden names only once a "." is typed, as in a shell.)
+        let hidden = word.rsplit('/').next().unwrap_or(word).starts_with('.');
+        let opts = glob::MatchOptions { require_literal_leading_dot: !hidden, ..Default::default() };
+        if let Ok(it) = glob::glob_with(&pat, opts) {
             let home = std::env::var("HOME").unwrap_or_default();
             for p in it.flatten().take(2000) {
                 let mut s = p.to_string_lossy().to_string();

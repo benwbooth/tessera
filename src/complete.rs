@@ -1208,6 +1208,7 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
     let (start, end) = (to_u16(cur.start.min(byte)), to_u16(byte));
     let typed = cur.text.clone();
     let mut pending = false;
+    let mut sole: Option<String> = None;
     let mut items: Vec<Item> = Vec::new();
 
     if ws.len() <= 1 {
@@ -1350,7 +1351,13 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
                 ));
             }
             let dirs_only = matches!(cmd.as_str(), "cd" | "pushd" | "rmdir" | "z");
+            let others = items.len();
             items.extend(rank(paths(&typed, cwd, dirs_only), name_of(&typed), |i| i.label.clone()));
+            // (The one file or folder here that fits, and nothing else:
+            // Tab puts it in at once, as a shell does.)
+            if others == 0 && items.len() == 1 {
+                sole = Some(items[0].insert.clone());
+            }
             // (cd: also where you go often or lately, folders further down, CDPATH.)
             // (A folder typed out to its slash: just what's in it.)
             if matches!(cmd.as_str(), "cd" | "pushd" | "z") && args.is_empty() && !typed.ends_with('/') {
@@ -1364,18 +1371,21 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
                 let have: std::collections::HashSet<String> = items.iter().map(|i| i.insert.clone()).collect();
                 let mut places: Vec<Item> = places.into_iter().filter(|i| !have.contains(&i.insert)).collect();
                 if name_of(&typed).is_empty() {
-                    // (Nothing typed yet: the five places used most, first.)
+                    // (Nothing typed yet: the five places used most, after
+                    // the folders here; first only when there are none.)
                     let top: Vec<Item> = places.drain(..places.len().min(5)).map(|mut i| {
                         i.detail = "most used".into();
                         i
                     }).collect();
-                    items.splice(0..0, top);
+                    let at = if items.iter().any(|i| i.kind == "dir") { items.len() } else { 0 };
+                    items.splice(at..at, top);
                 }
                 items.extend(places);
             }
         }
     }
-    json!({"start": start, "end": end, "items": items, "pending": pending}).to_string()
+    let sole = sole.and_then(|ins| items.iter().position(|i| i.insert == ins));
+    json!({"start": start, "end": end, "items": items, "pending": pending, "sole": sole}).to_string()
 }
 
 /// The part of a path after its last "/" (what the file names are matched against).

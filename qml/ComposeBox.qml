@@ -760,6 +760,11 @@ Rectangle {
             try { r = JSON.parse(json) } catch (e) { return }
             box.comp = r
             if (box.compIndex >= r.items.length) box.compIndex = 0
+            const byTab = box.compByTab
+            box.compByTab = false
+            // (tessh's own list says nothing of it: just one item is the one.)
+            const sole = r.sole !== undefined && r.sole !== null ? r.sole : r.items.length === 1 && !r.pending ? 0 : -1
+            if (byTab && !hist && sole >= 0 && r.items[sole]) { box.acceptComp(sole); return }
             if (r.items.length === 0 && !r.pending) box.closeComp()
             if (r.pending) compRetry.restart()
             // (The language server's items are added to these when they come.)
@@ -767,7 +772,9 @@ Rectangle {
                 box.controller.lspAsk(box.aiKey + "-comp", box.lang, box.cwd, text, "complete", cursor, box.sshHost)
         })
     }
-    function openComp() { compOpen = true; compChosen = false; compIndex = 0; typing = false; requestComplete() }
+    // (byTab: the one thing that fits goes in at once, as in a shell.)
+    property bool compByTab: false
+    function openComp(byTab) { compOpen = true; compChosen = false; compIndex = 0; typing = false; compByTab = byTab === true; requestComplete() }
     property double histClosedAt: 0   // (history shut by a press outside it, just now)
     function closeComp() { compOpen = false; compChosen = false; historyMode = false }
     function acceptComp(i) {
@@ -1290,7 +1297,7 @@ Rectangle {
                 if (!done) done = box.compKey(e)
                 if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
                         && !/^\s*$/.test(text.substring(box.lineStart(cursorPosition), cursorPosition))) {
-                    box.openComp(); done = true
+                    box.openComp(true); done = true
                 }
                 if (!done && e.key === Qt.Key_Space && (e.modifiers & Qt.ControlModifier)) { box.openComp(); done = true }
                 if (!done && e.key === Qt.Key_R && (e.modifiers & Qt.ControlModifier) && !(box.keys === "vi" && box.viNormal)) {
@@ -1709,6 +1716,9 @@ Rectangle {
         if (t.trim().length < 2 || t.indexOf("\n") >= 0 || !atSuggestEnd) return ""
         for (let i = box.history.length - 1; i >= 0; i--) {
             const h = box.history[i]
+            // (A cd to a relative folder was run from somewhere else: it
+            // need not be here.)
+            if (/^\s*(cd|pushd)\s+[^\s\/~$-]/.test(h)) continue
             if (h.length > t.length && h.startsWith(t) && h.indexOf("\n") < 0) return h.substring(t.length)
         }
         return ""
