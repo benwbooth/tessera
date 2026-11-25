@@ -47,6 +47,14 @@ fn word_ops_are_always_keywords() {
         let e = check_one(src);
         assert!(e.iter().any(|e| e.3.contains(&format!("{w} is a keyword here"))), "{src}: {e:?}");
     }
+    // (After a call's bareword argument, too: not (print salt) and pepper.)
+    for (src, w) in [("print salt and pepper", "'and' after `print salt`"), ("print it is ready", "'is' after `print it`"), ("print a not in b", "'not in' after `print a`")] {
+        let e = check_one(src);
+        assert!(e.iter().any(|e| e.3.contains(w) && e.3.contains("quote it")), "{src}: {e:?}");
+    }
+    for ok in ["x = 2\nprint $x and 3", "x = salt and pepper", "(print a) and b", "if (len [1]) and True\n  pass"] {
+        assert!(check_one(ok).is_empty(), "{ok}: {:?}", check_one(ok));
+    }
 }
 
 #[test]

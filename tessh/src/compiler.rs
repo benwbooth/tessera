@@ -1574,6 +1574,21 @@ impl<'py, 's> Compiler<'py, 's> {
             }
             merged.push(t);
         }
+        // (A keyword right after a call's bareword argument, `print salt and
+        // pepper`: never what was meant, so an error, not (print salt) and
+        // pepper. `print $a and $b`, `x = a and b`, `(print a) and b` are fine.)
+        for k in 0..merged.len() {
+            let Tok::Op(n, f) = &merged[k] else { continue };
+            if !matches!(f.kind, Kind::Sym { .. }) || !["and", "or", "in", "is", "not in", "is not"].contains(&n.as_str()) {
+                continue;
+            }
+            let run = merged[..k].iter().rev().take_while(|t| matches!(t, Tok::X(_))).count();
+            let last_bare = matches!(merged.get(k.wrapping_sub(1)), Some(Tok::X(x)) if x.sym_name().is_some_and(|s| !["True", "False", "None", "..."].contains(&s) && !s.contains('.')));
+            if run >= 2 && last_bare {
+                let call: Vec<String> = merged[k - run..k].iter().filter_map(|t| if let Tok::X(x) = t { Some(show(x)) } else { None }).collect();
+                return err(format!("'{n}' after `{}` is a keyword, not a word: quote it ('{n}') for the text, or write ({}) {n} … for Python's {n}", call.join(" "), call.join(" ")), Some(f));
+            }
+        }
         // Operators with nothing on a side are words.
         let mut out: Vec<Tok> = vec![];
         let mut want = true;

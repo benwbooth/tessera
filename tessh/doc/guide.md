@@ -376,6 +376,9 @@ bitwise not is `operator.invert`.)
 `and`, `or`, `not`, `in` and `is` are always keywords, never words: a
 bareword next to one is its text (`$x or default`), and for the keyword's
 own text you quote it (`print salt 'and' pepper`, or the whole phrase).
+One right after a call's bareword argument, `print salt and pepper`, is an
+error rather than `(print salt) and pepper`; write that with the
+parentheses if it's what you mean.
 
 ```tessh
 x = 0

@@ -1188,7 +1188,7 @@ if (len $argv) - 1 != $ARGCOUNT
   exit $E_WRONGARGS
 domain = $argv[1]
 
-contacts = dig +short "$domain.contacts.abuse.net" -c in -t txt
+contacts = dig +short "$domain.contacts.abuse.net" -c 'in' -t txt
 for line in $contacts.lines
   print ($line.strip '"')
 # Also try:
