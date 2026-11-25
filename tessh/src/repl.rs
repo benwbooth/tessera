@@ -1093,6 +1093,24 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
         let label = if kind == "dir" || kind == "file" { path_tail(&insert).to_string() } else { n.clone() };
         items.push(Item { insert, label, kind, detail, doc });
     }
+    // (Programs: what they are and their common uses, as Tessera's list has
+    // them: tldr-pages, else whatis. The first 30.)
+    let progs: Vec<String> = items.iter().filter(|i| i.detail == "program").take(30).map(|i| i.label.clone()).collect();
+    if !progs.is_empty() {
+        let mut said = whatis(&progs);
+        for i in items.iter_mut().filter(|i| i.detail == "program").take(30) {
+            if let Some((desc, examples)) = tldr_page(&i.label) {
+                let mut doc = desc.clone();
+                for (what, cmd) in examples.iter().take(6) {
+                    doc.push_str(&format!("\n\u{2022} {what}\n    {cmd}"));
+                }
+                i.detail = desc;
+                i.doc = doc;
+            } else if let Some(d) = said.remove(&i.label).filter(|d| !d.is_empty()) {
+                i.detail = d;
+            }
+        }
+    }
     // (cd and the like take folders only.)
     if !first && !var {
         let seg = before[..start].rsplit(['|', ';', '\n', '(']).next().unwrap_or("");
@@ -1217,6 +1235,95 @@ fn hostname() -> String {
 }
 
 // ---- the loop ---------------------------------------------------------------------
+
+// ---- programs' help: tldr-pages (where Tessera keeps them) and whatis -------------
+
+fn tldr_dir() -> std::path::PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("tessera")
+        .join("tldr")
+}
+
+/// tldr-pages fetched once, in the background, when there are none (as
+/// Tessera does; git, a shallow sparse clone of the English pages).
+fn ensure_tldr() {
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let dir = tldr_dir();
+    if dir.join("pages").exists() || STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let git = |args: &[&str]| std::process::Command::new("git").args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
+        let _ = std::fs::create_dir_all(dir.parent().unwrap_or(&dir));
+        let tmp = format!("{}.part", dir.to_string_lossy());
+        let _ = std::fs::remove_dir_all(&tmp);
+        if git(&["clone", "-q", "--depth", "1", "--filter=blob:none", "--sparse", "https://github.com/tldr-pages/tldr.git", &tmp])
+            && git(&["-C", &tmp, "sparse-checkout", "set", "pages/common", "pages/linux", "pages/osx", "pages/windows"])
+        {
+            let _ = std::fs::rename(&tmp, &dir);
+        }
+    });
+}
+
+/// A program's tldr page: its description and examples (what, command).
+fn tldr_page(cmd: &str) -> Option<(String, Vec<(String, String)>)> {
+    ensure_tldr();
+    if cmd.contains('/') {
+        return None;
+    }
+    let platform = if cfg!(target_os = "macos") { "osx" } else { "linux" };
+    let base = tldr_dir().join("pages");
+    let text = [platform, "common"].iter().find_map(|p| std::fs::read_to_string(base.join(p).join(format!("{cmd}.md"))).ok())?;
+    let (mut desc, mut examples, mut what) = (Vec::new(), Vec::new(), None::<String>);
+    for line in text.lines() {
+        if let Some(d) = line.strip_prefix("> ") {
+            if !d.starts_with("More information") {
+                desc.push(d.trim().to_string());
+            }
+        } else if let Some(w) = line.strip_prefix("- ") {
+            what = Some(w.trim_end_matches(':').replace(['[', ']'], ""));
+        } else if let Some(c) = line.strip_prefix('`').and_then(|l| l.strip_suffix('`')) {
+            if let Some(w) = what.take() {
+                examples.push((w, c.replace("{{", "").replace("}}", "")));
+            }
+        }
+    }
+    Some((desc.join(" "), examples))
+}
+
+/// whatis's one line for each program (asked once each, kept).
+fn whatis(names: &[String]) -> std::collections::HashMap<String, String> {
+    static CACHE: std::sync::OnceLock<Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let missing: Vec<String> = {
+        let c = cache.lock().unwrap();
+        names.iter().filter(|n| !c.contains_key(*n)).cloned().collect()
+    };
+    if !missing.is_empty() {
+        let out = std::process::Command::new("whatis").args(&missing).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output();
+        let mut c = cache.lock().unwrap();
+        for m in &missing {
+            c.insert(m.clone(), String::new());
+        }
+        if let Ok(o) = out {
+            for line in String::from_utf8_lossy(&o.stdout).lines() {
+                // "ls (1)               - list directory contents"
+                let Some((head, desc)) = line.split_once(" - ") else { continue };
+                let name = head.split_whitespace().next().unwrap_or("");
+                if let Some(slot) = c.get_mut(name) {
+                    if slot.is_empty() {
+                        *slot = desc.trim().to_string();
+                    }
+                }
+            }
+        }
+    }
+    let c = cache.lock().unwrap();
+    names.iter().map(|n| (n.clone(), c.get(n).cloned().unwrap_or_default())).collect()
+}
 
 /// A completed path's last part (`a/'My Drive'/'CD backups'/` →
 /// `'CD backups'/`): after the last slash outside quotes, a folder's own
