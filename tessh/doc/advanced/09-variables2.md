@@ -1606,7 +1606,7 @@ import inspect
 from dataclasses import dataclass FrozenInstanceError
 
 def func1
-  echo This is a function.
+  echo "This is a function."
 
 # Lists the function above (declare -f).
 for f in (list ((globals).values))
@@ -1644,7 +1644,7 @@ except FrozenInstanceError as e
 
 ```output
 def func1
-  echo This is a function.
+  echo "This is a function."
 
 var1 declared as 2367
 var1 incremented by 1 is 2368.

@@ -1326,6 +1326,7 @@ impl<'py, 's> Compiler<'py, 's> {
         let glob = |t: &str| t.contains(['*', '?', '[']);
         match &x.kind {
             Kind::Sym { name, .. } | Kind::Op { name, tick: false } => {
+                keyword_word::<()>(name, x)?;
                 if glob(name) {
                     Ok(Res::e(self.rcall("g", vec![self.c(name.as_str())?])?))
                 } else if name.starts_with('~') {
@@ -1501,7 +1502,7 @@ impl<'py, 's> Compiler<'py, 's> {
             let (stmts, exprs) = self.gather_e(rs)?;
             return Ok(Res::s(stmts, self.tuple(exprs, false)?));
         }
-        let toks = self.tokens(items);
+        let toks = self.tokens(items)?;
         let (tree, k) = self.parse(&toks, 0, 0)?;
         if k != toks.len() {
             let f = match &toks[k] {
@@ -1537,7 +1538,7 @@ impl<'py, 's> Compiler<'py, 's> {
         Ok(Res::s(stmts, e))
     }
 
-    fn tokens(&self, items: &[Form]) -> Vec<Tok> {
+    fn tokens(&self, items: &[Form]) -> R<Vec<Tok>> {
         let mut toks: Vec<Tok> = vec![];
         for x in items {
             match &x.kind {
@@ -1552,26 +1553,6 @@ impl<'py, 's> Compiler<'py, 's> {
                 }
                 Kind::Sym { name, .. } if WORD_OPS.contains(&name.as_str()) => toks.push(Tok::Op(name.clone(), x.clone())),
                 _ => toks.push(Tok::X(x.clone())),
-            }
-        }
-        // (in and is next to a bareword are words: print it is ready. and
-        // and or between two barewords are: print salt and pepper; with a
-        // value on either side they're Python's: $x or default, $x == PREV
-        // and $y.)
-        let bare = |t: Option<&Tok>| matches!(t, Some(Tok::X(f)) if f.sym_name().is_some_and(|n| !["True", "False", "None", "..."].contains(&n)));
-        let mut words = vec![];
-        for k in 0..toks.len() {
-            if let Tok::Op(n, f) = &toks[k] {
-                let (before, after) = (bare(if k > 0 { toks.get(k - 1) } else { None }), bare(toks.get(k + 1)));
-                let word = if ["and", "or"].contains(&n.as_str()) { before && after } else { before || after };
-                if matches!(f.kind, Kind::Sym { .. }) && ["and", "or", "in", "is"].contains(&n.as_str()) && word {
-                    words.push(k);
-                }
-            }
-        }
-        for k in words {
-            if let Tok::Op(_, f) = &toks[k] {
-                toks[k] = Tok::X(f.clone());
             }
         }
         // not in, is not
@@ -1604,6 +1585,7 @@ impl<'py, 's> Compiler<'py, 's> {
                             out.push(Tok::Pre(n, f));
                             continue;
                         }
+                        keyword_word::<()>(&n, &f)?;
                         out.push(Tok::X(Form::sym_at(&n, &[], f.pos)));
                         want = false;
                     } else {
@@ -1618,6 +1600,7 @@ impl<'py, 's> Compiler<'py, 's> {
             }
         }
         if let Some(Tok::Op(n, f)) | Some(Tok::Pre(n, f)) = out.last() {
+            keyword_word::<()>(n, f)?;
             let w = Form::sym_at(n.trim_start_matches('`'), &[], f.pos);
             out.pop();
             out.push(Tok::X(w));
@@ -1632,7 +1615,7 @@ impl<'py, 's> Compiler<'py, 's> {
                 t => chunks.push(t),
             }
         }
-        chunks
+        Ok(chunks)
     }
 
     fn op_prec(&self, n: &str) -> (u8, Assoc) {
@@ -4393,6 +4376,14 @@ fn docstring(children: &[Form]) -> Option<String> {
         Kind::Str { value, kind } if *kind != 'b' => Some(value.clone()),
         _ => None,
     }
+}
+
+/// and, or, not, in, is: keywords, never text; quoted they are.
+fn keyword_word<T: Default>(n: &str, f: &Form) -> R<T> {
+    if matches!(f.kind, Kind::Sym { .. }) && WORD_OPS.contains(&n.split(' ').next().unwrap_or(n)) {
+        return err(format!("'{n}' is a keyword here, not a word: quote it ('{n}') for the text"), Some(f));
+    }
+    Ok(T::default())
 }
 
 fn is_glob_word(x: &Form) -> bool {

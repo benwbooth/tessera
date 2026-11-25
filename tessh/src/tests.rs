@@ -39,9 +39,14 @@ fn precedence() {
 }
 
 #[test]
-fn word_ops_next_to_barewords_are_words() {
-    let (_, out) = run("x = 3\nprint it is $x\nprint ($x in [1 2 3])");
-    assert_eq!(out, "it is 3\nTrue\n");
+/// and, or, not, in, is: keywords everywhere, never words; quoted they are.
+fn word_ops_are_always_keywords() {
+    let (_, out) = run("x = 3\nprint it 'is' $x\nprint ($x in [1 2 3]) ($x or default) (0 or default)\necho 'salt and pepper'");
+    assert_eq!(out, "it is 3\nTrue 3 default\nsalt and pepper\n");
+    for (src, w) in [("echo salt and pepper", "'and'"), ("echo in here", "'in'"), ("echo not here", "'not'"), ("echo a or", "'or'")] {
+        let e = check_one(src);
+        assert!(e.iter().any(|e| e.3.contains(&format!("{w} is a keyword here"))), "{src}: {e:?}");
+    }
 }
 
 #[test]
@@ -306,7 +311,7 @@ fn bitwise_or_with_value_on_right() {
 
 #[test]
 fn and_or_status() {
-    let (_, out) = run("false || echo or\ntrue && echo and\nfalse && echo never");
+    let (_, out) = run("false || echo 'or'\ntrue && echo 'and'\nfalse && echo never");
     assert_eq!(out, "or\nand\n");
 }
 
@@ -1591,7 +1596,7 @@ fn debug_return_traps_and_set_options() {
     let (out, _, _) = run_forked("trap 'print dbg $BASH_COMMAND' DEBUG\necho hi\ntrap - DEBUG\necho after");
     // (As bash's: it runs before `trap - DEBUG` too.)
     assert_eq!(out, "dbg echo hi\nhi\ndbg trap - DEBUG\nafter\n");
-    let (out, _, _) = run_forked("def f\n  print in f\ntrap 'print returned' RETURN\nf\nprint (len [1 2])\ntrap - RETURN\nf");
+    let (out, _, _) = run_forked("def f\n  print 'in f'\ntrap 'print returned' RETURN\nf\nprint (len [1 2])\ntrap - RETURN\nf");
     assert_eq!(out, "in f\nreturned\n2\nin f\n");
     let (out, err, _) = run_forked("set -x\necho hi | tr a-z A-Z\nset +x\necho no");
     assert_eq!(out, "HI\nno\n");
@@ -1718,7 +1723,7 @@ fn noclobber() {
 fn time_and_coproc_blocks() {
     let (out, err, _) = run_forked(concat!(
         "time\n",
-        "  echo in block\n",
+        "  echo 'in block'\n",
         "  x = 2\n",
         "print $x\n",
         "greeting = hello\n",
@@ -2002,7 +2007,7 @@ fn break_n_eval_and_bareword_and_or() {
         "for i in [1 2]\n  break 1\nprint after $i\n",
         "x = 0\n",
         "print ($x or default) ($x == 0 and yes) (1 and $x)\n",
-        "print salt and pepper\n",
+        "print 'salt and pepper'\n",
         "cmd = 'echo from eval'\n",
         "eval $cmd\n",
         "eval 'y = 7'\n",

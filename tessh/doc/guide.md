@@ -373,15 +373,14 @@ comparisons, backtick and custom operators, `^`, `&`, `<<` `>>`, `+` `-`,
 `.attr` and `[i]`. (`~` is your home folder and a macro's unquote, so
 bitwise not is `operator.invert`.)
 
-`and` and `or` between two barewords are words, so `print salt and pepper`
-prints them; with a value on either side they're Python's, and a bareword
-there is its text: `$x or default`, `$n == 5 and yes`. (`in` and `is` next
-to a bareword are words: `print it is ready`.)
+`and`, `or`, `not`, `in` and `is` are always keywords, never words: a
+bareword next to one is its text (`$x or default`), and for the keyword's
+own text you quote it (`print salt 'and' pepper`, or the whole phrase).
 
 ```tessh
 x = 0
 print ($x or default) ($x == 0 and yes)
-print salt and pepper
+print 'salt and pepper'
 ```
 
 ```output
@@ -415,14 +414,17 @@ big
 24
 ```
 
-In a command, operators other than the shell's are words.
+In a command, operators other than the shell's are words. `and`, `or`,
+`not`, `in` and `is` are keywords everywhere: quote them for the text.
 
 ```tessh
-echo 1 + 2 is three
+echo 1 + 2 = three
+echo salt 'and' pepper
 ```
 
 ```output
-1 + 2 is three
+1 + 2 = three
+salt and pepper
 ```
 
 ## Custom operators
@@ -1382,7 +1384,7 @@ while $n > 0
   n -= 1
   if $n == 1
     continue
-  print n is $n
+  print n 'is' $n
 for x in [1 2 3]
   if $x == 5
     break

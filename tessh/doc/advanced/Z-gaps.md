@@ -52,8 +52,9 @@ them as bash would:
 - `*[1 2]` splats the list, and `f languages=[fr]` gives it a list.
 - A `def`'s or `class`'s first-line string is its docstring.
 - `break N`, `continue N`; `eval $code` runs the text as tessh (Python's
-  is `builtins.eval`); `and`/`or` are words only between two barewords
-  (`print salt and pepper`), so `$x or default` is Python's `or`.
+  is `builtins.eval`); `and`, `or`, `not`, `in` and `is` are always
+  keywords, so `$x or default` is Python's `or` (quote one for its text:
+  `print 'salt and pepper'`).
 - `~/.config/tessh/logout.tsh` when a login shell ends; `$HISTCMD`;
   `complete -o filenames` and `-o nospace`.
 - `declare`, `local`, `shopt`, `bind`, `caller`, `enable`: not

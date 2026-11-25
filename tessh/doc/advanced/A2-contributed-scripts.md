@@ -2590,7 +2590,7 @@ def dig_reply reply message name
 # Forward lookup :: Name -> Address
 def short_fwd name
   print "." end="" flush=True
-  dig_reply (dig +short $name -c in -t a 2>/dev/null) '## Lookup error {} on {} ##' $name
+  dig_reply (dig +short $name -c 'in' -t a 2>/dev/null) '## Lookup error {} on {} ##' $name
 
 # Reverse lookup :: Address -> Name
 def short_rev ip
@@ -2601,7 +2601,7 @@ def short_rev ip
 # (The bash version's warning filter counts to ${#_st_cnt}, the length of
 # the count, so it looks at the first line or so only.)
 def short_text name
-  dig_reply (dig +short $name -c in -t txt 2>/dev/null) '##Text lookup error {} on {}##' $name
+  dig_reply (dig +short $name -c 'in' -t txt 2>/dev/null) '##Text lookup error {} on {}##' $name
 
 # The long forms, a.k.a., the parse it yourself versions
 

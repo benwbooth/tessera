@@ -139,8 +139,8 @@ printf "<%s>" "$variable2 $variable2 $variable2" ; echo    # 1 argument (2 space
 
 ```tessh
 variable1 = "a variable containing five words"
-printf "<%s>" This is $variable1 ; echo              # 3 arguments
-printf "<%s>" This is *(.split $variable1) ; echo     # 7 arguments
+printf "<%s>" This 'is' $variable1 ; echo              # 3 arguments
+printf "<%s>" This 'is' *(.split $variable1) ; echo     # 7 arguments
 printf "<%s>" "This is $variable1" ; echo            # 1 argument
 
 variable2 = ""    # Empty.

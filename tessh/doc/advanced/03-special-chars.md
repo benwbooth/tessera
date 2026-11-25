@@ -30,7 +30,7 @@ echo $(( 2#101011 ))  # Base conversion, not a comment.
 ```tessh
 echo "The # here does not begin a comment."
 echo 'The # here does not begin a comment.'
-echo The \# here does not begin a comment.
+echo The \# here does 'not' begin a comment.
 echo The # here begins a comment.
 
 path = "/usr/local/bin:/bin:/usr/bin"
