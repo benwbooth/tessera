@@ -321,34 +321,44 @@ Item {
         let cwd = bar.cwd.replace(/^file:\/\/[^/]*/, "")
         try { cwd = decodeURIComponent(cwd) } catch (e) {}
         if (cwd === "") return []
-        const home = bar.home
-        const re = /\S+/g
-        let m
-        while ((m = re.exec(t)) !== null) {
-            const tok = m[0]
-            if (tok.indexOf("/") < 0 && tok !== "~" && tok !== cwd.replace(/.*\//, "")) continue
-            const comps = tok.split("/")
-            // The shell's folder and its parents, from the end.
-            let dir = cwd.replace(/\/+$/, "") || "/"
-            const parts = []
-            let pos = m.index + tok.length
-            let ok = true
-            for (let j = comps.length - 1; j >= 0; j--) {
-                const c = comps[j]
-                const start = pos - c.length
-                if (c === "" && j === 0 && dir === "/") { parts.unshift({ start: m.index, end: m.index + 1, path: "/" }); break }
-                if (c === "~") { if (dir !== home) ok = false; else parts.unshift({ start: start, end: pos, path: home }); break }
-                if (c === "…" || c === "...") break
-                if (c !== dir.replace(/.*\//, "")) { ok = false; break }
-                if (c !== "") parts.unshift({ start: start, end: pos, path: dir })
-                dir = dir.substring(0, dir.lastIndexOf("/")) || "/"
-                pos = start - 1
+        // (Each word's start, with the longest stretch first, so a folder
+        // with a space in its name ("My Drive") is one path; then shorter,
+        // so a prompt that says more after it ("… on main") still finds it.)
+        const ws = (c) => /\s/.test(c)
+        for (let s = 0; s < t.length; s++) {
+            if (ws(t[s]) || (s > 0 && !ws(t[s - 1]))) continue
+            for (let e = t.length; e > s; e--) {
+                if (ws(t[e - 1]) || (e < t.length && !ws(t[e]))) continue
+                const p = bar.pathAt(t, s, e, cwd)
+                if (p) return p
             }
-            if (!ok || parts.length === 0) continue
-            parts[parts.length - 1].last = true
-            return parts
         }
         return []
+    }
+    // t's s..e as the shell's folder (or its tail): its folders, from the
+    // end matched against cwd and its parents, or null.
+    function pathAt(t, s, e, cwd) {
+        const home = bar.home
+        const tok = t.substring(s, e)
+        if (tok.indexOf("/") < 0 && tok !== "~" && tok !== cwd.replace(/.*\//, "")) return null
+        const comps = tok.split("/")
+        let dir = cwd.replace(/\/+$/, "") || "/"
+        const parts = []
+        let pos = e
+        for (let j = comps.length - 1; j >= 0; j--) {
+            const c = comps[j]
+            const start = pos - c.length
+            if (c === "" && j === 0 && dir === "/") { parts.unshift({ start: s, end: s + 1, path: "/" }); break }
+            if (c === "~") { if (dir !== home) return null; parts.unshift({ start: start, end: pos, path: home }); break }
+            if (c === "…" || c === "...") break
+            if (c !== dir.replace(/.*\//, "")) return null
+            if (c !== "") parts.unshift({ start: start, end: pos, path: dir })
+            dir = dir.substring(0, dir.lastIndexOf("/")) || "/"
+            pos = start - 1
+        }
+        if (parts.length === 0) return null
+        parts[parts.length - 1].last = true
+        return parts
     }
     // ---- lines too long for the bar: wrapped, never cut short ----------------
     // Runs past `room` px go on to another line, a long one (the folder)

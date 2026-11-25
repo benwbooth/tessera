@@ -869,70 +869,76 @@ fn path_parts(t: &str, cwd: &str, home: &str) -> Vec<(usize, usize, String, bool
     if cwd.is_empty() {
         return Vec::new();
     }
+    let chars: Vec<char> = t.chars().collect();
+    let ws = |i: usize| chars[i].is_whitespace();
+    // (Each word's start, with the longest stretch first, so a folder with
+    // a space in its name ("My Drive") is one path; then shorter, so a
+    // prompt that says more after the path ("… on main") still finds it.)
+    for s in 0..chars.len() {
+        if ws(s) || (s > 0 && !ws(s - 1)) {
+            continue;
+        }
+        let ends: Vec<usize> = (s + 1..=chars.len()).rev().filter(|&e| !ws(e - 1) && (e == chars.len() || ws(e))).collect();
+        for e in ends {
+            if let Some(p) = path_at(&chars, s, e, cwd, home) {
+                return p;
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// chars[s..e] as the shell's folder (or its tail): its folders, each from
+/// the end matched against cwd and its parents, or None.
+fn path_at(chars: &[char], s: usize, e: usize, cwd: &str, home: &str) -> Option<Vec<(usize, usize, String, bool)>> {
     let base = |d: &str| d.rsplit('/').next().unwrap_or("").to_string();
     let parent = |d: &str| match d.rfind('/') {
         Some(0) | None => "/".to_string(),
         Some(i) => d[..i].to_string(),
     };
-    let chars: Vec<char> = t.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i].is_whitespace() {
-            i += 1;
-            continue;
-        }
-        let s = i;
-        while i < chars.len() && !chars[i].is_whitespace() {
-            i += 1;
-        }
-        let tok: String = chars[s..i].iter().collect();
-        if !tok.contains('/') && tok != "~" && tok != base(cwd) {
-            continue;
-        }
-        let comps: Vec<&str> = tok.split('/').collect();
-        // The shell's folder and its parents, from the end.
-        let mut dir = cwd.trim_end_matches('/').to_string();
-        if dir.is_empty() {
-            dir = "/".into();
-        }
-        let mut parts: Vec<(usize, usize, String, bool)> = Vec::new();
-        let mut pos = i as isize;
-        let mut ok = true;
-        for j in (0..comps.len()).rev() {
-            let c = comps[j];
-            let start = pos - c.chars().count() as isize;
-            if c.is_empty() && j == 0 && dir == "/" {
-                parts.insert(0, (s, s + 1, "/".into(), false));
-                break;
-            }
-            if c == "~" {
-                if dir != home {
-                    ok = false;
-                } else {
-                    parts.insert(0, (start as usize, pos as usize, home.to_string(), false));
-                }
-                break;
-            }
-            if c == "…" || c == "..." {
-                break;
-            }
-            if c != base(&dir) {
-                ok = false;
-                break;
-            }
-            if !c.is_empty() {
-                parts.insert(0, (start as usize, pos as usize, dir.clone(), false));
-            }
-            dir = parent(&dir);
-            pos = start - 1;
-        }
-        if !ok || parts.is_empty() {
-            continue;
-        }
-        parts.last_mut().unwrap().3 = true;
-        return parts;
+    let tok: String = chars[s..e].iter().collect();
+    if !tok.contains('/') && tok != "~" && tok != base(cwd) {
+        return None;
     }
-    Vec::new()
+    let comps: Vec<&str> = tok.split('/').collect();
+    // The shell's folder and its parents, from the end.
+    let mut dir = cwd.trim_end_matches('/').to_string();
+    if dir.is_empty() {
+        dir = "/".into();
+    }
+    let mut parts: Vec<(usize, usize, String, bool)> = Vec::new();
+    let mut pos = e as isize;
+    for j in (0..comps.len()).rev() {
+        let c = comps[j];
+        let start = pos - c.chars().count() as isize;
+        if c.is_empty() && j == 0 && dir == "/" {
+            parts.insert(0, (s, s + 1, "/".into(), false));
+            break;
+        }
+        if c == "~" {
+            if dir != home {
+                return None;
+            }
+            parts.insert(0, (start as usize, pos as usize, home.to_string(), false));
+            break;
+        }
+        if c == "…" || c == "..." {
+            break;
+        }
+        if c != base(&dir) {
+            return None;
+        }
+        if !c.is_empty() {
+            parts.insert(0, (start as usize, pos as usize, dir.clone(), false));
+        }
+        dir = parent(&dir);
+        pos = start - 1;
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    parts.last_mut().unwrap().3 = true;
+    Some(parts)
 }
 
 /// A widget's runs with its name on them, and the folders of a path in
@@ -1842,6 +1848,11 @@ mod tests {
         let p = path_parts("…/a/b", "/x/y/a/b", "/home/u");
         assert_eq!(p, [(2, 3, "/x/y/a".into(), false), (4, 5, "/x/y/a/b".into(), true)]);
         assert!(path_parts("main", "/x/y", "/home/u").is_empty());
+        // A folder with a space in its name, and more after the path.
+        let p = path_parts(" ~/My Drive/CD backups ", "/home/u/My Drive/CD backups", "/home/u");
+        assert_eq!(p, [(1, 2, "/home/u".into(), false), (3, 11, "/home/u/My Drive".into(), false), (12, 22, "/home/u/My Drive/CD backups".into(), true)]);
+        let p = path_parts("~/src/tessera on main", "/home/u/src/tessera", "/home/u");
+        assert_eq!(p.len(), 3);
     }
 
     #[test]
