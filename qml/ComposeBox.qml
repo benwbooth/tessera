@@ -138,6 +138,7 @@ Rectangle {
     property int jobsAll: 0
     signal jobsToggled()
     signal handBack()                  // Ctrl tapped: type into the terminal instead
+    signal hideRequested()             // its top edge clicked: put it away
 
     readonly property alias text: edit.text
     readonly property bool editing: edit.activeFocus
@@ -154,7 +155,20 @@ Rectangle {
     readonly property real flickTop: promptBar.visible ? promptBar.y + promptBar.height + 4 : modeTag.y + modeTag.height + 4
 
     color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
-    Rectangle { width: parent.width; height: 1; color: Theme.divider }
+    Rectangle { width: parent.width; height: edgeHover.hovered ? 2 : 1; color: edgeHover.hovered ? Theme.accent : Theme.divider }
+    // The top edge: a click puts the input box away (the strip left in its
+    // place, a click or Ctrl+Shift+H, brings it back).
+    Item {
+        z: 50
+        y: -2
+        width: parent.width
+        height: 5
+        HoverHandler { id: edgeHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: box.hideRequested() }
+        ToolTip.visible: edgeHover.hovered
+        ToolTip.delay: 600
+        ToolTip.text: "Hide the input box (Ctrl+Shift+H)"
+    }
 
     FontMetrics { id: fm; font: edit.font }
 

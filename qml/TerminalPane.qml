@@ -154,11 +154,20 @@ Item {
         })
     }
     Timer { id: fsWait; interval: 400; onTriggered: pane.fsKnown = true }
-    readonly property bool editorOn: inputEditor && !term.exited && !takenOver && (promptHeld || editorCalled)
+    // (Put away by the user (its top edge, Ctrl+Shift+H, View ▸ Show Input
+    // Box): a thin strip stays to bring it back.)
+    property bool inputHidden: false
+    readonly property bool stripShown: inputEditor && inputHidden && !term.exited && !takenOver
+    function setInputHidden(h) {
+        inputHidden = h
+        if (h) term.forceActiveFocus()
+        else { preferEditor = true; Qt.callLater(() => { if (pane.editorOn) compose.focusEditor() }) }
+    }
+    readonly property bool editorOn: inputEditor && !inputHidden && !term.exited && !takenOver && (promptHeld || editorCalled)
     // (Shown while a command runs too, the keys the program's: the pane
     // doesn't come and go, and a click or a tap of left Ctrl there types
     // the next command, queued. Only a full-screen program takes it away.)
-    readonly property bool editorShown: inputEditor && !term.exited && !takenOver
+    readonly property bool editorShown: inputEditor && !inputHidden && !term.exited && !takenOver
     // (At the prompt, or was a moment ago: a quick command (ls) leaves the
     // editor up rather than taking it away and back, which resizes
     // everything above it twice. One that's still going after 250 ms hides
@@ -307,7 +316,31 @@ Item {
         anchors.right: parent.right
         // (Whether the editor should show, not whether it's on screen: a tab in
         // the background has it hidden, and the terminal mustn't resize then.)
-        anchors.bottom: pane.editorShown ? compose.top : parent.bottom
+        anchors.bottom: pane.editorShown ? compose.top : pane.stripShown ? inputStrip.top : parent.bottom
+    }
+    // The input box put away: a strip to bring it back.
+    Rectangle {
+        id: inputStrip
+        z: 22
+        visible: pane.stripShown
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 7
+        color: stripHover.hovered ? Theme.mix(Theme.bg, Theme.accent, 0.3) : Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
+        Rectangle { width: parent.width; height: 1; color: Theme.divider }
+        Rectangle {
+            width: 36; height: 3; radius: 1.5
+            x: Math.round((parent.width - width) / 2)
+            y: 2
+            color: Theme.textDim
+            opacity: stripHover.hovered ? 1 : 0.6
+        }
+        HoverHandler { id: stripHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: pane.setInputHidden(false) }
+        ToolTip.visible: stripHover.hovered
+        ToolTip.delay: 600
+        ToolTip.text: "Show the input box (Ctrl+Shift+H)"
     }
     TerminalView {
         id: term
@@ -446,6 +479,7 @@ Item {
         }
         // (The terminal keeps the keys until the editor is clicked again.)
         onHandBack: { pane.preferEditor = false; term.forceActiveFocus() }
+        onHideRequested: pane.setInputHidden(true)
         onKeysPicked: (k) => pane.editorKeysPicked(k)
         onOpenRich: pane.openRich()
         viewMode: pane.viewMode
