@@ -1253,6 +1253,8 @@ ApplicationWindow {
     // Ctrl+W stays the shell's (delete a word).
     Shortcut { sequence: "Ctrl+Alt+W"; autoRepeat: false; onActivated: closeActivePane() }
     Shortcut { sequence: "Ctrl+Shift+I"; onActivated: win.toggleAssistant() }
+    Shortcut { sequence: "Ctrl+Shift+H"; onActivated: win.toggleInputBox() }
+    function toggleInputBox() { const p = activePane; if (p && p.inputEditor) p.setInputHidden(!p.inputHidden) }
     Shortcut {
         sequence: "Ctrl+Shift+W"
         autoRepeat: false
@@ -1393,6 +1395,8 @@ ApplicationWindow {
         { title: "View", icon: "view-visible", items: [
             { id: "fullscreen", icon: "view-fullscreen", text: "Full Screen", shortcut: "F11", checkable: true, checked: win.visibility === Window.FullScreen },
             { id: "assistant", icon: "help-hint", text: "Show Assistant", shortcut: "Ctrl+Shift+I", checkable: true, checked: win.assistantOpen },
+            { id: "input-box", icon: "edit-entry", text: "Show Input Box", shortcut: "Ctrl+Shift+H", checkable: true,
+              checked: activePane !== null && !activePane.inputHidden, enabled: activePane !== null && activePane.inputEditor },
             { separator: true },
             { id: "zoom-in", icon: "zoom-in", text: "Make Text Bigger", shortcut: "Ctrl+=" },
             { id: "zoom-out", icon: "zoom-out", text: "Make Text Smaller", shortcut: "Ctrl+-" },
@@ -1517,6 +1521,7 @@ ApplicationWindow {
         case "transparency": useTransparency = !useTransparency; break
         case "find-cursor": if (v) v.findCursor(); break
         case "cursor-guide": cursorGuide = !cursorGuide; break
+        case "input-box": toggleInputBox(); break
         case "tab-color-none": if (tabs[currentTab]) tabs[currentTab].tabColor = "transparent"; break
         case "edit-session": case "edit-profiles": prefs.showProfile(activeProfile.name); break
         case "restart-session": if (v) confirmJobs([paneOf(v)], function() { v.restart() }); break
@@ -2479,15 +2484,14 @@ ApplicationWindow {
             ChromeTitleArea { anchors.fill: parent; window: win; menuDark: Theme.dark; menuAccent: Theme.accent }
 
             // ☰ The app menu.
-            BarButton {
+            MacMenuButton {
                 id: menuButton
                 anchors.left: parent.left
                 anchors.leftMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
-                icon: "menu"
-                tip: "Menu"
-                open: win.appMenuOpen
-                onClicked: if (appMenu.visible || Date.now() - win.appMenuClosedAt < 400) appMenu.close(); else appMenu.openAt(menuButton, 0, menuButton.height + 4)
+                dark: Theme.dark
+                fg: Theme.fg
+                menu: appMenu
             }
 
             Loader {
