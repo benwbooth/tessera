@@ -429,9 +429,13 @@
             # system glibc and the binary can't load this nixpkgs' Qt).
             "CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "cc";
             shellHook = ''
-              ln -sfn ${qtEnv} .qt-env
-              mkdir -p target
-              printf '[build]\nrustc = "%s"\n' "${musl.buildPackages.rustc}/bin/rustc" > target/musl.toml
+              # Only in tessera's own checkout: a shell started anywhere else
+              # (a terminal opened in ~/Canopy) must not leave files there.
+              if [ -f Cargo.toml ] && grep -q '^name = "tessera"' Cargo.toml; then
+                ln -sfn ${qtEnv} .qt-env
+                mkdir -p target
+                printf '[build]\nrustc = "%s"\n' "${musl.buildPackages.rustc}/bin/rustc" > target/musl.toml
+              fi
               export NIX_LDFLAGS="''${NIX_LDFLAGS//"-rpath $out/lib"/}"
             '';
           };
