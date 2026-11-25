@@ -1221,7 +1221,11 @@ void TerminalItem::mousePressEvent(QMouseEvent* e)
             return;
         }
     }
-    if (e->button() == Qt::RightButton && !appWantsMouse) {
+    // (A right-click on output above the prompt of a shell that reads the
+    // mouse (tessh's editor): the window's menu, not the shell's.)
+    const bool rightIsApps = appWantsMouse
+        && m_session->app_owns_click(uint32_t(qMax(0.0, (e->position().y() * m_dpr - m_pad) / m_ch)));
+    if (e->button() == Qt::RightButton && !rightIsApps) {
         if (m_rightClickPastes) paste();
         else emit contextMenuRequested(e->position().x(), e->position().y());
         e->accept();

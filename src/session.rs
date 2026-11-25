@@ -1775,6 +1775,19 @@ impl Session {
         self.term.kitty_keyboard_flags().is_ok_and(|f| f.contains(key::KittyKeyFlags::REPORT_ALL))
     }
 
+    /// Whether a right-click on this row (of the view) is the program's,
+    /// when it reads the mouse: always for a full-screen one or a command
+    /// running; at a prompt drawn by the shell itself (tessh's editor), only
+    /// on the prompt and below it. The output above is the window's: its
+    /// menu, not a click the shell has nothing to do with.
+    pub fn app_owns_click(&self, view_row: u32) -> bool {
+        if self.full_screen() || !self.at_prompt() {
+            return true;
+        }
+        let row = self.view_top() + view_row as usize;
+        self.prompt_rows().last().is_none_or(|&p| row >= p)
+    }
+
     pub fn wants_mouse(&self, qt_mods: u32) -> bool {
         self.opts.mouse_reporting
             && self.term.is_mouse_tracking().unwrap_or(false)

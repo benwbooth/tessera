@@ -1576,7 +1576,7 @@ ApplicationWindow {
     property real appMenuClosedAt: 0
     AppMenu {
         id: appMenu
-        monoIcon: n => iconTheme.mono(n)
+        iconUrl: (n, px) => win.menuIconUrl(n, px)
         model: win.menuModel
         appMenuAtEnd: true
         accent: Theme.accent
@@ -1592,36 +1592,60 @@ ApplicationWindow {
     // built get their icons again).
     IconTheme { id: iconTheme; Component.onCompleted: win.applyIcons() }
     Connections { target: Theme; function onDarkChanged() { win.applyIcons() } }
+    // (Menus' icons: drawn off the UI thread by IconTheme's provider, the
+    // one-colour ones in the menu's text colour. A new iconRev: drawn again.)
+    property int iconRev: 0
+    function menuIconUrl(n, px) {
+        return "image://icon/" + encodeURIComponent(n) + "?px=" + px + "&mono=" + (Theme.dark ? "f5f5f7" : "1d1d1f") + "&r=" + iconRev
+    }
     function applyIcons() {
-        if (iconTheme.setDark(Theme.dark)) { appMenu._shape = ""; menuBridge._shape = "" }
+        if (iconTheme.setDark(Theme.dark)) iconRev++
     }
 
     // The menus below are written as platform menus (P.Menu, their items as
     // data) but shown in the app's own look, AppMenu, like the ☰: the
     // platform's were the desktop style's (light, whatever the theme). Each
     // row triggers its item, so they work as written.
-    AppMenu {
-        id: menuBridge
-        monoIcon: n => iconTheme.mono(n)
-        flat: true
-        accent: Theme.accent
-        dark: Theme.dark
-        popupType: Popup.Item
-        property var src: null
-        property var acts: []
-        onTriggered: id => { const it = acts[parseInt(id)]; if (it) it.triggered() }
-        onClosed: { if (src) src.aboutToHide(); src = null }
+    // One AppMenu per menu and set of rows shown (a link under the pointer
+    // or not, a selection or not...), each built once: making the rows is
+    // what's slow (~0.5 s for the terminal's), so opening one already made
+    // only updates their texts and states.
+    Component {
+        id: bridgeComp
+        AppMenu {
+            iconUrl: (n, px) => win.menuIconUrl(n, px)
+            flat: true
+            accent: Theme.accent
+            dark: Theme.dark
+            popupType: Popup.Item
+            property var src: null
+            property string kind: ""
+            property var acts: []
+            onTriggered: id => { const it = acts[parseInt(id)]; if (it) it.triggered() }
+            onClosed: if (src) src.aboutToHide()
+        }
     }
-    function bridgeModel(menu, acts) {
+    property var bridges: []
+    function bridgeFor(menu, kind) {
+        for (const b of bridges) if (b.src === menu && b.kind === kind) return b
+        const b = bridgeComp.createObject(win, { src: menu, kind: kind })
+        bridges.push(b)
+        return b
+    }
+    // (The rows shown now; `shape` collects which, as the menu's kind.)
+    function bridgeModel(menu, acts, shape) {
         const out = []
         for (let i = 0; i < menu.items.length; i++) {
             const it = menu.items[i]
-            if (!it || !it.visible) continue
+            const on = !!it && it.visible && (!it.subMenu || it.subMenu.enabled)
+            shape.push(on ? "1" : "0")
+            if (!on) continue
             if (it.separator) { out.push({ separator: true }); continue }
             const sub = it.subMenu
             if (sub) {
-                if (!sub.enabled) continue
-                out.push({ text: sub.title, icon: sub.icon.name, items: bridgeModel(sub, acts) })
+                shape.push("(")
+                out.push({ id: "sub-" + i, text: sub.title, icon: sub.icon.name, items: bridgeModel(sub, acts, shape) })
+                shape.push(")")
                 continue
             }
             const parts = it.text.split("\t")
@@ -1633,14 +1657,14 @@ ApplicationWindow {
     }
     // (Where: x, y in item's coordinates.)
     function showMenu(menu, item, x, y) {
-        if (menuBridge.visible) menuBridge.close()
+        for (const o of bridges) if (o.visible) o.close()
         menu.aboutToShow()
-        const acts = []
-        const items = bridgeModel(menu, acts)
-        menuBridge.src = menu
-        menuBridge.acts = acts
-        menuBridge.model = [{ title: "", items: items }]
-        menuBridge.openAt(item, x, y)
+        const acts = [], shape = []
+        const model = [{ title: "", items: bridgeModel(menu, acts, shape) }]
+        const b = bridgeFor(menu, shape.join(""))
+        b.model = model
+        b.acts = acts
+        b.openAt(item, x, y)
     }
 
     // The + button's menu: profiles, the shells installed, ssh hosts.
@@ -1784,7 +1808,9 @@ ApplicationWindow {
     // iTerm2's context menu, depending on what's under the pointer.
     property string contextLink: ""
     property string contextSelection: ""
-    readonly property string contextSelShort: contextSelection.length > 30 ? contextSelection.slice(0, 28).trim() + "…" : contextSelection.trim()
+    // (One line, for a menu row: a selection's line breaks and runs of
+    // spaces as one space.)
+    readonly property string contextSelShort: { const t = contextSelection.replace(/\s+/g, " ").trim(); return t.length > 30 ? t.slice(0, 28).trim() + "…" : t }
 
     function movePaneToNewTab(p, window) {
         if (!p) return
@@ -2092,7 +2118,7 @@ ApplicationWindow {
     Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
     Timer { id: composeTestTimer; interval: Number(controller.testEnv("COMPOSE_DELAY") || 4000); onTriggered: if (activePane) { activePane.compose.focusEditor(); if (controller.testEnv("COMPOSE_LANG") !== "") activePane.compose.pickLanguage(controller.testEnv("COMPOSE_LANG")); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_TAB") !== "") activePane.compose.openComp(); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory(); if (controller.testEnv("COMPOSE_GUIDE") !== "") activePane.compose.openGuideAtWord() } }
-    Timer { id: contextTestTimer; interval: 2500; onTriggered: { const c = controller.testEnv("CONTEXT"); if (c === "app") appMenu.openAt(menuButton, 0, menuButton.height + 4); else if (c === "launch") showMenu(launchMenu, win.contentItem, 300, 40); else if (c === "tab") { win.menuTab = tabs[0]; win.openMenuAt(tabMenu, win.contentItem, 120, 40) } else if (c === "zoom") showMenu(zoomMenu, win.contentItem, 300, 200); else if (c === "hideinput") toggleInputBox(); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
+    Timer { id: contextTestTimer; interval: 2500; onTriggered: { const c = controller.testEnv("CONTEXT"); if (c === "app") appMenu.openAt(menuButton, 0, menuButton.height + 4); else if (c === "launch") showMenu(launchMenu, win.contentItem, 300, 40); else if (c === "tab") { win.menuTab = tabs[0]; win.openMenuAt(tabMenu, win.contentItem, 120, 40) } else if (c === "zoom") showMenu(zoomMenu, win.contentItem, 300, 200); else if (c === "hideinput") toggleInputBox(); else if (c === "termtwice" && activePane) { activePane.contextMenu(activeView, 200, 150); later(1200, () => { for (const b of bridges) b.close(); later(1500, () => { activeView.selectAll(); activePane.contextMenu(activeView, 200, 150) }) }) } else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
     P.Menu {
         id: zoomMenu
@@ -2154,9 +2180,16 @@ ApplicationWindow {
             P.MenuItem { text: "Paste Selection\tShift+Insert"; onTriggered: contextView.pasteSelection() }
             P.MenuItem { text: "Paste Slowly"; onTriggered: contextView.pasteSlowly() }
             P.MenuSeparator { visible: pasteHistory.length > 0 }
+            // (20 places, the history's most, each shown when it has an
+            // entry: the menu keeps its shape as the history grows, so its
+            // rows aren't made again.)
             Instantiator {
-                model: win.pasteHistory
-                delegate: P.MenuItem { text: win.shortLabel(modelData); onTriggered: pasteInto(contextView, modelData) }
+                model: 20
+                delegate: P.MenuItem {
+                    visible: index < win.pasteHistory.length
+                    text: visible ? win.shortLabel(win.pasteHistory[index]) : ""
+                    onTriggered: { const s = win.pasteHistory[index]; if (s !== undefined) pasteInto(contextView, s) }
+                }
                 onObjectAdded: (i, o) => ctxPasteSpecial.insertItem(3 + i, o)
                 onObjectRemoved: (i, o) => ctxPasteSpecial.removeItem(o)
             }

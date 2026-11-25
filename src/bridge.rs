@@ -124,6 +124,7 @@ pub mod ffi {
         /// Whether mouse events go to the program (it asked for them and
         /// Shift isn't held), so the view knows a right click isn't a menu.
         fn wants_mouse(self: &Session, qt_mods: u32) -> bool;
+        fn app_owns_click(self: &Session, view_row: u32) -> bool;
         /// A full-screen program is running (the alternate screen is up).
         fn full_screen(self: &Session) -> bool;
         /// An image's pixels (RGBA) for drawing it.
