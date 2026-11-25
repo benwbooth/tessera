@@ -1187,10 +1187,7 @@ Rectangle {
             }
             SlimMenu {
                 id: editMenu
-                component Sep: MenuSeparator {
-                    topPadding: 3; bottomPadding: 3
-                    contentItem: Rectangle { implicitWidth: 120; implicitHeight: 1; color: Theme.divider }
-                }
+                component Sep: MacMenuSeparator {}
                 SlimMenuItem { text: "Undo"; enabled: edit.canUndo; onTriggered: edit.undo() }
                 SlimMenuItem { text: "Redo"; enabled: edit.canRedo; onTriggered: edit.redo() }
                 Sep {}

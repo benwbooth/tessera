@@ -1022,10 +1022,7 @@ Item {
     TextEdit { id: clip; visible: false }
     function later(ms, f) { const t = Qt.createQmlObject("import QtQuick; Timer {}", fb); t.interval = ms; t.triggered.connect(() => { f(); t.destroy() }); t.start() }
     function copyText(t) { clip.text = t; clip.selectAll(); clip.copy() }
-    component Sep: MenuSeparator {
-        topPadding: 3; bottomPadding: 3
-        contentItem: Rectangle { implicitWidth: 120; implicitHeight: 1; color: Theme.divider }
-    }
+    component Sep: MacMenuSeparator {}
     property var held: null             // {op: "copy"|"move", path}: for Paste (another host's, or copied here)
     // ---- the desktop's clipboard: files to and from file managers ------------
     FileClip {

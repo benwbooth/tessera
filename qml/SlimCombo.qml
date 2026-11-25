@@ -62,69 +62,9 @@ T.ComboBox {
         topPadding: 0.001
     }
 
-    delegate: T.ItemDelegate {
-        id: row
-        required property int index
-        required property var modelData
-        width: ListView.view ? ListView.view.width : control.width
-        implicitHeight: 24
-        leftPadding: 8
-        rightPadding: 8
-        highlighted: control.highlightedIndex === index
-        hoverEnabled: true
-        ToolTip.visible: row.hovered && rowText.truncated
-        ToolTip.delay: 400
-        ToolTip.text: rowText.text
-        contentItem: Text {
-            id: rowText
-            text: typeof row.modelData === "object" && row.modelData !== null && control.textRole ? row.modelData[control.textRole] : String(row.modelData)
-            color: Theme.text
-            font.pixelSize: 12
-            font.weight: control.currentIndex === row.index ? Font.DemiBold : Font.Normal
-            font.underline: row.hovered
-            elide: Text.ElideRight
-            verticalAlignment: Text.AlignVCenter
-            renderType: Text.NativeRendering
-        }
-        background: Rectangle {
-            radius: 4
-            color: row.highlighted || row.hovered ? control.tint : "transparent"
-        }
-    }
-
-    popup: T.Popup {
-        y: control.height + 2
-        // (On whole pixels, plus the nudge: the combo can sit at a fraction
-        // of one in a layout, and native text smears there at 130%.)
-        onAboutToShow: {
-            const win = control.Window.window
-            const room = win ? win.width - 8 : 100000
-            width = Math.min(Math.max(control.width, 160, control.widest()), room)
-            const p = control.mapToItem(null, 0, control.height + 2)
-            // (Wider than the room to its right: moved left to fit.)
-            const shift = win ? Math.min(0, win.width - 4 - (p.x + width)) : 0
-            x = Math.round(p.x + shift) - p.x + 0.001
-            y = control.height + 2 + Math.round(p.y) - p.y + 0.001
-        }
-        width: Math.max(control.width, 160)
-        implicitHeight: Math.min(contentItem.implicitHeight + 8, 320)
-        padding: 4
-        topPadding: 4.001   // (off the half pixel: 130% scale smears native text there)
-        contentItem: ListView {
-            id: list
-            clip: true
-            implicitHeight: contentHeight
-            model: control.delegateModel
-            currentIndex: control.highlightedIndex
-            boundsBehavior: Flickable.StopAtBounds
-            highlightMoveDuration: 0
-            ScrollBar.vertical: ScrollBar { policy: list.contentHeight > list.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
-            MomentumWheel { flick: list }
-        }
-        background: Rectangle {
-            radius: 7
-            color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.08 : 0.03)
-            border.color: Theme.divider
-        }
-    }
+    // The list: the shared macOS pop-up list (hearth/shared/app-menus), the
+    // current choice over the field with its text lined up (an editable
+    // one opens below).
+    delegate: MacComboItem { combo: control }
+    popup: MacComboPopup { combo: control; dark: Theme.dark; accent: Theme.accent }
 }
