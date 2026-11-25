@@ -749,8 +749,10 @@ Rectangle {
         if (!controller) return
         const seq = ++compSeq, hist = historyMode, query = historyQuery
         const text = edit.text, cursor = edit.cursorPosition
-        // (tessh: its own names, programs and files, not the shell's.)
-        const tessh = box.lang === "tessh" && box.sshHost === ""
+        // (tessh: its own names, programs and files, not the shell's. A line
+        // that reads as a shell command in a pane whose shell is tessh is
+        // tessh's too: its quoting, cd's folders.)
+        const tessh = (box.lang === "tessh" || (box.lang === "bash" && box.runShell === "" && box.shellName === "tessh")) && box.sshHost === ""
         Async.call(controller, k => hist ? controller.historySearch(k, query, box.lang)
                                  : tessh ? controller.completeTessh(k, text, cursor, box.cwd)
                                          : controller.complete(k, text, cursor, box.cwd, box.view ? box.view.aliases : "{}", box.shellPid, box.sshHost), json => {
@@ -767,8 +769,10 @@ Rectangle {
             if (byTab && !hist && sole >= 0 && r.items[sole]) { box.acceptComp(sole); return }
             if (r.items.length === 0 && !r.pending) box.closeComp()
             if (r.pending) compRetry.restart()
-            // (The language server's items are added to these when they come.)
-            if (!hist && box.lspServer !== "")
+            // (The language server's items are added to these when they come;
+            // not a shell line's: bash-language-server reads a path after a
+            // quote from the root, and cd's list isn't folders only.)
+            if (!hist && box.lspServer !== "" && box.lang !== "bash")
                 box.controller.lspAsk(box.aiKey + "-comp", box.lang, box.cwd, text, "complete", cursor, box.sshHost)
         })
     }

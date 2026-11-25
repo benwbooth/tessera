@@ -1089,7 +1089,8 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
         // '7th Heaven'/ — unless it's inside a quote already.)
         let insert = if (kind == "dir" || kind == "file") && !before[..start].ends_with(['\'', '"']) { quote_path(&n) } else { n.clone() };
         // (Shown as it'll go in, quotes and all.)
-        let label = if kind == "dir" || kind == "file" { insert.clone() } else { n.clone() };
+        // (A path's last part, as Tessera's own list has it; what goes in is the whole.)
+        let label = if kind == "dir" || kind == "file" { path_tail(&insert).to_string() } else { n.clone() };
         items.push(Item { insert, label, kind, detail, doc });
     }
     // (cd and the like take folders only.)
@@ -1216,6 +1217,24 @@ fn hostname() -> String {
 }
 
 // ---- the loop ---------------------------------------------------------------------
+
+/// A completed path's last part (`a/'My Drive'/'CD backups'/` →
+/// `'CD backups'/`): after the last slash outside quotes, a folder's own
+/// slash kept.
+fn path_tail(p: &str) -> &str {
+    let body = p.strip_suffix('/').unwrap_or(p);
+    let (mut q, mut cut) = (None::<char>, 0);
+    for (i, c) in body.char_indices() {
+        match q {
+            Some(x) if c == x => q = None,
+            Some(_) => {}
+            None if c == '\'' || c == '"' => q = Some(c),
+            None if c == '/' => cut = i + 1,
+            None => {}
+        }
+    }
+    if cut >= p.len() { p } else { &p[cut..] }
+}
 
 /// The word at (or just before) a byte offset.
 fn word_at(text: &str, pos: usize) -> &str {
