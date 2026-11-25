@@ -3221,7 +3221,10 @@ impl Ed {
             }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                 let ls = self.ls.as_mut().unwrap();
-                if !ls.capped {
+                // (At its top already, up: the mouse back to the terminal,
+                // which scrolls its scrollback from here, to what came
+                // before (an earlier ls, all of it). It looked wiped.)
+                if !ls.capped || (e.kind == MouseEventKind::ScrollUp && ls.scroll == 0) {
                     return false;
                 }
                 ls.scroll = if e.kind == MouseEventKind::ScrollUp { ls.scroll.saturating_sub(3) } else { ls.scroll + 3 };
