@@ -264,6 +264,35 @@ pub fn render(p: &Path, kind: Kind) -> Result<Guide, String> {
     }
 }
 
+/// The pager for a file shown as `key` says (super::types's): one of the
+/// viewer's own kinds ("kind:json"…), or text colored as a syntax.
+pub fn render_as(p: &Path, key: &str) -> Result<Guide, String> {
+    let kind = match key {
+        "kind:text" => None,
+        "kind:markdown" => Some(Kind::Markdown),
+        "kind:json" => Some(Kind::Json),
+        "kind:yaml" => Some(Kind::Yaml),
+        "kind:toml" => Some(Kind::Toml),
+        "kind:csv" => Some(Kind::Table(b',')),
+        "kind:tsv" => Some(Kind::Table(b'\t')),
+        "kind:hex" => Some(Kind::Binary),
+        _ => None,
+    };
+    if let Some(k) = kind {
+        return render(p, k);
+    }
+    let (b, more) = read_some(p, TEXT_MAX)?;
+    let t = sanitize(&decode(&b));
+    let (lines, lang) = if key == "kind:text" {
+        (t.split('\n').map(String::from).collect(), "plain text".to_string())
+    } else {
+        highlight::highlight_as(key, &t).ok_or_else(|| format!("no {} syntax to color with", key.split_once(':').map(|x| x.1).unwrap_or(key)))?
+    };
+    let l = numbered(lines, true);
+    let n = format!("{} lines{}", l.lines.len(), if more { " (the first 32 MB)" } else { "" });
+    Ok(guide(p, vec![("text", Content::Lines(l))], info(p, &lang, &n)))
+}
+
 /// JSON laid out with two-space indents, keys in their order, numbers as
 /// written (reindented token by token, not parsed and printed again).
 pub fn pretty_json(t: &str) -> String {

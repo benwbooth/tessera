@@ -208,6 +208,46 @@ pub(crate) struct Guide {
     help: bool,
     side_hidden: bool,
     note: String,
+    /// The file-type box (s, View > File type…): what's typed, the
+    /// choices that match, the one lit, the first shown, and where it is.
+    pick: Option<Pick>,
+}
+
+/// Picking what a file is shown as: every type and syntax, narrowed as
+/// you type.
+pub(crate) struct Pick {
+    all: Vec<(String, String)>,
+    query: String,
+    shown: Vec<usize>,
+    at: usize,
+    top: usize,
+    /// (x, y of the first choice, width, choices on screen).
+    area: (usize, usize, usize, usize),
+}
+
+impl Pick {
+    fn new(all: Vec<(String, String)>) -> Pick {
+        let mut p = Pick { all, query: String::new(), shown: vec![], at: 0, top: 0, area: (0, 0, 0, 0) };
+        p.filter();
+        p
+    }
+    /// The choices with every typed word in them; those starting with the
+    /// first word first.
+    fn filter(&mut self) {
+        let q = self.query.to_lowercase();
+        let words: Vec<&str> = q.split_whitespace().collect();
+        let mut hits: Vec<(bool, usize)> = self.all.iter().enumerate().filter(|(_, (l, k))| {
+            let l = l.to_lowercase();
+            words.iter().all(|w| l.contains(w) || k.contains(w))
+        }).map(|(i, (l, _))| (!words.first().is_some_and(|w| l.to_lowercase().starts_with(w)), i)).collect();
+        hits.sort_by_key(|&(later, _)| later);
+        self.shown = hits.into_iter().map(|(_, i)| i).collect();
+        self.at = 0;
+        self.top = 0;
+    }
+    fn key(&self) -> Option<String> {
+        self.shown.get(self.at).map(|&i| self.all[i].1.clone())
+    }
 }
 
 /// The contents column's width as dragged (0: as wide as suits the terminal).
@@ -230,7 +270,7 @@ impl Guide {
     /// search box says "Search `name`", the foot starts with `info`.
     pub(crate) fn views(guides: Vec<(String, Content)>, which: usize, name: &str, info: &str) -> Guide {
         let n = guides.len();
-        let mut g = Guide { guides, which, name: name.to_string(), info: info.to_string(), file: None, left: 0, gutters: vec![], widest: 0, tops: vec![0; n], bash: vec![Default::default(); n], tab_lines: vec![], chips: vec![], width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None, sel: None, dragging: false, rect: false, rect_mode: false, menu: None, open: None, open_box: None, ctx_box: None, menu_x: vec![], search_x: (0, 0), status_x: vec![], help: false, side_hidden: false, note: String::new() };
+        let mut g = Guide { guides, which, name: name.to_string(), info: info.to_string(), file: None, left: 0, gutters: vec![], widest: 0, tops: vec![0; n], bash: vec![Default::default(); n], tab_lines: vec![], chips: vec![], width: 0, lines: vec![], plain: vec![], lower: vec![], parts: vec![], top: 0, toc_top: 0, query: String::new(), searching: false, matches: vec![], at: None, sel: None, dragging: false, rect: false, rect_mode: false, menu: None, open: None, open_box: None, ctx_box: None, menu_x: vec![], search_x: (0, 0), status_x: vec![], help: false, side_hidden: false, note: String::new(), pick: None };
         g.layout(80);
         g
     }
@@ -641,6 +681,10 @@ impl Guide {
         if self.has_parts() {
             view.push(Item::new("Contents", "C", Act::Sidebar).check(!self.side_hidden));
         }
+        if self.file.is_some() {
+            view.push(Item::sep());
+            view.push(Item::new("File type…", "S", Act::FileType));
+        }
         if !self.tab_lines.is_empty() {
             view.push(Item::new("bash examples", "T", Act::Bash).check(!self.bash[self.which].is_empty()));
         }
@@ -648,6 +692,31 @@ impl Guide {
         let options = SCHEMES.iter().enumerate().map(|(k, sc)| Item::new(sc.name, "", Act::Scheme(k)).radio(k == cur)).collect();
         let help = vec![Item::new("Keys and mouse…", "F1", Act::Help)];
         vec![("File", file), ("Edit", edit), ("Search", search), ("View", view), ("Options", options), ("Help", help)]
+    }
+
+    /// The file shown as `key` says (Pick's choices): its views replaced,
+    /// at about the same place.
+    fn show_as(&mut self, key: &str) {
+        let Some(p) = self.file.clone() else { return };
+        match crate::viewer::render_as(&p, key) {
+            Ok(ng) => {
+                let n = ng.guides.len();
+                self.guides = ng.guides;
+                self.info = ng.info;
+                self.which = 0;
+                self.tops = vec![0; n];
+                self.bash = vec![Default::default(); n];
+                self.left = 0;
+                self.sel = None;
+                self.matches.clear();
+                self.at = None;
+                self.relayout(true);
+                if !self.query.is_empty() {
+                    self.search();
+                }
+            }
+            Err(e) => self.note = e,
+        }
     }
 
     /// Do a menu's (or a key's) action; true when it's time to go back.
@@ -699,6 +768,11 @@ impl Guide {
                 self.relayout(true);
             }
             Act::Help => self.help = true,
+            Act::FileType => {
+                if self.file.is_some() {
+                    self.pick = Some(Pick::new(crate::viewer::types()));
+                }
+            }
             Act::Scheme(k) => {
                 set_scheme(k);
                 self.note = format!("Colors: {} (kept for next time)", SCHEMES[k].name);
@@ -892,6 +966,9 @@ impl Guide {
         if self.help {
             help_box(&mut o, cols, rows, t, self.file.is_some(), self.guides.len() > 1);
         }
+        if let Some(p) = self.pick.as_mut() {
+            pick_box(&mut o, p, cols, rows, t);
+        }
         if self.searching {
             o.push_str(&format!("\x1b[1;{}H\x1b[?25h", self.search_x.0 + 5 + self.query.width().min(fw.saturating_sub(3))));
         }
@@ -991,6 +1068,7 @@ enum Act {
     Bash,
     Help,
     Scheme(usize),
+    FileType,
 }
 
 /// A menu item: its label, its key, what it does, whether it can now, and
@@ -1411,6 +1489,55 @@ fn box_menu(o: &mut String, items: &[Item], x: usize, y: usize, at: usize, cols:
 }
 
 /// The keys (F1): a dialog in the middle, shadowed, with an OK button.
+/// The file-type box: a search line, then the choices that match, the lit
+/// one reversed, with a scrollbar when they don't all fit.
+fn pick_box(o: &mut String, p: &mut Pick, cols: usize, rows: usize, t: &Theme) {
+    let w = 44.min(cols.saturating_sub(4)).max(20);
+    // (Its size from all the choices, so it stays put as typing narrows them.)
+    let n = p.all.len().clamp(1, rows.saturating_sub(10).clamp(3, 18));
+    let h = n + 6;
+    let x = cols.saturating_sub(w) / 2;
+    let y = rows.saturating_sub(h) / 2;
+    p.at = p.at.min(p.shown.len().saturating_sub(1));
+    if p.at < p.top {
+        p.top = p.at;
+    } else if p.at >= p.top + n {
+        p.top = p.at + 1 - n;
+    }
+    p.area = (x, y + 4, w, n);
+    let line = |o: &mut String, row: usize, body: &str| {
+        let pad = (w - 2).saturating_sub(strip(body).width());
+        o.push_str(&format!("\x1b[{};{}H{}║{body}{}{}║{}  ", row + 1, x + 1, t.menu, t.menu, " ".repeat(pad), t.shadow));
+    };
+    o.push_str(&format!("\x1b[{};{}H{}╔{}╗", y + 1, x + 1, t.menu, "═".repeat(w - 2)));
+    let title = " File type ";
+    o.push_str(&format!("\x1b[{};{}H{}{title}", y + 1, x + 1 + (w - title.width()) / 2, t.menu));
+    let q = cut(&p.query, w.saturating_sub(10));
+    line(o, y + 1, &format!(" ⌕ {}{q}▏{}", t.menu_sel, t.menu));
+    line(o, y + 2, &format!(" {} of {}", p.shown.len(), p.all.len()));
+    o.push_str(&format!("\x1b[{};{}H{}╟{}╢", y + 4, x + 1, t.menu, "─".repeat(w - 2)));
+    let th = thumb(p.shown.len(), n, p.top, n);
+    for r in 0..n {
+        let body = match p.shown.get(p.top + r) {
+            Some(&i) => {
+                let label = cut(&p.all[i].0, w - 6);
+                let bar = if p.shown.len() > n { if th.is_some_and(|(a, b)| (a..b).contains(&r)) { "█" } else { "░" } } else { " " };
+                let pad = " ".repeat((w - 5).saturating_sub(label.width()));
+                if p.top + r == p.at {
+                    format!(" {}{label}{pad}{}{bar}", t.menu_sel, t.menu)
+                } else {
+                    format!(" {label}{pad}{bar}")
+                }
+            }
+            None if r == 0 => " (none match)".to_string(),
+            None => String::new(),
+        };
+        line(o, y + 4 + r, &body);
+    }
+    line(o, y + 4 + n, "");
+    o.push_str(&format!("\x1b[{};{}H{}╚{}╝{}  ", y + 5 + n, x + 1, t.menu, "═".repeat(w - 2), t.shadow));
+}
+
 fn help_box(o: &mut String, cols: usize, rows: usize, t: &Theme, file: bool, views: bool) {
     let mut lines: Vec<String> = vec![
         "↑ ↓ PgUp PgDn Home End   scroll (j k space b g G too)".into(),
@@ -1434,6 +1561,7 @@ fn help_box(o: &mut String, cols: usize, rows: usize, t: &Theme, file: bool, vie
     }
     if file {
         lines.push("O                        open the file in its own app".into());
+        lines.push("S                        show it as another file type (type to narrow)".into());
     }
     lines.push("Q or Esc                 back to the prompt".into());
     let w = lines.iter().map(|l| l.width()).max().unwrap_or(40) + 6;
@@ -1591,6 +1719,42 @@ pub(crate) fn run(mut g: Guide, at: &str) {
                 // (The keys box: any key closes it.)
                 if g.help {
                     g.help = false;
+                    continue;
+                }
+                // (The file-type box: typing narrows it, ↑ ↓ pick, Enter shows
+                // the file that way, Esc leaves it as it was.)
+                if let Some(p) = g.pick.as_mut() {
+                    let page = p.area.3.max(1);
+                    match k.code {
+                        KeyCode::Esc => g.pick = None,
+                        KeyCode::Char('c') if ctrl => g.pick = None,
+                        KeyCode::Enter => {
+                            let key = p.key();
+                            g.pick = None;
+                            if let Some(key) = key {
+                                g.show_as(&key);
+                            }
+                        }
+                        KeyCode::Up => p.at = p.at.saturating_sub(1),
+                        KeyCode::Down => p.at = (p.at + 1).min(p.shown.len().saturating_sub(1)),
+                        KeyCode::PageUp => p.at = p.at.saturating_sub(page),
+                        KeyCode::PageDown => p.at = (p.at + page).min(p.shown.len().saturating_sub(1)),
+                        KeyCode::Home if ctrl => p.at = 0,
+                        KeyCode::End if ctrl => p.at = p.shown.len().saturating_sub(1),
+                        KeyCode::Backspace => {
+                            p.query.pop();
+                            p.filter();
+                        }
+                        KeyCode::Char('u') if ctrl => {
+                            p.query.clear();
+                            p.filter();
+                        }
+                        KeyCode::Char(ch) if !ctrl && !alt => {
+                            p.query.push(ch);
+                            p.filter();
+                        }
+                        _ => {}
+                    }
                     continue;
                 }
                 // (A menu open: ← → the next menu, ↑ ↓ its items, Enter does one.)
@@ -1771,6 +1935,9 @@ pub(crate) fn run(mut g: Guide, at: &str) {
                     KeyCode::Char('t') if !g.tab_lines.is_empty() => {
                         g.act(Act::Bash);
                     }
+                    KeyCode::Char('s') if g.file.is_some() => {
+                        g.act(Act::FileType);
+                    }
                     KeyCode::Down | KeyCode::Up if shift => g.pick_lines(k.code == KeyCode::Down, geo.bh),
                     KeyCode::Left | KeyCode::Char('h') if g.unwrapped() => g.left = g.left.saturating_sub(8),
                     KeyCode::Right | KeyCode::Char('l') if g.unwrapped() => g.left += 8,
@@ -1823,6 +1990,36 @@ pub(crate) fn run(mut g: Guide, at: &str) {
                 if g.help {
                     if matches!(m.kind, MouseEventKind::Down(_)) {
                         g.help = false;
+                    }
+                    continue;
+                }
+                // (The file-type box: the wheel scrolls it, a choice pointed at
+                // is lit and clicked is shown; a click outside closes it.)
+                if let Some(p) = g.pick.as_mut() {
+                    let (bx, by, bw, n) = p.area;
+                    let inside = (row >= by && row < by + n && col > bx && col < bx + bw).then(|| p.top + row - by).filter(|&i| i < p.shown.len());
+                    match m.kind {
+                        MouseEventKind::ScrollDown => p.at = (p.at + 3).min(p.shown.len().saturating_sub(1)),
+                        MouseEventKind::ScrollUp => p.at = p.at.saturating_sub(3),
+                        MouseEventKind::Moved => {
+                            if let Some(i) = inside {
+                                p.at = i;
+                            }
+                        }
+                        MouseEventKind::Down(MouseButton::Left) => match inside {
+                            Some(i) => {
+                                p.at = i;
+                                let key = p.key();
+                                g.pick = None;
+                                if let Some(key) = key {
+                                    g.show_as(&key);
+                                }
+                            }
+                            None if !(row + 3 >= by && row < by + n + 1 && col >= bx && col <= bx + bw) => g.pick = None,
+                            None => {}
+                        },
+                        MouseEventKind::Down(_) => g.pick = None,
+                        _ => {}
                     }
                     continue;
                 }

@@ -445,6 +445,11 @@ fn scope_kind(stack: &syntect::parsing::ScopeStack) -> &'static str {
 pub fn highlight_bat(name: &str, text: &str) -> Option<(Vec<String>, String)> {
     let ss = syntaxes();
     let syn = syntax_for(ss, name, text)?;
+    Some(highlight_syn(ss, syn, text))
+}
+
+/// `text` in one of bat's syntaxes: its lines styled, and the syntax's name.
+fn highlight_syn(ss: &syntect::parsing::SyntaxSet, syn: &syntect::parsing::SyntaxReference, text: &str) -> (Vec<String>, String) {
     let mut state = syntect::parsing::ParseState::new(syn);
     let mut stack = syntect::parsing::ScopeStack::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -493,7 +498,7 @@ pub fn highlight_bat(name: &str, text: &str) -> Option<(Vec<String>, String)> {
     if text.ends_with('\n') || text.is_empty() {
         out.push(String::new());
     }
-    Some((out, syn.name.clone()))
+    (out, syn.name.clone())
 }
 
 /// What a text is when its name doesn't say, by Grove's clear-cut content
@@ -582,6 +587,52 @@ pub fn highlight_file(path: &std::path::Path, text: &str) -> (Vec<String>, Strin
         }
     }
     (text.split('\n').map(String::from).collect(), String::new())
+}
+
+/// Every syntax the viewer can color with, for picking one by hand:
+/// (label, key). Tree-sitter's (built in, and Helix's: fetched when
+/// picked), then bat's that those don't cover. A key is "ts:NAME" or
+/// "bat:NAME".
+pub fn all_langs() -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = vec![];
+    let mut seen = std::collections::HashSet::new();
+    let mut ts: Vec<String> = BUILTIN.iter().map(|s| s.to_string()).collect();
+    ts.extend(crate::grammars::known());
+    for n in ts {
+        // (Helix's helpers, only ever inside another language.)
+        if n.ends_with("-format-args") {
+            continue;
+        }
+        let l = label(&n);
+        if seen.insert(l.to_lowercase()) {
+            out.push((l, format!("ts:{n}")));
+        }
+    }
+    for syn in syntaxes().syntaxes() {
+        if syn.hidden || syn.name == "Plain Text" {
+            continue;
+        }
+        if seen.insert(syn.name.to_lowercase()) {
+            out.push((syn.name.clone(), format!("bat:{}", syn.name)));
+        }
+    }
+    out.sort_by_key(|(l, _)| l.to_lowercase());
+    out
+}
+
+/// `text` colored as `key` (all_langs's) says: its lines, and the syntax's
+/// name. None when it can't be.
+pub fn highlight_as(key: &str, text: &str) -> Option<(Vec<String>, String)> {
+    if let Some(n) = key.strip_prefix("ts:") {
+        if ensure_helix(n) {
+            return highlight_lines(n, text).map(|l| (l, label(n)));
+        }
+        return None;
+    }
+    let name = key.strip_prefix("bat:")?;
+    let ss = syntaxes();
+    let syn = ss.find_syntax_by_name(name)?;
+    Some(highlight_syn(ss, syn, text))
 }
 
 /// A tree-sitter language's name as people write it.

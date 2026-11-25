@@ -147,6 +147,29 @@ pub fn classify(p: &Path) -> Kind {
     Kind::Text
 }
 
+pub use render::render_as;
+
+/// What a file can be shown as, picked by hand (the viewer's s, View >
+/// File type…): (label, key for render_as). The viewer's own ways first,
+/// then every syntax.
+pub fn types() -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = [
+        ("Plain text", "kind:text"),
+        ("Markdown (rendered)", "kind:markdown"),
+        ("JSON (formatted)", "kind:json"),
+        ("YAML (checked)", "kind:yaml"),
+        ("TOML (checked)", "kind:toml"),
+        ("CSV table", "kind:csv"),
+        ("TSV table", "kind:tsv"),
+        ("Hex dump", "kind:hex"),
+    ]
+    .iter()
+    .map(|(l, k)| (l.to_string(), k.to_string()))
+    .collect();
+    v.extend(highlight::all_langs());
+    v
+}
+
 /// A size as people say it: 512 B, 4.2 KB, 13 MB.
 pub fn human_size(n: u64) -> String {
     let units = ["B", "KB", "MB", "GB", "TB"];
