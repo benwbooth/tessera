@@ -626,6 +626,10 @@ FocusScope {
     function follow() { sticking = true; Qt.callLater(pin) }
     function pin() {
         if (!sticking || unseenCid !== "") return   // (a card on its way: when it shows)
+        // (Hidden, a terminal pane's: not scrolled. Scrolling made the new
+        // card, menus and all, on the UI thread with every command; shown
+        // again, it's pinned to the end then.)
+        if (!visible) return
         pinning = true
         list.positionViewAtEnd()
         pinning = false
@@ -1743,7 +1747,7 @@ FocusScope {
     }
     function isMarkdownFile(p) { return /\.(md|markdown|mdx)$/i.test(p || "") }
     function isPictureFile(p) { return !/^ssh:/.test(p || "") && /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p || "") }
-    function followLive() { if (liveIndex >= 0 && unseenCid === "") { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
+    function followLive() { if (visible && liveIndex >= 0 && unseenCid === "") { list.positionViewAtIndex(liveIndex, ListView.Contain); Qt.callLater(placeLive) } }
     property int termRev: 0             // the terminal's cells came back: read outputs again
     Timer { interval: 400; repeat: true; running: nb.visible && nb.ownRunOrAny; onTriggered: nb.tick++ }
     property bool ownRunOrAny: false
@@ -4036,6 +4040,10 @@ FocusScope {
     component LsPane: FileBrowser {
         property var card: null
         readonly property var plan: card ? card.plan : ({})
+        // (A hidden notebook's (a terminal pane's) folder cards read nothing:
+        // every cd and ls read its whole folder, a big one tens of MB of
+        // JSON on the UI thread, for a card no one saw. Read when shown.)
+        wanted: nb.visible
         controller: nb.controller
         themeData: nb.themeData
         fontFamily: nb.fontFamily
