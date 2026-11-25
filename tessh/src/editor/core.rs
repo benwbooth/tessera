@@ -93,6 +93,11 @@ pub struct Comp {
     pub query: Text,
     pub doc_scroll: usize,
     pub top: usize,
+    /// The text and cursor the items were worked out for: a list for other
+    /// text is never taken (worked out again first). "cd " lists at once,
+    /// and typed on quickly, a Tab took that list's first folder.
+    pub for_text: String,
+    pub for_cursor: usize,
 }
 
 /// A list from a button or widget: the folders, a widget's choices, the
@@ -521,6 +526,8 @@ impl Ed {
             return;
         }
         let (s, e, items) = h.complete(&self.t.text, self.t.cursor);
+        self.comp.for_text = self.t.text.clone();
+        self.comp.for_cursor = self.t.cursor;
         self.comp.start = s;
         self.comp.end = e;
         self.comp.items = items;
@@ -559,6 +566,22 @@ impl Ed {
     fn comp_key(&mut self, k: &KeyEvent, h: &mut dyn Hooks) -> bool {
         if !self.comp.open || self.comp.items.is_empty() {
             return false;
+        }
+        if !self.comp.hist && (self.comp.for_text != self.t.text || self.comp.for_cursor != self.t.cursor) {
+            self.comp.index = 0;
+            self.request_complete(h);
+            if !self.comp.open || self.comp.items.is_empty() {
+                return false;
+            }
+            // (Tab on a list not yet seen: one thing fits, in it goes;
+            // several, they're shown, the next Tab takes one.)
+            if k.code == KeyCode::Tab && !k.modifiers.contains(KeyModifiers::SHIFT) {
+                self.comp.typing = false;
+                if self.comp.items.len() == 1 {
+                    self.accept_comp(Some(0), h);
+                }
+                return true;
+            }
         }
         let n = self.comp.items.len();
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
@@ -913,6 +936,12 @@ impl Ed {
             let lead = &self.t.text[self.t.line_start(p)..p];
             if !lead.trim().is_empty() {
                 self.open_comp(h);
+                // (One thing fits: it goes in at once, as in a shell, and
+                // Tessera's input; the list was shown and a second Tab
+                // needed.)
+                if self.comp.open && self.comp.items.len() == 1 {
+                    self.accept_comp(Some(0), h);
+                }
                 return true;
             }
         }

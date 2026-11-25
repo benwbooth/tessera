@@ -779,6 +779,7 @@ Rectangle {
             let r
             try { r = JSON.parse(json) } catch (e) { return }
             box.comp = r
+            box.compFor = text + "\u0001" + cursor
             if (box.compIndex >= r.items.length) box.compIndex = 0
             const byTab = box.compByTab
             box.compByTab = false
@@ -803,6 +804,7 @@ Rectangle {
         const it = comp.items[i === undefined ? compIndex : i]
         if (!it) return
         if (historyMode) { setText(it.insert); closeComp(); edit.forceActiveFocus(); return }
+        if (!compCurrent()) { requestComplete(); return }
         edit.remove(comp.start, comp.end)
         let ins = it.insert
         // A finished word gets its space; a folder or "--opt=" keeps going.
@@ -917,8 +919,18 @@ Rectangle {
             SlimMenuItem { required property string modelData; text: promptBar.title(modelData); onTriggered: promptBar.openChoices(modelData, promptBar) }
         }
     }
+    // (The text and cursor the list in hand was worked out for: a list
+    // for other text is never taken. "cd " asked at once, then "Can" typed
+    // and Tab: the list was still "cd "'s, and its first folder went in
+    // before "Can". Tab then asks again, for the text as it is.)
+    property string compFor: ""
+    function compCurrent() { return compFor === edit.text + "\u0001" + edit.cursorPosition }
     function compKey(e) {
         if (!compOpen || comp.items.length === 0) return false
+        if (!historyMode && !compCurrent()) {
+            if (e.key === Qt.Key_Escape) { closeComp(); return true }
+            return false
+        }
         const n = comp.items.length
         // (Shift+PgUp/PgDn: the help over the list.)
         if ((e.modifiers & Qt.ShiftModifier) && (e.key === Qt.Key_PageDown || e.key === Qt.Key_PageUp)) { compPopup.scrollDoc(e.key === Qt.Key_PageDown ? 1 : -1); return true }
