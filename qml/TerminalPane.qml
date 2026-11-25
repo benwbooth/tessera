@@ -134,11 +134,31 @@ Item {
         if (editorOn && focused && preferEditor) Qt.callLater(compose.focusEditor)
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
-    readonly property bool editorOn: inputEditor && !term.exited && !term.fullScreen && (promptHeld || editorCalled)
+    // (A program that takes the screen: full-screen ones, or ones drawn in
+    // place that read keys themselves. A REPL the editor serves (python's
+    // own turns on bracketed paste) isn't one: its lines come from here.)
+    // (Which program it is is asked the moment it takes over, and the
+    // editor stays until the answer: a REPL then doesn't flash it away.)
+    readonly property bool takenOver: term.fullScreen && replLang === "" && fsKnown
+    property bool fsKnown: false
+    readonly property bool fsNow: term.fullScreen
+    onFsNowChanged: {
+        if (!fsNow) { fsKnown = false; fsWait.stop(); return }
+        fsWait.restart()
+        const id = term.sessionId
+        if (!controller || id === "") { fsKnown = true; return }
+        Async.call(controller, k => controller.sessionJob(k, id), job => {
+            if (!term || term.sessionId !== id || !pane.fsNow) return
+            if (pane.job !== job) pane.job = job
+            pane.fsKnown = true
+        })
+    }
+    Timer { id: fsWait; interval: 400; onTriggered: pane.fsKnown = true }
+    readonly property bool editorOn: inputEditor && !term.exited && !takenOver && (promptHeld || editorCalled)
     // (Shown while a command runs too, the keys the program's: the pane
     // doesn't come and go, and a click or a tap of left Ctrl there types
     // the next command, queued. Only a full-screen program takes it away.)
-    readonly property bool editorShown: inputEditor && !term.exited && !term.fullScreen
+    readonly property bool editorShown: inputEditor && !term.exited && !takenOver
     // (At the prompt, or was a moment ago: a quick command (ls) leaves the
     // editor up rather than taking it away and back, which resizes
     // everything above it twice. One that's still going after 250 ms hides

@@ -120,7 +120,7 @@ ApplicationWindow {
         if (!p) return
         // (A command running: the editor called up to type the next one,
         // which waits for it, queued.)
-        if (!p.editorOn && p.inputEditor && !p.view.exited && !p.view.fullScreen) { p.editorCalled = true; Qt.callLater(backToEditor); return }
+        if (!p.editorOn && p.inputEditor && !p.view.exited && !p.takenOver) { p.editorCalled = true; Qt.callLater(backToEditor); return }
         if (!p.editorOn) return
         if (p.compose.editing) { p.compose.handBack(); return }
         backToEditor()
