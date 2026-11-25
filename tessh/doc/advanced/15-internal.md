@@ -23,8 +23,9 @@ in tessh instead. Where that leaves a real hole, this chapter says so.
 A builtin used as a value gives what it prints (`m = (umask)`), and in a
 pipe its output goes down the pipe (`history | grep ssh`). `type`, `hash`,
 `exec` and `eval` are Python's names too: given words (`type ls`,
-`eval "echo hi"`) they are the shell's builtins, given a value (`type $x`,
-`eval $code`) they are Python's.
+`exec zsh`) they are the shell's builtins, given a value (`type $x`) they
+are Python's. `eval` always runs tessh text, `eval $code` too; Python's is
+`builtins.eval`.
 
 When a shell runs a program it *forks*: the new process is the child, and
 the parent goes on (or waits for it). A child can't change its parent's
@@ -1301,9 +1302,9 @@ expands once more: with `a='$b' b='$c' c=d`, `echo $a` prints `$b`, `eval
 echo $a` prints `$c` and `eval eval echo $a` prints `d`.
 
 tessh's `eval text…` runs tessh text (not sh text) in the shell, and its
-value is the last form's: `x = (eval "1 + 2")`. Text in a variable goes
-in quotes (`eval "$code"`); a bare value (`eval $code`) is Python's `eval`,
-which runs Python text;
+value is the last form's: `x = (eval "1 + 2")`. Text in a variable runs
+the same way (`eval $code`, `eval "$code"`); Python's `eval`, which runs
+Python text, is `builtins.eval`;
 `source` runs a file of tessh. Most of what scripts use `eval` for
 (choosing a variable by name, building a command) is done more safely with
 a dict, a list of arguments, or `$env`.
@@ -1413,8 +1414,8 @@ version = 3.4
 Major: 3, minor: 4
 ```
 
-tessh's `eval` runs tessh text given as words or a string (`eval "echo
-hi"`, `eval "$code"`); a bare value (`eval $code`) goes to Python's `eval`.
+tessh's `eval` runs tessh text given as words, a string or a variable
+(`eval "echo hi"`, `eval $code`); Python's is `builtins.eval`.
 The lines above go through a file, which `eval "$code"` would do too.
 
 ### Example 15-12. Using eval to select among variables (`arr-choice.sh`)

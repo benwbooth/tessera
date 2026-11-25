@@ -1568,10 +1568,10 @@ Printing Numbers 1 through 20, but something happens after 2.
 the loop N levels up. Python's `break` and `continue` only act on the
 innermost loop.
 
-**Gap:** no `break N` or `continue N`. The ways around it: put the loops
-in a function and `return`; use a loop's `else` (run when it ends without
-`break`); or, for `continue 2` at the end of an outer loop's body, a plain
-`break` of the inner loop.
+tessh has them too, as bash's: `break 2` leaves the inner loop and the
+one around it, `continue 2` goes on with the next round of the outer one.
+A function and `return`, or a loop's `else` (run when it ends without
+`break`), are Python's ways, often as clear.
 
 ### Example 11-22. Breaking out of multiple loop levels (`break-levels.sh`)
 

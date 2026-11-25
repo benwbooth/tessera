@@ -373,6 +373,22 @@ comparisons, backtick and custom operators, `^`, `&`, `<<` `>>`, `+` `-`,
 `.attr` and `[i]`. (`~` is your home folder and a macro's unquote, so
 bitwise not is `operator.invert`.)
 
+`and` and `or` between two barewords are words, so `print salt and pepper`
+prints them; with a value on either side they're Python's, and a bareword
+there is its text: `$x or default`, `$n == 5 and yes`. (`in` and `is` next
+to a bareword are words: `print it is ready`.)
+
+```tessh
+x = 0
+print ($x or default) ($x == 0 and yes)
+print salt and pepper
+```
+
+```output
+default yes
+salt and pepper
+```
+
 Prefix minus: spaced, or glued to a variable or a bracket.
 
 ```tessh

@@ -1989,3 +1989,29 @@ fn fifo_redirection_and_histcmd() {
     ));
     assert_eq!((out.as_str(), err.as_str(), code), ("started\nthrough\nagain\nhc 1\n", "", 0));
 }
+
+/// bash's break N and continue N; eval $code runs tessh text; and/or are
+/// words only between two barewords.
+#[test]
+fn break_n_eval_and_bareword_and_or() {
+    let (ns, out) = run(concat!(
+        "for i in [1 2 3]\n  for j in [1 2 3]\n    if $j == 2\n      continue 2\n    print c $i $j\n",
+        "for i in [1 2]\n  for j in [1 2 3]\n    for k in [1 2]\n      if $j == 2\n        break 2\n      print b $i $j $k\n",
+        "def f\n  n = 0\n  while true\n    for x in [1 2]\n      n += 1\n      if $n > 3\n        break 9\n  return $n\n",
+        "print f (f)\n",
+        "for i in [1 2]\n  break 1\nprint after $i\n",
+        "x = 0\n",
+        "print ($x or default) ($x == 0 and yes) (1 and $x)\n",
+        "print salt and pepper\n",
+        "cmd = 'echo from eval'\n",
+        "eval $cmd\n",
+        "eval 'y = 7'\n",
+        "z = (builtins.eval '2 ** 5')\n",
+    ));
+    assert_eq!(out, "c 1 1\nc 2 1\nc 3 1\nb 1 1 1\nb 1 1 2\nb 2 1 1\nb 2 1 2\nf 4\nafter 1\ndefault yes 0\nsalt and pepper\nfrom eval\n");
+    assert_eq!(get::<i64>(&ns, "y"), 7);
+    assert_eq!(get::<i64>(&ns, "z"), 32);
+    let msg = |s: &str| check_one(s).into_iter().map(|e| e.3).collect::<Vec<_>>().join("; ");
+    assert!(msg("break 2").contains("outside a loop"), "{}", msg("break 2"));
+    assert!(msg("for i in [1]\n  break 0").contains("out of range"));
+}

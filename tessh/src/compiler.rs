@@ -212,6 +212,9 @@ pub struct Scope {
     known: HashSet<String>,
     commands: HashSet<String>,
     is_gen: bool,
+    /// The loops being compiled, innermost last: true when a break N or
+    /// continue N in it needs it to pass the break on.
+    loops: Vec<bool>,
 }
 
 impl Scope {
@@ -653,6 +656,11 @@ impl<'py, 's> Compiler<'py, 's> {
         // (The first argument decides: Python's take code or a value first,
         // never a bareword, so `exec less $file` is the shell's.)
         let eval = name == "eval";
+        // (eval runs tessh text, held in a variable too: eval $cmd, as bash's;
+        // Python's is builtins.eval.)
+        if eval {
+            return items.len() > 1;
+        }
         items[1..].iter().take(1).all(|x| match &x.kind {
             // (A bareword is a word, a name of yours too: `type f`; its value is $f.)
             Kind::Sym { .. } => true,
@@ -1546,12 +1554,17 @@ impl<'py, 's> Compiler<'py, 's> {
                 _ => toks.push(Tok::X(x.clone())),
             }
         }
-        // (and, or, in, is next to a bareword are words: print it is ready.)
+        // (in and is next to a bareword are words: print it is ready. and
+        // and or between two barewords are: print salt and pepper; with a
+        // value on either side they're Python's: $x or default, $x == PREV
+        // and $y.)
         let bare = |t: Option<&Tok>| matches!(t, Some(Tok::X(f)) if f.sym_name().is_some_and(|n| !["True", "False", "None", "..."].contains(&n)));
         let mut words = vec![];
         for k in 0..toks.len() {
             if let Tok::Op(n, f) = &toks[k] {
-                if matches!(f.kind, Kind::Sym { .. }) && ["and", "or", "in", "is"].contains(&n.as_str()) && (bare(if k > 0 { toks.get(k - 1) } else { None }) || bare(toks.get(k + 1))) {
+                let (before, after) = (bare(if k > 0 { toks.get(k - 1) } else { None }), bare(toks.get(k + 1)));
+                let word = if ["and", "or"].contains(&n.as_str()) { before && after } else { before || after };
+                if matches!(f.kind, Kind::Sym { .. }) && ["and", "or", "in", "is"].contains(&n.as_str()) && word {
                     words.push(k);
                 }
             }
@@ -2950,7 +2963,7 @@ impl<'py, 's> Compiler<'py, 's> {
         }
         match n {
             "pass" => Ok(Res::s(vec![self.pass()?], self.cnone()?)),
-            "break" | "continue" => Ok(Res::s(vec![self.at(self.n0(if n == "break" { "Break" } else { "Continue" })?, head)], self.cnone()?)),
+            "break" | "continue" => self.sf_break(n, items),
             "return" => {
                 let v = if items.len() > 1 { Some(self.compile_expr(&items[1..], Ctx::Value, children)?) } else if !children.is_empty() { Some(self.compile_body(children, Ctx::Value)?) } else { None };
                 let (mut stmts, val) = match v {
@@ -3329,7 +3342,10 @@ impl<'py, 's> Compiler<'py, 's> {
             return err("'while' needs an indented block under it (bash's do … done)", Some(&items[0]));
         }
         let c = self.cond(&items[1..], &items[0])?;
-        let body = self.branch(children, Ctx::Stmt, &None)?;
+        self.scope().loops.push(false);
+        let body = self.branch(children, Ctx::Stmt, &None);
+        let marked = self.scope().loops.pop().unwrap_or(false);
+        let body = body?;
         let mut orelse = vec![];
         for k in conts {
             orelse = self.branch(line_parts(k).1, Ctx::Stmt, &None)?;
@@ -3345,7 +3361,69 @@ impl<'py, 's> Compiler<'py, 's> {
         } else {
             self.n("While", vec![("test", self.val(c.expr)?), ("body", self.list(body)?), ("orelse", self.list(orelse)?)])?
         };
-        Ok(Res::s(vec![self.at(node, &items[0])], self.cnone()?))
+        let stmts = self.multi_break(marked, vec![self.at(node, &items[0])])?;
+        Ok(Res::s(stmts, self.cnone()?))
+    }
+
+    /// `break N`, `continue N` (bash's): leave N loops, or go on with the Nth
+    /// out. N - 1 in _tessh_brk (negative for continue), then a break; each
+    /// loop it leaves passes it on (multi_break).
+    fn sf_break(&mut self, n: &str, items: &[Form]) -> R<Res<'py>> {
+        let head = &items[0];
+        let plain = |me: &Self| -> R<Res<'py>> { Ok(Res::s(vec![me.at(me.n0(if n == "break" { "Break" } else { "Continue" })?, head)], me.cnone()?)) };
+        let Some(arg) = items.get(1) else { return plain(self) };
+        if items.len() > 2 {
+            return err(format!("{n} [N]"), Some(&items[2]));
+        }
+        let k: i64 = match &arg.kind {
+            Kind::Num(t) => t.parse().map_err(|_| ()).or_else(|_| err(format!("{n}: {t}: a loop count is a whole number"), Some(arg)))?,
+            _ => return err(format!("{n} N: N is a number of loops"), Some(arg)),
+        };
+        if k < 1 {
+            return err(format!("{n}: {k}: loop count out of range"), Some(arg));
+        }
+        let depth = self.scope().loops.len() as i64;
+        if depth == 0 {
+            return err(format!("'{n}' outside a loop"), Some(head));
+        }
+        // (More than there are: all of them, as bash has it.)
+        let k = k.min(depth);
+        if k == 1 {
+            return plain(self);
+        }
+        let l = self.scope().loops.len();
+        for m in &mut self.scope().loops[l - k as usize..] {
+            *m = true;
+        }
+        let v = if n == "break" { k - 1 } else { -(k - 1) };
+        Ok(Res::s(vec![self.at(self.assign("_tessh_brk", self.c(v)?)?, head), self.at(self.n0("Break")?, head)], self.cnone()?))
+    }
+
+    /// A loop a break N passes through: _tessh_brk set to 0 before it, and
+    /// after it (inside another loop) the break or continue passed on.
+    fn multi_break(&mut self, marked: bool, lp: Vec<Obj<'py>>) -> R<Vec<Obj<'py>>> {
+        if !marked {
+            return Ok(lp);
+        }
+        let mut out = vec![self.assign("_tessh_brk", self.c(0i64)?)?];
+        out.extend(lp);
+        if self.scope().loops.is_empty() {
+            return Ok(out);
+        }
+        let v = || self.name("_tessh_brk", false);
+        let cmp = |op: &str, me: &Self| -> R<Obj<'py>> {
+            me.n("Compare", vec![("left", v()?), ("ops", me.list(vec![me.n0(op)?])?), ("comparators", me.list(vec![me.c(0i64)?])?)])
+        };
+        let aug = |op: &str, me: &Self| -> R<Obj<'py>> {
+            me.n("AugAssign", vec![("target", me.name("_tessh_brk", true)?), ("op", me.n0(op)?), ("value", me.c(1i64)?)])
+        };
+        // if _tessh_brk > 0: _tessh_brk -= 1; break
+        // elif _tessh_brk < 0: _tessh_brk += 1; (continue if it's 0 now, else break)
+        let cont = self.iff(cmp("Eq", self)?, vec![self.n0("Continue")?], vec![self.n0("Break")?])?;
+        let neg = self.iff(cmp("Lt", self)?, vec![aug("Add", self)?, cont], vec![])?;
+        let pos = self.iff(cmp("Gt", self)?, vec![aug("Sub", self)?, self.n0("Break")?], vec![neg])?;
+        out.push(pos);
+        Ok(out)
     }
 
     fn sf_for(&mut self, items: &[Form], children: &[Form], conts: &[Form], is_async: bool) -> R<Res<'py>> {
@@ -3359,7 +3437,10 @@ impl<'py, 's> Compiler<'py, 's> {
         }
         let it = self.compile_expr(&items[k + 1..], Ctx::Value, &[])?;
         let target = self.make_target(&items[1..k], &items[0], false, false)?;
-        let body = self.branch(children, Ctx::Stmt, &None)?;
+        self.scope().loops.push(false);
+        let body = self.branch(children, Ctx::Stmt, &None);
+        let marked = self.scope().loops.pop().unwrap_or(false);
+        let body = body?;
         let mut orelse = vec![];
         for c in conts {
             orelse = self.branch(line_parts(c).1, Ctx::Stmt, &None)?;
@@ -3367,7 +3448,8 @@ impl<'py, 's> Compiler<'py, 's> {
         let node = self.n(if is_async { "AsyncFor" } else { "For" }, vec![("target", self.val(target.expr)?), ("iter", self.val(it.expr)?), ("body", self.list(body)?), ("orelse", self.list(orelse)?)])?;
         let mut stmts = it.stmts;
         stmts.extend(target.stmts);
-        stmts.push(self.at(node, &items[0]));
+        let lp = self.multi_break(marked, vec![self.at(node, &items[0])])?;
+        stmts.extend(lp);
         Ok(Res::s(stmts, self.cnone()?))
     }
 

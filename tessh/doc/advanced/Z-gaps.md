@@ -51,6 +51,9 @@ them as bash would:
   in the background doesn't stop tessh until the other end opens.
 - `*[1 2]` splats the list, and `f languages=[fr]` gives it a list.
 - A `def`'s or `class`'s first-line string is its docstring.
+- `break N`, `continue N`; `eval $code` runs the text as tessh (Python's
+  is `builtins.eval`); `and`/`or` are words only between two barewords
+  (`print salt and pepper`), so `$x or default` is Python's `or`.
 - `~/.config/tessh/logout.tsh` when a login shell ends; `$HISTCMD`;
   `complete -o filenames` and `-o nospace`.
 - `declare`, `local`, `shopt`, `bind`, `caller`, `enable`: not
@@ -100,14 +103,11 @@ nothing else, so bash's forms inside it aren't read as bash's.
 | `$RANDOM`, `$UID`, `$SECONDS`… | Python's forms, below (Variables) |
 | `/dev/tcp/host/port` | `socket` (chapter 29) |
 | `case` fall-through (`;&`, `;;&`) | none in `match`; test the cases with `if` |
-| `break N`, `continue N` | a function and `return`, or `for … else` |
-| `eval $code` (code in a variable) | `eval "$code"`; `eval $x` with a bare value is Python's `eval` |
 | `set -a`, `-b`, `-h`, `-k`, `-m`, `-P`, `-t`; `shopt` | `export NAME=value`; jobs are reported at the next prompt; there's no hashing, no `-k` words; `cd` keeps links (`os.path.realpath` for the real path); `shopt` says what to do for each |
 | `set +u` | none: an unset name is always an error; `$env.get "X"` or `globals().get` when it may not be set |
 | `PS1`, `PS2`, `PROMPT_COMMAND` | the prompt bar, set in Tessera's settings (its widgets, or Starship); `@before_prompt` for `PROMPT_COMMAND` |
 | `$HISTFILE`, `$HISTTIMEFORMAT` | tessh's history is always its own file (`$XDG_DATA_HOME/tessh/history`), so bash's doesn't get tessh's lines; it keeps no times |
 | restricted mode (`bash -r`) | none: with Python underneath it couldn't mean much |
-| a bareword next to `and`/`or` | a word, by design (`print it is ready`): quote it, `$x == "PREV" and …` |
 
 ## Builtins
 <!-- help: abs-gaps-builtins read eval exec trap wait type -->
