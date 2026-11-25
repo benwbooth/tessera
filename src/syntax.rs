@@ -958,6 +958,73 @@ pub fn tessh_program() -> Option<std::path::PathBuf> {
     std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("tessh")).find(|f| f.is_file()))
 }
 
+/// tessh's completions for `ask` ({"text", "cursor", "cwd"}): from one
+/// `tessh --complete --serve` kept running (Python, bash-completion's bash and
+/// tessh's caches stay warm; a fresh tessh an ask took 0.2–0.5 s). Started
+/// again when tessh is rebuilt, or it dies or stops answering. Call off the
+/// UI thread.
+pub fn tessh_complete(ask: &serde_json::Value) -> Option<String> {
+    use std::io::Write;
+    struct Server {
+        child: std::process::Child,
+        stdin: std::process::ChildStdin,
+        lines: std::sync::mpsc::Receiver<String>,
+        built: Option<std::time::SystemTime>,
+    }
+    static SERVER: std::sync::Mutex<Option<Server>> = std::sync::Mutex::new(None);
+    let prog = tessh_program()?;
+    let built = std::fs::metadata(&prog).and_then(|m| m.modified()).ok();
+    let mut slot = SERVER.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|s| s.built != built) {
+        if let Some(mut old) = slot.take() {
+            let _ = old.child.kill();
+            let _ = old.child.wait();
+        }
+    }
+    for _ in 0..2 {
+        if slot.is_none() {
+            let mut child = std::process::Command::new(&prog)
+                .args(["--complete", "--serve"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .ok()?;
+            let stdin = child.stdin.take()?;
+            let stdout = child.stdout.take()?;
+            let (tx, lines) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                use std::io::BufRead;
+                for l in std::io::BufReader::new(stdout).lines() {
+                    let Ok(l) = l else { break };
+                    if tx.send(l).is_err() {
+                        break;
+                    }
+                }
+            });
+            *slot = Some(Server { child, stdin, lines, built });
+        }
+        let s = slot.as_mut()?;
+        // (Answers left over from an ask that timed out are dropped.)
+        while s.lines.try_recv().is_ok() {}
+        let sent = writeln!(s.stdin, "{ask}").and_then(|_| s.stdin.flush()).is_ok();
+        if sent {
+            if let Ok(l) = s.lines.recv_timeout(std::time::Duration::from_secs(3)) {
+                return Some(l);
+            }
+        }
+        // (Dead or stuck: a fresh one, once.)
+        if let Some(mut old) = slot.take() {
+            let _ = old.child.kill();
+            let _ = old.child.wait();
+        }
+        if sent {
+            return None;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod shell_check_tests {
     #[test]

@@ -63,7 +63,11 @@ Rectangle {
     onControllerChanged: { restorePick(); refreshLsp() }
     Component.onCompleted: { restorePick(); refreshLsp() }
     // (A shell picked before the pane's own shell is known: decided again once it is.)
-    onShellNameChanged: if (savedPick.startsWith("shell:") && langOverride === "bash") pickLanguage(savedPick, false)
+    onShellNameChanged: {
+        if (savedPick.startsWith("shell:") && langOverride === "bash") pickLanguage(savedPick, false)
+        // (A tessh pane: its completer started now, warm by the first list.)
+        if (shellName === "tessh" && controller) Async.call(controller, k => controller.completeTessh(k, "c", 1, box.cwd), null)
+    }
     function pickLanguage(id, remember) {
         if (remember !== false && controller) {
             savedPick = id
@@ -1241,6 +1245,11 @@ Rectangle {
                 box.analyze(false)
                 if (!box.historyMode) box.typing = true
                 compAuto.restart()
+                // (cd's, ls's folders the moment the space after it goes in:
+                // no pause to wait for.)
+                if (!box.historyMode && !box.fromHistory && /^\s*(cd|pushd|ls|ll|la)\s$/.test(text) && !(box.keys === "vi" && box.viNormal)) {
+                    box.typing = false; box.compOpen = true; box.compIndex = 0; box.requestComplete()
+                }
                 // A "# request": the command it'd be, from the AI, as the
                 // suggestion (taken, it replaces the line).
                 if (/^#\s*\S/.test(text) && text.indexOf("\n") < 0) {
@@ -1912,20 +1921,33 @@ Rectangle {
     property string lspLang: ""
     property string lspAskedLang: ""
     property string lspNote: ""        // the first warning, for the corner
+    property string checkKey: ""      // the shell check's answer: for this shell and text
+    property var checkErrors: []
+    property string checkAsked: ""
     function analyze(withErrors) {
         if (!controller) return
         const r = JSON.parse(controller.syntax(box.lang, edit.text))
         // (Shell: the shell's own check, zsh -n and the like, when typing
         // pauses; tree-sitter's bash grammar and shellcheck are too strict
-        // for a command line, and zsh isn't bash.)
-        if (box.lang === "bash") {
-            r.errors = []
-            if (withErrors && edit.text.trim() !== "") { try { r.errors = JSON.parse(controller.shellSyntax(box.shellName, edit.text)) } catch (e) {} }
-        }
-        // (tessh: its own check too, `tessh --check`, when typing pauses:
-        // indentation, a misplaced else, macros.)
-        if (box.lang === "tessh" && withErrors && edit.text.trim() !== "") {
-            try { r.errors = r.errors.concat(JSON.parse(controller.shellSyntax("tessh", edit.text))) } catch (e) {}
+        // for a command line, and zsh isn't bash. tessh: its own check too,
+        // `tessh --check`: indentation, a misplaced else, macros. Both are
+        // programs run in the background, never here: its answer, when it
+        // comes, is kept for the text and drawn.)
+        if (box.lang === "bash") r.errors = []
+        if ((box.lang === "bash" || box.lang === "tessh") && withErrors && edit.text.trim() !== "") {
+            const sh = box.lang === "tessh" ? "tessh" : box.shellName, text = edit.text, key = sh + "\n" + text
+            if (box.checkKey === key) r.errors = r.errors.concat(box.checkErrors)
+            else if (box.checkAsked !== key) {
+                box.checkAsked = key
+                Async.call(controller, k => controller.shellSyntax(k, sh, text), json => {
+                    if (!box || box.checkAsked !== key) return
+                    let errs = []
+                    try { errs = JSON.parse(json) } catch (e) {}
+                    box.checkErrors = errs
+                    box.checkKey = key
+                    if (edit.text === text) box.analyze(true)
+                })
+            }
         }
         if (!withErrors) r.errors = []
         problem = r.errors.length > 0 ? r.errors[0][2] : ""

@@ -2135,7 +2135,12 @@ def bash_complete(before, word, ns, timeout=1.0):
     words = ws + [word]
     line = seg.lstrip() + word
     marker = "\x1e__tessh_done__"
-    q = "__w=(" + " ".join(_shq(w) for w in words) + f"); __c={len(words) - 1}; __l={_shq(line)}; __p={len(line)}; __tessh_q 2>/dev/null; printf '%s\\n' {_shq(marker)}\n"
+    # (In this shell's folder now, not where the bash started.)
+    try:
+        here = "builtin cd -- " + _shq(os.getcwd()) + " 2>/dev/null; "
+    except OSError:
+        here = ""
+    q = here + "__w=(" + " ".join(_shq(w) for w in words) + f"); __c={len(words) - 1}; __l={_shq(line)}; __p={len(line)}; __tessh_q 2>/dev/null; printf '%s\\n' {_shq(marker)}\n"
     try:
         p.stdin.write(q)
         p.stdin.flush()

@@ -52,6 +52,7 @@ tessh --py FILE            print the Python it compiles to
 tessh --kernel -f CONN     the Jupyter kernel
 tessh --guide [TOPIC]      the guide (or a topic of it), drawn for the terminal; --keys: the editor's keys
 tessh --complete [DIR]     completions for {\"text\", \"cursor\"} on stdin, in DIR (Tessera's editor)
+tessh --complete --serve   the same, one {\"text\", \"cursor\", \"cwd\"} a line, kept running
   --with PKG[,PKG…]        first: PyPI packages to have (uv installs them once), as `need` does";
 
 /// A login shell: its login.tsh runs in the first namespace (the REPL's, or
@@ -289,14 +290,6 @@ fn run(opts: login::Opts, args: Vec<String>) -> i32 {
                 if problems.is_empty() { 0 } else { 1 }
             }
             "--complete" => {
-                if let Some(d) = args.get(1) {
-                    let _ = std::env::set_current_dir(d);
-                }
-                let mut s = String::new();
-                let _ = std::io::stdin().read_to_string(&mut s);
-                let q: serde_json::Value = serde_json::from_str(&s).unwrap_or_default();
-                let text = q["text"].as_str().unwrap_or("");
-                let cursor = q["cursor"].as_u64().map(|c| c as usize).unwrap_or(text.encode_utf16().count());
                 let ns = match runner::new_namespace(py, "__main__", vec![]) {
                     Ok(ns) => ns,
                     Err(e) => {
@@ -304,7 +297,38 @@ fn run(opts: login::Opts, args: Vec<String>) -> i32 {
                         return 1;
                     }
                 };
-                println!("{}", repl::complete_json(py, &ns, text, cursor));
+                let answer = |q: &serde_json::Value| {
+                    if let Some(d) = q["cwd"].as_str().filter(|d| !d.is_empty()) {
+                        if std::env::set_current_dir(d).is_ok() {
+                            std::env::set_var("PWD", d);
+                        }
+                    }
+                    let text = q["text"].as_str().unwrap_or("");
+                    let cursor = q["cursor"].as_u64().map(|c| c as usize).unwrap_or(text.encode_utf16().count());
+                    repl::complete_json(py, &ns, text, cursor)
+                };
+                // (--serve: one ask a line, one answer a line, for as long as
+                // stdin is open: Python, bash-completion's bash and the
+                // caches kept warm between asks.)
+                if args.get(1).map(String::as_str) == Some("--serve") {
+                    use std::io::{BufRead, Write};
+                    for line in std::io::stdin().lock().lines() {
+                        let Ok(line) = line else { break };
+                        let q: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+                        let mut out = std::io::stdout().lock();
+                        if writeln!(out, "{}", answer(&q)).and_then(|_| out.flush()).is_err() {
+                            break;
+                        }
+                    }
+                    return 0;
+                }
+                if let Some(d) = args.get(1) {
+                    let _ = std::env::set_current_dir(d);
+                }
+                let mut s = String::new();
+                let _ = std::io::stdin().read_to_string(&mut s);
+                let q: serde_json::Value = serde_json::from_str(&s).unwrap_or_default();
+                println!("{}", answer(&q));
                 0
             }
             "--kernel" => {

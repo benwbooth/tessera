@@ -333,10 +333,11 @@ pub mod ffi {
         /// The input editor's syntax analysis (src/syntax.rs) as JSON.
         #[qinvokable]
         fn syntax(self: &Controller, lang: &QString, text: &QString) -> QString;
-        /// The shell's own syntax check (zsh -n, bash -n, fish -n): JSON
-        /// [[start, length, message]] (UTF-16), [] when it parses.
+        /// The shell's own syntax check (zsh -n, bash -n, fish -n, tessh
+        /// --check), in the background: JSON [[start, length, message]]
+        /// (UTF-16), [] when it parses.
         #[qinvokable]
-        fn shell_syntax(self: &Controller, shell: &QString, text: &QString) -> QString;
+        fn shell_syntax(self: &Controller, reply: &QString, shell: &QString, text: &QString);
         /// A command line laid out and colored for a card's details, as Qt
         /// rich text (src/cmdline.rs); argv_json: tessh's [[program, args...]]
         /// or "". Pure text work (no files, no processes).
@@ -973,19 +974,17 @@ impl ffi::Controller {
 
     fn complete_tessh(&self, reply: &ffi::QString, text: &ffi::QString, cursor: i32, cwd: &ffi::QString) {
         let (text, cwd) = (text.to_string(), cwd.to_string());
+        // (Asks that a newer one has replaced are skipped, not worked out:
+        // the editor only takes the latest.)
+        static LATEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let me = LATEST.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         self.answer_on(reply, Some("complete"), move || {
-            use std::io::Write;
             let none = r#"{"start":0,"end":0,"items":[]}"#.to_string();
-            let Some(prog) = crate::syntax::tessh_program() else { return none };
+            if LATEST.load(std::sync::atomic::Ordering::SeqCst) != me {
+                return none;
+            }
             let dir = if std::path::Path::new(&cwd).is_dir() { cwd } else { std::env::var("HOME").unwrap_or_else(|_| "/".into()) };
-            let Ok(mut ch) = std::process::Command::new(prog).arg("--complete").arg(&dir).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn() else { return none };
-            if let Some(mut i) = ch.stdin.take() {
-                let _ = i.write_all(serde_json::json!({"text": text, "cursor": cursor.max(0)}).to_string().as_bytes());
-            }
-            match ch.wait_with_output() {
-                Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-                _ => none,
-            }
+            crate::syntax::tessh_complete(&serde_json::json!({"text": text, "cursor": cursor.max(0), "cwd": dir})).unwrap_or(none)
         })
     }
 
@@ -1867,8 +1866,9 @@ impl ffi::Controller {
         qs(&crate::cmdline::pretty_html(&line.to_string(), &argv_json.to_string(), dark, &text_color.to_string()))
     }
 
-    fn shell_syntax(&self, shell: &ffi::QString, text: &ffi::QString) -> ffi::QString {
-        qs(&crate::syntax::shell_check(&shell.to_string(), &text.to_string()))
+    fn shell_syntax(&self, reply: &ffi::QString, shell: &ffi::QString, text: &ffi::QString) {
+        let (shell, text) = (shell.to_string(), text.to_string());
+        self.answer_on(reply, Some("shell-check"), move || crate::syntax::shell_check(&shell, &text))
     }
 
     fn detect_language(&self, text: &ffi::QString) -> ffi::QString {
