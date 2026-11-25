@@ -18,7 +18,8 @@ pub struct Editor {
     pub screen: Screen,
     pub ed: Ed,
     bar_fn: BarFn,
-    bar: Arc<Mutex<(Vec<Line>, Line, u64)>>,
+    /// The bar: its lines, its right side, its ask's number, and the folder it's for.
+    bar: Arc<Mutex<(Vec<Line>, Line, u64, String)>>,
     bar_seq: u64,
     hovered: Option<Hit>,
     pub mode_name: Box<dyn Fn(&Ed) -> String>,
@@ -51,7 +52,7 @@ impl Editor {
         let term = Term::new();
         let mut ed = Ed::new();
         ed.kitty = term.kitty;
-        Editor { term, screen: Screen::new(), ed, bar_fn, bar: Arc::new(Mutex::new((vec![], vec![], 0))), bar_seq: 0, hovered: None, mode_name: Box::new(|ed: &Ed| if ed.vi.pending.is_empty() { ed.vi.mode_name().to_string() } else { format!("{} {}", ed.vi.mode_name(), ed.vi.pending) }) }
+        Editor { term, screen: Screen::new(), ed, bar_fn, bar: Arc::new(Mutex::new((vec![], vec![], 0, String::new()))), bar_seq: 0, hovered: None, mode_name: Box::new(|ed: &Ed| if ed.vi.pending.is_empty() { ed.vi.mode_name().to_string() } else { format!("{} {}", ed.vi.mode_name(), ed.vi.pending) }) }
     }
 
     fn palette(&self) -> Palette {
@@ -67,12 +68,17 @@ impl Editor {
         let (cwd, st, du, w, visited) = (self.ed.cwd.clone(), self.ed.status, self.ed.duration_ms, Term::size().0, self.ed.visited.clone());
         let colors = self.term.fg.zip(self.term.bg);
         // (A folder been in before: its last bar at once, till the new one's
-        // worked out, not the last folder's.)
+        // worked out, not the last folder's. One not been in: the last bar
+        // with this folder put in place of that one's, when it shows it whole.)
         static SEEN: Mutex<Option<std::collections::HashMap<(String, u16), (Vec<Line>, Line)>>> = Mutex::new(None);
-        if let Some((l, r)) = SEEN.lock().unwrap().as_ref().and_then(|m| m.get(&(cwd.clone(), w)).cloned()) {
+        let seen = SEEN.lock().unwrap().as_ref().and_then(|m| m.get(&(cwd.clone(), w)).cloned());
+        {
             let mut s = self.bar.lock().unwrap();
-            if seq >= s.2 {
-                *s = (l, r, seq);
+            if seq >= s.2 && s.3 != cwd {
+                let quick = seen.or_else(|| swap_folder(&s.0, &s.3, &cwd, w as usize).map(|l| (l, s.1.clone())));
+                if let Some((l, r)) = quick {
+                    *s = (l, r, seq, cwd.clone());
+                }
             }
         }
         std::thread::spawn(move || {
@@ -82,11 +88,11 @@ impl Editor {
             if m.len() > 200 {
                 m.clear();
             }
-            m.insert((cwd, w), (l.clone(), r.clone()));
+            m.insert((cwd.clone(), w), (l.clone(), r.clone()));
             drop(seen);
             let mut s = slot.lock().unwrap();
             if seq >= s.2 {
-                *s = (l, r, seq);
+                *s = (l, r, seq, cwd);
             }
         });
     }
@@ -391,5 +397,109 @@ impl Editor {
                 return o;
             }
         }
+    }
+}
+
+/// A folder as the bar shows it: under home, from ~.
+fn shown_folder(p: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    match p.strip_prefix(home.as_str()) {
+        Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => format!("~{rest}"),
+        _ => p.to_string(),
+    }
+}
+
+/// The bar drawn for folder `old`, with `new` in its place: where `old`
+/// shows whole (not cut short by the prompt's settings), the gap the bar
+/// stretches (its $fill: the longest run of spaces) taking up the
+/// difference so the line stays as wide. None when it can't be done
+/// as it would look.
+fn swap_folder(lines: &[Line], old: &str, new: &str, cols: usize) -> Option<Vec<Line>> {
+    use unicode_width::UnicodeWidthStr;
+    if old.is_empty() || lines.is_empty() {
+        return None;
+    }
+    let (from, to) = (shown_folder(old), shown_folder(new));
+    let mut out = lines.to_vec();
+    for line in out.iter_mut() {
+        let text: String = line.iter().map(|s| s.text.as_str()).collect();
+        let Some(at) = text.find(&from) else { continue };
+        let end = at + from.len();
+        if text[end..].starts_with('/') || text[..at].ends_with(|c: char| c.is_alphanumeric() || c == '/') {
+            continue;
+        }
+        // (The spans the folder runs over: its first takes the new one, the
+        // rest give up their part of the old.)
+        let mut pos = 0;
+        let mut put = false;
+        for sp in line.iter_mut() {
+            let (a, b) = (pos, pos + sp.text.len());
+            pos = b;
+            if b <= at || a >= end {
+                continue;
+            }
+            let (s0, e0) = (at.max(a) - a, end.min(b) - a);
+            let mut t = String::new();
+            t.push_str(&sp.text[..s0]);
+            if !put {
+                t.push_str(&to);
+                put = true;
+            }
+            t.push_str(&sp.text[e0..]);
+            sp.text = t;
+        }
+        line.retain(|sp| !sp.text.is_empty());
+        // (The line as wide as it was: the stretched gap shrinks or grows.)
+        let d = to.width() as isize - from.width() as isize;
+        let gap = line.iter().enumerate().filter_map(|(i, sp)| {
+            let t = &sp.text;
+            let mut best: Option<(usize, usize)> = None;
+            let mut run_start = None;
+            for (j, c) in t.char_indices().chain(std::iter::once((t.len(), 'x'))) {
+                if c == ' ' {
+                    run_start.get_or_insert(j);
+                } else if let Some(st) = run_start.take() {
+                    if best.is_none_or(|(bs, be)| j - st > be - bs) {
+                        best = Some((st, j));
+                    }
+                }
+            }
+            best.map(|(st, en)| (i, st, en))
+        }).max_by_key(|(_, st, en)| en - st);
+        match gap {
+            Some((i, st, en)) if en - st >= 2 => {
+                let n = en - st;
+                let want = n as isize - d;
+                if want < 1 {
+                    return None;
+                }
+                let t = &line[i].text;
+                line[i].text = format!("{}{}{}", &t[..st], " ".repeat(want as usize), &t[en..]);
+            }
+            _ => {
+                if super::width(line) > cols {
+                    return None;
+                }
+            }
+        }
+        return Some(out);
+    }
+    None
+}
+
+#[cfg(test)]
+mod swap_tests {
+    use super::*;
+    use crate::editor::{Span, Sty};
+    #[test]
+    fn swaps_the_folder_and_keeps_the_width() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let l: Line = vec![Span::new(" ~/a/My Drive ", Sty::default()), Span::new("          ", Sty::default()), Span::new(" v24 ", Sty::default())];
+        let w = crate::editor::width(&l);
+        let out = swap_folder(&[l], &format!("{home}/a/My Drive"), &format!("{home}/a/My Drive/health"), 80).unwrap();
+        let t: String = out[0].iter().map(|s| s.text.as_str()).collect();
+        assert!(t.contains("~/a/My Drive/health "), "{t:?}");
+        assert_eq!(crate::editor::width(&out[0]), w);
+        assert!(swap_folder(&out, &format!("{home}/elsewhere"), "/x", 80).is_none());
     }
 }
