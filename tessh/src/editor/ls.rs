@@ -1839,7 +1839,10 @@ impl Ls {
                         if live && rect > tw {
                             row.push(Span::new(" ".repeat(rect - tw), Sty { bg, ..Default::default() }).hit(Hit::Ls(hit.clone())));
                         }
-                        x = cx + rect.max(tw);
+                        // (Left in the scrollback there's no padding span: what
+                        // was written ends at tw, and room() fills to the next
+                        // column. Counting the padding there ran the columns together.)
+                        x = cx + if live { rect.max(tw) } else { tw };
                         cx += cw;
                     }
                     if live {
@@ -3494,6 +3497,13 @@ mod tests {
         let (a, b, s) = (r.find("a.rs").unwrap(), r.find("b.txt").unwrap(), r.find("sub/").unwrap());
         assert!(a < b && b < s, "{r}");
         assert!(!r.contains(".hidden"));
+        // (Left in the scrollback, the columns keep their widths, as live:
+        // each name starts where it does in the live view.)
+        let (live, _) = ls.panel(&pal, 80, 40, None, false);
+        let lr = text_of(&live).into_iter().find(|l| l.contains("a.rs")).unwrap();
+        for n in ["b.txt", "sub/"] {
+            assert_eq!(r.find(n), lr.find(n), "{n}: frozen {r:?}, live {lr:?}");
+        }
         // -a: hidden too. -l: the table, sizes exact.
         let mut ls = Ls::new(command("ls -la", &d, "/").unwrap(), &d);
         ls.mine = json!({});
