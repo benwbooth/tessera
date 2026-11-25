@@ -2170,7 +2170,9 @@ def bash_complete(before, word, ns, timeout=1.0):
             seen.add(l)
             res.append(l)
     # (Only files and folders: tessh's own does those better, / on a folder, quotes where needed.)
-    if res and all(os.path.exists(os.path.expanduser(r)) for r in res):
+    # (bash's come escaped: My\\ Drive.)
+    import re
+    if res and all(os.path.exists(os.path.expanduser(re.sub(r"\\(.)", r"\1", r))) for r in res):
         return None
     return res or None
 

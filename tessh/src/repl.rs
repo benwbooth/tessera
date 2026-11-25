@@ -1092,6 +1092,14 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
         let label = if kind == "dir" || kind == "file" { insert.clone() } else { n.clone() };
         items.push(Item { insert, label, kind, detail, doc });
     }
+    // (cd and the like take folders only.)
+    if !first && !var {
+        let seg = before[..start].rsplit(['|', ';', '\n', '(']).next().unwrap_or("");
+        let seg = seg.rsplit("&&").next().unwrap_or(seg).rsplit("||").next().unwrap_or(seg);
+        if seg.split_whitespace().next().is_some_and(|c| ["cd", "pushd", "rmdir", "z"].contains(&c)) {
+            items.retain(|i| i.kind == "dir");
+        }
+    }
     (start, pos, items)
 }
 
