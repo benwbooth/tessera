@@ -28,8 +28,9 @@ command with old replaced by new. `fc` edits past commands in
 runs one again at once. `$HISTSIZE`, `$HISTFILESIZE`, `$HISTCONTROL`
 (`ignorespace`, `ignoredups`, `ignoreboth`, `erasedups`) and
 `$HISTIGNORE` work as bash's, set as tessh variables (in `rc.tsh`) or in
-the environment. **Gap:** no `$HISTTIMEFORMAT` or `$HISTCMD`, and
-`$HISTFILE` is always tessh's own file.
+the environment. `$HISTCMD` is the running command's number. By design,
+`$HISTFILE` is always tessh's own file, so bash's history doesn't get
+tessh's lines, and with no times kept in it there's no `$HISTTIMEFORMAT`.
 
 ```tessh no-run
 cp notes.txt /tmp/backup/

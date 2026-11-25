@@ -653,6 +653,21 @@ HELLO
 {a: [1 2]}
 ```
 
+A function first in a pipe sends what it prints down it, then what it gives
+back, if anything, as `<(f)` does; `do` puts a block there (see Do).
+
+```tessh
+def numbers
+  print 1
+  print 2
+numbers | tac
+```
+
+```output
+2
+1
+```
+
 The first stage can be a value: a string is written as it is and any other
 iterable one item per line.
 
@@ -747,6 +762,26 @@ o
 e
 e2
 three
+```
+
+`a |& b` is `a 2>&1 | b`. Redirections can come first, as in bash:
+`<in.txt sort`, `2>/dev/null ls x`; a line of only redirections, `>file`,
+empties or makes the file (bash's `: >file`). A program redirected to or
+from a named pipe opens it itself, so `cat <fifo &` doesn't wait there.
+
+```tessh
+sh -c "echo oops >&2" |& tr a-z A-Z
+printf "b\na\n" >in.txt
+<in.txt sort
+>in.txt
+wc -c <in.txt
+```
+
+```output
+OOPS
+a
+b
+0
 ```
 
 `<<<word` gives a program the word (and a newline) as its input. A heredoc,
@@ -1781,7 +1816,7 @@ installs them once into a cache, and they import from the next line. A module
 that isn't there says so: `No module named 'numpy': need numpy installs it`.
 
 ## Do
-<!-- help: do block progn -->
+<!-- help: do block progn subshell group command-group { ( -->
 
 `do` makes several forms into one; its value is the last one's.
 
@@ -1794,6 +1829,48 @@ print $r
 
 ```output
 42
+```
+
+With a redirection, a pipe or `&` after it, `do` is bash's `{ …; }`: the
+block's output (its programs' too) goes to the file or down the pipe, and
+`do &` runs it in the background. With only redirections its names are the
+caller's; piped or in the background it runs as a function. `subshell` is
+bash's `( … )`: the block runs in a fork of tessh, so its `cd`, names and
+`exit` stay there, and its status is the block's. It takes the same
+redirections, pipe or `&` after it.
+
+```tessh
+do >log.txt
+  echo one
+  n = 2
+print n $n
+do >>log.txt
+  echo two
+cat log.txt
+do | sort -r
+  echo a
+  echo c
+  echo b
+here = (pwd)
+subshell
+  cd /
+  pwd
+print back ((pwd) == $here)
+subshell
+  exit 3
+print status $?
+```
+
+```output
+n 2
+one
+two
+c
+b
+a
+/
+back True
+status 3
 ```
 
 ## Statements
@@ -2556,7 +2633,7 @@ The first time it runs, the file unpacks itself into `~/.cache/tessh` (about
   Under WSL, use the Linux file.
 
 ## tessh as your login shell
-<!-- help: login shell chsh -l --login -i -s profile /etc/profile /etc/shells sshd scp rsync login.tsh -->
+<!-- help: login shell chsh -l --login -i -s profile /etc/profile /etc/shells sshd scp rsync login.tsh logout.tsh bash_logout -->
 
 tessh takes the flags a login shell gets:
 
@@ -2564,8 +2641,10 @@ tessh takes the flags a login shell gets:
   start one): first it imports the environment that `/etc/profile`,
   `/etc/profile.d`, `~/.profile` and NixOS's `set-environment` set up, by
   running `sh -l` once. It doesn't take that sh's working folder or `SHLVL`.
-  Then it runs `~/.config/tessh/login.tsh`, before `rc.tsh`. A profile that
-  takes more than 10 s is cut off, with a message.
+  Then it runs `~/.config/tessh/login.tsh`, before `rc.tsh`, and when it
+  ends (`exit`, `logout`, Ctrl+D, a hangup) `~/.config/tessh/logout.tsh`,
+  bash's `~/.bash_logout`. A profile that takes more than 10 s is cut off,
+  with a message.
 - `-i`: accepted, for programs that pass it. The REPL needs a terminal,
   so without one tessh runs stdin as a script.
 - `-s [ARGS…]`: run the script read from stdin, with ARGS as `sys.argv[1:]`.

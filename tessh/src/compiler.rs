@@ -579,6 +579,65 @@ impl<'py, 's> Compiler<'py, 's> {
         }
     }
 
+    /// do or subshell (not names of yours) with what block_tail takes after.
+    fn tailed_block(&self, items: &[Form]) -> Option<&'static str> {
+        let n = match items.first()?.sym_name()? {
+            "do" => "do",
+            "subshell" => "subshell",
+            _ => return None,
+        };
+        let tail_ok = items.len() == 1 || matches!(items[1].kind, Kind::Redir { .. }) && self.procsub_parts(&items[1]).is_none() || items[1].is_op("|") || items[1].is_op("|&") || items[1].is_op("&");
+        (self.binding(n, &[]).is_none() && self.ns_get(n).is_none() && tail_ok && (n == "subshell" || items.len() > 1)).then_some(n)
+    }
+
+    /// `do >log`, `do | sort`, `do &`, `subshell`, `subshell | sort`… with a
+    /// block under it. do with only redirections keeps the block's names the
+    /// caller's (a with); otherwise the block is a function put in do's place.
+    fn block_tail(&mut self, n: &str, items: &[Form], children: &[Form], ctx: Ctx) -> R<Res<'py>> {
+        let pos = items[0].pos;
+        let tail = &items[1..];
+        if n == "do" && tail.iter().all(|x| matches!(x.kind, Kind::Redir { .. }) && self.procsub_parts(x).is_none()) {
+            let mut rs = vec![];
+            let mut ops = vec![];
+            for x in tail {
+                let Kind::Redir { op, target } = &x.kind else { unreachable!() };
+                rs.push(match target {
+                    Some(t) => self.cmd_word(t)?,
+                    None => Res::e(self.cnone()?),
+                });
+                ops.push(op.clone());
+            }
+            let (mut stmts, es) = self.gather_e(rs)?;
+            let mut red = vec![];
+            for (op, e) in ops.iter().zip(es) {
+                red.push(self.tuple(vec![self.c(op.as_str())?, e], false)?);
+            }
+            let ce = self.rcall("redirecting", vec![self.list_node(red)?])?;
+            let r = self.compile_body(children, Ctx::Stmt)?;
+            let mut body = self.as_stmts(r)?;
+            if body.is_empty() {
+                body.push(self.pass()?);
+            }
+            let item = self.n("withitem", vec![("context_expr", ce), ("optional_vars", self.none())])?;
+            let w = self.n("With", vec![("items", self.list(vec![item])?), ("body", self.list(body)?)])?;
+            stmts.push(self.at(w, &items[0]));
+            return Ok(Res::s(stmts, self.cnone()?));
+        }
+        let f = self.tmp("block");
+        let def = Form::line(vec![Form::sym_at("def", &[], pos), Form::sym_at(&f, &[], pos)], children.to_vec(), pos);
+        let r1 = self.compile_line(&def, Ctx::Stmt)?;
+        let mut stmts = self.as_stmts(r1)?;
+        let mut line = if n == "subshell" {
+            vec![Form::sym_at("__tessh__.subshell_run", &[], pos), Form::new(Kind::Var(Box::new(Form::sym_at(&f, &[], pos))), pos)]
+        } else {
+            vec![Form::sym_at(&f, &[], pos)]
+        };
+        line.extend(tail.iter().cloned());
+        let r2 = self.compile_items(&line, &[], ctx, &[], &[])?;
+        stmts.extend(r2.stmts);
+        Ok(Res { stmts, expr: r2.expr })
+    }
+
     /// `type ls`, `hash -r`, `exec zsh`, `eval "echo hi"`: Python's type,
     /// hash, exec or eval (not a name of yours) whose first argument is a
     /// word, so the shell's builtin; `type $x`, `hash $s`, `exec $code` stay
@@ -883,6 +942,11 @@ impl<'py, 's> Compiler<'py, 's> {
         // `time { …; }`. coproc [NAME] with a block: the block run as the
         // coprocess, in a fork of tessh, as bash's `coproc NAME { …; }`.)
         if !children.is_empty() {
+            // (do or subshell, a block under it, and a redirection, a pipe
+            // or & after: bash's `{ …; } >f`, `( … ) | c`, `{ …; } &`.)
+            if let Some(n) = self.tailed_block(items) {
+                return self.block_tail(n, items, children, ctx);
+            }
             if let Some(r) = self.shell_block(items, children, ctx)? {
                 return Ok(r);
             }
@@ -925,6 +989,36 @@ impl<'py, 's> Compiler<'py, 's> {
     }
 
     fn compile_shell(&mut self, items: &[Form], children: &[Form], ctx: Ctx) -> R<Res<'py>> {
+        // (`a |& b`: bash's `a 2>&1 | b`.)
+        if items.iter().any(|x| x.is_op("|&")) {
+            let mut v = vec![];
+            for x in items {
+                if x.is_op("|&") {
+                    v.push(Form::new(Kind::Redir { op: "2>&1".into(), target: None }, x.pos));
+                    v.push(Form::new(Kind::Op { name: "|".into(), tick: false }, x.pos));
+                } else {
+                    v.push(x.clone());
+                }
+            }
+            return self.compile_shell(&v, children, ctx);
+        }
+        // (`<file cmd`, `2>/dev/null cmd`: redirections first, as bash allows;
+        // a line of only redirections, `>file`, is bash's `: >file`.)
+        let lead = items.iter().take_while(|x| matches!(x.kind, Kind::Redir { .. }) && self.procsub_parts(x).is_none()).count();
+        if lead > 0 {
+            let mut v: Vec<Form> = vec![];
+            if lead == items.len() {
+                v.push(Form::sym_at(":", &[], items[0].pos));
+                v.extend(items.iter().cloned());
+            } else {
+                let rest = &items[lead..];
+                let end = rest.iter().position(|x| x.is_op("|") || x.is_op("|&") || x.is_op("&&") || x.is_op("||") || matches!(x.kind, Kind::Semi) || x.is_op("&")).unwrap_or(rest.len());
+                v.extend(rest[..end].iter().cloned());
+                v.extend(items[..lead].iter().cloned());
+                v.extend(rest[end..].iter().cloned());
+            }
+            return self.compile_shell(&v, children, ctx);
+        }
         if items.len() > 1 && items[items.len() - 1].is_op("&") {
             return self.compile_bg(&items[..items.len() - 1], children);
         }
@@ -1329,14 +1423,23 @@ impl<'py, 's> Compiler<'py, 's> {
             return Ok(Res::s(v.stmts, self.rcall("value_stage", vec![e])?));
         }
         let f = self.compile_head(head)?;
-        let (astmts, mut args, kws, _) = self.compile_call_args(&items[1..], children)?;
+        let (astmts, mut args, kws, reds) = self.compile_call_args(&items[1..], children)?;
         let (stmts, exprs) = self.gather_e(vec![f, Res { stmts: astmts, expr: None }])?;
         // (The first of a pipe has no input to be given: `gen | sort`, <(gen).)
         if !first {
             args.push(self.name("_tessh_in", false)?);
         }
         let lam_args = self.n("arguments", vec![("posonlyargs", self.list(vec![])?), ("args", self.list(vec![self.n("arg", vec![("arg", self.s("_tessh_in"))])?])?), ("kwonlyargs", self.list(vec![])?), ("kw_defaults", self.list(vec![])?), ("defaults", self.list(vec![])?)])?;
-        let lam = self.lambda(lam_args, self.call(exprs[0].clone(), args, kws)?)?;
+        let mut body = self.call(exprs[0].clone(), args, kws)?;
+        // (`f 2>&1 | grep`: the call's redirections, inside the pipe's.)
+        if !reds.is_empty() {
+            let mut red = vec![];
+            for (op, e) in reds {
+                red.push(self.tuple(vec![self.c(op.as_str())?, e], false)?);
+            }
+            body = self.rcall("redirect", vec![self.lambda(self.noargs()?, body)?, self.list_node(red)?])?;
+        }
+        let lam = self.lambda(lam_args, body)?;
         Ok(Res::s(stmts, self.rcall("call_stage", vec![lam])?))
     }
 
@@ -1363,6 +1466,11 @@ impl<'py, 's> Compiler<'py, 's> {
     // ---- expressions ----------------------------------------------------------
 
     pub fn compile_expr(&mut self, items: &[Form], ctx: Ctx, children: &[Form]) -> R<Res<'py>> {
+        if !children.is_empty() {
+            if let Some(n) = self.tailed_block(items) {
+                return self.block_tail(n, items, children, ctx);
+            }
+        }
         if items.is_empty() {
             return err("expected an expression", children.first());
         }
@@ -2150,6 +2258,10 @@ impl<'py, 's> Compiler<'py, 's> {
         // ($PIPESTATUS: the last pipe's statuses.)
         if name == "PIPESTATUS" {
             let e = self.rcall("pipestatus", vec![])?;
+            return Ok(self.at(e, v));
+        }
+        if name == "HISTCMD" {
+            let e = self.rcall("histcmd", vec![])?;
             return Ok(self.at(e, v));
         }
         // ($LINENO: the line it's on, as bash's.)
@@ -3533,7 +3645,10 @@ impl<'py, 's> Compiler<'py, 's> {
             Ok((arguments, dstmts, body))
         })();
         self.pop();
-        let (arguments, dstmts, body) = result?;
+        let (arguments, dstmts, mut body) = result?;
+        if let Some(d) = docstring(children) {
+            body.insert(0, self.expr_stmt(self.c(d)?)?);
+        }
         let (mut stmts, deco_es) = self.gather_e(deco_rs)?;
         stmts.extend(dstmts);
         let node = self.n(if is_async { "AsyncFunctionDef" } else { "FunctionDef" }, vec![("name", self.s(&py)), ("args", arguments), ("body", self.list(body)?), ("decorator_list", self.list(deco_es)?), ("returns", returns), ("type_params", self.list(vec![])?)])?;
@@ -3656,7 +3771,10 @@ impl<'py, 's> Compiler<'py, 's> {
             Ok(if s.is_empty() { vec![self.pass()?] } else { s })
         })();
         self.pop();
-        let body = body?;
+        let mut body = body?;
+        if let Some(d) = docstring(children) {
+            body.insert(0, self.expr_stmt(self.c(d)?)?);
+        }
         let node = self.n("ClassDef", vec![("name", self.s(&py)), ("bases", self.list(bases)?), ("keywords", self.list(kws)?), ("body", self.list(body)?), ("decorator_list", self.list(deco_es)?), ("type_params", self.list(vec![])?)])?;
         let mut stmts = stmts0;
         stmts.push(self.at(node, head));
@@ -4179,6 +4297,20 @@ fn bang_inner(x: &Form) -> Option<&Form> {
 fn dollar_suffix(x: &Form) -> bool {
     let Kind::Word(ps) = &x.kind else { return false };
     matches!(ps.first(), Some(Part::F(f)) if matches!(f.kind, Kind::Interp { .. }))
+}
+
+/// A def's or class's first line, a string alone with more after it: its
+/// docstring, as Python's (`help f`, `f.__doc__`).
+fn docstring(children: &[Form]) -> Option<String> {
+    let (first, more) = children.split_first()?;
+    let (items, kids) = line_parts(first);
+    if more.is_empty() || items.len() != 1 || !kids.is_empty() {
+        return None;
+    }
+    match &items[0].kind {
+        Kind::Str { value, kind } if *kind != 'b' => Some(value.clone()),
+        _ => None,
+    }
 }
 
 fn is_glob_word(x: &Form) -> bool {

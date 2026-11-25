@@ -69,6 +69,21 @@ pub fn run_login_file(py: Python<'_>, ns: &Bound<'_, pyo3::types::PyDict>) {
             runner::report(py, e, &f.to_string_lossy());
         }
     }
+    // (logout.tsh when it ends: exit, logout, Ctrl+D, a hangup.)
+    let ns2 = ns.clone().unbind();
+    let at_end = pyo3::types::PyCFunction::new_closure(py, None, None, move |args, _kw| -> PyResult<()> {
+        let py = args.py();
+        let f = login::logout_file();
+        if f.is_file() {
+            if let Err(e) = runner::run_file(py, &f.to_string_lossy(), ns2.bind(py)) {
+                runner::report(py, e, &f.to_string_lossy());
+            }
+        }
+        Ok(())
+    });
+    if let (Ok(at_end), Ok(atexit)) = (at_end, py.import("atexit")) {
+        let _ = atexit.call_method1("register", (at_end,));
+    }
 }
 
 /// The script on stdin (`tessh -s ARGS…`, `cmd | tessh`): ARGS are sys.argv[1:].

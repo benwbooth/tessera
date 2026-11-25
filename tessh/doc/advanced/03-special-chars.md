@@ -552,7 +552,7 @@ print ($a // $b) (7 // 2) (7 / 2)
 <!-- help: abs-brace-expansion brace-expansion {a,b} {a..z} -->
 
 Bash expands `{a,b,c}` and `{a..z}` into several words before a command
-runs. **Gap:** tessh has no brace expansion; `{…}` is a dict or a set, and
+runs. By design, tessh has no brace expansion (Python makes lists well); `{…}` is a dict or a set, and
 glued to text it's not expanded (`echo file{1,2}` prints `file{'1,2'}`).
 Python makes the lists (a comprehension, `range`, `string`'s alphabets), and a
 list given to a command is one argument per item.
@@ -969,7 +969,7 @@ print $z   # 2
 ```
 
 `~` is your home folder, at the start of a word, in tessh as in bash, and
-`~bozo` bozo's. **Gap:** bash's `~+` (the current folder, `$PWD`) and `~-`
+`~bozo` bozo's. By design, bash's `~+` (the current folder, `$PWD`) and `~-`
 (the last one, `$OLDPWD`) aren't expanded by tessh; use `(pwd)` and
 `$OLDPWD`.
 

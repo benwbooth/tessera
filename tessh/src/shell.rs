@@ -630,6 +630,7 @@ pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // (What `time` and `coproc` with a block compile to.)
     m.add("timed", sh.getattr("timed")?)?;
     m.add("coproc_block", sh.getattr("coproc_block")?)?;
+    m.add("subshell_run", sh.getattr("subshell_run")?)?;
     // (An interactive tessh's jobs get SIGHUP when it ends, or its terminal does.)
     py.import("atexit")?.call_method1("register", (m.getattr("hup_jobs")?,))?;
     crate::jobs::on_hangup();
@@ -1550,6 +1551,62 @@ def _time_report(real, c0, c1, posix):
         sys.stderr.write(f"\nreal\t{f(real)}\nuser\t{f(user)}\nsys\t{f(system)}\n")
     sys.stderr.flush()
 
+def subshell_run(body):
+    """subshell with a block: the block run in a fork of tessh, as bash's
+    `( … )`: its cd, names and exit stay there. Its status is the block's."""
+    import warnings
+    relay = None
+    try:
+        sys.stdout.fileno()
+    except Exception:
+        # (Output captured, a StringIO: the fork's comes back through a pipe.)
+        relay = os.pipe()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        pid = os.fork()
+    if pid == 0:
+        code = 0
+        try:
+            if relay:
+                os.close(relay[0])
+                sys.stdout = open(relay[1], "w", buffering=1)
+            body()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+        except KeyboardInterrupt:
+            code = 130
+        except BaseException:
+            import traceback
+            traceback.print_exc()
+            code = 1
+        finally:
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except Exception:
+                pass
+            os._exit(code)
+    if relay:
+        os.close(relay[1])
+        with open(relay[0], "r", errors="surrogateescape") as r:
+            for chunk in iter(lambda: r.read(65536), ""):
+                sys.stdout.write(chunk)
+    while True:
+        try:
+            _, st = os.waitpid(pid, 0)
+            break
+        except InterruptedError:
+            continue
+        except KeyboardInterrupt:
+            continue
+    code = os.waitstatus_to_exitcode(st)
+    if code < 0:
+        code = 128 - code
+    _tessh().set_last_status(code)
+    return _status(code)
+
 def coproc_block(name, body, ns):
     """coproc NAME with a block: the block runs in a fork of tessh, its
     input and output piped back, as bash's `coproc NAME { …; }`."""
@@ -1930,10 +1987,22 @@ def complete_for(before, word, ns):
         got = _gen(spec, word, ws, ns, line, len(line))
     except Exception:
         return None
+    opts = set(spec.get("opts", set()))
     # (-o default, -o bashdefault: tessh's own when there's nothing.)
-    if not got and spec.get("opts", set()) & {"default", "bashdefault"}:
+    if not got and opts & {"default", "bashdefault"}:
         return None
-    return got
+    # (-o filenames: folders get their /, and a space or special character
+    # its backslash, as tessh's own file completion has them.)
+    if "filenames" in opts or "dirnames" in opts:
+        out = []
+        for g in got:
+            p = os.path.expanduser(g)
+            if os.path.isdir(p) and not g.endswith("/"):
+                g += "/"
+            out.append("".join("\\" + c if c in " \t'\"()[]{}$&;|<>*?!#`" else c for c in g))
+        got = out
+    # (-o nospace: no space after it; Tab goes on completing.)
+    return (got, sorted(opts & {"nospace"}))
 
 # ---- bash's completions, borrowed -------------------------------------------------------
 

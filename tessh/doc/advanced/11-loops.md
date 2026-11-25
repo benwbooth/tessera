@@ -619,11 +619,9 @@ three
 ```
 
 A `for` loop's output can be piped into a command, or redirected to a
-file. tessh can redirect a function's output (`f >file`), but not yet pipe
-it (`f | sort`), so the next two collect the names and sort them in Python.
-
-**Gap:** a loop (or a function) can't be a pipeline stage, as bash's
-`for … done | sort` is.
+file. A function's output pipes (`f | sort`) and a loop's does under `do`
+(`do | sort`, the loop indented under it), as bash's `for … done | sort`;
+the next two collect the names and sort them in Python, which is as short.
 
 ### Example 11-11. Listing the symbolic links in a directory (`symlinks.sh`)
 

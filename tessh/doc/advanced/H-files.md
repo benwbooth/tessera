@@ -10,7 +10,7 @@ interactive shell.
 | `/etc/bashrc` | interactive bash: system functions and aliases | none |
 | `~/.bash_profile` | your login shell: your environment | the same (tessh inherits it) |
 | `~/.bashrc` | interactive bash: your functions, aliases, prompt | `~/.config/tessh/rc.tsh`, run before the REPL's first prompt |
-| `~/.bash_logout` | a login shell, as it exits | none: Python's `atexit` in `rc.tsh` does it |
+| `~/.bash_logout` | a login shell, as it exits | `~/.config/tessh/logout.tsh` |
 | `~/.bash_history` | the command history | `~/.local/share/tessh/history` |
 
 `rc.tsh` is tessh code like any other: functions, `export`s, imports. A

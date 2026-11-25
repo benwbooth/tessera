@@ -167,6 +167,11 @@ pub fn login_file() -> std::path::PathBuf {
     config.join("tessh/login.tsh")
 }
 
+/// ~/.config/tessh/logout.tsh, run when a login shell ends (bash's ~/.bash_logout).
+pub fn logout_file() -> std::path::PathBuf {
+    login_file().with_file_name("logout.tsh")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

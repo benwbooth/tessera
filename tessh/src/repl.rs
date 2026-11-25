@@ -99,6 +99,19 @@ pub fn opens_block(line: &str, macros: &[String]) -> bool {
     if (h == "fn" || h == "lambda") && words.len() > 2 {
         return false;
     }
+    // (do and subshell with a redirection, a pipe or & after open the block
+    // it applies to: `do >log`, `do | sort`, `subshell &`.)
+    let tail = |w: &str| {
+        let r = w.trim_start_matches(|c: char| c.is_ascii_digit());
+        ["|", "|&", "&"].contains(&w) || r.starts_with('>') || r.starts_with('<') || r.starts_with("&>")
+    };
+    let at = if words[0] == h { 0 } else { 2 };
+    if (h == "do" || h == "subshell") && words.get(at + 1).is_some_and(|w| tail(w)) {
+        return true;
+    }
+    if h == "subshell" && words.len() == 1 && crate::runtime::which("subshell").is_none() {
+        return true;
+    }
     if (h == "quasi" || h == "do") && words.len() > 1 {
         return false;
     }
@@ -1029,10 +1042,12 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
     if !first && !var {
         let own = py.import("__tessh_shell__").and_then(|m| m.getattr("complete_for")).and_then(|f| f.call1((&before[..start], word, ns)));
         if let Ok(list) = own {
-            if let Ok(names) = list.extract::<Vec<String>>() {
+            // ((names, options): -o nospace leaves no space after one.)
+            if let Ok((names, opts)) = list.extract::<(Vec<String>, Vec<String>)>() {
+                let nospace = opts.iter().any(|o| o == "nospace");
                 for n in names {
                     let dir = n.ends_with('/');
-                    items.push(Item { insert: n.clone(), label: n, kind: if dir { "dir" } else { "option" }, detail: "complete".into(), doc: String::new() });
+                    items.push(Item { insert: n.clone(), label: n, kind: if dir { "dir" } else if nospace { "partial" } else { "option" }, detail: "complete".into(), doc: String::new() });
                 }
                 return (start, pos, items);
             }

@@ -1536,9 +1536,9 @@ fn select_readonly_lineno_err_complete() {
         let ns = ns.bind(py);
         assert_eq!(ns.get_item("r").unwrap().unwrap().getattr("code").unwrap().extract::<i32>().unwrap(), 1);
         let f = py.import("__tessh_shell__").unwrap().getattr("complete_for").unwrap();
-        let got: Vec<String> = f.call1(("svc ", "st", ns)).unwrap().extract().unwrap();
+        let got: Vec<String> = f.call1(("svc ", "st", ns)).unwrap().extract::<(Vec<String>, Vec<String>)>().unwrap().0;
         assert_eq!(got, ["start", "stop"]);
-        let got: Vec<String> = f.call1(("ls | mycmd x ", "", ns)).unwrap().extract().unwrap();
+        let got: Vec<String> = f.call1(("ls | mycmd x ", "", ns)).unwrap().extract::<(Vec<String>, Vec<String>)>().unwrap().0;
         assert_eq!(got, ["one", "two"]);
         assert!(f.call1(("other ", "", ns)).unwrap().is_none());
     });
@@ -1688,7 +1688,7 @@ fn bash_style_completion() {
     Python::attach(|py| {
         let ns = ns.bind(py);
         let f = py.import("__tessh_shell__").unwrap().getattr("complete_for").unwrap();
-        let got = |before: &str, word: &str| -> Option<Vec<String>> { f.call1((before, word, ns)).unwrap().extract().ok() };
+        let got = |before: &str, word: &str| -> Option<Vec<String>> { f.call1((before, word, ns)).unwrap().extract::<(Vec<String>, Vec<String>)>().ok().map(|x| x.0) };
         assert_eq!(got("svc ", "st").unwrap(), ["start", "stop", "status"]);
         assert_eq!(ns.get_item("COMP_LINE").unwrap().unwrap().extract::<String>().unwrap(), "svc st");
         assert_eq!(ns.get_item("COMP_POINT").unwrap().unwrap().extract::<i64>().unwrap(), 6);
@@ -1878,4 +1878,114 @@ fn bash_completion_bridge() {
         st.set_item("script", py.None()).unwrap();
     });
     let _ = std::fs::remove_file(&f);
+}
+
+/// bash's `{ …; } >f`, `( … ) | c`, `{ …; } &` and `( … )`: do or
+/// subshell with a block under it and a redirection, a pipe or & after.
+/// A function first in a pipe sends what it prints down it.
+#[test]
+fn block_redirections_pipes_and_subshells() {
+    let (out, err, code) = run_forked(concat!(
+        "import tempfile\n",
+        "cd (tempfile.mkdtemp)\n",
+        "do >log.txt\n  echo a\n  n = 5\n  print b\n",
+        "print n $n\n",
+        "cat log.txt\n",
+        "do >>log.txt\n  echo c\n",
+        "wc -l <log.txt\n",
+        "do | sort -r\n  echo 1\n  echo 3\n  echo 2\n",
+        "do 2>&1 | tr a-z A-Z\n  echo out\n  sh -c 'echo err >&2'\n",
+        "x = do | wc -l\n  echo a\n  echo b\n",
+        "print got ($x.strip)\n",
+        "def nums\n  print 1\n  print 2\n",
+        "nums | tac\n",
+        "print (nums | str.upper)\n",
+        "here = (pwd)\n",
+        "subshell\n  cd /\n  z = 1\n  pwd\n",
+        "print same ((pwd) == $here) ('z' in (globals))\n",
+        "subshell | tr a-z A-Z\n  echo lower\n  print py\n",
+        "subshell\n  exit 3\n",
+        "print sub $?\n",
+        "do &\n  sleep 0.1\n  echo bg-done\n",
+        "wait\n",
+        "print end\n",
+    ));
+    assert_eq!(err, "");
+    assert_eq!(out, "n 5\na\nb\n3\n3\n2\n1\nOUT\nERR\ngot 2\n2\n1\n1\n2\n\n/\nsame True False\nLOWER\nPY\nsub 3\nbg-done\nend\n");
+    assert_eq!(code, 0);
+    for (line, opens) in [("do >log", true), ("do | sort", true), ("do &", true), ("x = do | wc -l", true), ("subshell", true), ("subshell | sort", true), ("do print 1", false), ("do", true)] {
+        assert_eq!(crate::repl::opens_block(line, &[]), opens, "{line}");
+    }
+}
+
+/// `a |& b`, `<file cmd`, a bare `>file`, `*[1 2]`, `f k=[a b]`, docstrings.
+#[test]
+fn small_bash_forms() {
+    let (out, err, _) = run_forked(concat!(
+        "import tempfile os\n",
+        "cd (tempfile.mkdtemp)\n",
+        "sh -c 'echo err >&2' |& tr a-z A-Z\n",
+        "printf 'x\\n' >in.txt\n",
+        "<in.txt cat\n",
+        "2>/dev/null ls nosuchfile\n",
+        "print st $?\n",
+        ">in.txt\n",
+        "print size (os.path.getsize 'in.txt')\n",
+        "def f *xs\n  'Says the items.'\n  print $xs\n",
+        "f *[1 2]\n",
+        "print $f.__doc__\n",
+        "def g **k\n  print $k\n",
+        "g languages=[fr de] one=[x]\n",
+        "def h\n  'only a string: its value'\n",
+        "print (h) $h.__doc__\n",
+    ));
+    assert_eq!(err, "");
+    assert_eq!(out, "ERR\nx\nst 2\nsize 0\n(1, 2)\nSays the items.\n{languages: ['fr' 'de'] one: ['x']}\nonly a string: its value None\n");
+}
+
+/// complete -o filenames (folders get /, specials a backslash) and -o
+/// nospace (the options come back with the names); logout.tsh's place.
+#[test]
+fn complete_options_and_logout_file() {
+    let (ns, _) = run(concat!(
+        "import tempfile os\n",
+        "d = (tempfile.mkdtemp)\n",
+        "os.mkdir \"$d/sub dir\"\n",
+        "touch \"$d/plain\"\n",
+        "complete -o filenames -G \"$d/*\" fc1\n",
+        "complete -o nospace -W 'key= other' ns1\n",
+    ));
+    Python::attach(|py| {
+        let ns = ns.bind(py);
+        let d: String = ns.get_item("d").unwrap().unwrap().extract().unwrap();
+        let f = py.import("__tessh_shell__").unwrap().getattr("complete_for").unwrap();
+        let (names, opts): (Vec<String>, Vec<String>) = f.call1(("fc1 ", "", ns)).unwrap().extract().unwrap();
+        assert_eq!(names, [format!("{d}/plain"), format!("{d}/sub\\ dir/")]);
+        assert!(opts.is_empty());
+        let (names, opts): (Vec<String>, Vec<String>) = f.call1(("ns1 ", "k", ns)).unwrap().extract().unwrap();
+        assert_eq!((names, opts), (vec!["key=".to_string()], vec!["nospace".to_string()]));
+    });
+    let p = crate::login::logout_file();
+    assert!(p.ends_with("tessh/logout.tsh"));
+}
+
+/// A program redirected from a named pipe in the background doesn't stop
+/// tessh until the other end opens (`cat <fifo &`); $HISTCMD is 1 in a script.
+#[test]
+fn fifo_redirection_and_histcmd() {
+    let (out, err, code) = run_forked(concat!(
+        "import tempfile\n",
+        "cd (tempfile.mkdtemp)\n",
+        "mkfifo ff\n",
+        "cat <ff &\n",
+        "print started\n",
+        "echo through >ff\n",
+        "wait\n",
+        "cat ff >got.txt &\n",
+        "echo again >ff\n",
+        "wait\n",
+        "cat got.txt\n",
+        "print hc $HISTCMD\n",
+    ));
+    assert_eq!((out.as_str(), err.as_str(), code), ("started\nthrough\nagain\nhc 1\n", "", 0));
 }

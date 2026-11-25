@@ -542,7 +542,7 @@ impl Ed {
         let (s, e) = (self.comp.start.min(self.t.len()), self.comp.end.min(self.t.len()));
         let mut ins = it.insert.clone();
         // A finished word gets its space; a folder or "--opt=" keeps going.
-        let more = it.kind == "dir" || ins.ends_with('=') || ins.ends_with('/');
+        let more = it.kind == "dir" || it.kind == "partial" || ins.ends_with('=') || ins.ends_with('/');
         if !more && self.t.char_at(e) != Some(' ') {
             ins.push(' ');
         }

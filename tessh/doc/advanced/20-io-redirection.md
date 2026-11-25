@@ -633,7 +633,9 @@ usual way. Or the block goes in a function, and the call is redirected,
 `block <file >out`; then `input` (bash's `read`) and the programs in it
 read the file. The examples below use both.
 
-**Gap:** no redirection after a loop or `if` block.
+bash's `done <file` and `fi >log` are `do <file` or `do >log` with the
+loop or `if` indented under it: the whole block redirected, its names
+still yours.
 
 These examples read names.data, Example 20-11. Each makes it first, with
 one `printf`.

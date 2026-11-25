@@ -26,8 +26,8 @@ $MATRIX)`, but the comment saying why is still yours to write.
 
 **Add descriptive headers to scripts and functions.** The same comment
 blocks serve in tessh. (In Python a string as a function's first line is
-its docstring, which `help` shows. **Gap:** tessh drops such a string, so
-the header stays a comment for now.)
+its docstring, which `help` shows; a tessh `def` keeps it the same way,
+`$f.__doc__`.)
 
 ```bash no-run
 #!/bin/bash

@@ -51,7 +51,8 @@ takes bash's `-C command`, `-G glob`, `-X filter` (`!` keeps the
 matches), `-P prefix`, `-S suffix`, `-A action` (file, directory, command,
 builtin, keyword, variable, function, export, user, hostname, job,
 signal) and `-o default`, `bashdefault`, `dirnames`, `plusdirs` and
-`nosort`; `-o filenames` and `-o nospace` are accepted and do nothing.
+`nosort`; `-o filenames` puts `/` after folders and a backslash before spaces and
+special characters, and `-o nospace` leaves no space after a choice.
 For the programs bash-completion knows (git, systemctl, nix and the rest
 that ship a bash completion), tessh's Tab asks a bash in the background,
 which has bash-completion loaded, what it would offer: their completions

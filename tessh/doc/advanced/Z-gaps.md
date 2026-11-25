@@ -41,6 +41,18 @@ them as bash would:
   read line <file` reads the file once, line after line; and history's
   `!?text?`, `!#`, word designators, modifiers and `^old^new^`.
 - `alias` and `unalias`, as bash's.
+- Blocks redirected, piped and in the background: `do >log`, `do <file`,
+  `do | sort`, `do &` with the block under it (bash's `{ …; } >f`, `done
+  <file`, `fi >log`, `for … done | sort`), and `subshell` with a block
+  (bash's `( … )`, a fork of tessh), with the same after it. A function
+  first in a pipe sends what it prints down it (`f | sort`).
+- `a |& b`; redirections first (`<file cmd`, `2>/dev/null cmd`); a line of
+  only redirections (`>file`); a program redirected to or from a named pipe
+  in the background doesn't stop tessh until the other end opens.
+- `*[1 2]` splats the list, and `f languages=[fr]` gives it a list.
+- A `def`'s or `class`'s first-line string is its docstring.
+- `~/.config/tessh/logout.tsh` when a login shell ends; `$HISTCMD`;
+  `complete -o filenames` and `-o nospace`.
 - `declare`, `local`, `shopt`, `bind`, `caller`, `enable`: not
   in tessh, but each now says what to do instead, rather than "command not
   found".
@@ -88,18 +100,21 @@ nothing else, so bash's forms inside it aren't read as bash's.
 | `$RANDOM`, `$UID`, `$SECONDS`… | Python's forms, below (Variables) |
 | `/dev/tcp/host/port` | `socket` (chapter 29) |
 | `case` fall-through (`;&`, `;;&`) | none in `match`; test the cases with `if` |
+| `break N`, `continue N` | a function and `return`, or `for … else` |
+| `eval $code` (code in a variable) | `eval "$code"`; `eval $x` with a bare value is Python's `eval` |
+| `set -a`, `-b`, `-h`, `-k`, `-m`, `-P`, `-t`; `shopt` | `export NAME=value`; jobs are reported at the next prompt; there's no hashing, no `-k` words; `cd` keeps links (`os.path.realpath` for the real path); `shopt` says what to do for each |
+| `set +u` | none: an unset name is always an error; `$env.get "X"` or `globals().get` when it may not be set |
+| `PS1`, `PS2`, `PROMPT_COMMAND` | the prompt bar, set in Tessera's settings (its widgets, or Starship); `@before_prompt` for `PROMPT_COMMAND` |
+| `$HISTFILE`, `$HISTTIMEFORMAT` | tessh's history is always its own file (`$XDG_DATA_HOME/tessh/history`), so bash's doesn't get tessh's lines; it keeps no times |
+| restricted mode (`bash -r`) | none: with Python underneath it couldn't mean much |
+| a bareword next to `and`/`or` | a word, by design (`print it is ready`): quote it, `$x == "PREV" and …` |
 
 ## Builtins
 <!-- help: abs-gaps-builtins read eval exec trap wait type -->
 
-- **`eval $code`**: given a bare value, `eval` is Python's; tessh text
-  held in a variable runs with `eval "$code"` (chapters 15, 36, A-30).
-- **`set` options** other than `-e`, `-x`, `-v`, `-u`, `-C`, `-f`, `-n`,
-  `-o pipefail` and `-o ignoreeof` (`-a`, `-b`, `-h`, `-k`, `-m`, `-P`, `-t`
-  and the rest), and
-  `shopt` (it says so). `set -u` is always on, so `set +u` fails. A
-  failing *program* stops a script only in strict mode (`strict`, `set
-  -e`, `tessh -e`) or with `(cmd)!` (chapters 32, 33).
+- A failing *program* stops a script only in strict mode (`strict`, `set
+  -e`, `tessh -e`) or with `(cmd)!`, by design: a failing builtin on a line
+  of its own stops it anyway (chapters 32, 33).
 
 ## Variables
 <!-- help: abs-gaps-variables $UID $RANDOM $LINENO $SECONDS -->
@@ -123,48 +138,22 @@ by design.
   `echo foo\` glued to the end of a line doesn't continue it (with a space,
   `\` does).
 - A pattern held in text: `glob $p` doesn't glob it; `Glob $p` does.
-- `*[1 2]` (splatting a list literal) is read as a glob; give the list a
-  name, or write `*(list …)`.
-- A keyword argument with a list value, `f languages=[fr]`, is read as a
-  glob; write `languages=([fr])`.
 
 ## Structure
-<!-- help: abs-gaps-structure subshell group pipeline-stage -->
+<!-- help: abs-gaps-structure -->
 
-- **A function or loop as a pipeline stage**: `f | sort` pipes `f`'s
-  return value, not what it prints; `for … done | sort` has no form.
-  Collect the lines in a list and pipe that, or redirect the call to a
-  file (chapters 11, 12, 19).
-- **Command groups**: `( a; b ) | c` and `{ a; b; } >f` have no form; a
-  function with its call redirected does the second (chapters 16, 19, 20).
-- **Subshells**: `( … )` is a Python form, not a child process; `os.fork`
-  (a small `@subshell` helper is in chapter 21).
-- **Redirection after a block** (`done <file`, `fi >log`) and a trailing
-  `&` on a block: put the block in a function (chapters 3, 20).
-- `<file cmd` (redirection first) and a bare `>file` line are errors.
-- No `|&`.
-- `break N`, `continue N`: a function and `return`, or `for … else`.
-- A bareword next to `and`/`or` is a word, by design (`print it is
-  ready`), so `$x == PREV and …` and `$x or default` need the word quoted.
+- A `do` or function stage *after* the first in a pipe gets the text as its
+  last argument, Python's way (`cmd | f`), not on its standard input.
 - Captured as a value, a command's words stop at Python operators:
   `x = echo 1 + 2` is `(echo 1) + 2`, and `y = expr 7 % 2` the same. Quote
   the operator: `y = expr 7 "%" 2` (A-58). On a line of its own, as a
   command, they're words.
 
 ## Elsewhere
-<!-- help: abs-gaps-elsewhere dev-tcp completion history prompt -->
+<!-- help: abs-gaps-elsewhere -->
 
-- **Completion**: `complete -o filenames` and `-o nospace` are accepted
-  but do nothing (Appendix J).
-- **History**: no `$HISTTIMEFORMAT` or `$HISTCMD`, and `$HISTFILE` is
-  always tessh's own file (Appendix L).
-- **The prompt** can't be set (`PS1`), and there's no logout file
-  (Appendices H, M).
-- **Restricted mode**: none, and with Python underneath it couldn't mean
-  much (chapter 22).
-- A background command redirected to or from a named pipe opens it before
-  starting, so it can block the shell until the other end opens (A-14).
-- Docstrings in tessh functions are dropped.
+- A Python call redirected to a named pipe (`print hi >fifo`) opens it in
+  tessh, so it waits there for the other end; a program doesn't.
 - Starting a program costs about 20 ms, several times what bash takes:
   loops that run thousands of tiny programs (`expr`) are slow; do the work
   in Python instead.

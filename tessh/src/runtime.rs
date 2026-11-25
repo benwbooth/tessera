@@ -1056,6 +1056,23 @@ fn is_attached_output(v: &Bound<'_, PyAny>) -> bool {
     v.getattr("attached").and_then(|a| a.extract::<bool>()).unwrap_or(false) && v.extract::<String>().map(|s| s.is_empty()).unwrap_or(false)
 }
 
+/// $HISTCMD: the history number of the command running now (at the prompt;
+/// 1 in a script, as bash has it).
+#[pyfunction]
+fn histcmd(py: Python<'_>) -> PyResult<i64> {
+    if !INTERACTIVE.load(Ordering::SeqCst) {
+        return Ok(1);
+    }
+    let n = py.import("__tessh_shell__")?.getattr("_history")?.call0()?.len()?;
+    Ok(n.max(1) as i64)
+}
+
+/// $? set from Python (subshell's block, run in a fork).
+#[pyfunction]
+fn set_last_status(code: i32) {
+    set_status(code);
+}
+
 #[pyfunction]
 fn status() -> i32 {
     STATUS.load(Ordering::SeqCst)
@@ -1571,6 +1588,66 @@ fn run_stages(py: Python<'_>, stages: Vec<Stage>, mode: &str) -> PyResult<Py<PyA
                 result = v;
                 i += 1;
             }
+            // (A function or a do block first, more after: what it prints goes
+            // down the pipe, then what it gives back, as <(f) has it.)
+            "call" if i == 0 && stages.len() > 1 => {
+                let obj = s.obj.as_ref().unwrap().bind(py).clone();
+                flush_python(py);
+                let sys = py.import("sys")?;
+                let saved = [sys.getattr("stdin")?.unbind(), sys.getattr("stdout")?.unbind(), sys.getattr("stderr")?.unbind()];
+                let meaningful = |v: &Bound<'_, PyAny>| !v.is_none() && !is_attached_output(v);
+                if !capture && stages[1..].iter().all(|s| s.kind == "cmd") {
+                    use std::os::fd::{IntoRawFd, OwnedFd};
+                    let (r, w) = std::io::pipe()?;
+                    let children = spawn_chain(&stages[1..], Some(Stdio::from(r)), None)?;
+                    let fd: OwnedFd = w.into();
+                    let kw = PyDict::new(py);
+                    kw.set_item("buffering", 1)?;
+                    kw.set_item("errors", "surrogateescape")?;
+                    let f = py.import("os")?.getattr("fdopen")?.call((fd.into_raw_fd(), "w"), Some(&kw))?;
+                    PY_STREAMS.with(|p| p.borrow_mut().push(saved));
+                    sys.setattr("stdout", &f)?;
+                    let res = obj.call1((py.None(),));
+                    let base = PY_STREAMS.with(|p| p.borrow_mut().pop()).unwrap();
+                    let res = match res {
+                        Ok(v) => {
+                            if meaningful(&v) {
+                                if let Ok(b) = feed_bytes(py, &v) {
+                                    let _ = f.call_method1("write", (String::from_utf8_lossy(&b).to_string(),));
+                                }
+                            }
+                            Ok(())
+                        }
+                        Err(e) if e.is_instance_of::<pyo3::exceptions::PyBrokenPipeError>(py) => Ok(()),
+                        Err(e) => Err(e),
+                    };
+                    let _ = f.call_method0("close");
+                    sys.setattr("stdout", base[1].bind(py))?;
+                    let code = wait_all(py, children)?;
+                    res?;
+                    set_status(code);
+                    return output(py, "", code, true);
+                }
+                let buf = py.import("io")?.getattr("StringIO")?.call0()?;
+                PY_STREAMS.with(|p| p.borrow_mut().push(saved));
+                sys.setattr("stdout", &buf)?;
+                let res = obj.call1((py.None(),));
+                let base = PY_STREAMS.with(|p| p.borrow_mut().pop()).unwrap();
+                sys.setattr("stdout", base[1].bind(py))?;
+                let v = res?;
+                let mut text: String = buf.call_method0("getvalue")?.extract()?;
+                let d: Py<PyAny> = if text.is_empty() {
+                    v.unbind()
+                } else {
+                    if meaningful(&v) {
+                        text.push_str(&String::from_utf8_lossy(&feed_bytes(py, &v)?));
+                    }
+                    PyString::new(py, &text).into_any().unbind()
+                };
+                data = Some(d.clone_ref(py));
+                result = d;
+                i += 1;
+            }
             "call" => {
                 let arg = data.take().unwrap_or_else(|| py.None());
                 let obj = s.obj.as_ref().unwrap().bind(py);
@@ -1836,6 +1913,47 @@ fn exec_redirs(py: Python<'_>, redirs: &[(String, Option<String>)]) -> PyResult<
     Ok(())
 }
 
+/// A program redirected to or from a named pipe: run through /bin/sh, which
+/// opens it, so tessh doesn't wait there for the other end (`cat <fifo &`
+/// goes on at once). Rust's spawn waits for the program to start, so the
+/// open can't be the child's own before exec. None: no named pipe (or a
+/// redirection sh can't do: a here-string, a descriptor above 9).
+fn fifo_trampoline(words: &[String], redirs: &[(String, Option<String>)]) -> Option<Vec<String>> {
+    use std::os::unix::fs::FileTypeExt;
+    let fifo = |t: &str| std::fs::metadata(t).is_ok_and(|m| m.file_type().is_fifo());
+    if !redirs.iter().any(|(_, t)| t.as_deref().is_some_and(fifo)) {
+        return None;
+    }
+    let mut parts = vec![];
+    let mut paths = vec![];
+    for (op, target) in redirs {
+        let (fd, k) = parse_redir(op)?;
+        if !(0..=9).contains(&fd) {
+            return None;
+        }
+        let mut path = |paths: &mut Vec<String>| -> Option<String> {
+            paths.push(target.clone()?);
+            Some(format!("\"${{{}}}\"", paths.len()))
+        };
+        parts.push(match k {
+            RKind::Out => format!("{fd}>{}", path(&mut paths)?),
+            RKind::Append => format!("{fd}>>{}", path(&mut paths)?),
+            RKind::In => format!("{fd}<{}", path(&mut paths)?),
+            RKind::ReadWrite => format!("{fd}<>{}", path(&mut paths)?),
+            RKind::Both => format!(">{} 2>&1", path(&mut paths)?),
+            RKind::BothAppend => format!(">>{} 2>&1", path(&mut paths)?),
+            RKind::Dup(m) if (0..=9).contains(&m) => format!("{fd}>&{m}"),
+            RKind::Close => format!("{fd}>&-"),
+            _ => return None,
+        });
+    }
+    let script = format!("exec {}; shift {}; exec \"$@\"", parts.join(" "), paths.len());
+    let mut v = vec!["/bin/sh".to_string(), "-c".into(), script, "sh".into()];
+    v.extend(paths);
+    v.extend(words.iter().cloned());
+    Some(v)
+}
+
 fn open_redir(op: &str, target: &Option<String>) -> PyResult<File> {
     let t = target.clone().ok_or_else(|| PyValueError::new_err(format!("{op} needs a file")))?;
     let r = if op == "<" {
@@ -1939,8 +2057,13 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
     let mut first_stdin: Option<std::process::ChildStdin> = None;
     for (k, c) in cmds.iter().enumerate() {
         let last = k + 1 == cmds.len();
-        let mut command = Command::new(&c.words[0]);
-        command.args(&c.words[1..]);
+        let tramp = fifo_trampoline(&c.words, &c.redirs);
+        let (words, no_redirs): (&[String], &[(String, Option<String>)]) = match &tramp {
+            Some(t) => (t, &[]),
+            None => (&c.words, &c.redirs),
+        };
+        let mut command = Command::new(&words[0]);
+        command.args(&words[1..]);
         // stdin
         let mut stdin: Option<Stdio> = None;
         if let Some(r) = prev_reader.take() {
@@ -1969,7 +2092,7 @@ fn run_procs(py: Python<'_>, cmds: &[Stage], data: Option<Py<PyAny>>, capture: b
         };
         // (A redirection that can't be made, a file not there or set -C's
         // refusal, fails the command, status 1, as bash's does.)
-        let _keep = match child_redirs(&mut command, &c.redirs) {
+        let _keep = match child_redirs(&mut command, no_redirs) {
             Ok(k) => k,
             Err(e) => {
                 for ch in children.iter_mut() {
@@ -2149,8 +2272,13 @@ fn spawn_chain(cmds: &[Stage], mut first_in: Option<Stdio>, mut last_out: Option
     let mut children: Vec<Child> = vec![];
     let mut prev: Option<std::io::PipeReader> = None;
     for (k, c) in cmds.iter().enumerate() {
-        let mut command = Command::new(&c.words[0]);
-        command.args(&c.words[1..]);
+        let tramp = fifo_trampoline(&c.words, &c.redirs);
+        let (words, no_redirs): (&[String], &[(String, Option<String>)]) = match &tramp {
+            Some(t) => (t, &[]),
+            None => (&c.words, &c.redirs),
+        };
+        let mut command = Command::new(&words[0]);
+        command.args(&words[1..]);
         if let Some(r) = prev.take() {
             command.stdin(Stdio::from(r));
         } else if let Some(s) = first_in.take() {
@@ -2163,7 +2291,7 @@ fn spawn_chain(cmds: &[Stage], mut first_in: Option<Stdio>, mut last_out: Option
         } else if let Some(s) = last_out.take() {
             command.stdout(s);
         }
-        let _keep = child_redirs(&mut command, &c.redirs)?;
+        let _keep = child_redirs(&mut command, no_redirs)?;
         unsafe {
             command.pre_exec(|| {
                 for s in [libc::SIGTSTP, libc::SIGTTOU, libc::SIGTTIN, libc::SIGINT, libc::SIGQUIT, libc::SIGPIPE, libc::SIGXFSZ] {
@@ -2340,15 +2468,45 @@ fn stream_fd(f: &Bound<'_, PyAny>) -> Option<std::os::fd::OwnedFd> {
     unsafe { BorrowedFd::borrow_raw(n) }.as_fd().try_clone_to_owned().ok()
 }
 
-fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
-    if redirs.is_empty() {
-        return f();
+struct RedirState {
+    saved: [Py<PyAny>; 3],
+    opened: Vec<Py<PyAny>>,
+}
+
+fn restore_redirs(py: Python<'_>, st: RedirState) -> PyResult<()> {
+    let sys = py.import("sys")?;
+    PY_STREAMS.with(|s| s.borrow_mut().pop());
+    let _ = sys.getattr("stdout").and_then(|o| o.call_method0("flush"));
+    let _ = sys.getattr("stderr").and_then(|o| o.call_method0("flush"));
+    let [o, e, i] = st.saved;
+    sys.setattr("stdout", o)?;
+    sys.setattr("stderr", e)?;
+    sys.setattr("stdin", i)?;
+    for fl in st.opened {
+        let _ = fl.bind(py).call_method0("close");
     }
+    Ok(())
+}
+
+/// Python's streams redirected (what `f >file` and `do >file` do), until
+/// restore_redirs; programs run meanwhile use what took their place.
+fn apply_redirs(py: Python<'_>, redirs: &[(String, Option<String>)]) -> PyResult<RedirState> {
+    let sys = py.import("sys")?;
+    let saved = [sys.getattr("stdout")?.unbind(), sys.getattr("stderr")?.unbind(), sys.getattr("stdin")?.unbind()];
+    PY_STREAMS.with(|s| s.borrow_mut().push([saved[2].clone_ref(py), saved[0].clone_ref(py), saved[1].clone_ref(py)]));
+    let mut st = RedirState { saved, opened: vec![] };
+    match apply_each(py, redirs, &mut st.opened) {
+        Ok(()) => Ok(st),
+        Err(e) => {
+            restore_redirs(py, st)?;
+            Err(e)
+        }
+    }
+}
+
+fn apply_each(py: Python<'_>, redirs: &[(String, Option<String>)], opened: &mut Vec<Py<PyAny>>) -> PyResult<()> {
     let sys = py.import("sys")?;
     let open = py.import("builtins")?.getattr("open")?;
-    let saved = (sys.getattr("stdout")?, sys.getattr("stderr")?, sys.getattr("stdin")?);
-    PY_STREAMS.with(|s| s.borrow_mut().push([saved.2.clone().unbind(), saved.0.clone().unbind(), saved.1.clone().unbind()]));
-    let mut opened = vec![];
     // (Python's own streams for 0, 1 and 2; more are only a program's.)
     let names = ["stdin", "stdout", "stderr"];
     for (op, target) in redirs {
@@ -2356,7 +2514,7 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
         let slot = |fd: i32| -> PyResult<&str> {
             names.get(fd as usize).copied().filter(|_| fd >= 0).ok_or_else(|| PyValueError::new_err(format!("{op}: only a program has file descriptor {fd}")))
         };
-        let file = |mode: &str| -> PyResult<Bound<'py, PyAny>> {
+        let file = |mode: &str| -> PyResult<Bound<'_, PyAny>> {
             let t = target.clone().ok_or_else(|| PyValueError::new_err(format!("{op} needs a file")))?;
             open.call1((t, mode))
         };
@@ -2367,7 +2525,7 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
                 }
                 let fl = file(match k { RKind::Out => "w", RKind::Append => "a", RKind::In => "r", _ => "r+" })?;
                 sys.setattr(slot(fd)?, &fl)?;
-                opened.push(fl);
+                opened.push(fl.unbind());
             }
             RKind::Both | RKind::BothAppend => {
                 if k == RKind::Both {
@@ -2376,7 +2534,7 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
                 let fl = file(if k == RKind::Both { "w" } else { "a" })?;
                 sys.setattr("stdout", &fl)?;
                 sys.setattr("stderr", &fl)?;
-                opened.push(fl);
+                opened.push(fl.unbind());
             }
             RKind::Here => {
                 let io = py.import("io")?.getattr("StringIO")?.call1((here_text(op, target),))?;
@@ -2387,23 +2545,51 @@ fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: 
                 sys.setattr(slot(fd)?, to)?;
             }
             RKind::Close => {
-                let fl = open.call1((std::path::Path::new("/dev/null").to_string_lossy().to_string(), if fd == 0 { "r" } else { "w" }))?;
+                let fl = open.call1(("/dev/null", if fd == 0 { "r" } else { "w" }))?;
                 sys.setattr(slot(fd)?, &fl)?;
-                opened.push(fl);
+                opened.push(fl.unbind());
             }
         }
     }
-    let r = f();
-    PY_STREAMS.with(|s| s.borrow_mut().pop());
-    let _ = sys.getattr("stdout").and_then(|o| o.call_method0("flush"));
-    let _ = sys.getattr("stderr").and_then(|o| o.call_method0("flush"));
-    sys.setattr("stdout", saved.0)?;
-    sys.setattr("stderr", saved.1)?;
-    sys.setattr("stdin", saved.2)?;
-    for fl in opened {
-        let _ = fl.call_method0("close");
+    Ok(())
+}
+
+fn with_redirs<'py, T>(py: Python<'py>, redirs: &[(String, Option<String>)], f: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
+    if redirs.is_empty() {
+        return f();
     }
+    let st = apply_redirs(py, redirs)?;
+    let r = f();
+    restore_redirs(py, st)?;
     r
+}
+
+/// `do >log` with a block: `with __tessh__.redirecting([…])`, the block's
+/// output (its programs' too) redirected, its names still the caller's.
+#[pyclass(module = "__tessh__", unsendable)]
+pub struct Redirecting {
+    redirs: Vec<(String, Option<String>)>,
+    st: Option<RedirState>,
+}
+
+#[pymethods]
+impl Redirecting {
+    fn __enter__(&mut self, py: Python<'_>) -> PyResult<()> {
+        flush_python(py);
+        self.st = Some(apply_redirs(py, &self.redirs)?);
+        Ok(())
+    }
+    fn __exit__(&mut self, py: Python<'_>, _t: Bound<'_, PyAny>, _v: Bound<'_, PyAny>, _tb: Bound<'_, PyAny>) -> PyResult<bool> {
+        if let Some(st) = self.st.take() {
+            restore_redirs(py, st)?;
+        }
+        Ok(false)
+    }
+}
+
+#[pyfunction]
+fn redirecting(redirs: Bound<'_, PyAny>) -> PyResult<Redirecting> {
+    Ok(Redirecting { redirs: redirs_of(&redirs)?, st: None })
 }
 
 #[pyfunction]
@@ -3106,12 +3292,15 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     crate::jobs::add(&m)?;
     m.add_class::<Env>()?;
     m.add_class::<Builtin>()?;
+    m.add_class::<Redirecting>()?;
     for f in [
         wrap_pyfunction!(lookup, &m)?,
         wrap_pyfunction!(free, &m)?,
         wrap_pyfunction!(auto, &m)?,
         wrap_pyfunction!(show, &m)?,
         wrap_pyfunction!(status, &m)?,
+        wrap_pyfunction!(set_last_status, &m)?,
+        wrap_pyfunction!(histcmd, &m)?,
         wrap_pyfunction!(negate, &m)?,
         wrap_pyfunction!(failed, &m)?,
         wrap_pyfunction!(ensure, &m)?,
@@ -3128,6 +3317,7 @@ pub fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         wrap_pyfunction!(value_stage, &m)?,
         wrap_pyfunction!(py_bg_call, &m)?,
         wrap_pyfunction!(redirect, &m)?,
+        wrap_pyfunction!(redirecting, &m)?,
         wrap_pyfunction!(apply_env, &m)?,
         wrap_pyfunction!(dump_env, &m)?,
         wrap_pyfunction!(command, &m)?,

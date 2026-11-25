@@ -337,9 +337,9 @@ variable1 = 12345
 variable2 = 0123456789
 ```
 
-**Gap:** what a tessh block prints can't be captured as a value the way
-bash's `` `for …` `` does; build the value instead, or redirect a
-function to a file.
+What a block prints is captured as bash's `` `for …` `` does with `do`
+piped: `x = do | cat` with the block under it (or `x = (f | cat)` for a
+function); building the value in Python is often simpler.
 
 Any program that writes to its standard output extends the shell this
 way, a compiled one included:

@@ -356,6 +356,9 @@ fn lines_parser<'a>() -> impl Parser<'a, &'a str, Vec<RawLine>, Ex<'a>> {
         with_postfix(paren.clone()).map(Piece::F).boxed(),
         balanced('[', ']').boxed(),
         balanced('{', '}').boxed(),
+        // (A [ … ] with spaces in it, no glob's set: the list, so *[1 2] is
+        // splatted and name=[a b] is a keyword argument given it.)
+        with_postfix(bracket.clone()).map(Piece::F).boxed(),
         just('[').to(Piece::Text("[".into())).boxed(),
         just('{').to(Piece::Text("{".into())).boxed(),
         just('`').to(Piece::Text("`".into())).boxed(),
@@ -563,6 +566,11 @@ fn classify(mut ps: Vec<Piece>, pos: Option<Pos>) -> Form {
         }
         if let Some(eq) = t.find('=') {
             let (n, v) = (&t[..eq], &t[eq + 1..]);
+            // (name=[x]: a list of one, not a glob's set.)
+            if is_ident(n) && v.len() > 2 && v.starts_with('[') && v.ends_with(']') && !v[1..v.len() - 1].contains(['[', ']', '*', '?']) {
+                let inner = classify_text(&v[1..v.len() - 1], shift(pos, eq + 2));
+                return Form::new(Kind::KwArg { name: n.to_string(), value: Box::new(Form::group('[', vec![inner], shift(pos, eq + 1))) }, pos);
+            }
             if is_ident(n) && !v.is_empty() && !v.starts_with('=') {
                 return Form::new(Kind::KwArg { name: n.to_string(), value: Box::new(classify_text(v, shift(pos, eq + 1))) }, pos);
             }
