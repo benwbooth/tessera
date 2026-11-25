@@ -224,9 +224,12 @@ impl Screen {
         if let Some(ov) = &f.overlay {
             let n = ov.lines.len();
             let below = self.rows.saturating_sub(self.top + h) as usize;
-            // (No room above either, as under a tall ls listing: from the screen's
-            // top, over the rows there, never moving the editor.)
-            let start: i32 = if below >= n { (self.top + h) as i32 } else { (self.top as i32 - n as i32).max(0) };
+            // (Else just above the editor's own rows: over the ls listing's
+            // last ones when there is one, not above the listing, which can
+            // reach the screen's top. No room there either: from the
+            // screen's top, never moving the editor.)
+            let ed_top = self.top as i32 + f.bare.saturating_sub(skip) as i32;
+            let start: i32 = if below >= n { (self.top + h) as i32 } else { (ed_top - n as i32).max(0) };
             for (i, l) in ov.lines.iter().enumerate() {
                 let r = start + i as i32;
                 if r < 0 || r >= self.rows as i32 {
