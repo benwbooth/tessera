@@ -336,6 +336,8 @@ void TerminalItem::itemChange(ItemChange change, const ItemChangeData& value)
     if (change == ItemSceneChange || change == ItemDevicePixelRatioHasChanged) {
         updateMetrics();
     }
+    // (A reattach waiting for a window: this one's.)
+    if (change == ItemSceneChange && value.window && !m_session && !m_attachId.isEmpty()) m_openTimer->start();
     // (After the layouts around it have settled: a moment after it's shown.)
     if (change == ItemVisibleHasChanged && value.boolValue && m_resizeWhenShown) m_resizeTimer->start();
     if (change == ItemVisibleHasChanged && value.boolValue && m_openWhenShown) {
@@ -407,6 +409,14 @@ void TerminalItem::open()
     // it's shown, at its real size.)
     if (!m_attachId.isEmpty() && !isVisible()) {
         m_openWhenShown = true;
+        return;
+    }
+    // (Reattaching before the window is on screen at its own size, as at
+    // startup, the item not even in it yet (400×224): the shell would be
+    // told that size and redraw for it, then the real one a moment later.
+    // Once it's in a window and that's on screen; looked at again shortly.)
+    if (!m_attachId.isEmpty() && (!window() || !window()->isExposed())) {
+        if (window()) m_openTimer->start();
         return;
     }
     const int cols = qMax(2, int((width() * m_dpr - 2 * m_pad) / m_cw));
