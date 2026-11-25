@@ -66,8 +66,24 @@ impl Editor {
         let (f, slot) = (self.bar_fn.clone(), self.bar.clone());
         let (cwd, st, du, w, visited) = (self.ed.cwd.clone(), self.ed.status, self.ed.duration_ms, Term::size().0, self.ed.visited.clone());
         let colors = self.term.fg.zip(self.term.bg);
+        // (A folder been in before: its last bar at once, till the new one's
+        // worked out, not the last folder's.)
+        static SEEN: Mutex<Option<std::collections::HashMap<(String, u16), (Vec<Line>, Line)>>> = Mutex::new(None);
+        if let Some((l, r)) = SEEN.lock().unwrap().as_ref().and_then(|m| m.get(&(cwd.clone(), w)).cloned()) {
+            let mut s = self.bar.lock().unwrap();
+            if seq >= s.2 {
+                *s = (l, r, seq);
+            }
+        }
         std::thread::spawn(move || {
             let (l, r) = f(&cwd, st, du, w, &visited, colors);
+            let mut seen = SEEN.lock().unwrap();
+            let m = seen.get_or_insert_with(Default::default);
+            if m.len() > 200 {
+                m.clear();
+            }
+            m.insert((cwd, w), (l.clone(), r.clone()));
+            drop(seen);
             let mut s = slot.lock().unwrap();
             if seq >= s.2 {
                 *s = (l, r, seq);

@@ -423,9 +423,18 @@ fn starship_run(ctx: &BarCtx, cwd: &str, right: bool, width: usize, cfg: Option<
 /// $fill marked (found by asking again a little wider and seeing where a
 /// line grew), to be stretched to the room the line has.
 fn starship_lines(ctx: &BarCtx, cwd: &str, width: usize, cfg: Option<&Path>) -> Vec<Vec<R>> {
-    let left = starship_run(ctx, cwd, false, width, cfg);
-    starship_parse(&left, width, |w| starship_run(ctx, cwd, false, w, cfg))
+    // (The wider ask that finds $fill, at the same time as the first, not
+    // after it: a line as wide as the bar, the usual case with a $fill,
+    // needs it, and waiting doubled the bar's time.)
+    let (left, wider) = std::thread::scope(|sc| {
+        let wider = sc.spawn(|| starship_run(ctx, cwd, false, width + FILL_MORE, cfg));
+        (starship_run(ctx, cwd, false, width, cfg), wider.join().unwrap_or_default())
+    });
+    starship_parse(&left, width, |w| if w == width + FILL_MORE { wider.clone() } else { starship_run(ctx, cwd, false, w, cfg) })
 }
+
+/// How much wider the second ask is, to find $fill.
+const FILL_MORE: usize = 8;
 
 fn starship_parse(left: &str, width: usize, run_at: impl Fn(usize) -> String) -> Vec<Vec<R>> {
     let mut lines: Vec<&str> = left.split('\n').collect();
@@ -442,7 +451,7 @@ fn starship_parse(left: &str, width: usize, run_at: impl Fn(usize) -> String) ->
     let mut out: Vec<Vec<R>> = lines.iter().map(|l| runs(l)).collect();
     let plain = |l: &str| -> Vec<char> { strip(l).chars().filter(|c| *c != '\u{1}' && *c != '\u{2}' && *c != '\r').collect() };
     if lines.iter().any(|l| plain(l).len() + 1 >= width) {
-        const MORE: usize = 8;
+        const MORE: usize = FILL_MORE;
         let wider = run_at(width + MORE);
         let mut wl: Vec<&str> = wider.split('\n').collect();
         while wl.first().is_some_and(|l| strip(l).trim().is_empty()) {

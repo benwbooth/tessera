@@ -3224,6 +3224,14 @@ fn direnv_export(py: Python<'_>) -> PyResult<()> {
     if std::env::var("TESSH_DIRENV").as_deref() == Ok("0") {
         return Ok(());
     }
+    // (Nothing loaded and no .envrc here or above: nothing for direnv to
+    // do, and the prompt doesn't wait on it.)
+    if std::env::var("DIRENV_DIR").map_or(true, |d| d.is_empty()) {
+        let here = std::env::current_dir().unwrap_or_default();
+        if !here.ancestors().any(|d| d.join(".envrc").exists() || d.join(".env").exists()) {
+            return Ok(());
+        }
+    }
     let Some(bin) = which("direnv") else { return Ok(()) };
     let out = py.detach(|| Command::new(&bin).args(["export", "json"]).stdin(Stdio::null()).output());
     let Ok(out) = out else { return Ok(()) };
