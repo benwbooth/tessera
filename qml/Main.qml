@@ -2474,15 +2474,9 @@ ApplicationWindow {
                 color: Theme.divider
                 opacity: 0.8
             }
-            // Drag the bar to move the window; double-click to maximize.
-            DragHandler {
-                target: null
-                onActiveChanged: if (active) win.startSystemMove()
-            }
-            TapHandler {
-                gesturePolicy: TapHandler.DragThreshold
-                onDoubleTapped: win.toggleMaximized()
-            }
+            // Drag the bar to move the window, double-click to maximize,
+            // right-click for the window menu (the shared ChromeTitleArea).
+            ChromeTitleArea { anchors.fill: parent; window: win; menuDark: Theme.dark; menuAccent: Theme.accent }
 
             // ☰ The app menu.
             BarButton {
@@ -2628,27 +2622,9 @@ ApplicationWindow {
         }
     }
 
-    // Without the system frame, these strips along the edges resize the window.
-    Item {
-        id: edges
-        anchors.fill: parent
-        z: 10000
-        visible: win.visibility !== Window.Maximized && win.visibility !== Window.FullScreen
-        readonly property int grip: 5
-        component Edge: MouseArea {
-            property int edgesToMove
-            hoverEnabled: true
-            onPressed: win.startSystemResize(edgesToMove)
-        }
-        Edge { x: edges.grip; width: parent.width - 2 * edges.grip; height: edges.grip; edgesToMove: Qt.TopEdge; cursorShape: Qt.SizeVerCursor }
-        Edge { x: edges.grip; y: parent.height - edges.grip; width: parent.width - 2 * edges.grip; height: edges.grip; edgesToMove: Qt.BottomEdge; cursorShape: Qt.SizeVerCursor }
-        Edge { y: edges.grip; width: edges.grip; height: parent.height - 2 * edges.grip; edgesToMove: Qt.LeftEdge; cursorShape: Qt.SizeHorCursor }
-        Edge { x: parent.width - edges.grip; y: edges.grip; width: edges.grip; height: parent.height - 2 * edges.grip; edgesToMove: Qt.RightEdge; cursorShape: Qt.SizeHorCursor }
-        Edge { width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.TopEdge | Qt.LeftEdge; cursorShape: Qt.SizeFDiagCursor }
-        Edge { x: parent.width - edges.grip * 2; width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.TopEdge | Qt.RightEdge; cursorShape: Qt.SizeBDiagCursor }
-        Edge { y: parent.height - edges.grip * 2; width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.BottomEdge | Qt.LeftEdge; cursorShape: Qt.SizeBDiagCursor }
-        Edge { x: parent.width - edges.grip * 2; y: parent.height - edges.grip * 2; width: edges.grip * 2; height: edges.grip * 2; edgesToMove: Qt.BottomEdge | Qt.RightEdge; cursorShape: Qt.SizeFDiagCursor }
-    }
+    // Without the system frame, strips along the edges resize the window
+    // (the shared ChromeResizeEdges, as every app).
+    ChromeResizeEdges { id: edges; anchors.fill: parent; z: 10000; window: win }
 
     // Dim background windows (Appearance > Dimming).
     Rectangle {
