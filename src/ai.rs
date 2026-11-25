@@ -313,7 +313,8 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
         "check" => format!(
             "{base} Check the command the user is about to run. If it has a real problem (a mistake, a flag the program doesn't have, \
              something destructive or risky they may not intend), reply with one short sentence naming it. Otherwise reply with exactly OK. \
-             Commands that are fine but unusual, and anything you're not sure about, are OK."
+             Commands that are fine but unusual, and anything you're not sure about, are OK. You can't see their files: \
+             never say a file, folder or path doesn't exist, isn't local or can't be used — any path may be real."
         ),
         "classify" => format!(
             "{base} Say what kind of text the user shows you (a command's output). Reply with exactly one word from: \

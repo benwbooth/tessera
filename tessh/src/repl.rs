@@ -1008,8 +1008,8 @@ pub fn complete_json(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, cursor1
 pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: usize) -> (usize, usize, Vec<Item>) {
     let pos = pos.min(text.len());
     let before = &text[..pos];
-    let start = before.rfind(|c: char| " \t\n()[]{}\"'`;$".contains(c)).map(|i| i + 1).unwrap_or(0);
-    let word = &before[start..];
+    let (start, word) = comp_word(before);
+    let word = word.as_str();
     let head = before[..start].trim_end();
     let first = head.is_empty() || head.ends_with(['|', ';', '(', '\n']) || head.ends_with("&&") || head.ends_with("||") || head.ends_with("&&?") || head.ends_with("||?");
     let var = before[..start].ends_with('$');
@@ -1112,7 +1112,7 @@ pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bo
         let pat = format!("{}*", glob::Pattern::escape(&runtime::expanduser(word)));
         // (Hidden names only once a "." is typed, as in a shell.)
         let hidden = word.rsplit('/').next().unwrap_or(word).starts_with('.');
-        let opts = glob::MatchOptions { require_literal_leading_dot: !hidden, ..Default::default() };
+        let opts = glob::MatchOptions { require_literal_leading_dot: !hidden, ..glob::MatchOptions::new() };
         if let Ok(it) = glob::glob_with(&pat, opts) {
             let home = std::env::var("HOME").unwrap_or_default();
             for p in it.flatten().take(2000) {
@@ -1556,6 +1556,54 @@ mod tests {
 /// A path as tessh reads it back: each part that has a space or another
 /// special character in it quoted ('7th Heaven'/, ~/'My Docs'/x), the rest
 /// (and a leading ~) bare, so the path can go on after it.
+/// Where the word being completed starts, and the word as written without
+/// its quotes: `a/'My Drive'/b` is one word, a/My Drive/b. A quote still
+/// open (`open "src/ma`) is a string being typed: the word starts after it,
+/// as it stands.
+pub fn comp_word(before: &str) -> (usize, String) {
+    let (mut start, mut quote, mut open_at, mut esc) = (0usize, None::<char>, 0usize, false);
+    for (i, c) in before.char_indices() {
+        if esc {
+            esc = false;
+            continue;
+        }
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some('"') if c == '\\' => esc = true,
+            Some(_) => {}
+            None if " \t\n()[]{};$`".contains(c) => start = i + c.len_utf8(),
+            None if c == '\'' || c == '"' => {
+                quote = Some(c);
+                open_at = i;
+            }
+            None if c == '\\' => esc = true,
+            None => {}
+        }
+    }
+    if quote.is_some() {
+        let s = open_at + 1;
+        return (s, before[s..].to_string());
+    }
+    // (The quotes and escapes taken out.)
+    let (mut out, mut q, mut esc) = (String::new(), None::<char>, false);
+    for c in before[start..].chars() {
+        if esc {
+            out.push(c);
+            esc = false;
+            continue;
+        }
+        match q {
+            Some(x) if c == x => q = None,
+            Some('"') if c == '\\' => esc = true,
+            Some(_) => out.push(c),
+            None if c == '\'' || c == '"' => q = Some(c),
+            None if c == '\\' => esc = true,
+            None => out.push(c),
+        }
+    }
+    (start, out)
+}
+
 pub fn quote_path(p: &str) -> String {
     let safe = |part: &str| part.chars().all(|c| c.is_alphanumeric() || "_-.+@%=,:~".contains(c));
     p.split('/')
@@ -1581,5 +1629,15 @@ mod quote_tests {
         assert_eq!(super::quote_path("src/main.rs"), "src/main.rs");
         assert_eq!(super::quote_path("it's here"), "\"it's here\"");
         assert_eq!(super::quote_path("a$b"), "'a$b'");
+    }
+
+    #[test]
+    fn word_with_quotes_inside() {
+        let t = "cd me@x.com/'My Drive'/b";
+        assert_eq!(super::comp_word(t), (3, "me@x.com/My Drive/b".to_string()));
+        assert_eq!(super::comp_word("ls a\\ b/c"), (3, "a b/c".to_string()));
+        // (A string still open: the word is inside it, as before.)
+        assert_eq!(super::comp_word("open \"src/ma"), (6, "src/ma".to_string()));
+        assert_eq!(super::comp_word("echo $HO"), (6, "HO".to_string()));
     }
 }

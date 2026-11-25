@@ -587,7 +587,10 @@ impl Ed {
             KeyCode::Tab if !shift => self.accept_comp(None, h),
             KeyCode::Esc => self.close_comp(),
             KeyCode::Enter => {
-                if self.comp.chosen && !shift {
+                // (Enter never takes a completion, Tab does: it runs the
+                // line as typed. Ctrl+R's history list is a pick, though.)
+                let history = self.comp.items.get(self.comp.index).is_some_and(|i| i.kind == "history");
+                if history && !shift {
                     self.accept_comp(None, h);
                     return true;
                 }

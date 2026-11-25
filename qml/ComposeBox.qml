@@ -908,7 +908,9 @@ Rectangle {
         case Qt.Key_Tab: acceptComp(); return true
         case Qt.Key_Escape: closeComp(); return true
         case Qt.Key_Return: case Qt.Key_Enter:
-            if (compChosen && !(e.modifiers & Qt.ShiftModifier)) { acceptComp(); return true }
+            // (Enter never takes a completion, Tab does: it runs the line
+            // as typed. Ctrl+R's history list is a pick, though.)
+            if (historyMode && !(e.modifiers & Qt.ShiftModifier)) { acceptComp(); return true }
             closeComp(); return false
         }
         return false
@@ -1822,6 +1824,9 @@ Rectangle {
             // does a syntax error.)
             if (!box.aiCheck || !box.checkReady || box.lang !== box.autoLang || t.length < 4 || t.startsWith("#") || t === box.checkedText
                     || box.ghost !== "" || box.problem !== "") return
+            // (Going somewhere or looking: nothing to warn of, and a small
+            // model only makes up that a folder isn't there.)
+            if (/^(cd|pushd|popd|z|ls|ll|la|pwd|echo|cat|less|bat|man|which|type|tree|du|df|history|clear)(\s|$)/.test(t)) { box.aiNote = ""; return }
             box.checkedText = t
             box.controller.aiRun(box.aiKey + "-check", "check", JSON.stringify([{ role: "user", content: t }]), box.aiContext())
         }
