@@ -26,6 +26,7 @@
 #include "terminal_item.h"
 #include "syntax_highlighter.h"
 #include "file_clip.h"
+#include "icon_theme.h"
 #include "global_menu.h"
 
 // Wayland desktops place windows themselves; with the session-restore
@@ -199,6 +200,7 @@ inline void tessera_create_app(const QString& session)
     qmlRegisterType<TerminalItem>("Tessera.Native", 1, 0, "TerminalView");
     qmlRegisterType<SyntaxHighlighter>("Tessera.Native", 1, 0, "SyntaxHighlighter");
     qmlRegisterType<FileClip>("Tessera.Native", 1, 0, "FileClip");
+    qmlRegisterType<IconTheme>("Tessera.Native", 1, 0, "IconTheme");
     // The window's menus in the desktop's global menu bar.
     qmlRegisterType<GlobalMenuBar>("GlobalMenu", 1, 0, "GlobalMenuBar");
 }

@@ -110,6 +110,7 @@ fn main() {
     .cpp_file("include/terminal_item.h")
     .cpp_file("include/syntax_highlighter.h")
     .cpp_file("include/file_clip.h")
+    .cpp_file("include/icon_theme.h")
     .cpp_file("cpp/terminal_item.cpp")
     // The menus in the desktop's global menu bar (QPA private headers).
     .cpp_file("include/global_menu.h")

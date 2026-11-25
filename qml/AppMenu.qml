@@ -43,6 +43,9 @@ Menu {
 
     // The menu item type: a MenuItem with a `shortcutText` property (the
     // app's own look); the default is the glass row above.
+    // Optional: name => whether the icon is one colour (then drawn in the
+    // text's colour: plain Qt draws Breeze's monochrome icons black).
+    property var monoIcon: null
     property Component itemDelegate: glassItem
     // The submenus' type (a Menu in the app's own look: background,
     // padding, and `delegate` for its rows that open further submenus) and
@@ -370,6 +373,7 @@ Menu {
                     id: rowIcon
                     visible: mi.iconName !== ""
                     name: mi.iconName
+                    color: root.monoIcon && root.monoIcon(mi.iconName) ? (mi.highlighted ? "#ffffff" : root.fg) : "transparent"
                     x: 2 + (16 - width) / 2
                     anchors.verticalCenter: parent.verticalCenter
                     opacity: mi.enabled ? 1 : 0.4

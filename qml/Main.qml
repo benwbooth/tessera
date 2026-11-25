@@ -394,10 +394,7 @@ ApplicationWindow {
     // Wayland).
     Item { id: menuSpot; width: 1; height: 1; parent: win.contentItem; z: -1 }
     function openMenuAt(menu, item, x, y) {
-        const pt = item.mapToItem(win.contentItem, x, y)
-        menuSpot.x = pt.x
-        menuSpot.y = pt.y - 1
-        menu.open(menuSpot)
+        showMenu(menu, item, x, y)
     }
 
     // A folder's name for a title: "~" for home.
@@ -1569,6 +1566,7 @@ ApplicationWindow {
     property real appMenuClosedAt: 0
     AppMenu {
         id: appMenu
+        monoIcon: n => iconTheme.mono(n)
         model: win.menuModel
         appMenuAtEnd: true
         accent: Theme.accent
@@ -1578,6 +1576,61 @@ ApplicationWindow {
         onAboutToShow: win.appMenuOpen = true
         onAboutToHide: win.appMenuOpen = false
         onClosed: win.appMenuClosedAt = Date.now()
+    }
+
+    // The icon theme to match: breeze-dark on a dark theme (rows already
+    // built get their icons again).
+    IconTheme { id: iconTheme; Component.onCompleted: win.applyIcons() }
+    Connections { target: Theme; function onDarkChanged() { win.applyIcons() } }
+    function applyIcons() {
+        if (iconTheme.setDark(Theme.dark)) { appMenu._shape = ""; menuBridge._shape = "" }
+    }
+
+    // The menus below are written as platform menus (P.Menu, their items as
+    // data) but shown in the app's own look, AppMenu, like the ☰: the
+    // platform's were the desktop style's (light, whatever the theme). Each
+    // row triggers its item, so they work as written.
+    AppMenu {
+        id: menuBridge
+        monoIcon: n => iconTheme.mono(n)
+        flat: true
+        accent: Theme.accent
+        dark: Theme.dark
+        popupType: Popup.Item
+        property var src: null
+        property var acts: []
+        onTriggered: id => { const it = acts[parseInt(id)]; if (it) it.triggered() }
+        onClosed: { if (src) src.aboutToHide(); src = null }
+    }
+    function bridgeModel(menu, acts) {
+        const out = []
+        for (let i = 0; i < menu.items.length; i++) {
+            const it = menu.items[i]
+            if (!it || !it.visible) continue
+            if (it.separator) { out.push({ separator: true }); continue }
+            const sub = it.subMenu
+            if (sub) {
+                if (!sub.enabled) continue
+                out.push({ text: sub.title, icon: sub.icon.name, items: bridgeModel(sub, acts) })
+                continue
+            }
+            const parts = it.text.split("\t")
+            acts.push(it)
+            out.push({ id: String(acts.length - 1), text: parts[0], shortcut: parts[1] || "", icon: it.icon.name,
+                       enabled: it.enabled, checkable: it.checkable, checked: it.checked })
+        }
+        return out
+    }
+    // (Where: x, y in item's coordinates.)
+    function showMenu(menu, item, x, y) {
+        if (menuBridge.visible) menuBridge.close()
+        menu.aboutToShow()
+        const acts = []
+        const items = bridgeModel(menu, acts)
+        menuBridge.src = menu
+        menuBridge.acts = acts
+        menuBridge.model = [{ title: "", items: items }]
+        menuBridge.openAt(item, x, y)
     }
 
     // The + button's menu: profiles, the shells installed, ssh hosts.
@@ -2029,7 +2082,7 @@ ApplicationWindow {
     Timer { id: richTestTimer; interval: 6000; onTriggered: if (activePane) activePane.openRich() }
     Timer { id: assistantTestTimer; interval: 3000; onTriggered: { win.toggleAssistant(); assistant.send(controller.testEnv("ASSISTANT")) } }
     Timer { id: composeTestTimer; interval: Number(controller.testEnv("COMPOSE_DELAY") || 4000); onTriggered: if (activePane) { activePane.compose.focusEditor(); if (controller.testEnv("COMPOSE_LANG") !== "") activePane.compose.pickLanguage(controller.testEnv("COMPOSE_LANG")); activePane.compose.insert(controller.testEnv("COMPOSE").replace(/\\n/g, "\n")); if (controller.testEnv("COMPOSE_TAB") !== "") activePane.compose.openComp(); if (controller.testEnv("COMPOSE_RUN") !== "") activePane.compose.submit(); if (controller.testEnv("COMPOSE_HISTORY") !== "") activePane.compose.openHistory(); if (controller.testEnv("COMPOSE_GUIDE") !== "") activePane.compose.openGuideAtWord() } }
-    Timer { id: contextTestTimer; interval: 2500; onTriggered: { if (controller.testEnv("CONTEXT") === "app") appMenu.openAt(menuButton, 0, menuButton.height + 4); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
+    Timer { id: contextTestTimer; interval: 2500; onTriggered: { const c = controller.testEnv("CONTEXT"); if (c === "app") appMenu.openAt(menuButton, 0, menuButton.height + 4); else if (c === "launch") showMenu(launchMenu, win.contentItem, 300, 40); else if (c === "tab") { win.menuTab = tabs[0]; win.openMenuAt(tabMenu, win.contentItem, 120, 40) } else if (c === "zoom") showMenu(zoomMenu, win.contentItem, 300, 200); else if (activePane) activePane.contextMenu(activeView, 200, 150) } }
     Timer { id: zoomTestTimer; interval: 2500; onTriggered: win.zoomTo(parseInt(controller.testEnv("ZOOM"))) }
     P.Menu {
         id: zoomMenu
@@ -2349,7 +2402,7 @@ ApplicationWindow {
                 menuTip: "Profiles, shells and SSH"
                 menuOpen: win.launchOpen
                 onMainClicked: newTab({})
-                onMenuClicked: launchMenu.open(plus.menuAnchor)
+                onMenuClicked: showMenu(launchMenu, plus.menuAnchor, 0, plus.menuAnchor.height + 4)
             }
 
             // Where a dragged tab would go.
@@ -2491,7 +2544,7 @@ ApplicationWindow {
                 }
                 HoverHandler { id: zoomHover }
                 TapHandler { onTapped: win.fontSize = 0 }
-                TapHandler { acceptedButtons: Qt.RightButton; onTapped: zoomMenu.open(zoomChip) }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: showMenu(zoomMenu, zoomChip, 0, zoomChip.height + 4) }
                 ToolTip.visible: zoomHover.hovered && !win.zoomMenuOpen
                 ToolTip.text: "Text size " + win.zoomPercent + "% — click for 100% (Ctrl+0)"
                 ToolTip.delay: 500
