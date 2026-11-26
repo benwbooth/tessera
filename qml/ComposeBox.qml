@@ -850,8 +850,10 @@ Rectangle {
     Timer { id: compRetry; interval: 250; onTriggered: if (box.compOpen) box.requestComplete() }
     Timer {
         id: compAuto
-        // (Once typing pauses: the list is hidden while keys come.)
-        interval: 300
+        // (As good as at once: just long enough for a burst of keys, a
+        // paste, to ask once. The list stays up meanwhile; the answers
+        // come in the background, an old one dropped.)
+        interval: 30
         onTriggered: {
             box.typing = false
             // Open by itself on a word being typed (not after a space, not in
@@ -2113,7 +2115,7 @@ Rectangle {
         id: compPopup
         // History: the editor's full width, with its own search field.
         readonly property bool hist: box.historyMode
-        visible: box.compOpen && (hist || (box.comp.items.length > 0 && !box.typing)) && (edit.activeFocus || historySearch.activeFocus)
+        visible: box.compOpen && (hist || box.comp.items.length > 0) && (edit.activeFocus || historySearch.activeFocus)
         z: 50
         readonly property real rowH: Math.ceil(fm.height) + 6
         readonly property int rows: Math.max(hist ? 1 : 0, Math.min(hist ? 14 : 10, box.comp.items.length))
