@@ -1141,7 +1141,24 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
         // The subcommand, if one was given (the first argument that isn't an option).
         let sub = args.iter().find(|a| !a.starts_with('-')).map(|s| s.to_string());
         let sub_known = sub.as_ref().is_some_and(|s| h.subcommands.iter().any(|(n, _)| n == s));
-        if (cmd == "export" || cmd == "unset") && !typed.contains('=') {
+        // (carapace, when it's installed and knows the command: its
+        // subcommands, options (bundles too) and values, each described.)
+        let cara = if cmd == "export" || cmd == "unset" || typed.starts_with('$') {
+            None
+        } else {
+            let mut a = vec![cmd.clone()];
+            a.extend(args.iter().map(|s| s.to_string()));
+            a.push(typed.clone());
+            crate::carapace::complete(&a, cwd)
+        };
+        if let Some(vals) = cara {
+            pending = false;
+            let q = |v: &str| if v.chars().any(|c| c.is_whitespace() || "'\"$`\\|&;()<>*?!#".contains(c)) { format!("'{}'", v.replace('\'', "'\\''")) } else { v.to_string() };
+            items = vals
+                .into_iter()
+                .map(|v| Item { insert: q(&v.value), label: v.value, detail: v.description, kind: if v.nospace { "partial" } else { v.kind }, doc: String::new() })
+                .collect();
+        } else if (cmd == "export" || cmd == "unset") && !typed.contains('=') {
             // (Variables to set or clear: the shell's, with their values.)
             let set = cmd == "export";
             items = rank(
@@ -1178,7 +1195,10 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
             opts.extend(h.options.iter().cloned());
             let mut seen = HashSet::new();
             opts.retain(|(f, _)| seen.insert(f.clone()));
-            let cands = opts.into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "option", doc: String::new() }).collect();
+            // (-l, then -la: each other short option after it.)
+            let more = crate::manopts::bundled(&typed, &opts);
+            let mut cands: Vec<Item> = opts.into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "option", doc: String::new() }).collect();
+            cands.extend(more.into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "partial", doc: String::new() }));
             items = rank(cands, &typed, |i| i.label.clone());
         } else {
             if sub.is_none() && !h.subcommands.is_empty() {

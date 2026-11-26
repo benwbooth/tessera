@@ -849,7 +849,7 @@ Rectangle {
         edit.remove(comp.start, comp.end)
         let ins = it.insert
         // A finished word gets its space; a folder or "--opt=" keeps going.
-        const more = it.kind === "dir" || ins.endsWith("=") || ins.endsWith("/")
+        const more = it.kind === "dir" || it.kind === "partial" || ins.endsWith("=") || ins.endsWith("/")
         if (!more && edit.text[comp.start] !== " ") ins += " "
         edit.insert(comp.start, ins)
         edit.cursorPosition = comp.start + ins.length

@@ -144,3 +144,19 @@ pub fn man_options(page: &str) -> Vec<(String, String)> {
     opts
 }
 
+
+/// A bundle of short options being typed (-l, -la): it with each other
+/// short option after it, as `ls -la` takes them, each with what the added
+/// one does. Nothing for a long option or one not all short flags.
+pub fn bundled(typed: &str, opts: &[(String, String)]) -> Vec<(String, String)> {
+    let Some(letters) = typed.strip_prefix('-').filter(|l| !l.is_empty() && !l.starts_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric())) else { return vec![] };
+    let short = |f: &str| f.len() == 2 && f.starts_with('-') && f.chars().nth(1).is_some_and(|c| c.is_ascii_alphanumeric());
+    let have = |c: char| opts.iter().any(|(f, _)| short(f) && f.ends_with(c));
+    if !letters.chars().all(have) {
+        return vec![];
+    }
+    opts.iter()
+        .filter(|(f, _)| short(f) && !letters.contains(f.chars().nth(1).unwrap()))
+        .map(|(f, d)| (format!("{typed}{}", &f[1..]), d.clone()))
+        .collect()
+}

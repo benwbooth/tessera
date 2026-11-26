@@ -8,6 +8,7 @@ mod client;
 mod cmdline;
 mod complete;
 mod manopts;
+mod carapace;
 mod contrast;
 mod daemon;
 mod detect;

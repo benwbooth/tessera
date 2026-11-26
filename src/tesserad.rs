@@ -24,6 +24,7 @@ mod cells;
 mod client;
 mod complete;
 mod manopts;
+mod carapace;
 mod daemon;
 mod files;
 mod find;

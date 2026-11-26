@@ -37,6 +37,10 @@ mod detect;
 #[allow(dead_code)]
 #[path = "../../src/manopts.rs"]
 mod manopts;
+// carapace's completions, when it's installed (as Tessera's completer).
+#[allow(dead_code)]
+#[path = "../../src/carapace.rs"]
+mod carapace;
 
 #[cfg(test)]
 mod tests;

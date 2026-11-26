@@ -1005,10 +1005,10 @@ fn option_items(before: &str, word: &str) -> Vec<Item> {
         cache.lock().unwrap().insert(cmd.clone(), o.clone());
         o
     });
-    opts.iter()
-        .filter(|(f, _)| f.starts_with(word))
-        .map(|(f, d)| Item { insert: f.clone(), label: f.clone(), kind: "option", detail: d.clone(), doc: String::new() })
-        .collect()
+    let mut out: Vec<Item> = opts.iter().filter(|(f, _)| f.starts_with(word)).map(|(f, d)| Item { insert: f.clone(), label: f.clone(), kind: "option", detail: d.clone(), doc: String::new() }).collect();
+    // (-l, then -la: each other short option after it, no space yet.)
+    out.extend(crate::manopts::bundled(word, &opts).into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, kind: "partial", detail: d, doc: String::new() }));
+    out
 }
 
 /// Completions for Tessera's input editor (`tessh --complete`): text and a
@@ -1074,6 +1074,22 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
                 for n in names {
                     let dir = n.ends_with('/');
                     items.push(Item { insert: n.clone(), label: n, kind: if dir { "dir" } else if nospace { "partial" } else { "option" }, detail: "complete".into(), doc: String::new() });
+                }
+                return (start, pos, items);
+            }
+        }
+        // (carapace, when it's installed and knows the program: its
+        // subcommands, options (-la's bundles too) and values, each with
+        // what it is. Not tessh's own names: they're not the program's.)
+        let mut args = crate::carapace::line_words(&before[..start]);
+        let external = args.first().is_some_and(|c| !c.contains('=') && !runtime::COMMAND_BUILTINS.contains(&c.as_str()) && !matches!(ns.contains(c.as_str()), Ok(true)));
+        if external {
+            args.push(word.to_string());
+            let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+            if let Some(vals) = crate::carapace::complete(&args, &cwd) {
+                for v in vals {
+                    let insert = if v.value.chars().any(|c| c.is_whitespace() || "'\"$`\\|&;()<>*?!#".contains(c)) { format!("'{}'", v.value.replace('\'', "\\'")) } else { v.value.clone() };
+                    items.push(Item { insert, label: v.value, kind: if v.nospace { "partial" } else { v.kind }, detail: v.description, doc: String::new() });
                 }
                 return (start, pos, items);
             }
