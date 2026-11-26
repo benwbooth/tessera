@@ -33,12 +33,12 @@ A multi-line editor under the terminal while the shell waits at its prompt
   xAI) and Anthropic (Claude); keys in secrets.json (owner-only) or env vars.
 - Hearth's AI hub (`ai.hearth`, on by default): when hearth-ai runs here
   (found through `$XDG_RUNTIME_DIR/hearth/ai-api.json`, a bearer token, the
-  process checked alive), Tessera's local models are asked through its
-  OpenAI-compatible app server under their own names (`ollama/qwen3.5:4b`),
-  so Hearth loads and unloads them; an empty model is the hub's "fast"
-  (suggestions, checks, # endings, guesses) or "default" (chat, # commands,
-  fixes); cloud models with keys go direct; a model the hub doesn't have
-  (404) is asked directly. `hearth/<model>` names a hub model. Without the
+  process checked alive), chat, # commands and fixes use the hub's
+  "default" (Hearth's assistant model); suggestions, checks, # endings and
+  guesses use Tessera's suggestions model, asked through the hub under its
+  own name (`ollama/qwen3.5:4b`) so Hearth loads and unloads it (empty: the
+  hub's "fast"; a cloud model with a key: direct; one the hub doesn't have
+  (404): direct). `hearth/<model>` names a hub model. Without the
   hub, everything is direct. Decided on the request's thread (`ai::route`).
 - Ghost-text completion (Tab accepts) from a small local model — on this
   machine `qwen3.5:4b` in Ollama; larger models for chat.

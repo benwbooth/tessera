@@ -317,11 +317,12 @@ pub fn hearth_alias(task: &str) -> &'static str {
     if matches!(task, "inline" | "classify" | "language" | "request" | "exit" | "check") { "fast" } else { "default" }
 }
 
-/// Who answers a task. Under Hearth (ai.hearth on and its hub running),
-/// Tessera's own local models still answer, but through the hub, so Hearth
-/// loads and unloads them with the desktop's others; an empty model is the
-/// hub's ("fast" or "default"); cloud providers with keys are asked
-/// directly. Anywhere else, the models set in Preferences, directly.
+/// Who answers a task. Under Hearth (ai.hearth on and its hub running), the
+/// assistant, # commands and fixes use Hearth's assistant model (the hub's
+/// "default"); the as-you-type tasks use Tessera's suggestions model, asked
+/// through the hub so Hearth loads and unloads it with the desktop's others
+/// (empty: the hub's "fast"; a cloud model with a key: directly). Anywhere
+/// else, the models set in Preferences, directly.
 /// The third value is where to go if the hub doesn't have the model.
 pub fn route(ai: &crate::settings::AiSettings, task: &str, model_ref: &str) -> Result<(Provider, String, Option<(Provider, String)>), String> {
     let direct = resolve(&ai.providers, model_ref);
@@ -332,6 +333,9 @@ pub fn route(ai: &crate::settings::AiSettings, task: &str, model_ref: &str) -> R
             }
             if let Some(m) = model_ref.strip_prefix("hearth/") {
                 return Ok((hub, m.to_string(), None));
+            }
+            if hearth_alias(task) == "default" {
+                return Ok((hub, "default".to_string(), None));
             }
             return match direct {
                 Some((p, m)) if !p.local => Ok((p, m, None)),

@@ -1622,7 +1622,7 @@ Window {
                             SectionTitle { text: "Hearth AI hub" }
                             ToggleRow {
                                 label: "Use Hearth's AI hub when it's running"
-                                hint: "On the Hearth desktop, the local models below are asked through Hearth, which loads and unloads them with the rest of the desktop's; an empty one uses Hearth's own (Settings \u203a AI \u203a Apps). Cloud models are asked directly. Without Hearth, Tessera asks the models below itself."
+                                hint: "On the Hearth desktop, the assistant, # commands and fixes use Hearth's assistant model, and suggestions and checks use the model below, loaded through Hearth with the rest of the desktop's. Without Hearth, Tessera asks the models below itself."
                                 checked: prefs.ai.hearth !== false
                                 onToggled: (on) => prefs.setAi("hearth", on)
                             }
@@ -1638,7 +1638,7 @@ Window {
                                         : !h.running ? (h.error ? "\u26a0 " + h.error : "Hearth's AI hub isn't running here: the models below answer.")
                                         : h.error ? "\u26a0 " + h.error
                                         : (prefs.ai.hearth !== false ? "In use. " : "Running (not used). ")
-                                          + "For a model left empty below: suggestions and checks use " + label(h.fast) + "; the assistant, commands and fixes " + label(h.default) + "."
+                                          + "The assistant, commands and fixes: " + label(h.default) + ". Suggestions and checks: " + (prefs.ai.inline_model ? prefs.ai.inline_model : label(h.fast)) + "."
                                 }
                                 PlainButton { implicitHeight: 24; text: "Refresh"; onClicked: prefs.controller.aiHearthInfo() }
                             }
