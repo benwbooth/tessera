@@ -420,7 +420,8 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         }
         return Some((boxed(lines, w, v), 0));
     }
-    if ed.comp.open && !ed.comp.typing && !ed.comp.items.is_empty() {
+    // (Kept up while keys come: it's worked out again as soon as they stop.)
+    if ed.comp.open && !ed.comp.items.is_empty() {
         let w = cols.saturating_sub(4).min(80);
         let items = &ed.comp.items;
         let it = &items[ed.comp.index.min(items.len() - 1)];

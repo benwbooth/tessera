@@ -205,6 +205,9 @@ pub struct Ed {
     /// background): a key right after it cancels it (keyd sends a Ctrl tap
     /// just before a tapped Enter).
     pub pending_tap: Option<(char, Instant)>,
+    /// No more keys waiting (set by the loop before each tick): the list
+    /// is worked out again at once, not after a pause.
+    pub input_idle: bool,
     /// vi's modes, the : commands and their line (ViKeys, ExCommands, ExLine).
     pub vi: super::vi::Vi,
     pub ex: super::ex::Ex,
@@ -308,6 +311,7 @@ impl Ed {
             list_top: std::cell::Cell::new(0),
             menu_x: None,
             pending_tap: None,
+            input_idle: true,
             vi: {
                 let mut v = super::vi::Vi::new();
                 v.clip_set = Some(Box::new(|s: &str| super::term::Term::copy(s)));
@@ -1874,8 +1878,9 @@ impl Ed {
     }
 
     // ---- time ---------------------------------------------------------------------------
-    /// What waiting does (called every ~50 ms): the list opens once typing
-    /// pauses, errors show, tooltips come up.
+    /// What waiting does (called every ~50 ms, and after each key): the list
+    /// opens or updates once no more keys are waiting, errors show,
+    /// tooltips come up.
     /// A tap whose moment passed with no key after it: done now.
     pub fn fire_tap(&mut self) {
         let Some((t, at)) = self.pending_tap else { return };
@@ -1909,7 +1914,9 @@ impl Ed {
         }
         let since = self.edited.map(|t| t.elapsed());
         if let Some(d) = since {
-            if self.comp.typing && d >= Duration::from_millis(300) {
+            // (At once when the keys stop coming; a steady stream of them,
+            // a paste typed out, every 300 ms.)
+            if self.comp.typing && (self.input_idle || d >= Duration::from_millis(300)) {
                 self.comp.typing = false;
                 self.dirty = true;
                 self.comp_auto(h);

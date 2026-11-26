@@ -373,6 +373,13 @@ impl Editor {
                 self.ed.dirty = true;
             }
             {
+                self.ed.input_idle = !event::poll(Duration::ZERO).unwrap_or(false);
+                // (The key shown first: a slow list, git's branches, never
+                // holds up what was typed.)
+                if self.ed.input_idle && self.ed.comp.typing && self.ed.dirty {
+                    self.ed.dirty = false;
+                    self.draw(h, false);
+                }
                 let screen = &self.screen;
                 self.ed.tick(h, view::tooltip, |c, r| screen.hit(c, r).cloned());
             }
