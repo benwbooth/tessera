@@ -148,7 +148,7 @@ fn main() {
         i += 1;
     }
 
-    std::env::set_var("QT_QUICK_CONTROLS_STYLE", std::env::var("TESSERA_STYLE").unwrap_or_else(|_| "Basic".into()));
+    set_qt_env("QT_QUICK_CONTROLS_STYLE", std::env::var("TESSERA_STYLE").unwrap_or_else(|_| "Basic".into()));
     // Wayland: the desktop remembers where the window was (KDE Plasma 6.4+,
     // GNOME 48+); the session id it gave last time lets it put it back.
     // Only the first window does this (not New Window / torn-off tabs).
@@ -156,7 +156,7 @@ fn main() {
     let wayland = main_window && std::env::var_os("WAYLAND_DISPLAY").is_some();
     let session_file = settings::state_dir().join("window-session");
     if wayland && std::env::var_os("QT_WAYLAND_ENABLE_XX_SESSION_MANAGER").is_none() {
-        std::env::set_var("QT_WAYLAND_ENABLE_XX_SESSION_MANAGER", "1");
+        set_qt_env("QT_WAYLAND_ENABLE_XX_SESSION_MANAGER", "1");
     }
     let session = if wayland { std::fs::read_to_string(&session_file).unwrap_or_default().trim().to_string() } else { String::new() };
     // Browser views (the guide, Markdown and HTML cards) could come back
@@ -223,6 +223,8 @@ fn main() {
         }
         engine.load(&QUrl::from("qrc:/qt/qml/Tessera/qml/Main.qml"));
     }
+    // (Shells and programs started from here get the desktop's own.)
+    restore_launch_env();
     bridge::ffi::tessera_show_windows();
     let code = bridge::ffi::tessera_exec();
     // (Notebook saves and kernel stops queued at the end still go out.)
@@ -256,4 +258,45 @@ fn local_mode() -> Option<std::path::PathBuf> {
     }
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
     Some(dir.join(format!("tessera-local-{}.sock", std::process::id())))
+}
+
+/// Sets an environment variable Qt reads while starting, noting what it was
+/// (as `__APP_ORIG_<name>`: empty = unset, else "=value") so
+/// `restore_launch_env` puts it back once the window is loaded: programs this
+/// app starts get the desktop's own. (QT_QUICK_CONTROLS_STYLE=Basic leaking
+/// from our apps made KDE apps opened from them draw plain light controls,
+/// 2026-11-25.)
+fn set_qt_env(name: &str, value: impl AsRef<std::ffi::OsStr>) {
+    let note = format!("__APP_ORIG_{name}");
+    if std::env::var_os(&note).is_none() {
+        let was = std::env::var_os(name)
+            .map(|v| {
+                let mut s = std::ffi::OsString::from("=");
+                s.push(v);
+                s
+            })
+            .unwrap_or_default();
+        #[allow(unused_unsafe)]
+        unsafe { std::env::set_var(&note, was) };
+    }
+    #[allow(unused_unsafe)]
+    unsafe { std::env::set_var(name, value) };
+}
+
+/// Puts back what `set_qt_env` (or the C++ start-up) changed, once the main
+/// QML has loaded: Qt has read them all by then.
+#[allow(dead_code)]
+fn restore_launch_env() {
+    for (k, v) in std::env::vars_os() {
+        let Some(name) = k.to_str().and_then(|k| k.strip_prefix("__APP_ORIG_")).map(str::to_owned) else { continue };
+        let v = v.to_string_lossy().into_owned();
+        #[allow(unused_unsafe)]
+        unsafe {
+            match v.strip_prefix('=') {
+                Some(old) => std::env::set_var(&name, old),
+                None => std::env::remove_var(&name),
+            }
+            std::env::remove_var(&k);
+        }
+    }
 }
