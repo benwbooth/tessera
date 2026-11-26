@@ -985,6 +985,32 @@ pub struct Item {
     pub doc: String,
 }
 
+/// The options of the command a line's last part runs, from its man page
+/// (read once per command), that start with the typed word.
+fn option_items(before: &str, word: &str) -> Vec<Item> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<Vec<(String, String)>>>>> = OnceLock::new();
+    let seg = before.rsplit(['|', ';', '&', '(']).next().unwrap_or("");
+    // (Past NAME=value settings and sudo/env/time-like prefixes.)
+    let cmd = seg
+        .split_whitespace()
+        .find(|w| !w.contains('=') && !matches!(*w, "sudo" | "doas" | "env" | "time" | "nice" | "nohup" | "command" | "exec"))
+        .map(|w| w.rsplit('/').next().unwrap_or(w).to_string());
+    let Some(cmd) = cmd.filter(|c| !c.is_empty() && c.chars().all(|ch| ch.is_alphanumeric() || "-_.+".contains(ch))) else { return vec![] };
+    let cache = CACHE.get_or_init(Default::default);
+    let got = cache.lock().unwrap().get(&cmd).cloned();
+    let opts = got.unwrap_or_else(|| {
+        let o = Arc::new(crate::manopts::man_options(&cmd));
+        cache.lock().unwrap().insert(cmd.clone(), o.clone());
+        o
+    });
+    opts.iter()
+        .filter(|(f, _)| f.starts_with(word))
+        .map(|(f, d)| Item { insert: f.clone(), label: f.clone(), kind: "option", detail: d.clone(), doc: String::new() })
+        .collect()
+}
+
 /// Completions for Tessera's input editor (`tessh --complete`): text and a
 /// UTF-16 cursor in, {"start", "end" (UTF-16), "items": [{insert, label,
 /// kind, detail, doc}]} out, as Tessera's shell completer answers.
@@ -1052,16 +1078,27 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
                 return (start, pos, items);
             }
         }
+        // (An option: the man page's, short and long, each with what it
+        // does; bash-completion's often has only the long ones, and none
+        // of what they mean. Its others after them.)
+        let opts = if word.starts_with('-') { option_items(&before[..start], word) } else { vec![] };
         // (A program bash-completion knows (git, systemctl, nix…): what bash would offer.)
         let bash = py.import("__tessh_shell__").and_then(|m| m.getattr("bash_complete")).and_then(|f| f.call1((&before[..start], word, ns)));
         if let Ok(list) = bash {
             if let Ok(names) = list.extract::<Vec<String>>() {
+                items.extend(opts);
                 for n in names {
+                    if items.iter().any(|i| i.insert == n) {
+                        continue;
+                    }
                     let dir = n.ends_with('/');
                     items.push(Item { insert: n.clone(), label: n, kind: if dir { "dir" } else { "option" }, detail: "bash".into(), doc: String::new() });
                 }
                 return (start, pos, items);
             }
+        }
+        if !opts.is_empty() {
+            return (start, pos, opts);
         }
     }
     let builtins = py.import("builtins").ok();

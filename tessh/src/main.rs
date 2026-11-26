@@ -33,6 +33,10 @@ mod grammars;
 #[allow(dead_code)]
 #[path = "../../src/detect.rs"]
 mod detect;
+// Options from man and info pages, as Tessera's completer reads them.
+#[allow(dead_code)]
+#[path = "../../src/manopts.rs"]
+mod manopts;
 
 #[cfg(test)]
 mod tests;

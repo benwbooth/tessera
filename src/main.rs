@@ -7,6 +7,7 @@ mod chats;
 mod client;
 mod cmdline;
 mod complete;
+mod manopts;
 mod contrast;
 mod daemon;
 mod detect;

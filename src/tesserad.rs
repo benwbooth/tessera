@@ -23,6 +23,7 @@ mod ai;
 mod cells;
 mod client;
 mod complete;
+mod manopts;
 mod daemon;
 mod files;
 mod find;
