@@ -145,3 +145,16 @@ mod tests {
         assert!(parse(r#"{"values":[{"value":"x/","tag":"files"}]}"#).is_none());
     }
 }
+
+/// The program's short options and what they do, as carapace has them
+/// (for a bundle's meaning): `args` without the word being typed.
+pub fn short_options(args: &[String], cwd: &str) -> Vec<(String, String)> {
+    let mut a = args.to_vec();
+    a.push("-".into());
+    complete(&a, cwd)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|v| v.kind == "option" && v.value.len() == 2 && !v.value.starts_with("--"))
+        .map(|v| (v.value, v.description))
+        .collect()
+}

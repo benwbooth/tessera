@@ -1006,6 +1006,11 @@ fn option_items(before: &str, word: &str) -> Vec<Item> {
         o
     });
     let mut out: Vec<Item> = opts.iter().filter(|(f, _)| f.starts_with(word)).map(|(f, d)| Item { insert: f.clone(), label: f.clone(), kind: "option", detail: d.clone(), doc: String::new() }).collect();
+    // (A bundle being typed, -la: it first, with what each letter does.)
+    if let Some((line, doc)) = crate::manopts::bundle_meaning(word, &opts) {
+        out.retain(|i| i.insert != word);
+        out.insert(0, Item { insert: word.to_string(), label: word.to_string(), kind: "option", detail: line, doc });
+    }
     // (-l, then -la: each other short option after it, no space yet.)
     out.extend(crate::manopts::bundled(word, &opts).into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, kind: "partial", detail: d, doc: String::new() }));
     out
@@ -1087,6 +1092,13 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
             args.push(word.to_string());
             let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
             if let Some(vals) = crate::carapace::complete(&args, &cwd) {
+                // (A bundle being typed, -la: it first, with what each letter does.)
+                if word.starts_with('-') && !word.starts_with("--") {
+                    let shorts = crate::carapace::short_options(&args[..args.len() - 1], &cwd);
+                    if let Some((line, doc)) = crate::manopts::bundle_meaning(word, &shorts) {
+                        items.push(Item { insert: word.to_string(), label: word.to_string(), kind: "option", detail: line, doc });
+                    }
+                }
                 for v in vals {
                     let insert = if v.value.chars().any(|c| c.is_whitespace() || "'\"$`\\|&;()<>*?!#".contains(c)) { format!("'{}'", v.value.replace('\'', "\\'")) } else { v.value.clone() };
                     items.push(Item { insert, label: v.value, kind: if v.nospace { "partial" } else { v.kind }, detail: v.description, doc: String::new() });

@@ -160,3 +160,22 @@ pub fn bundled(typed: &str, opts: &[(String, String)]) -> Vec<(String, String)> 
         .map(|(f, d)| (format!("{typed}{}", &f[1..]), d.clone()))
         .collect()
 }
+
+/// What a bundle of short options being typed means (-la: -l's and -a's
+/// descriptions): (one line, a line per letter), or None when it isn't one
+/// or a letter isn't an option of the command's.
+pub fn bundle_meaning(typed: &str, opts: &[(String, String)]) -> Option<(String, String)> {
+    let letters = typed.strip_prefix('-').filter(|l| !l.is_empty() && !l.starts_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric()))?;
+    let mut line = Vec::new();
+    let mut doc = Vec::new();
+    for c in letters.chars() {
+        let flag = format!("-{c}");
+        let d = opts.iter().find(|(f, _)| *f == flag).map(|(_, d)| d.clone())?;
+        // (Its first sentence: "starting with ." keeps its dot.)
+        let first = d.split("; ").next().unwrap_or("").split(". ").next().unwrap_or("");
+        let short: String = first.chars().take(60).collect();
+        line.push(format!("{flag} {}", short.trim()));
+        doc.push(format!("{flag}  {d}"));
+    }
+    Some((line.join(" · "), doc.join("\n")))
+}

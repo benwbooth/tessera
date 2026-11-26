@@ -1158,6 +1158,11 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
                 .into_iter()
                 .map(|v| Item { insert: q(&v.value), label: v.value, detail: v.description, kind: if v.nospace { "partial" } else { v.kind }, doc: String::new() })
                 .collect();
+            if typed.starts_with('-') && !typed.starts_with("--") {
+                let mut a = vec![cmd.clone()];
+                a.extend(args.iter().map(|s| s.to_string()));
+                bundle_first(&mut items, &typed, &crate::carapace::short_options(&a, cwd));
+            }
         } else if (cmd == "export" || cmd == "unset") && !typed.contains('=') {
             // (Variables to set or clear: the shell's, with their values.)
             let set = cmd == "export";
@@ -1200,6 +1205,10 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
             let mut cands: Vec<Item> = opts.into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "option", doc: String::new() }).collect();
             cands.extend(more.into_iter().map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "partial", doc: String::new() }));
             items = rank(cands, &typed, |i| i.label.clone());
+            let shorts: Vec<(String, String)> = items.iter().filter(|i| i.kind == "option" && i.label.len() == 2).map(|i| (i.label.clone(), i.detail.clone())).collect();
+            let mut all = h.options.clone();
+            all.extend(shorts);
+            bundle_first(&mut items, &typed, &all);
         } else {
             if sub.is_none() && !h.subcommands.is_empty() {
                 items.extend(rank(
@@ -1269,6 +1278,15 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
 }
 
 /// The part of a path after its last "/" (what the file names are matched against).
+/// A bundle of short options being typed (-la): it first, with what each
+/// of its letters does (the line, and a line each in its help).
+fn bundle_first(items: &mut Vec<Item>, typed: &str, opts: &[(String, String)]) {
+    if let Some((line, doc)) = crate::manopts::bundle_meaning(typed, opts) {
+        items.retain(|i| i.insert != typed);
+        items.insert(0, Item { insert: typed.to_string(), label: typed.to_string(), detail: line, kind: "option", doc });
+    }
+}
+
 fn name_of(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
 }
