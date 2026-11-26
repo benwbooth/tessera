@@ -1166,7 +1166,9 @@ Rectangle {
         Text {
             x: (parent.width - width) / 2
             y: (parent.height - height) / 2 + 0.001
-            text: optionsMenu.opened && !optionsMenu.up ? "\u25be" : optionsMenu.opened ? "\u25b4" : "\u25be"
+            // (Up: the menu opens over it, the input staying in view. Down
+            // only when the window has no room above, while it's open.)
+            text: optionsMenu.opened && !optionsMenu.up ? "\u25be" : "\u25b4"
             color: Theme.fg
             font.pixelSize: 12
             renderType: Text.NativeRendering
