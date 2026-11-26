@@ -1072,7 +1072,7 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
             ("option", "help topic".to_string())
         } else if n.ends_with('/') {
             ("dir", String::new())
-        } else if !first && !var {
+        } else if (!first && !var) || (first && !var && std::path::Path::new(&n).is_file()) {
             ("file", String::new())
         } else if var {
             ("variable", ns.get_item(n.as_str()).ok().flatten().map(|v| type_word(&v)).unwrap_or_else(|| "environment".into()))
@@ -1144,6 +1144,11 @@ pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bo
             let home = std::env::var("HOME").unwrap_or_default();
             for p in it.flatten().take(2000) {
                 let mut s = p.to_string_lossy().to_string();
+                // (glob drops a leading ./: kept, as typed; it went from the
+                // line, and ./script needs it.)
+                if word.starts_with("./") && !s.starts_with("./") {
+                    s = format!("./{s}");
+                }
                 if word.starts_with('~') && s.starts_with(&home) {
                     s = format!("~{}", &s[home.len()..]);
                 }
@@ -1185,6 +1190,30 @@ pub fn completions(py: Python<'_>, ns: &Bound<'_, PyDict>, word: &str, first: bo
                 }
             }
             out.extend(cmds);
+            // (Then what's here, as fish and zsh offer it: a folder (with
+            // its /, so Enter goes there), a program or script as ./name
+            // (so Enter runs it), another file as named. Not before the
+            // commands: `l` is still ls first.)
+            if !word.contains('/') && !word.starts_with(['~', '.']) {
+                let pat = format!("{}*", glob::Pattern::escape(word));
+                let opts = glob::MatchOptions { require_literal_leading_dot: true, ..glob::MatchOptions::new() };
+                if let Ok(it) = glob::glob_with(&pat, opts) {
+                    let (mut dirs, mut runs, mut files) = (vec![], vec![], vec![]);
+                    for p in it.flatten().take(2000) {
+                        let n = p.to_string_lossy().to_string();
+                        if p.is_dir() {
+                            dirs.push(format!("{n}/"));
+                        } else if std::fs::metadata(&p).is_ok_and(|m| std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111 != 0) {
+                            runs.push(format!("./{n}"));
+                        } else {
+                            files.push(n);
+                        }
+                    }
+                    out.extend(dirs);
+                    out.extend(runs);
+                    out.extend(files);
+                }
+            }
         }
     }
     let mut seen = std::collections::HashSet::new();
