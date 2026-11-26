@@ -533,6 +533,7 @@ void TerminalItem::handleEvents()
             const bool at = e.value(u"state").toString() != u"C";
             if (at != m_atPrompt) {
                 m_atPrompt = at;
+                update();   // (the prompt's mark: off while at it, back once it runs)
                 emit promptChanged();
             }
         } else {
@@ -1031,8 +1032,14 @@ QSGNode* TerminalItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*)
     // Shell-integration marks: a short tick in the left margin at each prompt.
     int nMarks = 0;
     if (m_showMarks && m_pad >= 2) {
+        // (Not the prompt being typed at: the latest at or over the cursor,
+        // while the shell sits at it. Those before it keep theirs.)
+        int current = -1;
+        if (m_atPrompt && m_cursorY >= 0)
+            for (int i = qMin<int>(m_cursorY, m_rows - 1); i >= 0 && i < m_rowMark.size(); --i)
+                if (m_rowMark[i]) { current = i; break; }
         for (int i = 0; i < m_rows && i < m_rowMark.size(); ++i) {
-            if (!m_rowMark[i]) continue;
+            if (!m_rowMark[i] || i == current) continue;
             if (nMarks >= node->marks.size()) {
                 QSGRectangleNode* r = win->createRectangleNode();
                 node->appendChildNode(r);

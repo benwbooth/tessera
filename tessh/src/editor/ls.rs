@@ -2361,7 +2361,7 @@ pub fn tooltip(ed: &Ed, h: &LsHit) -> String {
 }
 
 fn item(label: &str, cmd: &str) -> MenuItem {
-    MenuItem { label: label.into(), cmd: cmd.into(), section: false, checked: false, enabled: true }
+    MenuItem { label: label.into(), cmd: cmd.into(), section: false, checked: false, enabled: true, key: String::new() }
 }
 fn sep() -> MenuItem {
     MenuItem { label: "────────────".into(), section: true, ..Default::default() }

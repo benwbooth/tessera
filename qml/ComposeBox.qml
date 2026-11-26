@@ -235,13 +235,15 @@ Rectangle {
                          ["Ctrl+Alt+D", "Folders: cd history"],
                          ["Ctrl+Alt+J", "Background jobs"],
                          ["Ctrl+Alt+P", "The prompt bar's choices (branches, contexts…)"]]],
-            ["More", [["F1", "Help for the word at the cursor"],
+            ["More", [["Ctrl+Alt+O", "The input box's menu (the \u25be at the prompt's left): all of these"],
+                      ["F1", "Help for the word at the cursor"],
                       ["Shift+F1", "The guide, at the word"],
                       ["Shift+F10", "The text's menu (Copy, Paste, …); or the Menu key"],
                       ["Ctrl+Alt+S", "Indentation: spaces or tabs, and its size"],
                       ["Ctrl+Alt+I", "Input language"],
                       ["Ctrl+Alt+E", "Editor keys: Emacs, vi, VS Code"],
-                      ["Ctrl+Alt+X", "Ask the AI to fix the command that failed"]]]]
+                      ["Ctrl+Alt+X", "Ask the AI to fix the command that failed"],
+                      ["Ctrl+Shift+H", "Hide the input box (again: show it)"]]]]
         if (box.aiNL && box.chatReady) groups.push(["AI", [["# \u2026", "Say what you want: the AI writes the command, for you to check"]]])
         if (box.keys === "vi") {
             const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -886,7 +888,9 @@ Rectangle {
     property var fetchedDoc: ({})
     // (A command with examples of its own: its man page goes under them.)
     // The editor language's guide, at the word (Shift+F1, the Guide chip).
-    function openGuideAtWord() { if (guideChip.guide !== "") Window.window.openGuide(guideChip.guide, guideWord()) }
+    // (The guide for the input's language, "" when there's none.)
+    readonly property string guideName: Window.window && Window.window.guideFor ? Window.window.guideFor(box.lang, box.runShell || box.shellName) : ""
+    function openGuideAtWord() { if (guideName !== "") Window.window.openGuide(guideName, guideWord()) }
     // The word to look up in the guide: the selection (one line), else the
     // word the cursor is in or just after.
     function guideWord() {
@@ -938,13 +942,14 @@ Rectangle {
     onCompChanged: docFetch.restart()
     // (The bar's chips, by key while this is the active pane's input; their
     // tooltips say them.)
-    function openLanguages() { langPop.x = langChip.x + modeTag.x - 100; langPop.y = -langPop.height - 4; langPop.open() }
+    function openLanguages() { langPop.x = optionsBtn.x; langPop.y = optionsBtn.y - langPop.height - 4; langPop.open() }
     readonly property bool keysHere: box.visible && Window.window !== null && Window.window.activePane !== null && Window.window.activePane !== undefined && Window.window.activePane.compose === box
-    Shortcut { sequence: "Ctrl+Alt+D"; enabled: box.keysHere && box.showPrompt; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); promptBar.toggleCdHistory(cdChip) } }
+    Shortcut { sequence: "Ctrl+Alt+D"; enabled: box.keysHere && box.showPrompt; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); promptBar.toggleCdHistory(optionsBtn) } }
     Shortcut { sequence: "Ctrl+Alt+I"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); box.openLanguages() } }
     Shortcut { sequence: "Ctrl+Alt+E"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { const order = ["emacs", "vi", "vscode"]; box.keysPicked(order[(order.indexOf(box.keys) + 1) % order.length]) } }
     // (The rest of the buttons, the prompt bar and the text's menu, without the mouse.)
-    Shortcut { sequence: "Ctrl+Alt+S"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); indentMenu.popup(indentChip, 0, -indentMenu.implicitHeight - 4) } }
+    Shortcut { sequence: "Ctrl+Alt+S"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); box.openIndent() } }
+    Shortcut { sequence: "Ctrl+Alt+O"; enabled: box.keysHere; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); box.openOptions() } }
     Shortcut { sequence: "Ctrl+Alt+X"; enabled: box.keysHere && box.view !== null && box.view.lastStatus !== 0 && box.chatReady && box.aiBusy === ""; context: Qt.WindowShortcut; onActivated: box.askFix() }
     Shortcut { sequence: "Ctrl+Alt+P"; enabled: box.keysHere && box.showPrompt; context: Qt.WindowShortcut; onActivated: { box.focusEditor(); widgetMenu.popup(promptBar, 8, promptBar.height) } }
     Shortcut { sequences: ["Shift+F10", "Menu"]; enabled: box.keysHere && edit.activeFocus; context: Qt.WindowShortcut; onActivated: editMenu.popup(edit, edit.cursorRectangle.x, edit.cursorRectangle.y + edit.cursorRectangle.height) }
@@ -1124,9 +1129,10 @@ Rectangle {
         popupLift: y
         visible: box.showPrompt
         anchors.left: parent.left
+        anchors.leftMargin: Math.max(optionsBtn.x + optionsBtn.width + 4, flick.x)
         anchors.right: parent.right
-        anchors.top: modeTag.bottom
-        anchors.topMargin: 2
+        anchors.top: modeTag.visible ? modeTag.bottom : parent.top
+        anchors.topMargin: modeTag.visible ? 2 : 5
         height: visible ? implicitHeight : 0
         view: box.view
         controller: box.controller
@@ -1141,6 +1147,89 @@ Rectangle {
         // (A widget's choice runs as if typed: a card, history.)
         onRunRequested: (c) => { box.runCommand(c); edit.forceActiveFocus() }
         onFixRequested: box.askFix()
+    }
+
+    // The input box's options in one menu, at the prompt line's left (or the
+    // toolbar's, without a prompt bar): folders, history, the guide, the
+    // language, indentation, the editor's keys; each with its shortcut.
+    // Ctrl+Alt+O. Down, or up when there's no room under it.
+    Rectangle {
+        id: optionsBtn
+        // (Over the ❯'s column, as tessh's ▾ is: the bar starts where the
+        // text does.)
+        x: Math.max(2, Math.round(promptChar.x + promptChar.implicitWidth / 2 - width / 2))
+        y: promptBar.visible ? promptBar.y + Math.max(0, (Math.min(promptBar.height, box.lineHeight + 6) - height) / 2) : modeTag.y
+        width: 22; height: 18; radius: 4
+        color: optHover.hovered || optionsMenu.opened ? Theme.mix(box.color, Theme.fg, 0.28) : Theme.mix(box.color, Theme.fg, 0.14)
+        border.width: 1
+        border.color: Theme.mix(box.color, Theme.fg, optHover.hovered || optionsMenu.opened ? 0.36 : 0.2)
+        Text {
+            x: (parent.width - width) / 2
+            y: (parent.height - height) / 2 + 0.001
+            text: optionsMenu.opened && !optionsMenu.up ? "\u25be" : optionsMenu.opened ? "\u25b4" : "\u25be"
+            color: Theme.fg
+            font.pixelSize: 12
+            renderType: Text.NativeRendering
+        }
+        HoverHandler { id: optHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: optionsMenu.opened ? optionsMenu.close() : box.openOptions() }
+        ToolTip.visible: optHover.hovered && !optionsMenu.opened
+        ToolTip.delay: 500
+        ToolTip.text: "The input box's menu: folders, history, the guide, language, indentation, editor keys (Ctrl+Alt+O)"
+    }
+    readonly property bool failedFixable: box.view !== null && box.view.lastStatus !== 0 && edit.text === "" && box.chatReady && box.aiBusy === ""
+    readonly property string langLabel: (box.runShell !== "" ? box.shellNames[box.runShell] : box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
+    readonly property string indentLabel: ({ spaces: "Spaces: ", tabs: "Tabs: ", mixed: "Mixed: " })[box.indentMode] + box.tabSize + (box.detectedIndent ? " \u00b7 detected" : "")
+    // The ▾'s menu: small, black, at once; over the button (the input box
+    // stays in view). Its rows are worked out as it opens.
+    QuickMenu {
+        id: optionsMenu
+        onClosed: if (!indentQuick.opened && !langPop.opened && !box.historyMode) edit.forceActiveFocus()
+    }
+    QuickMenu {
+        id: indentQuick
+        onClosed: edit.forceActiveFocus()
+    }
+    function openOptions() {
+        const r = []
+        const keysTo = k => () => { box.keysPicked(k); edit.forceActiveFocus() }
+        if (box.failedFixable) r.push({ label: "\u2726 Fix the failed command", key: "Ctrl+Alt+X", act: () => box.askFix() }, { sep: true })
+        if (box.showPrompt) r.push({ label: "Folders (cd history)\u2026", key: "Ctrl+Alt+D", act: () => promptBar.toggleCdHistory(optionsBtn) })
+        r.push({ label: "Command history\u2026", key: "Ctrl+R", act: () => box.openHistory() })
+        if (box.jobsAll > 0) r.push({ label: "Background jobs (" + box.jobsRunning + " running)", key: "Ctrl+Alt+J", act: () => box.jobsToggled() })
+        if (box.guideName !== "") r.push({ label: (Window.window.guides && Window.window.guides[box.guideName]) || box.guideName + " guide", key: "Shift+F1", act: () => box.openGuideAtWord() })
+        if (box.showPrompt) r.push({ label: "Prompt bar choices\u2026", key: "Ctrl+Alt+P", act: () => widgetMenu.popup(promptBar, 8, promptBar.height) })
+        r.push({ sep: true })
+        r.push({ label: "Language: " + box.langLabel + "\u2026", key: "Ctrl+Alt+I", act: () => box.openLanguages() })
+        r.push({ label: "Indentation: " + box.indentLabel + "\u2026", key: "Ctrl+Alt+S", act: () => box.openIndent() })
+        r.push({ sep: true }, { header: "EDITOR KEYS", key: "Ctrl+Alt+E" })
+        r.push({ label: "Emacs", checked: box.keys === "emacs", act: keysTo("emacs") })
+        r.push({ label: "vi", checked: box.keys === "vi", act: keysTo("vi") })
+        r.push({ label: "VS Code", checked: box.keys === "vscode", act: keysTo("vscode") })
+        r.push({ sep: true })
+        r.push({ label: "Hide the input box", key: "Ctrl+Shift+H", act: () => box.hideRequested() })
+        optionsMenu.rows = r
+        optionsMenu.openAt(optionsBtn)
+    }
+    // Indentation, from the ▾ or Ctrl+Alt+S: spaces, tabs or mixed, the
+    // size of a level, kept per language.
+    function openIndent() {
+        const p = box.indentPref, set = (k, v) => () => box.setIndentPref(k, v)
+        const r = [{ header: "INDENT WITH", key: "Ctrl+Alt+S" },
+                   { label: "Spaces", checked: p.mode === "spaces", act: set("mode", "spaces") },
+                   { label: "Tabs", checked: p.mode === "tabs", act: set("mode", "tabs") },
+                   { label: "Mixed (a tab for every 8 columns)", checked: p.mode === "mixed", act: set("mode", "mixed") },
+                   { sep: true }, { header: "SIZE" }]
+        for (const n of [1, 2, 4, 8]) r.push({ label: String(n), checked: p.size === n, act: set("size", n) })
+        r.push({ label: "Custom\u2026" + ([1, 2, 4, 8].indexOf(p.size) < 0 ? " (" + p.size + ")" : ""), checked: [1, 2, 4, 8].indexOf(p.size) < 0,
+                 act: () => Window.window.askText("Indent size", "Columns per level for " + box.lang + ":", String(p.size), v => { const n = parseInt(v); if (n > 0 && n <= 32) box.setIndentPref("size", n) }) })
+        r.push({ sep: true })
+        r.push({ label: "Detect from the text", checked: box.edPrefs.editor_detect_indent !== false,
+                 act: () => { if (box.controller) box.controller.setSetting("editor_detect_indent", JSON.stringify(box.edPrefs.editor_detect_indent === false)) } })
+        r.push({ label: "Use " + box.lang + "'s default (" + ({ spaces: "spaces", tabs: "tabs", mixed: "mixed" })[p.defMode] + ", " + p.defSize + ")", enabled: !!p.own,
+                 act: () => { box.setIndentPref("mode", null); box.setIndentPref("size", null) } })
+        indentQuick.rows = r
+        indentQuick.openAt(optionsBtn)
     }
 
     // The prompt character, as the shell shows it: green, red after a failure.
@@ -1379,7 +1468,7 @@ Rectangle {
                     done = box.acceptGhost()
                 if (!done && e.key === Qt.Key_Escape && box.ghost !== "") { box.ghost = ""; done = true }
                 if (!done && e.key === Qt.Key_Escape && box.aiBusy !== "") { box.controller.aiCancel(box.aiKey + "-cmd"); box.aiBusy = ""; done = true }
-                if (!done && e.key === Qt.Key_F1 && (e.modifiers & Qt.ShiftModifier) && guideChip.guide !== "") { box.openGuideAtWord(); done = true }
+                if (!done && e.key === Qt.Key_F1 && (e.modifiers & Qt.ShiftModifier) && box.guideName !== "") { box.openGuideAtWord(); done = true }
                 if (!done && e.key === Qt.Key_F1) { box.hoverAtPosition(cursorPosition); done = true }
                 if (!done) done = box.compKey(e)
                 if (!done && e.key === Qt.Key_Tab && !(e.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
@@ -1547,9 +1636,14 @@ Rectangle {
     // the history button and the key switch (Emacs, vi, VS Code).
     Row {
         id: modeTag
+        // (Only when it has something: a note, Fix, a formatted view, the
+        // queue, jobs; else the prompt bar is the top line. Without a
+        // prompt bar it's where the options button is.)
+        visible: spinner.on || modeNote.text !== "" || box.failedFixable || (box.view !== null && box.view.richKind !== "") || box.queued > 0 || box.jobsAll > 0 || box.keys === "vi" || !box.showPrompt
         anchors.right: parent.right
         anchors.rightMargin: 8
         y: 5
+        height: visible ? implicitHeight : 0
         spacing: 6
         // Working: a turning arc.
         Canvas {
@@ -1571,6 +1665,7 @@ Rectangle {
             RotationAnimator on rotation { from: 0; to: 360; duration: 800; loops: Animation.Infinite; running: spinner.on }
         }
         Text {
+            id: modeNote
             anchors.verticalCenter: parent.verticalCenter
             // (Problems with the text are under the editor: problemNote.)
             text: box.fetchingLang !== "" ? "getting " + box.fetchingLang + "\u2026"
@@ -1591,7 +1686,7 @@ Rectangle {
         }
         Chip {
             base: box.color
-            visible: box.view !== null && box.view.lastStatus !== 0 && edit.text === "" && box.chatReady && box.aiBusy === ""
+            visible: box.failedFixable
             label: "\u2726 Fix"
             tip: "Ask the AI to correct the command that just failed (Ctrl+Alt+X)"
             onClicked: box.askFix()
@@ -1610,74 +1705,8 @@ Rectangle {
             tip: "Commands waiting for the running one to finish, run in turn. Click to drop them. (Ctrl+Enter or a tap of right Ctrl runs a command in the background instead.)"
             onClicked: box.clearQueue()
         }
-        // (The cd history: this tab's folders, then recent and frequent ones.)
-        Chip {
-            id: cdChip
-            visible: box.showPrompt
-            base: box.color
-            icon: "\uf07b"
-            label: "Folders"
-            tip: "cd history: this tab's folders, then recent and frequent ones (Ctrl+Alt+D)"
-            onClicked: promptBar.toggleCdHistory(cdChip)
-        }
-        // (Test hook: TESSERA_TEST_CDHIST opens it.)
-        Timer { interval: 7000; running: box.controller !== null && box.controller.testEnv("CDHIST") !== ""; onTriggered: promptBar.toggleCdHistory(cdChip) }
-        Chip { base: box.color; label: "\u21ba History"; tip: "Command history (Ctrl+R)"; onClicked: box.historyMode ? box.closeComp() : Date.now() - box.histClosedAt > 500 ? box.openHistory() : undefined }
-        Chip {
-            id: langChip
-            base: box.color
-            // (Shell code: the shell's own name, zsh, fish.)
-            label: (box.runShell !== "" ? box.shellNames[box.runShell] : box.lang === "bash" ? (box.shellName || "bash") : box.lang) + (box.langOverride !== "" ? "" : " \u00b7 auto")
-            tip: "Input language: highlighting, checks, completion (Ctrl+Alt+I)"
-            onClicked: box.openLanguages()
-        }
-        Chip {
-            base: box.color
-            id: guideChip
-            readonly property string guide: Window.window && Window.window.guideFor ? Window.window.guideFor(box.lang, box.runShell || box.shellName) : ""
-            visible: guide !== ""
-            label: "Guide"
-            tip: (guide === "tessh" ? "The tessh guide, in a tab: every feature, with examples"
-                : "The " + Window.window.guides[guide] + ", in a tab: " + guide + "'s own documentation, fetched the first time and kept")
-                + ". Opens at the selected word, or the word at the cursor (Shift+F1)"
-            onClicked: box.openGuideAtWord()
-        }
-        // Indentation, as VS Code's status bar has it: spaces, tabs or mixed,
-        // and how wide a level is; kept per language.
-        Chip {
-            id: indentChip
-            base: box.color
-            label: ({ spaces: "Spaces: ", tabs: "Tabs: ", mixed: "Mixed: " })[box.indentMode] + box.tabSize + (box.detectedIndent ? " \u00b7 detected" : "")
-            tip: (box.detectedIndent ? "Detected from the text. " : "") + "Indentation for " + box.lang + ": spaces, tabs or mixed (a tab for every 8 columns), and the size of a level. Kept for each language. (Ctrl+Alt+S)"
-            onClicked: indentMenu.popup(indentChip, 0, -indentMenu.implicitHeight - 4)
-        }
-        SlimMenu {
-            id: indentMenu
-            readonly property var p: box.indentPref
-            SlimMenuItem { text: "Indent with spaces"; checkable: true; checked: indentMenu.p.mode === "spaces"; onTriggered: box.setIndentPref("mode", "spaces") }
-            SlimMenuItem { text: "Indent with tabs"; checkable: true; checked: indentMenu.p.mode === "tabs"; onTriggered: box.setIndentPref("mode", "tabs") }
-            SlimMenuItem { text: "Mixed (a tab for every 8 columns)"; checkable: true; checked: indentMenu.p.mode === "mixed"; onTriggered: box.setIndentPref("mode", "mixed") }
-            SlimMenuItem { text: "Size"; enabled: false }
-            Repeater {
-                model: [1, 2, 4, 8]
-                SlimMenuItem { required property int modelData; text: String(modelData); checkable: true; checked: indentMenu.p.size === modelData; onTriggered: box.setIndentPref("size", modelData) }
-            }
-            SlimMenuItem {
-                text: "Custom…" + ([1, 2, 4, 8].indexOf(indentMenu.p.size) < 0 ? " (" + indentMenu.p.size + ")" : "")
-                checkable: true; checked: [1, 2, 4, 8].indexOf(indentMenu.p.size) < 0
-                onTriggered: Window.window.askText("Indent size", "Columns per level for " + box.lang + ":", String(indentMenu.p.size), v => { const n = parseInt(v); if (n > 0 && n <= 32) box.setIndentPref("size", n) })
-            }
-            SlimMenuItem {
-                text: "Detect from the text"
-                checkable: true; checked: box.edPrefs.editor_detect_indent !== false
-                onTriggered: if (box.controller) box.controller.setSetting("editor_detect_indent", JSON.stringify(box.edPrefs.editor_detect_indent === false))
-            }
-            SlimMenuItem {
-                text: "Use " + box.lang + "'s default (" + ({ spaces: "spaces", tabs: "tabs", mixed: "mixed" })[indentMenu.p.defMode] + ", " + indentMenu.p.defSize + ")"
-                enabled: indentMenu.p.own
-                onTriggered: { box.setIndentPref("mode", null); box.setIndentPref("size", null) }
-            }
-        }
+        // (Test hook: TESSERA_TEST_CDHIST opens the cd history.)
+        Timer { interval: 7000; running: box.controller !== null && box.controller.testEnv("CDHIST") !== ""; onTriggered: promptBar.toggleCdHistory(optionsBtn) }
         Chip {
             visible: box.jobsAll > 0
             base: box.jobsRunning > 0 ? Theme.mix(box.color, Theme.accent, 0.35) : box.color
@@ -1685,17 +1714,13 @@ Rectangle {
             tip: box.jobsRunning + " background job" + (box.jobsRunning === 1 ? "" : "s") + " running (" + box.jobsAll + " in all): click to show or hide them (Ctrl+Alt+J)"
             onClicked: box.jobsToggled()
         }
+        // (vi's mode: normal, insert, what's pending. Its keys are in the menu.)
         Chip {
-            id: keysChip
+            visible: box.keys === "vi"
             base: box.color
-            label: box.keys === "vi" ? "vi \u00b7 " + vik.modeName.toLowerCase() + (vik.viPending !== "" ? " " + vik.viPending : "")
-                 : (({ emacs: "Emacs", vscode: "VS Code" })[box.keys] || box.keys)
-            tip: "Editor keys: click for the next, Emacs, vi, VS Code (Ctrl+Alt+E)"
-            onClicked: {
-                const order = ["emacs", "vi", "vscode"]
-                box.keysPicked(order[(order.indexOf(box.keys) + 1) % order.length])
-                edit.forceActiveFocus()
-            }
+            label: "vi \u00b7 " + vik.modeName.toLowerCase() + (vik.viPending !== "" ? " " + vik.viPending : "")
+            tip: "Editor keys: vi, in this mode. Others in the \u25be menu (Ctrl+Alt+O); Ctrl+Alt+E goes to the next"
+            onClicked: box.openOptions()
         }
     }
     // The input language: a searchable list (hundreds with Helix's grammars).

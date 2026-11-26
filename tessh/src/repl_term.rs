@@ -132,7 +132,7 @@ fn set_indent_pref(key: &str, value: serde_json::Value) {
 
 fn indent_menu(ed: &crate::editor::core::Ed) -> Vec<MenuItem> {
     let p = &ed.indent_pref;
-    let it = |label: String, cmd: &str, checked: bool, enabled: bool| MenuItem { label, cmd: cmd.into(), section: false, checked, enabled };
+    let it = |label: String, cmd: &str, checked: bool, enabled: bool| MenuItem { label, cmd: cmd.into(), section: false, checked, enabled, key: String::new() };
     let mut v = vec![
         it("Indent with spaces".into(), "mode=spaces", p.mode == IndentMode::Spaces, true),
         it("Indent with tabs".into(), "mode=tabs", p.mode == IndentMode::Tabs, true),
@@ -170,7 +170,7 @@ fn bar_ctx(ed: &crate::editor::core::Ed) -> crate::editor::promptbar::BarCtx {
 }
 
 fn menu_of(cs: Vec<crate::editor::promptbar::Choice>) -> Vec<MenuItem> {
-    cs.into_iter().map(|c| MenuItem { enabled: !c.section, label: c.label, cmd: c.cmd, section: c.section, checked: c.current }).collect()
+    cs.into_iter().map(|c| MenuItem { enabled: !c.section, label: c.label, cmd: c.cmd, section: c.section, checked: c.current, key: String::new() }).collect()
 }
 
 // ---- ls: Tessera's folder view ---------------------------------------------------------
@@ -378,6 +378,11 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                         "history" => editor.ed.open_history(),
                         "keys" => {
                             editor.ed.keys = editor.ed.keys.next();
+                            save_own("editor_keys", serde_json::json!(editor.ed.keys.name()));
+                        }
+                        // (Picked in the options menu.)
+                        k if k.starts_with("keys=") => {
+                            editor.ed.keys = crate::editor::core::Keys::parse(&k[5..]);
                             save_own("editor_keys", serde_json::json!(editor.ed.keys.name()));
                         }
                         "indent" => {

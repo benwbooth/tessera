@@ -120,6 +120,9 @@ pub enum MenuKind {
     Widgets,
     /// The ls listing's menus ("item", "folder", "columns", "sort", …).
     Ls(String),
+    /// The ▾ at the prompt bar's left (Ctrl+Alt+O): folders, history, the
+    /// guide, indentation, the editor's keys; each with its shortcut.
+    Options,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -129,6 +132,8 @@ pub struct MenuItem {
     pub section: bool,
     pub checked: bool,
     pub enabled: bool,
+    /// Its shortcut, shown at the right.
+    pub key: String,
 }
 
 pub struct Ai {
@@ -891,6 +896,12 @@ impl Ed {
                     return true;
                 }
                 KeyCode::Char('i') | KeyCode::Char('I') => return true,
+                // (The options menu: the ▾ at the prompt bar's left.)
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    self.close_comp();
+                    self.toggle_options();
+                    return true;
+                }
                 // (The buttons and the prompt bar, without the mouse.)
                 KeyCode::Char('s') | KeyCode::Char('S') => {
                     self.click(Hit::Chip("indent"), h);
@@ -1537,7 +1548,7 @@ impl Ed {
     /// The text's right-click menu, as a text field has it.
     pub fn open_context(&mut self) {
         let sel = self.t.selection().is_some();
-        let it = |label: &str, cmd: &str, enabled: bool| MenuItem { label: label.into(), cmd: cmd.into(), section: false, checked: false, enabled };
+        let it = |label: &str, cmd: &str, enabled: bool| MenuItem { label: label.into(), cmd: cmd.into(), section: false, checked: false, enabled, key: String::new() };
         let items = vec![
             it("Undo", "undo", true),
             it("Redo", "redo", true),
@@ -1548,6 +1559,47 @@ impl Ed {
             it("Select All", "all", !self.t.is_empty()),
         ];
         self.open_menu(MenuKind::Context, items);
+    }
+
+    /// The options menu (the ▾ at the prompt bar's left, Ctrl+Alt+O): what
+    /// the toolbar's buttons were, each with its shortcut. Again: closed.
+    pub fn toggle_options(&mut self) {
+        if matches!(&self.menu, Some(m) if m.kind == MenuKind::Options) {
+            self.menu = None;
+            return;
+        }
+        let it = |label: String, cmd: &str, key: &str| MenuItem { label, cmd: cmd.into(), enabled: true, key: key.into(), ..Default::default() };
+        let sep = || MenuItem { label: "─".repeat(24), section: true, ..Default::default() };
+        let mut items = vec![];
+        if self.status != 0 && self.t.is_empty() && self.ai.lock().unwrap().command_ready {
+            items.push(it("✦ Fix the failed command".into(), "chip:fix", "Ctrl+Alt+X"));
+            items.push(sep());
+        }
+        items.push(it("\u{f07b} Folders (cd history)…".into(), "chip:folders", "Ctrl+Alt+D"));
+        items.push(it("↺ Command history…".into(), "chip:history", "Ctrl+R"));
+        if self.jobs.1 > 0 {
+            items.push(it(format!("⧗ Background jobs ({} running)", self.jobs.0), "jobs", "Ctrl+Alt+J"));
+        }
+        items.push(it("tessh guide".into(), "chip:guide", "Shift+F1"));
+        items.push(it("Prompt bar choices…".into(), "widgets", "Ctrl+Alt+P"));
+        items.push(sep());
+        let ind = self.indent();
+        let mode = match ind.mode {
+            super::text::IndentMode::Spaces => "Spaces",
+            super::text::IndentMode::Tabs => "Tabs",
+            super::text::IndentMode::Mixed => "Mixed",
+        };
+        let det = if self.detected().is_some() { " · detected" } else { "" };
+        items.push(it(format!("Indentation: {mode} {}{det}…", ind.size), "chip:indent", "Ctrl+Alt+S"));
+        items.push(sep());
+        items.push(MenuItem { label: "Editor keys".into(), section: true, key: "Ctrl+Alt+E".into(), ..Default::default() });
+        for (k, name) in [(Keys::Emacs, "Emacs"), (Keys::Vi, "vi"), (Keys::Vscode, "VS Code")] {
+            items.push(MenuItem { checked: self.keys == k, ..it(name.into(), &format!("chip:keys={}", k.name()), "") });
+        }
+        items.push(sep());
+        items.push(it("Keyboard shortcuts".into(), "help:keys", "F1"));
+        self.menu_x = Some(0);
+        self.open_menu(MenuKind::Options, items);
     }
 
     pub fn open_menu(&mut self, kind: MenuKind, items: Vec<MenuItem>) {
@@ -1598,7 +1650,7 @@ impl Ed {
                     m.sel = i;
                 }
             }
-            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) && m.kind != MenuKind::Indent => {
+            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) && m.kind != MenuKind::Indent && m.kind != MenuKind::Options => {
                 m.filter.insert(&c.to_string());
                 let first = self.menu_shown().into_iter().find(|&i| ok(self.menu.as_ref().unwrap(), i));
                 if let (Some(m), Some(i)) = (self.menu.as_mut(), first) {
@@ -1624,6 +1676,7 @@ impl Ed {
             MenuKind::Indent => self.done = Some(Outcome::Host(format!("indent:{}", it.cmd))),
             MenuKind::Widgets => self.done = Some(Outcome::Host(format!("widget:{}", it.cmd))),
             MenuKind::Ls(_) => self.ls_pick(&it.cmd),
+            MenuKind::Options => self.done = Some(Outcome::Host(it.cmd.clone())),
             MenuKind::Context => {
                 let sel = self.t.selection();
                 match it.cmd.as_str() {
@@ -1828,6 +1881,10 @@ impl Ed {
                     self.comp.index = i;
                     self.accept_comp(Some(i), h);
                 }
+            }
+            Hit::Chip("menu") => {
+                self.close_comp();
+                self.toggle_options();
             }
             Hit::Chip(name) => {
                 // (Its list open: the click closes it. Another's: that goes first.)

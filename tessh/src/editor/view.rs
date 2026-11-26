@@ -89,6 +89,20 @@ pub struct ViewIn<'a> {
     pub screen_top: u16,
 }
 
+/// How wide the options menu's button is, with the gap after it.
+pub const MENU_BUTTON_W: usize = 4;
+
+/// The options menu's button: ▾, lit while hovered or open.
+fn menu_button(ed: &Ed, v: &ViewIn) -> Vec<Span> {
+    let open = matches!(&ed.menu, Some(m) if m.kind == MenuKind::Options);
+    let lit = open || v.hovered == Some(&Hit::Chip("menu"));
+    // (A grey key with room around its ▾: plainly a button. Without the
+    // theme's colors, the terminal's own greys.)
+    let bg = v.pal.mix(if lit { 0.30 } else { 0.18 }).or(Some(Col::Ansi(if lit { 7 } else { 8 })));
+    let st = Sty { bold: true, fg: if v.pal.mix(0.1).is_none() { Some(Col::Ansi(15)) } else { None }, ..Sty::default() }.with_bg(bg);
+    vec![Span::new(" ▾ ", st).hit(Hit::Chip("menu")), Span::new(" ", Sty::default())]
+}
+
 fn chip(label: &str, name: &'static str, v: &ViewIn) -> Vec<Span> {
     let hov = v.hovered == Some(&Hit::Chip(name));
     let bg = v.pal.mix(if hov { 0.17 } else { 0.10 });
@@ -102,7 +116,9 @@ fn chip(label: &str, name: &'static str, v: &ViewIn) -> Vec<Span> {
     vec![Span::new(format!(" {label} "), st).hit(Hit::Chip(name))]
 }
 
-/// The toolbar's buttons, as ComposeBox's modeTag row shows them.
+/// The toolbar's buttons, as ComposeBox's modeTag row shows them: only
+/// what's passing (Fix after a failure, jobs, vi's mode); the rest are in
+/// the options menu, the ▾ at the prompt bar's left.
 pub fn chips(ed: &Ed, v: &ViewIn) -> Vec<Span> {
     let mut out: Vec<Span> = vec![];
     let mut add = |s: Vec<Span>| {
@@ -114,25 +130,12 @@ pub fn chips(ed: &Ed, v: &ViewIn) -> Vec<Span> {
     if ed.status != 0 && ed.t.is_empty() && v.chat_ready && v.ai_busy.is_empty() {
         add(chip("✦ Fix", "fix", v));
     }
-    add(chip("\u{f07b} Folders", "folders", v));
-    add(chip("↺ History", "history", v));
-    add(chip("Guide", "guide", v));
-    let ind = ed.indent();
-    let mode = match ind.mode {
-        super::text::IndentMode::Spaces => "Spaces: ",
-        super::text::IndentMode::Tabs => "Tabs: ",
-        super::text::IndentMode::Mixed => "Mixed: ",
-    };
-    add(chip(&format!("{mode}{}{}", ind.size, if ed.detected().is_some() { " · detected" } else { "" }), "indent", v));
     if ed.jobs.1 > 0 {
         add(chip(&format!("⧗ Jobs {}", ed.jobs.0), "jobs", v));
     }
-    let keys = match ed.keys {
-        Keys::Vi => format!("vi · {}", v.mode_name.to_lowercase()),
-        Keys::Emacs => "Emacs".into(),
-        Keys::Vscode => "VS Code".into(),
-    };
-    add(chip(&keys, "keys", v));
+    if ed.keys == Keys::Vi {
+        add(chip(&format!("vi · {}", v.mode_name.to_lowercase()), "menu", v));
+    }
     out
 }
 
@@ -151,6 +154,7 @@ pub fn tooltip(ed: &Ed, hit: &Hit) -> String {
             ),
             "jobs" => format!("{} background job{} running ({} in all): click to show them (Ctrl+Alt+J)", ed.jobs.0, if ed.jobs.0 == 1 { "" } else { "s" }, ed.jobs.1),
             "keys" => "Editor keys: click for the next, Emacs, vi, VS Code (Ctrl+Alt+E)".into(),
+            "menu" => "The input's menu: folders, history, the guide, indentation, editor keys; each with its shortcut (Ctrl+Alt+O)".into(),
             "hint" => keys_table(ed),
             "note" => if !ed.problem.is_empty() { ed.problem.clone() } else { ed.ai_note.clone() },
             _ => String::new(),
@@ -176,7 +180,7 @@ pub fn keys_table(ed: &Ed) -> String {
             ],
         ),
         ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+D", "Folders: cd history"), ("Ctrl+Alt+J", "Background jobs"), ("Ctrl+Alt+P", "The prompt bar's choices (branches, contexts…)"), ("Ctrl+Alt+L", "The ls listing above the prompt, by keys")]),
-        ("More", vec![("F1", "Help for the word at the cursor (on an empty line: these keys)"), ("Shift+F1", "The guide, at the word"), ("Shift+F10", "The text's menu (Copy, Paste, …); or the Menu key"), ("Ctrl+Alt+S", "Indentation: spaces or tabs, and its size"), ("Ctrl+Alt+E", "Editor keys: Emacs, vi, VS Code"), ("Ctrl+Alt+X", "Ask the AI to fix the command that failed")]),
+        ("More", vec![("Ctrl+Alt+O", "The input's menu (the ▾ at the prompt bar's left): all of these"), ("F1", "Help for the word at the cursor (on an empty line: these keys)"), ("Shift+F1", "The guide, at the word"), ("Shift+F10", "The text's menu (Copy, Paste, …); or the Menu key"), ("Ctrl+Alt+S", "Indentation: spaces or tabs, and its size"), ("Ctrl+Alt+E", "Editor keys: Emacs, vi, VS Code"), ("Ctrl+Alt+X", "Ask the AI to fix the command that failed")]),
     ];
     if ed.ai.lock().unwrap().command_ready {
         groups.push(("AI", vec![("# …", "Say what you want: the AI writes the command, for you to check")]));
@@ -345,9 +349,11 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
     }
     if let Some(m) = &ed.menu {
         let shown = ed.menu_shown();
-        let w = (cols.saturating_sub(4)).min(60);
+        // (The options menu: as wide as its rows and their keys need.)
+        let need = if m.kind == MenuKind::Options { m.items.iter().filter(|i| !i.section || !i.key.is_empty()).map(|i| cols_of(&i.label) + cols_of(&i.key) + 7).max().unwrap_or(30) } else { 60 };
+        let w = (cols.saturating_sub(4)).min(60).min(need.max(24));
         let mut lines: Vec<Line> = vec![];
-        if m.items.len() > 10 && !matches!(m.kind, MenuKind::Indent) {
+        if m.items.len() > 10 && !matches!(m.kind, MenuKind::Indent | MenuKind::Options) {
             let q = if m.filter.is_empty() { Span::new("Filter…", v.pal.dimmed()) } else { Span::new(m.filter.text.clone(), Sty::default()) };
             lines.push(vec![Span::new(" ⌕ ", v.pal.dimmed()), q]);
         }
@@ -366,10 +372,15 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
                 st.bg = Some(if on { sel_bg } else { v.pal.mix(0.14).unwrap_or(Col::Ansi(8)) });
             }
             let mark = if it.checked { "✓ " } else { "  " };
-            let text = format!("{mark}{}", it.label);
             let iw = if bar.is_empty() { w } else { w - 1 };
-            let pad = iw.saturating_sub(cols_of(&text));
-            let mut row = fit(vec![Span::new(format!("{text}{}", " ".repeat(pad)), st).hit(Hit::Row(i))], iw);
+            // (A separator: the menu's whole width.)
+            let text = if it.section && !it.label.is_empty() && it.label.chars().all(|c| c == '─') { format!(" {}", "─".repeat(iw.saturating_sub(2))) } else { format!("{mark}{}", it.label) };
+            // (Its shortcut, dimmed, at the right.)
+            let key = if it.key.is_empty() { String::new() } else { format!("  {} ", it.key) };
+            let pad = iw.saturating_sub(cols_of(&text) + cols_of(&key));
+            let mut kst = v.pal.dimmed();
+            kst.bg = st.bg;
+            let mut row = fit(vec![Span::new(format!("{text}{}", " ".repeat(pad)), st).hit(Hit::Row(i)), Span::new(key, kst).hit(Hit::Row(i))], iw);
             if let Some(b) = bar.get(k) {
                 row.push(b.clone());
             }
@@ -762,6 +773,11 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
             None
         };
         let right = chips(ed, v);
+        // (Nothing passing: no row; the prompt bar is the top line. No
+        // prompt bar: the ▾ goes here.)
+        let button = menu_button(ed, v);
+        let right = if v.bar.is_empty() { let mut r = right; if !r.is_empty() { r.push(Span::new(" ", Sty::default())); } r.extend(button.clone()); r } else { right };
+        if note.is_some() || !right.is_empty() {
         let rw = super::width(&right);
         let room = cols.saturating_sub(rw + 3).max(20).min(cols.saturating_sub(2).max(1));
         let lines = note.as_ref().map(|(t, _)| wrap_text(t, room)).unwrap_or_else(|| vec![String::new()]);
@@ -785,10 +801,19 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
             }
             rows.push(row);
         }
+        }
     }
     // ---- the prompt bar ----
     for (i, l) in v.bar.iter().enumerate() {
-        let mut row = fit(l.clone(), cols);
+        // (The options menu's ▾ at its left.)
+        let mut row = if i == 0 && !v.final_ {
+            let mut r = menu_button(ed, v);
+            let bw = super::width(&r);
+            r.extend(fit(l.clone(), cols.saturating_sub(bw)));
+            r
+        } else {
+            fit(l.clone(), cols)
+        };
         if i == 0 && !v.bar_right.is_empty() {
             let lw = super::width(&row);
             let rw = super::width(v.bar_right);

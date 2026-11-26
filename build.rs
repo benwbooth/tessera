@@ -70,6 +70,7 @@ fn main() {
         QmlFile::from("qml/WindowControls.qml"),
         QmlFile::from("qml/MomentumWheel.qml"),
         QmlFile::from("qml/ComposeBox.qml"),
+        QmlFile::from("qml/QuickMenu.qml"),
         QmlFile::from("qml/GuidePage.qml"),
         QmlFile::from("qml/ValueTree.qml"),
         QmlFile::from("qml/PromptBar.qml"),
