@@ -563,6 +563,35 @@ impl Ed {
             self.close_comp();
         }
     }
+    /// Tab on the list, as in bash: an item picked with Up/Down goes in;
+    /// else the one that fits, or as much as all that fit have in common.
+    /// Several left with nothing more in common: they stay shown, to type
+    /// on or pick from (the first is never just taken).
+    pub fn tab_comp(&mut self, h: &mut dyn Hooks) {
+        if self.comp.items.is_empty() {
+            return;
+        }
+        if self.comp.chosen || self.comp.hist || self.comp.items.len() == 1 {
+            self.accept_comp(None, h);
+            return;
+        }
+        let (s, c) = (self.comp.start.min(self.t.cursor), self.t.cursor);
+        let typed = self.t.text.get(s..c).unwrap_or("").to_string();
+        let (i, lcp) = match tab_common(&typed, &self.comp.items) {
+            TabFit::One(i) => (Some(i), String::new()),
+            TabFit::Common(l) => (None, l),
+            TabFit::Nothing => return,
+        };
+        if let Some(i) = i {
+            self.accept_comp(Some(i), h);
+            return;
+        }
+        self.t.replace(s, c, &lcp);
+        self.changed();
+        self.comp.index = 0;
+        self.request_complete(h);
+        self.comp.typing = false;
+    }
     fn comp_key(&mut self, k: &KeyEvent, h: &mut dyn Hooks) -> bool {
         if !self.comp.open || self.comp.items.is_empty() {
             return false;
@@ -577,9 +606,7 @@ impl Ed {
             // several, they're shown, the next Tab takes one.)
             if k.code == KeyCode::Tab && !k.modifiers.contains(KeyModifiers::SHIFT) {
                 self.comp.typing = false;
-                if self.comp.items.len() == 1 {
-                    self.accept_comp(Some(0), h);
-                }
+                self.tab_comp(h);
                 return true;
             }
         }
@@ -607,7 +634,7 @@ impl Ed {
                 self.comp.index = self.comp.index.saturating_sub(8);
                 self.comp.chosen = true;
             }
-            KeyCode::Tab if !shift => self.accept_comp(None, h),
+            KeyCode::Tab if !shift => self.tab_comp(h),
             KeyCode::Esc => self.close_comp(),
             KeyCode::Enter => {
                 // (Enter never takes a completion, Tab does: it runs the
@@ -936,11 +963,10 @@ impl Ed {
             let lead = &self.t.text[self.t.line_start(p)..p];
             if !lead.trim().is_empty() {
                 self.open_comp(h);
-                // (One thing fits: it goes in at once, as in a shell, and
-                // Tessera's input; the list was shown and a second Tab
-                // needed.)
-                if self.comp.open && self.comp.items.len() == 1 {
-                    self.accept_comp(Some(0), h);
+                // (As in bash: what fits goes in at once, as far as it's
+                // certain.)
+                if self.comp.open {
+                    self.tab_comp(h);
                 }
                 return true;
             }
@@ -2021,4 +2047,72 @@ fn one_line(h: &str) -> String {
         }
     }
     out
+}
+
+/// What Tab can put in for the typed word.
+#[derive(Debug, PartialEq)]
+pub enum TabFit {
+    /// Just this item fits.
+    One(usize),
+    /// Several fit, all starting with this (longer than the word).
+    Common(String),
+    /// Several fit with no more in common, or none starts with the word
+    /// (fuzzy matches only): pick or type on.
+    Nothing,
+}
+
+/// The items starting with the typed word (else, ignoring case): one, or
+/// what they all start with. (By their inserted text: quoting included.)
+pub fn tab_common(typed: &str, items: &[Item]) -> TabFit {
+    let fits = |fold: bool| -> Vec<usize> {
+        let t = if fold { typed.to_lowercase() } else { typed.to_string() };
+        (0..items.len())
+            .filter(|&i| {
+                let ins = &items[i].insert;
+                if fold { ins.to_lowercase().starts_with(&t) } else { ins.starts_with(&t) }
+            })
+            .collect()
+    };
+    let (mut fit, mut fold) = (fits(false), false);
+    if fit.is_empty() {
+        (fit, fold) = (fits(true), true);
+    }
+    // (The same text twice, from two sources, is one.)
+    let mut seen = std::collections::HashSet::new();
+    fit.retain(|&i| seen.insert(items[i].insert.trim_end().to_string()));
+    match fit.len() {
+        0 => TabFit::Nothing,
+        1 => TabFit::One(fit[0]),
+        _ => {
+            let first: Vec<char> = items[fit[0]].insert.chars().collect();
+            let mut n = first.len();
+            for &i in &fit[1..] {
+                let m = items[i].insert.chars().zip(first.iter()).take_while(|(a, b)| if fold { a.to_lowercase().eq(b.to_lowercase()) } else { a == *b }).count();
+                n = n.min(m);
+            }
+            let common: String = first[..n].iter().collect();
+            if common.chars().count() > typed.chars().count() { TabFit::Common(common) } else { TabFit::Nothing }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+    fn it(s: &str) -> Item {
+        Item { label: s.into(), insert: s.into(), ..Default::default() }
+    }
+    #[test]
+    fn tab_like_bash() {
+        let items = [it("Documents/"), it("Downloads/"), it("Desktop/")];
+        assert_eq!(tab_common("D", &items), TabFit::Nothing);
+        assert_eq!(tab_common("Do", &items), TabFit::Nothing);
+        assert_eq!(tab_common("Doc", &items), TabFit::One(0));
+        assert_eq!(tab_common("De", &items), TabFit::One(2));
+        let items = [it("Documents/"), it("Documentation/")];
+        assert_eq!(tab_common("D", &items), TabFit::Common("Document".into()));
+        assert_eq!(tab_common("doc", &items), TabFit::Common("Document".into()));
+        // (Fuzzy matches only: nothing taken.)
+        assert_eq!(tab_common("mnt", &[it("Documents/"), it("Music/")]), TabFit::Nothing);
+    }
 }

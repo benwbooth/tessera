@@ -782,10 +782,9 @@ Rectangle {
             box.compFor = text + "\u0001" + cursor
             if (box.compIndex >= r.items.length) box.compIndex = 0
             const byTab = box.compByTab
-            box.compByTab = false
-            // (tessh's own list says nothing of it: just one item is the one.)
-            const sole = r.sole !== undefined && r.sole !== null ? r.sole : r.items.length === 1 && !r.pending ? 0 : -1
-            if (byTab && !hist && sole >= 0 && r.items[sole]) { box.acceptComp(sole); return }
+            // (Still coming: Tab's turn is when they're in.)
+            box.compByTab = byTab && !!r.pending
+            if (byTab && !hist && !r.pending && r.items.length > 0) { box.tabComp(); if (!box.compOpen) return }
             if (r.items.length === 0 && !r.pending) box.closeComp()
             if (r.pending) compRetry.restart()
             // (The language server's items are added to these when they come;
@@ -795,8 +794,42 @@ Rectangle {
                 box.controller.lspAsk(box.aiKey + "-comp", box.lang, box.cwd, text, "complete", cursor, box.sshHost)
         })
     }
-    // (byTab: the one thing that fits goes in at once, as in a shell.)
+    // (byTab: what fits goes in at once, as in a shell; see tabComp.)
     property bool compByTab: false
+    // Tab on the list, as in bash: an item picked with Up/Down goes in; else
+    // the one that fits, or as much as all that fit have in common. Several
+    // left with nothing more in common stay shown, to type on or pick from:
+    // the first is never just taken. (tessh's editor does the same.)
+    function tabComp() {
+        const items = comp.items
+        if (items.length === 0) return
+        if (compChosen || historyMode || items.length === 1) { acceptComp(); return }
+        // (A path that's the only one there, among commands and the like.)
+        if (comp.sole !== undefined && comp.sole !== null && items[comp.sole]) { acceptComp(comp.sole); return }
+        const p = edit.cursorPosition, s = Math.min(comp.start, p)
+        const typed = edit.text.slice(s, p)
+        let fold = false
+        let fit = items.map((it, i) => i).filter(i => items[i].insert.startsWith(typed))
+        if (fit.length === 0) { fold = true; fit = items.map((it, i) => i).filter(i => items[i].insert.toLowerCase().startsWith(typed.toLowerCase())) }
+        const seen = {}
+        fit = fit.filter(i => { const k = items[i].insert.trim(); if (seen[k]) return false; seen[k] = true; return true })
+        if (fit.length === 0) return
+        if (fit.length === 1) { acceptComp(fit[0]); return }
+        const first = items[fit[0]].insert
+        let n = first.length
+        for (const i of fit.slice(1)) {
+            const o = items[i].insert
+            let m = 0
+            while (m < n && m < o.length && (fold ? o[m].toLowerCase() === first[m].toLowerCase() : o[m] === first[m])) m++
+            n = m
+        }
+        if (n <= typed.length) return
+        edit.remove(s, p)
+        edit.insert(s, first.slice(0, n))
+        edit.cursorPosition = s + n
+        compIndex = 0
+        requestComplete()
+    }
     function openComp(byTab) { compOpen = true; compChosen = false; compIndex = 0; typing = false; compByTab = byTab === true; requestComplete() }
     property double histClosedAt: 0   // (history shut by a press outside it, just now)
     function closeComp() { compOpen = false; compChosen = false; historyMode = false }
@@ -939,7 +972,7 @@ Rectangle {
         case Qt.Key_Up: compIndex = (compIndex - 1 + n) % n; compChosen = true; return true
         case Qt.Key_PageDown: compIndex = Math.min(n - 1, compIndex + 8); compChosen = true; return true
         case Qt.Key_PageUp: compIndex = Math.max(0, compIndex - 8); compChosen = true; return true
-        case Qt.Key_Tab: acceptComp(); return true
+        case Qt.Key_Tab: tabComp(); return true
         case Qt.Key_Escape: closeComp(); return true
         case Qt.Key_Return: case Qt.Key_Enter:
             // (Enter never takes a completion, Tab does: it runs the line
