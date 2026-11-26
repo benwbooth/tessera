@@ -425,6 +425,10 @@ pub mod ffi {
         fn request_starship(self: Pin<&mut Controller>, key: &QString, cwd: &QString, status: i32, duration_ms: f64, width: i32, pid: i32, host: &QString);
         #[qsignal]
         fn starship_ready(self: Pin<&mut Controller>, key: QString, json: QString);
+        /// Another launch (`tessera -e CMD`) asks for a tab running CMD:
+        /// JSON {cmd, cwd, hold}.
+        #[qsignal]
+        fn exec_requested(self: Pin<&mut Controller>, json: QString);
         /// The answer to a call that ran in the background (src/background.rs;
         /// qml/Async.qml matches `key` to its callback).
         #[qsignal]
@@ -771,6 +775,16 @@ pub mod ffi {
         /// Text typed into the first terminal at startup (--run), or empty.
         #[qinvokable]
         fn startup_command(self: &Controller) -> QString;
+        /// A command this window was started to run in a tab (`-e`), JSON
+        /// {cmd, cwd, hold}, or empty.
+        #[qinvokable]
+        fn exec_request(self: &Controller) -> QString;
+        /// Take commands from later `tessera -e` launches (execRequested).
+        #[qinvokable]
+        fn start_gui_link(self: &Controller);
+        /// This window was just used: later `tessera -e` launches come here.
+        #[qinvokable]
+        fn gui_link_touch(self: &Controller);
 
         /// Testing: text typed into the focused terminal a few seconds later
         /// (--then), and how long to wait before the screenshot (ms).
@@ -2116,6 +2130,21 @@ impl ffi::Controller {
 
     fn startup_command(&self) -> ffi::QString {
         ffi::QString::from(&std::env::var("TESSERA_RUN").unwrap_or_default())
+    }
+
+    fn exec_request(&self) -> ffi::QString {
+        ffi::QString::from(&std::env::var("TESSERA_EXEC").unwrap_or_default())
+    }
+
+    fn start_gui_link(&self) {
+        let qt = self.qt_thread();
+        crate::gui_link::listen(move |json| {
+            let _ = qt.queue(move |c| c.exec_requested(qs(&json)));
+        });
+    }
+
+    fn gui_link_touch(&self) {
+        crate::gui_link::touch();
     }
 }
 

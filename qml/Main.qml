@@ -1572,7 +1572,22 @@ ApplicationWindow {
     // About is in Help there). An in-window popup (Popup.Item): a separate
     // popup window gets a different scale from the compositor and loses
     // pixels.
-    onActiveChanged: if (!active) appMenu.close()
+    // (The window used last takes `tessera -e` commands: src/gui_link.rs.)
+    onActiveChanged: { if (!active) appMenu.close(); else controller.guiLinkTouch() }
+    // A command from `tessera -e` (this launch or a later one): a tab of its
+    // own running it, in its folder, the window brought forward.
+    function runExec(r) {
+        if (!r) return
+        const opts = { cwd: r.cwd || undefined }
+        if (r.cmd) { opts.command = r.cmd; opts.title = r.cmd.length > 40 ? r.cmd.substring(0, 40) + "…" : r.cmd }
+        newTab(opts)
+        win.raise()
+        win.requestActivate()
+    }
+    Connections {
+        target: controller
+        function onExecRequested(json) { let r = null; try { r = JSON.parse(json) } catch (e) {} win.runExec(r) }
+    }
     property real appMenuClosedAt: 0
     AppMenu {
         id: appMenu
@@ -2722,8 +2737,11 @@ ApplicationWindow {
     }
     // (The rest of startup, once the tabs are back.)
     function startupRest(restored) {
+        // (Started by `tessera -e` with nothing to restore: the command's tab
+        // is the first one, not an empty shell beside it.)
+        const startEx = controller.execRequest()
         if (!restored) {
-            newTab({})
+            if (startEx === "") newTab({})
             if (!savedSize) sizeTimer.start()
             else if (startMaximized && win.visibility !== Window.Maximized) win.showMaximized()
         }
@@ -2731,6 +2749,10 @@ ApplicationWindow {
         layoutSaver.restart()
         const cmd = controller.startupCommand()
         if (cmd !== "") runTimer.start()
+        // Started by `tessera -e` with no window open: its tab; and later
+        // `tessera -e` launches come to this window.
+        if (startEx !== "") { let r = null; try { r = JSON.parse(startEx) } catch (e) {} runExec(r) }
+        controller.startGuiLink()
         if (controller.thenCommand() !== "") thenTimer.start()
         if (controller.prefsPage() !== "") prefs.showPage(controller.prefsPage())
         if (controller.findQuery() !== "") findTimer.start()

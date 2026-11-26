@@ -14,6 +14,7 @@ mod files;
 mod find;
 mod kde;
 mod grammars;
+mod gui_link;
 mod guides;
 mod history;
 mod images;
@@ -81,6 +82,11 @@ fn main() {
         }
     }
     // Options for the QML side (screenshots, a first command for testing).
+    // A command to run (`-e CMD…`, the terminals' usual option, or `-- CMD…`),
+    // where (`--working-directory`), and whether its tab stays (`--hold`).
+    let mut exec_argv: Vec<String> = vec![];
+    let mut exec_dir: Option<String> = None;
+    let mut hold = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -143,9 +149,29 @@ fn main() {
                 let abs = std::env::current_dir().unwrap_or_default().join(a);
                 std::env::set_var("TESSERA_OPEN_DOC", abs);
             }
+            "-e" | "--" | "-x" | "--execute" => {
+                exec_argv = args[i + 1..].to_vec();
+                break;
+            }
+            "--hold" | "-H" => hold = true,
+            "--working-directory" | "--workdir" | "-d" => {
+                exec_dir = args.get(i + 1).cloned();
+                i += 1;
+            }
+            a if a.starts_with("--working-directory=") => exec_dir = Some(a["--working-directory=".len()..].to_string()),
             _ => {}
         }
         i += 1;
+    }
+    // A command: a new tab in the window used last, if there is one
+    // (src/gui_link.rs); else this new window runs it in its first tab.
+    if !exec_argv.is_empty() || exec_dir.is_some() {
+        let cwd = exec_dir.unwrap_or_else(|| std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+        let e = if exec_argv.is_empty() { gui_link::Exec { cmd: String::new(), cwd, hold: true } } else { gui_link::Exec::new(&exec_argv, cwd, hold) };
+        if std::env::var_os("TESSERA_NO_RESTORE").is_none() && gui_link::send(&e) {
+            return;
+        }
+        std::env::set_var("TESSERA_EXEC", e.to_json());
     }
 
     set_qt_env("QT_QUICK_CONTROLS_STYLE", std::env::var("TESSERA_STYLE").unwrap_or_else(|_| "Basic".into()));
@@ -227,6 +253,7 @@ fn main() {
     restore_launch_env();
     bridge::ffi::tessera_show_windows();
     let code = bridge::ffi::tessera_exec();
+    gui_link::remove();
     // (Notebook saves and kernel stops queued at the end still go out.)
     background::drain(std::time::Duration::from_secs(5));
     if let Some(sock) = &local {

@@ -9,6 +9,13 @@ Terminal=false
 Categories=System;TerminalEmulator;
 Keywords=terminal;shell;console;command;prompt;ssh;notebook;
 StartupWMClass=tessera
+# How other programs run a command in it (xdg-terminal-exec, file
+# managers' "Run in Terminal"): `tessera -e CMD…` opens a new tab in the
+# open window, or a new window when there's none.
+X-TerminalArgExec=-e
+X-TerminalArgDir=--working-directory=
+X-TerminalArgHold=--hold
+X-ExecArg=-e
 Actions=new-window;
 
 [Desktop Action new-window]
