@@ -199,8 +199,11 @@ pub fn has_desktop() -> bool {
 pub fn open_outside(p: &Path) {
     use std::os::unix::process::CommandExt;
     let prog = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    // (Always a whole path: the app may start in another folder (devloop's
+    // launchers cd to their project), and a bare name was looked for there.)
+    let p = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut c = std::process::Command::new(prog);
-    c.arg(p).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    c.arg(&p).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     unsafe {
         c.pre_exec(|| {
             libc::setsid();

@@ -555,6 +555,10 @@ fn sh_quote(a: &str) -> String {
 
 /// Start the app `id` on `path`: its Exec line with the file put in.
 fn open_with(id: &str, path: &str) -> Result<(), String> {
+    // (A whole path, as for open: the app may start elsewhere, and a
+    // file:// URL needs one.)
+    let abs = std::path::absolute(path).map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
+    let path = abs.as_str();
     let file = desktop_file(id).ok_or_else(|| format!("No app {id}."))?;
     let e = desktop_entry(&file);
     let exec = e.get("Exec").ok_or("It has no Exec line.")?;
@@ -608,7 +612,9 @@ pub fn action(op: &str, path: &str, arg: &str) -> String {
     let p = Path::new(path);
     let parent = p.parent().unwrap_or(Path::new("/"));
     let r: Result<(), String> = match op {
-        "open" => spawn("xdg-open", &[path]),
+        // (A whole path: the app may start in another folder (devloop's
+        // launchers cd to their project), where a bare name isn't.)
+        "open" => spawn("xdg-open", &[&std::path::absolute(p).map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string())]),
         // (A recording as a GIF beside it, by agg, in the background; then
         // the GIF opens.)
         "gif" => {

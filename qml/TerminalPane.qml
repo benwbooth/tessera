@@ -806,7 +806,17 @@ Item {
         onClosed: { visible = false; if (pane.editorOn) compose.focusEditor(); else term.forceActiveFocus() }
     }
     // A file, shown (View, from a file listing or the terminal's menu).
-    function viewFile(p) { preview.path = ""; preview.path = p; preview.visible = true; preview.forceActiveFocus() }
+    function viewFile(p) { preview.path = ""; preview.path = fullPath(p); preview.visible = true; preview.forceActiveFocus() }
+    // (A name from the terminal's text — IMG_1.jpeg, ~/a.txt — as the shell
+    // means it: from its folder. Tessera's own folder isn't the shell's, and
+    // Open with its app handed the bare name on, to be looked for there.)
+    function fullPath(p) {
+        if (p === "" || p.startsWith("/") || /^[a-z]+:/.test(p)) return p
+        if ((p === "~" || p.startsWith("~/")) && controller) return controller.homeDir() + p.substring(1)
+        let dir = compose.cwd
+        if (dir.startsWith("file://")) { dir = dir.replace(/^file:\/\/[^/]*/, ""); try { dir = decodeURIComponent(dir) } catch (e) {} }
+        return dir === "" ? p : dir.replace(/\/+$/, "") + "/" + p.replace(/^\.\//, "")
+    }
     FilePreview {
         id: preview
         visible: false
