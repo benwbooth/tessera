@@ -1539,7 +1539,7 @@ impl ffi::Controller {
         };
         std::thread::spawn(move || {
             // (Hearth's hub or the set model: decided here, off the UI thread.)
-            let (provider, model) = match crate::ai::route(&s.ai, &task, &model_ref) {
+            let (provider, model, fallback) = match crate::ai::route(&s.ai, &task, &model_ref) {
                 Ok(r) => r,
                 Err(e) => {
                     {
@@ -1558,12 +1558,18 @@ impl ffi::Controller {
             let stream = task == "chat";
             let q2 = qt.clone();
             let k2 = key.clone();
-            let result = crate::ai::chat(&provider, &model, &msgs, &opts, &cancel, |piece| {
+            let send = |piece: &str| {
                 if stream {
                     let (k, p) = (k2.clone(), piece.to_string());
                     let _ = q2.queue(move |c| c.ai_delta(qs(&k), qs(&p)));
                 }
-            });
+            };
+            let mut result = crate::ai::chat(&provider, &model, &msgs, &opts, &cancel, send);
+            // (Hearth's hub doesn't have that model: ask its server directly.)
+            let missing = matches!(&result, Err(e) if e.contains("HTTP 404"));
+            if let (true, Some((p, m))) = (missing && !cancel.load(Ordering::Relaxed), &fallback) {
+                result = crate::ai::chat(p, m, &msgs, &opts, &cancel, send);
+            }
             if cancel.load(Ordering::Relaxed) {
                 return;
             }
@@ -1657,7 +1663,7 @@ impl ffi::Controller {
             _ => s.ai.chat_model.clone(),
         };
         let t = task.to_string();
-        crate::ai::route(&s.ai, &t, &r).is_ok_and(|(p, _)| p.local || crate::ai::has_key(&p))
+        crate::ai::route(&s.ai, &t, &r).is_ok_and(|(p, _, _)| p.local || crate::ai::has_key(&p))
     }
 
     fn ai_hearth_info(self: Pin<&mut Self>) {

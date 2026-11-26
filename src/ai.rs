@@ -317,18 +317,32 @@ pub fn hearth_alias(task: &str) -> &'static str {
     if matches!(task, "inline" | "classify" | "language" | "request" | "exit" | "check") { "fast" } else { "default" }
 }
 
-/// Who answers a task: Hearth's hub when it's on and running (ai.hearth),
-/// else the model set for it in Preferences.
-pub fn route(ai: &crate::settings::AiSettings, task: &str, model_ref: &str) -> Result<(Provider, String), String> {
+/// Who answers a task. Under Hearth (ai.hearth on and its hub running),
+/// Tessera's own local models still answer, but through the hub, so Hearth
+/// loads and unloads them with the desktop's others; an empty model is the
+/// hub's ("fast" or "default"); cloud providers with keys are asked
+/// directly. Anywhere else, the models set in Preferences, directly.
+/// The third value is where to go if the hub doesn't have the model.
+pub fn route(ai: &crate::settings::AiSettings, task: &str, model_ref: &str) -> Result<(Provider, String, Option<(Provider, String)>), String> {
+    let direct = resolve(&ai.providers, model_ref);
     if ai.hearth {
-        if let Some(p) = hearth_provider() {
-            return Ok((p, hearth_alias(task).to_string()));
+        if let Some(hub) = hearth_provider() {
+            if model_ref.is_empty() {
+                return Ok((hub, hearth_alias(task).to_string(), None));
+            }
+            if let Some(m) = model_ref.strip_prefix("hearth/") {
+                return Ok((hub, m.to_string(), None));
+            }
+            return match direct {
+                Some((p, m)) if !p.local => Ok((p, m, None)),
+                d => Ok((hub, model_ref.to_string(), d)),
+            };
         }
     }
     if model_ref.starts_with("hearth/") {
-        return resolve(&ai.providers, model_ref).ok_or_else(|| format!("{HEARTH_OFF} (Preferences › AI)."));
+        return Err(format!("{HEARTH_OFF} (Preferences › AI)."));
     }
-    resolve(&ai.providers, model_ref).ok_or_else(|| "No AI model set up (Preferences › AI).".to_string())
+    direct.map(|(p, m)| (p, m, None)).ok_or_else(|| "No AI model set up (Preferences › AI).".to_string())
 }
 
 /// For Preferences: what "default" and "fast" stand for, from the hub's
