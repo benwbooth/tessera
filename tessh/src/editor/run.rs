@@ -294,7 +294,7 @@ impl Editor {
             if self.ed.pending_tap.is_some_and(|p| p.1.elapsed() >= Duration::from_millis(60)) {
                 keylog(&format!("  tap fires {:?}", self.ed.pending_tap.map(|p| p.0)));
             }
-            self.ed.fire_tap();
+            self.ed.fire_tap(h);
             {
                 let b = self.bar.lock().unwrap().2;
                 if b != last_bar {

@@ -169,7 +169,7 @@ pub fn keys_table(ed: &Ed) -> String {
         (
             "Editing",
             vec![
-                ("Right Shift", "New line (tap; or Shift+Enter, Alt+Enter, Ctrl+J)"),
+                ("Right Shift", "New line (tap; or Shift+Enter, Alt+Enter, Ctrl+J); with completions shown, the highlighted one"),
                 ("Left Shift", "Take the grey suggestion (tap; or → / End at the end of the line, Alt+/)"),
                 ("Tab", "Complete; in the indentation, indent"),
                 ("Shift+Tab", "Outdent"),

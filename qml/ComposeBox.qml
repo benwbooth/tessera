@@ -227,7 +227,7 @@ Rectangle {
             ["Running", [["Enter", "Run the command \u2014 while one runs, it waits its turn"],
                          ["Right Ctrl", "Run it in the background, alongside (tap; or Ctrl+Enter)"],
                          ["Left Ctrl", "Switch between this editor and the terminal (tap; or click in the terminal to type there)"]]],
-            ["Editing", [["Right Shift", "New line (tap; or Shift+Enter, Alt+Enter)"],
+            ["Editing", [["Right Shift", "New line (tap; or Shift+Enter, Alt+Enter); with completions shown, the highlighted one"],
                          ["Left Shift", "Take the grey suggestion (tap; or \u2192 / End at the end of the line)"],
                          ["Tab", "Complete; in the indentation, indent"],
                          ["Shift+Tab", "Outdent"]]],
@@ -800,6 +800,14 @@ Rectangle {
     // the one that fits, or as much as all that fit have in common. Several
     // left with nothing more in common stay shown, to type on or pick from:
     // the first is never just taken. (tessh's editor does the same.)
+    function shiftTakesItem() {
+        const it = comp.items[compIndex]
+        if (!it || !compCurrent() && !historyMode) return false
+        if (compChosen || historyMode) return true
+        // (Nothing typed yet, after "cd " or a bracket: picked first.)
+        const p = edit.cursorPosition, typed = edit.text.slice(Math.min(comp.start, p), p).toLowerCase()
+        return typed !== "" && it.insert.toLowerCase().startsWith(typed)
+    }
     function tabComp() {
         const items = comp.items
         if (items.length === 0) return
@@ -1319,7 +1327,8 @@ Rectangle {
             }
             Keys.priority: Keys.BeforeItem
             // A Shift tapped on its own: right Shift is a new line (Shift+Enter),
-            // left Shift takes the AI's suggestion (or asks for one).
+            // or the highlighted completion when the list is up; left Shift
+            // takes the AI's suggestion (or asks for one).
             property int shiftSide: 0          // 1 left, 2 right, 0 none / spoiled
             property double shiftAt: 0
             function shiftSideOf(e) {
@@ -1346,7 +1355,12 @@ Rectangle {
                 property int side: 0
                 interval: 60
                 onTriggered: {
-                    if (side === 2) box.newline()
+                    // (Right Shift with the list up: the item highlighted in
+                    // it, as Tab would once there's no doubt left.)
+                    // (Only one picked with Up/Down or starting with what's
+                    // typed: a list up on a loose match leaves it a new line.)
+                    if (side === 2 && compPopup.visible && box.shiftTakesItem()) box.acceptComp()
+                    else if (side === 2) box.newline()
                     else if (!box.acceptGhost()) box.askGhostNow()
                 }
             }

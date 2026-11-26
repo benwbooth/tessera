@@ -1882,7 +1882,20 @@ impl Ed {
     /// opens or updates once no more keys are waiting, errors show,
     /// tooltips come up.
     /// A tap whose moment passed with no key after it: done now.
-    pub fn fire_tap(&mut self) {
+    fn shift_takes_item(&mut self, h: &mut dyn Hooks) -> bool {
+        if !self.comp.hist && (self.comp.for_text != self.t.text || self.comp.for_cursor != self.t.cursor) {
+            self.request_complete(h);
+        }
+        let Some(it) = self.comp.items.get(self.comp.index) else { return false };
+        if self.comp.chosen || self.comp.hist {
+            return true;
+        }
+        let s = self.comp.start.min(self.t.cursor);
+        let typed = self.t.text.get(s..self.t.cursor).unwrap_or("").to_lowercase();
+        // (Nothing typed yet, after "cd " or a bracket: picked first.)
+        !typed.is_empty() && it.insert.to_lowercase().starts_with(&typed)
+    }
+    pub fn fire_tap(&mut self, h: &mut dyn Hooks) {
         let Some((t, at)) = self.pending_tap else { return };
         if at.elapsed() < Duration::from_millis(60) {
             return;
@@ -1890,6 +1903,11 @@ impl Ed {
         self.pending_tap = None;
         self.dirty = true;
         match t {
+            // (Right Shift with the list up: the item highlighted in it, as
+            // Tab would once there's no doubt left.)
+            // (Only an item picked with Up/Down or starting with what's
+            // typed: a list up on a loose match leaves it a new line.)
+            'n' if self.comp.open && self.shift_takes_item(h) => self.accept_comp(None, h),
             'n' => self.newline(),
             'g' => {
                 if !self.accept_ghost() {

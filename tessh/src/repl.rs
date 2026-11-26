@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 /// chord most terminals send as plain Enter, and what to press instead.
 /// (Tessera key, what it does, the alternative here, kitty-protocol keys.)
 pub const KEYS: &[(&str, &str, &str, &str)] = &[
-    ("Right Shift (tap)", "New line", "Alt+Enter or Ctrl+J", "right Shift tap, Shift+Enter"),
+    ("Right Shift (tap)", "New line; with completions shown, the highlighted one", "Alt+Enter or Ctrl+J", "right Shift tap, Shift+Enter"),
     ("Shift+Enter", "New line", "Alt+Enter or Ctrl+J", "Shift+Enter"),
     ("Left Shift (tap)", "Take the grey suggestion; with none, ask the AI for one", "→ or End at the end takes it; Ctrl+Space takes it or asks", "left Shift tap"),
     ("Right Ctrl (tap)", "Run in the background (as with a trailing &)", "Alt+&", "right Ctrl tap, Ctrl+Enter"),
