@@ -41,6 +41,7 @@ pub fn presets() -> Vec<Provider> {
         local,
     };
     vec![
+        p("hearth", "Hearth AI hub", "openai", "", true, ""),
         p("ollama", "Ollama", "openai", "http://localhost:11434/v1", true, "none"),
         p("llamacpp", "llama.cpp server", "openai", "http://localhost:8080/v1", true, ""),
         p("lmstudio", "LM Studio", "openai", "http://localhost:1234/v1", true, ""),
@@ -92,6 +93,9 @@ pub fn set_key(provider: &str, key: &str) -> Result<(), String> {
 
 /// The key for a provider: stored, "env:NAME", or the usual variable.
 pub fn key(provider: &Provider) -> String {
+    if provider.id == "hearth" {
+        return hearth_hub().map(|h| h.token).unwrap_or_default();
+    }
     let stored = secrets().get(&provider.id).and_then(|v| v.as_str()).unwrap_or("").to_string();
     if let Some(var) = stored.strip_prefix("env:") {
         return std::env::var(var).unwrap_or_default();
@@ -129,6 +133,13 @@ fn agent(timeout: Duration) -> ureq::Agent {
 
 /// The models a provider offers.
 pub fn models(provider: &Provider) -> Result<Vec<String>, String> {
+    let live;
+    let provider = if provider.id == "hearth" {
+        live = hearth_provider().ok_or_else(|| HEARTH_OFF.to_string())?;
+        &live
+    } else {
+        provider
+    };
     let base = provider.base_url.trim_end_matches('/');
     let k = key(provider);
     let a = agent(Duration::from_secs(8));
@@ -251,8 +262,97 @@ pub fn strip_thinking(s: &str) -> String {
 /// The provider and model for a "provider/model" name.
 pub fn resolve(providers: &[Provider], model_ref: &str) -> Option<(Provider, String)> {
     let (pid, model) = model_ref.split_once('/')?;
+    if pid == "hearth" {
+        return hearth_provider().map(|p| (p, model.to_string()));
+    }
     let p = providers.iter().find(|p| p.id == pid).cloned().or_else(|| presets().into_iter().find(|p| p.id == pid))?;
     Some((p, model.to_string()))
+}
+
+// ---- Hearth's AI hub -----------------------------------------------------------------
+//
+// On the Hearth desktop, hearth-ai serves the desktop's models to apps as an
+// OpenAI-compatible server on 127.0.0.1 (the same models, cloud rule and
+// graphics-memory manager as Hearth's assistant). It says where, with a
+// token, in $XDG_RUNTIME_DIR/hearth/ai-api.json while it runs. "default" and
+// "fast" are the models picked in Hearth's Settings › AI › Apps.
+
+const HEARTH_OFF: &str = "Hearth's AI hub isn't running here";
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HearthHub {
+    pub url: String,
+    pub token: String,
+}
+
+fn hearth_file() -> Option<PathBuf> {
+    if let Some(f) = std::env::var_os("HEARTH_AI_API_FILE") {
+        return Some(PathBuf::from(f));
+    }
+    std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join("hearth").join("ai-api.json"))
+}
+
+/// The hub, when it's running (its file is there and its process alive).
+/// A small tmpfs file: cheap enough to read per request.
+pub fn hearth_hub() -> Option<HearthHub> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(hearth_file()?).ok()?).ok()?;
+    let url = v["url"].as_str()?.to_string();
+    let token = v["token"].as_str().unwrap_or("").to_string();
+    #[cfg(target_os = "linux")]
+    if let Some(pid) = v["pid"].as_u64() {
+        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return None; // left behind by a hub that died
+        }
+    }
+    Some(HearthHub { url, token })
+}
+
+pub fn hearth_provider() -> Option<Provider> {
+    let hub = hearth_hub()?;
+    Some(Provider { id: "hearth".into(), name: "Hearth AI hub".into(), kind: "openai".into(), base_url: hub.url, reasoning_effort: String::new(), local: true })
+}
+
+/// Tasks answered as you type use the hub's "fast" model; the rest "default".
+pub fn hearth_alias(task: &str) -> &'static str {
+    if matches!(task, "inline" | "classify" | "language" | "request" | "exit" | "check") { "fast" } else { "default" }
+}
+
+/// Who answers a task: Hearth's hub when it's on and running (ai.hearth),
+/// else the model set for it in Preferences.
+pub fn route(ai: &crate::settings::AiSettings, task: &str, model_ref: &str) -> Result<(Provider, String), String> {
+    if ai.hearth {
+        if let Some(p) = hearth_provider() {
+            return Ok((p, hearth_alias(task).to_string()));
+        }
+    }
+    if model_ref.starts_with("hearth/") {
+        return resolve(&ai.providers, model_ref).ok_or_else(|| format!("{HEARTH_OFF} (Preferences › AI)."));
+    }
+    resolve(&ai.providers, model_ref).ok_or_else(|| "No AI model set up (Preferences › AI).".to_string())
+}
+
+/// For Preferences: what "default" and "fast" stand for, from the hub's
+/// model list ({running, default: {label, available}, fast: {...}}).
+pub fn hearth_info() -> Value {
+    let Some(p) = hearth_provider() else { return json!({"running": false}) };
+    let a = agent(Duration::from_secs(8));
+    let resp = a.get(&format!("{}/models", p.base_url.trim_end_matches('/'))).header("Authorization", &format!("Bearer {}", key(&p))).call();
+    let mut resp = match resp {
+        Ok(r) => r,
+        Err(e) => return json!({"running": false, "error": e.to_string()}),
+    };
+    let status = resp.status().as_u16();
+    let body: Value = resp.body_mut().read_json().unwrap_or(json!({}));
+    if status >= 400 {
+        return json!({"running": true, "error": error_text(&body, status)});
+    }
+    let mut out = json!({"running": true, "url": p.base_url});
+    for m in body["data"].as_array().into_iter().flatten() {
+        if let Some(id @ ("default" | "fast")) = m["id"].as_str() {
+            out[id] = m["hearth"].clone();
+        }
+    }
+    out
 }
 
 /// First run: Ollama on this machine, if it's there, with its smallest model

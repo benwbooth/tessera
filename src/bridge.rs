@@ -694,6 +694,11 @@ pub mod ffi {
         fn ai_list_models(self: Pin<&mut Controller>, provider_json: &QString);
         #[qsignal]
         fn ai_models_ready(self: Pin<&mut Controller>, provider: QString, json: QString);
+        /// Hearth's AI hub, in the background: ai_hearth_ready(json {running, default, fast}).
+        #[qinvokable]
+        fn ai_hearth_info(self: Pin<&mut Controller>);
+        #[qsignal]
+        fn ai_hearth_ready(self: Pin<&mut Controller>, json: QString);
         /// First run: set up Ollama if it's running here (background; settings change).
         #[qinvokable]
         fn ai_autodetect(self: Pin<&mut Controller>);
@@ -1518,10 +1523,6 @@ impl ffi::Controller {
             _ => s.ai.chat_model.clone(),
         };
         let qt = self.qt_thread();
-        let Some((provider, model)) = crate::ai::resolve(&s.ai.providers, &model_ref) else {
-            let _ = qt.queue(move |c| c.ai_done(qs(&key), qs(""), qs("No AI model set up (Preferences › AI).")));
-            return;
-        };
         let cancel = Arc::new(AtomicBool::new(false));
         if let Some(old) = ai_jobs().lock().unwrap().insert(key.clone(), cancel.clone()) {
             old.store(true, Ordering::Relaxed);
@@ -1536,10 +1537,24 @@ impl ffi::Controller {
             "command" | "fix" => crate::ai::Options { max_tokens: 300, temperature: 0.2, timeout: std::time::Duration::from_secs(60) },
             _ => crate::ai::Options { max_tokens: 4096, temperature: 0.4, timeout: std::time::Duration::from_secs(600) },
         };
-        if std::env::var_os("TESSERA_AI_DEBUG").is_some() {
-            eprintln!("tessera ai: {task} with {}/{model} ({} messages)", provider.id, msgs.len());
-        }
         std::thread::spawn(move || {
+            // (Hearth's hub or the set model: decided here, off the UI thread.)
+            let (provider, model) = match crate::ai::route(&s.ai, &task, &model_ref) {
+                Ok(r) => r,
+                Err(e) => {
+                    {
+                        let mut jobs = ai_jobs().lock().unwrap();
+                        if jobs.get(&key).is_some_and(|c| Arc::ptr_eq(c, &cancel)) {
+                            jobs.remove(&key);
+                        }
+                    }
+                    let _ = qt.queue(move |c| c.ai_done(qs(&key), qs(""), qs(&e)));
+                    return;
+                }
+            };
+            if std::env::var_os("TESSERA_AI_DEBUG").is_some() {
+                eprintln!("tessera ai: {task} with {}/{model} ({} messages)", provider.id, msgs.len());
+            }
             let stream = task == "chat";
             let q2 = qt.clone();
             let k2 = key.clone();
@@ -1641,7 +1656,16 @@ impl ffi::Controller {
             "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
             _ => s.ai.chat_model.clone(),
         };
-        crate::ai::resolve(&s.ai.providers, &r).is_some_and(|(p, _)| p.local || crate::ai::has_key(&p))
+        let t = task.to_string();
+        crate::ai::route(&s.ai, &t, &r).is_ok_and(|(p, _)| p.local || crate::ai::has_key(&p))
+    }
+
+    fn ai_hearth_info(self: Pin<&mut Self>) {
+        let qt = self.qt_thread();
+        std::thread::spawn(move || {
+            let json = crate::ai::hearth_info().to_string();
+            let _ = qt.queue(move |c| c.ai_hearth_ready(qs(&json)));
+        });
     }
 
     fn ai_presets(&self) -> ffi::QString {

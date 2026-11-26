@@ -78,15 +78,17 @@ Window {
         }
         return out
     }
+    property var hearthInfo: ({ running: false, checking: true })   // Hearth's AI hub: {running, default, fast}
     Connections {
         target: prefs.controller
+        function onAiHearthReady(json) { try { prefs.hearthInfo = JSON.parse(json) } catch (e) { prefs.hearthInfo = { running: false } } }
         function onAiModelsReady(provider, json) {
             const m = Object.assign({}, prefs.aiModels)
             m[provider] = json.startsWith("error:") ? json : JSON.parse(json)
             prefs.aiModels = m
         }
     }
-    onPageChanged: { if (page === "ai") refreshModels(); if (page === "prompt") loadPrompt() }
+    onPageChanged: { if (page === "ai") { refreshModels(); controller.aiHearthInfo() } if (page === "prompt") loadPrompt() }
     // ---- the prompt builder -------------------------------------------------
     property string promptToml: ""
     property var promptPreviews: ({})     // key -> {lines, right}
@@ -1617,6 +1619,30 @@ Window {
                             Layout.margins: 24
                             spacing: 12
 
+                            SectionTitle { text: "Hearth AI hub" }
+                            ToggleRow {
+                                label: "Use Hearth's AI hub when it's running"
+                                hint: "On the Hearth desktop: the models picked in Hearth's Settings \u203a AI \u203a Apps, loaded and unloaded with the rest of the desktop's. Without Hearth, the models below answer."
+                                checked: prefs.ai.hearth !== false
+                                onToggled: (on) => prefs.setAi("hearth", on)
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.maximumWidth: 760
+                                Hint {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    readonly property var h: prefs.hearthInfo
+                                    function label(m) { return m ? (m.label || m.model || "?") + (m.available === false ? " (not available)" : "") : "?" }
+                                    text: h.checking ? "Looking for Hearth\u2026"
+                                        : !h.running ? (h.error ? "\u26a0 " + h.error : "Hearth's AI hub isn't running here: the models below answer.")
+                                        : h.error ? "\u26a0 " + h.error
+                                        : (prefs.ai.hearth !== false ? "In use. " : "Running (not used). ")
+                                          + "Suggestions and checks: " + label(h.fast) + ". Assistant, commands and fixes: " + label(h.default) + "."
+                                }
+                                PlainButton { implicitHeight: 24; text: "Refresh"; onClicked: prefs.controller.aiHearthInfo() }
+                            }
+
                             SectionTitle { text: "Providers" }
                             Hint {
                                 Layout.fillWidth: true
@@ -1660,6 +1686,8 @@ Window {
                                             }
                                         }
                                         RowLayout {
+                                            // (Hearth's hub says where it is itself.)
+                                            visible: provRow.modelData.id !== "hearth"
                                             Text { text: "Address"; color: Theme.textDim; font.pixelSize: 12; Layout.preferredWidth: 60 }
                                             Field {
                                                 saved: provRow.modelData.base_url

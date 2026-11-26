@@ -31,6 +31,13 @@ A multi-line editor under the terminal while the shell waits at its prompt
 - Providers: any OpenAI-compatible server (Ollama, llama.cpp, LM Studio,
   vLLM, LocalAI, OpenAI/Codex, Gemini, OpenRouter, Groq, Mistral, DeepSeek,
   xAI) and Anthropic (Claude); keys in secrets.json (owner-only) or env vars.
+- Hearth's AI hub (`ai.hearth`, on by default): when hearth-ai runs, every
+  task goes to its OpenAI-compatible app server (found through
+  `$XDG_RUNTIME_DIR/hearth/ai-api.json`, a bearer token, the process checked
+  alive): "fast" for suggestions, checks, # endings, language and exit-status
+  guesses, "default" for chat, # commands and fixes. Without it, the models
+  set in Preferences. `hearth/<model>` names one of the hub's models directly.
+  The route is decided on the request's own thread (`ai::route`).
 - Ghost-text completion (Tab accepts) from a small local model — on this
   machine `qwen3.5:4b` in Ollama; larger models for chat.
 - AI checking as you type: risky or wrong commands flagged inline with a

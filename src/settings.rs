@@ -450,6 +450,9 @@ pub struct AiSettings {
     pub natural_language: bool,
     /// The first-run look for a local model server happened.
     pub autodetected: bool,
+    /// Use Hearth's AI hub when it runs here (the desktop's models and
+    /// memory manager); the models above when it doesn't.
+    pub hearth: bool,
 }
 
 impl Default for AiSettings {
@@ -463,6 +466,7 @@ impl Default for AiSettings {
             check: true,
             natural_language: true,
             autodetected: false,
+            hearth: true,
         }
     }
 }
