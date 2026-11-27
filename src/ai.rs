@@ -482,6 +482,9 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
         let list: Vec<String> = a.iter().map(|(k, v)| format!("{k}='{}'", v.as_str().unwrap_or(""))).collect();
         base.push_str(&format!(" Aliases in their shell: {} (an alias runs what it stands for: judge options by that program).", list.join(", ")));
     }
+    if shell == "tessh" {
+        base.push_str(TESSH_NOTES);
+    }
     match task {
         "inline" => format!(
             "{base} Complete the command the user is typing. Reply with ONLY the complete command line (including what they typed), \
@@ -531,6 +534,54 @@ pub fn system_prompt(task: &str, ctx: &Value) -> String {
     }
 }
 
+/// What a model needs to know of tessh (Tessera's shell, which no model has
+/// seen): ordinary commands work as in any shell; the rest is Python.
+const TESSH_NOTES: &str = " Their shell, tessh, runs ordinary commands, pipes and redirections as any shell does, \
+    but its own lines compile to Python: words separated by spaces with no commas and no call parentheses, \
+    $name is a variable, (cmd …) captures output or calls a function, `name = value` assigns, \
+    and blocks (for, if, while, def) end their line with no ':' and no do/then and continue on indented lines, \
+    e.g. `for p in *.py` or `if $n > 1`; `print (glob *.py)`; `echo hi | str.upper | print`; `data = json.loads (cat x.json)`. \
+    Never use bash's do/done, then/fi, $(...) or [[ ]].";
+
+/// tessh for models (tessh/doc/ai.md, a condensed guide), sent as its own
+/// first system message when the shell is tessh.
+pub fn tessh_primer() -> &'static str {
+    let doc = include_str!("../tessh/doc/ai.md");
+    doc.split_once("-->").map(|(_, rest)| rest.trim()).unwrap_or(doc)
+}
+
+/// Whether a line being typed is tessh's own (Python-ish) rather than an
+/// ordinary command, so a suggestion for it needs the primer (it makes a
+/// request about twice as slow, so plain commands go without).
+pub fn looks_tessh(line: &str) -> bool {
+    let first = line.split_whitespace().next().unwrap_or("");
+    matches!(first, "for" | "if" | "elif" | "while" | "def" | "with" | "import" | "from" | "try" | "match" | "class" | "return")
+        || line.contains(['$', '(', '[', '{']) || line.contains(" = ") || line.contains(" == ")
+}
+
+/// A tessh suggestion without the bash a model adds anyway (`for f in *.png
+/// do echo $f done`): cut at the first do/then/done/fi. Never shorter than
+/// what was typed.
+pub fn tessh_suggestion(reply: &str, typed: &str) -> String {
+    let mut cut = reply.len();
+    for kw in ["do", "then", "done", "fi", "end"] {
+        for sep in [" ", "; ", ";"] {
+            let pat = format!("{sep}{kw}");
+            let mut from = typed.len().min(reply.len());
+            while let Some(i) = reply.get(from..).and_then(|r| r.find(&pat)).map(|i| i + from) {
+                let end = i + pat.len();
+                if reply[end..].chars().next().is_none_or(|c| !c.is_alphanumeric() && c != '_') {
+                    cut = cut.min(i);
+                    break;
+                }
+                from = end;
+            }
+        }
+    }
+    let out = reply[..cut].trim_end().trim_end_matches(';').trim_end();
+    if out.len() < typed.len() || !out.starts_with(typed) { typed.to_string() } else { out.to_string() }
+}
+
 /// A command from a model's reply: the first code block's contents, or the
 /// first non-empty line, without a "$ " prompt.
 pub fn command_from(reply: &str) -> String {
@@ -555,6 +606,17 @@ mod tests {
         assert_eq!(strip_thinking("<think>hmm</think> git commit"), "git commit");
         assert_eq!(command_from("```bash\n$ ls -la\n```\nThat lists."), "ls -la");
         assert_eq!(command_from("git status"), "git status");
+    }
+
+    #[test]
+    fn tessh_suggestions() {
+        assert_eq!(tessh_suggestion("for f in *.png do echo $f done", "for f in *."), "for f in *.png");
+        assert_eq!(tessh_suggestion("for f in (glob \"*.py\"); do echo $f", "for f in (glob"), "for f in (glob \"*.py\")");
+        assert_eq!(tessh_suggestion("git log --oneline | head", "git log --oneline | he"), "git log --oneline | head");
+        assert_eq!(tessh_suggestion("cd ~/src/dotfiles", "cd ~/src/do"), "cd ~/src/dotfiles");
+        assert_eq!(tessh_suggestion("for f in (glob \"*.txt\") do echo $f end", "for f in (glob"), "for f in (glob \"*.txt\")");
+        assert!(looks_tessh("for [k v] in ($d.it") && looks_tessh("x = [1 2") && !looks_tessh("sudo nixos-reb"));
+        assert!(tessh_primer().starts_with("# tessh in brief"));
     }
 
     #[test]

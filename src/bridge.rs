@@ -1524,6 +1524,14 @@ impl ffi::Controller {
             old.store(true, Ordering::Relaxed);
         }
         msgs.insert(0, serde_json::json!({"role": "system", "content": crate::ai::system_prompt(&task, &ctx)}));
+        // (tessh is new to every model: its condensed guide goes first, the
+        // same text each time. Suggestions for plain commands go without.)
+        if ctx["shell"] == "tessh" {
+            let typed = msgs.last().and_then(|m| m["content"].as_str()).and_then(|c| c.rsplit_once("Complete this command line: ")).map(|(_, t)| t).unwrap_or("");
+            if task != "inline" || crate::ai::looks_tessh(typed) {
+                msgs.insert(0, serde_json::json!({"role": "system", "content": crate::ai::tessh_primer()}));
+            }
+        }
         let opts = match task.as_str() {
             "inline" | "request" => crate::ai::Options { max_tokens: 80, temperature: 0.1, timeout: std::time::Duration::from_secs(8) },
             "classify" => crate::ai::Options { max_tokens: 8, temperature: 0.0, timeout: std::time::Duration::from_secs(10) },
@@ -1591,6 +1599,10 @@ impl ffi::Controller {
             }
             let (reply, err) = match result {
                 // (One command, for the tasks that want one.)
+                Ok(r) if task == "inline" && ctx["shell"] == "tessh" => {
+                    let typed = msgs.last().and_then(|m| m["content"].as_str()).and_then(|c| c.rsplit_once("Complete this command line: ")).map(|(_, t)| t).unwrap_or("");
+                    (crate::ai::tessh_suggestion(&crate::ai::command_from(&r), typed), String::new())
+                }
                 Ok(r) if matches!(task.as_str(), "inline" | "command" | "fix") => (crate::ai::command_from(&r), String::new()),
                 Ok(r) => (r, String::new()),
                 Err(e) => (String::new(), e),

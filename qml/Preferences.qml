@@ -1763,7 +1763,7 @@ Window {
                                 }
                                 Item { Layout.fillWidth: true }
                             }
-                            ModelRow { key: "inline_model"; label: "Suggestions as you type"; hint: "A base coder model is quickest: it continues the line instead of chatting (e.g. ollama/qwen2.5-coder:1.5b-base, about 1 GB). With one, checks and # endings use the assistant's model. A small chat model (ollama/qwen3.5:4b) works too and also checks commands unless the next one is set." }
+                            ModelRow { key: "inline_model"; label: "Suggestions as you type"; hint: "A small chat model is best (e.g. ollama/qwen3.5:4b): it finishes half-typed words and knows commands, and is told how tessh lines look. Also checks commands unless the next one is set. A base coder model (\u2026-base) answers quicker but guesses worse." }
                             ModelRow { key: "chat_model"; label: "Assistant and commands"; hint: "The sidebar, # descriptions turned into commands, and fixing failed commands (e.g. ollama/qwen3.5:9b, anthropic/claude-sonnet-4-5, openai/gpt-5)." }
                             ModelRow { key: "check_model"; label: "Checking commands"; hint: "Empty: the suggestions model." }
 

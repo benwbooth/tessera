@@ -40,13 +40,19 @@ A multi-line editor under the terminal while the shell waits at its prompt
   hub's "fast"; a cloud model with a key: direct; one the hub doesn't have
   (404): direct). `hearth/<model>` names a hub model. Without the
   hub, everything is direct. Decided on the request's thread (`ai::route`).
-- Ghost-text completion (Tab accepts) from a small local model — on this
-  machine `qwen2.5-coder:1.5b-base` in Ollama, a base coder model asked
-  through `/completions` with the folder and recent commands as a script
-  ending in the typed text (~50–150 ms warm, ~2 GB of VRAM; `ai::complete`,
-  any model named *base*, starcoder, codestral, -fim or mellum). A chat model
-  works too. With a completion model, checks, # endings and guesses use the
-  assistant's model; larger models for chat.
+- Ghost-text completion (Tab accepts) from a small local chat model — on
+  this machine `qwen3.5:4b` in Ollama (~150–450 ms warm, 4 GB beside
+  Hearth's assistant model). Under tessh every request starts with
+  `tessh/doc/ai.md` (a ~1.2k-token condensed guide for models; the full guide
+  is ~23k tokens and made suggestions 3x slower for little more), except
+  suggestions for plain command lines (`ai::looks_tessh`), which stay at
+  ~200 ms; `ai::tessh_suggestion` cuts the bash a model adds anyway
+  (`do … done`).
+  A base coder model (`…-base`, starcoder, codestral: `ai::complete`, a raw
+  /completions prompt) is supported and quicker, but compared on real tessh
+  lines (2026-11-26) it couldn't finish a half-typed word (`nixos-reb`,
+  `| he`, `str.up`) and didn't know commands, so it isn't the default; with
+  one, checks and # endings use the assistant's model. Larger models for chat.
 - AI checking as you type: risky or wrong commands flagged inline with a
   reason (rm -rf with a variable, a flag the command doesn't have, ...).
 - Plain English to a command; explain a command; fix the last failed one
