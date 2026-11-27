@@ -22,7 +22,14 @@ Rectangle {
     // the languages used lately ranked up. It runs with that language's
     // interpreter; see TerminalPane's onSubmitted.)
     property string aiLang: ""
-    readonly property string lang: langOverride !== "" ? langOverride : contentLang !== "" ? contentLang : magikaLang !== "" ? magikaLang : aiLang !== "" ? aiLang : autoLang
+    readonly property string lang: langOverride !== "" ? langOverride : detectedLang !== "" ? detectedLang : autoLang
+    // (What the text was detected as; in a tessh pane, Python is tessh's own
+    // (it runs Python): print() was taken for Python, and Python's check
+    // then complained about the line.)
+    readonly property string detectedLang: {
+        const d = contentLang !== "" ? contentLang : magikaLang !== "" ? magikaLang : aiLang
+        return d === "python" && shellName === "tessh" && runShell === "" ? "" : d
+    }
     // (Several lines its own rules can't place, at the shell: Magika's model
     // says, in the background, a moment after typing stops. Not where the
     // default is another language: it doesn't know tessh, and would call
