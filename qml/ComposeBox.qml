@@ -873,7 +873,7 @@ Rectangle {
             const inWord = !/\s/.test(prev) && /\s/.test(next)
             // (Right after "cd ", "ls ", "export ", "unset ": the folders or
             // variables at once, to click through.)
-            const builtinArg = p === t.length && /^\s*(cd|pushd|ls|ll|la|export|unset)\s+$/.test(t)
+            const builtinArg = p === t.length && /^\s*(cd|pushd|ls|ll|la|export|unset)(\s+-\S*)*\s+$/.test(t)
             if (builtinArg && !(box.keys === "vi" && box.viNormal)) { box.compOpen = true; box.compIndex = 0; box.requestComplete(); return }
             if (box.compOpen && box.historyMode) return
             if (box.fromHistory) return
@@ -1393,7 +1393,7 @@ Rectangle {
                 compAuto.restart()
                 // (cd's, ls's folders the moment the space after it goes in:
                 // no pause to wait for.)
-                if (!box.historyMode && !box.fromHistory && /^\s*(cd|pushd|ls|ll|la)\s$/.test(text) && !(box.keys === "vi" && box.viNormal)) {
+                if (!box.historyMode && !box.fromHistory && /^\s*(cd|pushd|ls|ll|la)(\s+-\S*)*\s$/.test(text) && !(box.keys === "vi" && box.viNormal)) {
                     box.typing = false; box.compOpen = true; box.compIndex = 0; box.requestComplete()
                 }
                 // A "# request": the command it'd be, from the AI, as the

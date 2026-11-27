@@ -2042,7 +2042,10 @@ impl Ed {
         let t = &self.t.text;
         let builtin_arg = p == t.len() && {
             let s = t.trim_start();
-            ["cd", "pushd", "ls", "ll", "la", "export", "unset"].iter().any(|b| s.strip_prefix(b).is_some_and(|r| !r.is_empty() && r.trim().is_empty()))
+            // (Options between, cd -L : the folders still.)
+            ["cd", "pushd", "ls", "ll", "la", "export", "unset"].iter().any(|b| {
+                s.strip_prefix(b).is_some_and(|r| r.starts_with(char::is_whitespace) && r.ends_with(char::is_whitespace) && r.split_whitespace().all(|w| w.starts_with('-')))
+            })
         };
         if builtin_arg && !(self.keys == Keys::Vi && self.vi_normal()) {
             self.comp.open = true;
