@@ -120,6 +120,7 @@ Item {
     property int shellPid: 0            // from the daemon (for the prompt's environment)
     property var promptSegments: ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
     property var commandHistory: []
+    property var historyLangs: ({})
     property var controller: null
     // REPLs the editor also serves (the shell needs its integration's prompt marks).
     readonly property var replPrograms: ["python", "python3", "ipython", "bpython", "node", "deno", "bun", "tessh"]
@@ -384,6 +385,7 @@ Item {
         controller: pane.controller
         keys: pane.editorKeys
         history: pane.commandHistory
+        historyLangs: pane.historyLangs
         // (A notebook with a Jupyter kernel: the editor writes its next cell.)
         readonly property bool forNotebook: notebook.visible && !notebook.shellKernel
         // (tessh as the pane's shell, not only started from another: its

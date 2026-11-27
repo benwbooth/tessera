@@ -248,6 +248,22 @@ fn when(now: u64, t: u64, cwd: &str) -> String {
 }
 
 /// Every command (newest last) for Up/Down in the editor, as a JSON array.
+/// Whether a history entry's language is a shell's (any shell's line can be
+/// suggested in any shell's editor; ""/unknown counts as one).
+pub fn is_shell_lang(l: &str) -> bool {
+    matches!(l, "" | "bash" | "sh" | "zsh" | "fish" | "tessh" | "nu" | "nushell" | "powershell" | "pwsh" | "elvish" | "xonsh" | "dash" | "ksh" | "shell")
+}
+
+/// {command: language} for the last `limit` entries written in something
+/// other than a shell (Python's `if True:`): a shell's suggestions leave them
+/// out, another language's keeps to its own.
+pub fn langs_json(limit: usize) -> String {
+    let a = all();
+    let start = a.len().saturating_sub(limit);
+    let m: serde_json::Map<String, serde_json::Value> = a[start..].iter().filter(|e| !is_shell_lang(&e.lang)).map(|e| (e.cmd.clone(), serde_json::Value::from(e.lang.clone()))).collect();
+    serde_json::Value::Object(m).to_string()
+}
+
 pub fn all_json(limit: usize) -> String {
     let a = all();
     let start = a.len().saturating_sub(limit);

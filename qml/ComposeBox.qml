@@ -125,6 +125,7 @@ Rectangle {
     readonly property var languages: { try { return JSON.parse(controller.syntaxLanguages()) } catch (e) { return [["bash", "Shell"]] } }
     property string keys: "emacs"      // "emacs", "vi", "vscode"
     property var history: []           // oldest first (shared by the window)
+    property var historyLangs: ({})    // (a line's language, when not a shell's: shared too)
     property var themeData: ({})       // the terminal's theme (ansi colors)
     property string cwd: ""            // the shell's folder (for path completion)
     property bool showPrompt: true     // Tessera's prompt bar above the editor
@@ -282,6 +283,7 @@ Rectangle {
             const old = h.indexOf(t)
             if (old >= 0) h.splice(old, 1)
             h.push(t)
+            if (lang !== "" && !box.shellLang(lang)) box.historyLangs[t] = lang; else delete box.historyLangs[t]
             if (controller) controller.historyAdd(t, box.cwd, box.lang)
         }
         histIndex = -1
@@ -787,6 +789,7 @@ Rectangle {
             try { r = JSON.parse(json) } catch (e) { return }
             box.comp = r
             box.compFor = text + "\u0001" + cursor
+            if (!hist) box.compGhost()
             if (box.compIndex >= r.items.length) box.compIndex = 0
             const byTab = box.compByTab
             // (Still coming: Tab's turn is when they're in.)
@@ -977,6 +980,27 @@ Rectangle {
     // and Tab: the list was still "cd "'s, and its first folder went in
     // before "Can". Tab then asks again, for the text as it is.)
     property string compFor: ""
+    // With nothing else suggested: what every completion of the word being
+    // typed starts with, past what's typed (prin → t), in grey, as fish
+    // does. True when it set one.
+    function compGhost() {
+        if (ghost !== "" || historyMode || !compCurrent() || edit.cursorPosition !== edit.length || edit.text.indexOf("\n") >= 0) return false
+        if (comp.end !== edit.cursorPosition) return false
+        const typed = edit.text.substring(comp.start, comp.end)
+        if (typed === "") return false
+        let cp = null
+        for (const it of comp.items) {
+            if (!it.insert.startsWith(typed)) continue
+            if (cp === null) { cp = it.insert; continue }
+            let n = 0
+            while (n < cp.length && n < it.insert.length && cp[n] === it.insert[n]) n++
+            cp = cp.substring(0, n)
+        }
+        if (cp === null || cp.length <= typed.length) return false
+        ghost = cp.substring(typed.length)
+        lastGhostBase = edit.text
+        return true
+    }
     function compCurrent() { return compFor === edit.text + "\u0001" + edit.cursorPosition }
     function compKey(e) {
         if (!compOpen || comp.items.length === 0) return false
@@ -1460,7 +1484,9 @@ Rectangle {
                     // typed: a list up on a loose match leaves it a new line.)
                     if (side === 2 && compPopup.visible && box.shiftTakesItem()) box.acceptComp()
                     else if (side === 2) box.newline()
-                    else if (!box.acceptGhost()) box.askGhostNow()
+                    // (Nothing suggested: the completions' common start at
+                    // once; else the AI is asked.)
+                    else if (!box.acceptGhost() && !(box.compGhost() && box.acceptGhost())) box.askGhostNow()
                 }
             }
             Keys.onPressed: (e) => {
@@ -1835,6 +1861,7 @@ Rectangle {
     // (What a suggestion adds: when it closes what the closers close, it
     // takes their place; else they follow it.)
     function ghostTakesClosers() { return closers !== "" && ghost.indexOf(closers) >= 0 }
+    function shellLang(l) { return ["", "bash", "sh", "zsh", "fish", "tessh", "nu", "nushell", "powershell", "pwsh", "elvish", "xonsh", "dash", "ksh", "shell"].indexOf(l) >= 0 }
     function historyGhost(t) {
         if (t.trim().length < 2 || t.indexOf("\n") >= 0 || !atSuggestEnd) return ""
         for (let i = box.history.length - 1; i >= 0; i--) {
@@ -1842,6 +1869,10 @@ Rectangle {
             // (A cd to a relative folder was run from somewhere else: it
             // need not be here.)
             if (/^\s*(cd|pushd)\s+[^\s\/~$-]/.test(h)) continue
+            // (Another language's line isn't this one's: Python's `if True:`
+            // offered its ':' to a tessh line.)
+            const hl = box.historyLangs[h]
+            if (hl !== undefined ? hl !== box.lang : !box.shellLang(box.lang)) continue
             if (h.length > t.length && h.startsWith(t) && h.indexOf("\n") < 0) return h.substring(t.length)
         }
         return ""

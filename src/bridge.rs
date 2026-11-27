@@ -705,6 +705,9 @@ pub mod ffi {
         /// Command history (Tessera's merged with the shells'), newest last, JSON array.
         #[qinvokable]
         fn history_all(self: &Controller, reply: &QString, limit: i32);
+        /// {command: language} for history entries not in a shell, JSON.
+        #[qinvokable]
+        fn history_langs(self: &Controller, reply: &QString, limit: i32);
         #[qinvokable]
         fn history_add(self: &Controller, cmd: &QString, cwd: &QString, lang: &QString);
         /// History matches for the dropdown (completion JSON).
@@ -1085,6 +1088,10 @@ impl ffi::Controller {
 
     fn history_all(&self, reply: &ffi::QString, limit: i32) {
         self.answer_on(reply, None, move || crate::history::all_json(limit.max(1) as usize))
+    }
+
+    fn history_langs(&self, reply: &ffi::QString, limit: i32) {
+        self.answer_on(reply, None, move || crate::history::langs_json(limit.max(1) as usize))
     }
 
     fn history_add(&self, cmd: &ffi::QString, cwd: &ffi::QString, lang: &ffi::QString) {

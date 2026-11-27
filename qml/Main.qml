@@ -59,6 +59,7 @@ ApplicationWindow {
         else if (activeView) activeView.forceActiveFocus()
     }
     property var commandHistory: []    // (filled at startup)
+    property var historyLangs: ({})     // command -> language, for those not in a shell
     property real zoomBase: 11         // the profile's size when zooming started
     readonly property int zoomPercent: fontSize > 0 ? Math.round(100 * fontSize / zoomBase) : 100
     property var contextView: null
@@ -167,6 +168,7 @@ ApplicationWindow {
             promptEngine: win.settings.prompt_engine || "auto"
             promptSegments: win.settings.prompt_segments || ["dir", "git", "venv", "nix", "status", "duration", "|", "kube", "aws", "gcloud", "host", "time"]
             commandHistory: win.commandHistory
+            historyLangs: win.historyLangs
             controller: controller
             onEditorKeysPicked: (k) => win.setSetting("editor_keys", k)
             markdownStyle: win.settings.markdown_style || "rich"
@@ -2695,6 +2697,7 @@ ApplicationWindow {
 
     Component.onCompleted: {
         Async.call(controller, k => controller.historyAll(k, 5000), r => { try { win.commandHistory = JSON.parse(r) } catch (e) {} })
+        Async.call(controller, k => controller.historyLangs(k, 5000), r => { try { win.historyLangs = JSON.parse(r) } catch (e) {} })
         const torn = controller.initialTab()
         if (torn !== "") {
             let restored = false
