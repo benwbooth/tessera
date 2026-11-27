@@ -198,6 +198,7 @@ pub fn keys_table(ed: &Ed) -> String {
                 ("Left Shift", "Take the grey suggestion (tap; or → / End at the end of the line, Alt+/)"),
                 ("Tab", "Complete; in the indentation, indent"),
                 ("Shift+Tab", "Outdent"),
+                ("Alt+drag", "Select a rectangle (or Ctrl+Shift+Alt+arrows): typing goes on every line; Ctrl+C/X copy or cut each line's part"),
             ],
         ),
         ("Finding", vec![("Ctrl+R", "Search history"), ("Ctrl+Alt+D", "Folders: cd history"), ("Ctrl+Alt+J", "Background jobs"), ("Ctrl+Alt+P", "The prompt bar's choices (branches, contexts…)"), ("Ctrl+Alt+L", "The ls listing above the prompt, by keys")]),
