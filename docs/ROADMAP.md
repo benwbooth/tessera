@@ -41,7 +41,12 @@ A multi-line editor under the terminal while the shell waits at its prompt
   (404): direct). `hearth/<model>` names a hub model. Without the
   hub, everything is direct. Decided on the request's thread (`ai::route`).
 - Ghost-text completion (Tab accepts) from a small local model — on this
-  machine `qwen3.5:4b` in Ollama; larger models for chat.
+  machine `qwen2.5-coder:1.5b-base` in Ollama, a base coder model asked
+  through `/completions` with the folder and recent commands as a script
+  ending in the typed text (~50–150 ms warm, ~2 GB of VRAM; `ai::complete`,
+  any model named *base*, starcoder, codestral, -fim or mellum). A chat model
+  works too. With a completion model, checks, # endings and guesses use the
+  assistant's model; larger models for chat.
 - AI checking as you type: risky or wrong commands flagged inline with a
   reason (rm -rf with a variable, a flag the command doesn't have, ...).
 - Plain English to a command; explain a command; fix the last failed one

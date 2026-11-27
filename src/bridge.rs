@@ -1517,11 +1517,7 @@ impl ffi::Controller {
         let mut msgs: Vec<serde_json::Value> = serde_json::from_str(&messages_json.to_string()).unwrap_or_default();
         let ctx: serde_json::Value = serde_json::from_str(&ctx_json.to_string()).unwrap_or_default();
         let s = crate::settings::load();
-        let model_ref = match task.as_str() {
-            "inline" | "classify" | "language" | "request" | "exit" => s.ai.inline_model.clone(),
-            "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
-            _ => s.ai.chat_model.clone(),
-        };
+        let (rtask, model_ref) = crate::ai::task_model(&s.ai, &task);
         let qt = self.qt_thread();
         let cancel = Arc::new(AtomicBool::new(false));
         if let Some(old) = ai_jobs().lock().unwrap().insert(key.clone(), cancel.clone()) {
@@ -1539,7 +1535,7 @@ impl ffi::Controller {
         };
         std::thread::spawn(move || {
             // (Hearth's hub or the set model: decided here, off the UI thread.)
-            let (provider, model, fallback) = match crate::ai::route(&s.ai, &task, &model_ref) {
+            let (provider, model, fallback) = match crate::ai::route(&s.ai, &rtask, &model_ref) {
                 Ok(r) => r,
                 Err(e) => {
                     {
@@ -1564,11 +1560,22 @@ impl ffi::Controller {
                     let _ = q2.queue(move |c| c.ai_delta(qs(&k), qs(&p)));
                 }
             };
-            let mut result = crate::ai::chat(&provider, &model, &msgs, &opts, &cancel, send);
+            // (A completion model continues the command line itself: no chat.)
+            let completion = task == "inline" && crate::ai::is_completion_model(&model_ref);
+            let ask = |p: &crate::ai::Provider, m: &str| {
+                if completion {
+                    let (prompt, typed) = crate::ai::completion_prompt(msgs.last().and_then(|m| m["content"].as_str()).unwrap_or(""), &ctx);
+                    let o = crate::ai::Options { max_tokens: 48, temperature: 0.1, timeout: std::time::Duration::from_secs(8) };
+                    crate::ai::complete(p, m, &prompt, &o, &cancel).map(|more| format!("{typed}{more}"))
+                } else {
+                    crate::ai::chat(p, m, &msgs, &opts, &cancel, send)
+                }
+            };
+            let mut result = ask(&provider, &model);
             // (Hearth's hub doesn't have that model: ask its server directly.)
             let missing = matches!(&result, Err(e) if e.contains("HTTP 404"));
             if let (true, Some((p, m))) = (missing && !cancel.load(Ordering::Relaxed), &fallback) {
-                result = crate::ai::chat(p, m, &msgs, &opts, &cancel, send);
+                result = ask(p, m.as_str());
             }
             if cancel.load(Ordering::Relaxed) {
                 return;
@@ -1657,12 +1664,7 @@ impl ffi::Controller {
 
     fn ai_ready(&self, task: &ffi::QString) -> bool {
         let s = crate::settings::load();
-        let r = match task.to_string().as_str() {
-            "inline" | "classify" | "language" => s.ai.inline_model.clone(),
-            "check" => if s.ai.check_model.is_empty() { s.ai.inline_model.clone() } else { s.ai.check_model.clone() },
-            _ => s.ai.chat_model.clone(),
-        };
-        let t = task.to_string();
+        let (t, r) = crate::ai::task_model(&s.ai, &task.to_string());
         crate::ai::route(&s.ai, &t, &r).is_ok_and(|(p, _, _)| p.local || crate::ai::has_key(&p))
     }
 

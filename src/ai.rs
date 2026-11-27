@@ -317,6 +317,75 @@ pub fn hearth_alias(task: &str) -> &'static str {
     if matches!(task, "inline" | "classify" | "language" | "request" | "exit" | "check") { "fast" } else { "default" }
 }
 
+// ---- completion models (autocomplete) -------------------------------------------------
+
+/// A base / fill-in-the-middle coder model (qwen2.5-coder:1.5b-base,
+/// starcoder2, codestral, ...): it continues text instead of chatting, so
+/// suggestions ask it with a raw prompt (`complete`), which is far quicker
+/// than a chat model's answer. It can't do the other tasks.
+pub fn is_completion_model(model_ref: &str) -> bool {
+    let m = model_ref.to_lowercase();
+    let name = m.rsplit('/').next().unwrap_or(&m);
+    name.contains("base") || name.contains("starcoder") || name.contains("codestral") || name.contains("-fim") || name.contains("mellum")
+}
+
+/// The model setting a task uses, and the task to route it as. With a
+/// completion model for suggestions, the other as-you-type tasks (checks,
+/// # endings, guesses) go to the assistant's model instead (unless checks
+/// have their own).
+pub fn task_model(ai: &crate::settings::AiSettings, task: &str) -> (String, String) {
+    let fast = matches!(task, "inline" | "classify" | "language" | "request" | "exit" | "check");
+    if task == "check" && !ai.check_model.is_empty() {
+        return (task.into(), ai.check_model.clone());
+    }
+    if fast && !(task != "inline" && is_completion_model(&ai.inline_model)) {
+        return (task.into(), ai.inline_model.clone());
+    }
+    let t = if fast { "chat" } else { task };
+    (t.into(), ai.chat_model.clone())
+}
+
+/// A completion model's prompt for the command being typed: the shell, the
+/// folder and recent commands as a script, ending in what's typed. `asked`
+/// is the inline task's message ("Recent commands:\n…\n\nComplete this
+/// command line: TEXT"). Returns (prompt, typed).
+pub fn completion_prompt(asked: &str, ctx: &Value) -> (String, String) {
+    let (recent, typed) = asked.split_once("\n\nComplete this command line: ").unwrap_or(("", asked));
+    let recent = recent.strip_prefix("Recent commands:\n").unwrap_or(recent);
+    let shell = ctx["shell"].as_str().unwrap_or("bash");
+    let cwd = ctx["cwd"].as_str().unwrap_or("");
+    let mut p = format!("#!/usr/bin/env {shell}\n# in {cwd}\n");
+    for l in recent.lines().filter(|l| !l.trim().is_empty() && !l.contains('\n')) {
+        p.push_str(l);
+        p.push('\n');
+    }
+    p.push_str(typed);
+    (p, typed.to_string())
+}
+
+/// Continue `prompt` to the end of the line (OpenAI /completions).
+pub fn complete(provider: &Provider, model: &str, prompt: &str, opts: &Options, cancel: &AtomicBool) -> Result<String, String> {
+    let base = provider.base_url.trim_end_matches('/');
+    let k = key(provider);
+    let a = agent(if opts.timeout.is_zero() { Duration::from_secs(10) } else { opts.timeout });
+    let body = json!({"model": model, "prompt": prompt, "max_tokens": if opts.max_tokens == 0 { 48 } else { opts.max_tokens },
+                      "temperature": opts.temperature, "stop": ["\n"], "stream": false});
+    let mut req = a.post(&format!("{base}/completions")).header("content-type", "application/json");
+    if !k.is_empty() {
+        req = req.header("Authorization", &format!("Bearer {k}"));
+    }
+    let mut resp = req.send_json(&body).map_err(|e| e.to_string())?;
+    let status = resp.status().as_u16();
+    let v: Value = resp.body_mut().read_json().unwrap_or(json!({}));
+    if status >= 400 {
+        return Err(error_text(&v, status));
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
+    Ok(v["choices"][0]["text"].as_str().unwrap_or("").lines().next().unwrap_or("").trim_end().to_string())
+}
+
 /// Who answers a task. Under Hearth (ai.hearth on and its hub running), the
 /// assistant, # commands and fixes use Hearth's assistant model (the hub's
 /// "default"); the as-you-type tasks use Tessera's suggestions model, asked
@@ -486,6 +555,15 @@ mod tests {
         assert_eq!(strip_thinking("<think>hmm</think> git commit"), "git commit");
         assert_eq!(command_from("```bash\n$ ls -la\n```\nThat lists."), "ls -la");
         assert_eq!(command_from("git status"), "git status");
+    }
+
+    #[test]
+    fn completion_models() {
+        assert!(is_completion_model("ollama/qwen2.5-coder:1.5b-base"));
+        assert!(!is_completion_model("ollama/qwen3.5:4b"));
+        let (p, typed) = completion_prompt("Recent commands:\ngit status\nls\n\nComplete this command line: git comm", &json!({"shell": "zsh", "cwd": "/tmp"}));
+        assert_eq!(typed, "git comm");
+        assert_eq!(p, "#!/usr/bin/env zsh\n# in /tmp\ngit status\nls\ngit comm");
     }
 
     #[test]
