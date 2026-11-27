@@ -253,9 +253,12 @@ impl Editor {
                 }
                 ("inline", Ok(reply)) => {
                     let t = self.ed.suggest_base();
-                    if t.starts_with(&text) && t.trim().chars().count() >= 2 && self.ed.at_suggest_end() && self.ed.ghost.is_empty() && reply.starts_with(&t) && reply.len() > t.len() {
+                    // (Over what the completions have in common, when it goes on from that.)
+                    let free = self.ed.ghost.is_empty() || (self.ed.ghost_comp && reply.get(t.len()..).is_some_and(|r| r.starts_with(&self.ed.ghost)));
+                    if t.starts_with(&text) && t.trim().chars().count() >= 2 && self.ed.at_suggest_end() && free && reply.starts_with(&t) && reply.len() > t.len() {
                         self.ed.ghost = reply[t.len()..].lines().next().unwrap_or("").to_string();
                         self.ed.ghost_base = t;
+                        self.ed.ghost_comp = false;
                         self.ed.ai_note.clear();
                     }
                 }

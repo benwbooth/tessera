@@ -167,6 +167,9 @@ pub struct Ed {
     pub menu: Option<Menu>,
     pub ghost: String,
     pub ghost_base: String,
+    /// The suggestion is only what every completion starts with (comp_ghost):
+    /// the AI's, when it comes and goes on from it, takes its place.
+    pub ghost_comp: bool,
     pub nl_command: String,
     pub errors: Vec<(usize, usize, String)>,
     pub problem: String,
@@ -286,6 +289,7 @@ impl Ed {
             menu: None,
             ghost: String::new(),
             ghost_base: String::new(),
+            ghost_comp: false,
             nl_command: String::new(),
             errors: vec![],
             problem: String::new(),
@@ -400,6 +404,7 @@ impl Ed {
         } else {
             self.ghost = self.history_ghost(&t);
             self.ghost_base = t.clone();
+            self.ghost_comp = false;
             if self.ghost.is_empty() {
                 self.want("inline", &t);
             }
@@ -574,6 +579,7 @@ impl Ed {
         }
         if let Some(c) = cp.filter(|c| c.len() > typed.len()) {
             self.ghost = c[typed.len()..].to_string();
+            self.ghost_comp = true;
             self.ghost_base = self.t.text.clone();
             self.dirty = true;
         }

@@ -632,6 +632,7 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
         (lo..=hi).all(|i| depth[i] > lim)
     };
     let ghost_shown = !v.final_ && !ed.ghost.is_empty() && ed.at_suggest_end();
+    let ghost_inside = ghost_shown && !ed.closers().is_empty();
     let err_at = |p: usize| ed.errors.iter().any(|e| p >= e.0 && p < e.0 + e.1.max(1));
     let mut text_rows: Vec<Line> = vec![];
     let mut cur_abs: Option<(usize, usize)> = None;
@@ -657,6 +658,16 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
             let n = p + ch.len_utf8();
             if p == ed.t.cursor {
                 cur_abs = Some((text_rows.len() + wrapped.len(), col));
+            }
+            // (Closers typed in pairs after the cursor: the suggestion goes
+            // in at the cursor, where it'd go in; over them when it has
+            // them, before them when not.)
+            if ghost_inside && p == ed.t.cursor && li == lines.len() - 1 {
+                push_cell(&mut row, ed.ghost.clone(), v.pal.ghost(), Hit::Text(p), &mut col, &mut wrapped);
+                if ed.ghost_takes_closers() {
+                    p = b;
+                    continue;
+                }
             }
             if p == ed.comp.start && ed.comp.open {
                 anchor_col = text_x + col;
@@ -727,7 +738,7 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
             anchor_col = text_x + col;
         }
         // The suggestion, greyed, after the cursor (at the text's end, or before closers).
-        if ghost_shown && li == lines.len() - 1 {
+        if ghost_shown && !ghost_inside && li == lines.len() - 1 {
             let g = ed.ghost.clone();
             push_cell(&mut row, g, v.pal.ghost(), Hit::Text(b), &mut col, &mut wrapped);
         }
@@ -847,8 +858,11 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
         }
         if plus {
             let lw = super::width(&row);
-            row.push(Span::new(" ".repeat(room.saturating_sub(lw) + 1), Sty::default()));
+            // (The last column left empty: a round end there is cut by the
+            // window's edge.)
+            row.push(Span::new(" ".repeat(room.saturating_sub(lw)), Sty::default()));
             row.extend(plus_button(ed, v));
+            row.push(Span::new(" ", Sty::default()));
         }
         rows.push(row);
     }
