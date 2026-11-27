@@ -158,6 +158,8 @@ Item {
     // (Put away by the user (its top edge, Ctrl+Shift+H, View ▸ Show Input
     // Box): a thin strip stays to bring it back.)
     property bool inputHidden: false
+    // (A notebook starts with the input box out: its cells are run from it.)
+    onViewModeChanged: if (viewMode === "notebook" && inputHidden) setInputHidden(false)
     readonly property bool stripShown: inputEditor && inputHidden && !term.exited && !takenOver
     function setInputHidden(h) {
         inputHidden = h

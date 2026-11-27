@@ -432,7 +432,7 @@ ApplicationWindow {
         if (maximizedPane) toggleMaximize()
         const prof = profileFor(profileName !== undefined ? profileName : p.profileName)
         // (A split of another host's pane opens there too.)
-        const props = { profileName: prof.name, cwd: cwdFor(prof, p.view), sshHost: p.sshHost, viewMode: p.viewMode, inputHidden: p.inputHidden }
+        const props = { profileName: prof.name, cwd: cwdFor(prof, p.view), sshHost: p.sshHost, viewMode: p.viewMode, inputHidden: p.inputHidden && p.viewMode !== "notebook" }
         const h = p.host
         if (h.count === 1) h.orientation = orientation
         let np
@@ -621,7 +621,7 @@ ApplicationWindow {
             if (cwd) props.cwd = cwd
             // (The input box put away in the tab it's opened from: away here too.)
             const src = active ? paneOf(active) : null
-            if (src && src.inputHidden) props.inputHidden = true
+            if (src && src.inputHidden && props.viewMode !== "notebook") props.inputHidden = true
             const p = makePane(t.root, props)
             t.root.addItem(p)
             focusPane(p)
@@ -989,7 +989,7 @@ ApplicationWindow {
         }
         function build(n, host, W, H) {
             if (n.t === "pane") {
-                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "", sshHost: n.host || "", inputHidden: !!n.noInput }
+                const props = { profileName: profileFor(n.profile).name, cwd: n.cwd || "", commandOverride: n.cmd || "", viewMode: n.mode === "notebook" ? "notebook" : "terminal", docPath: n.doc || "", sshHost: n.host || "", inputHidden: !!n.noInput && n.mode !== "notebook" }
                 // (Another host's: whether it's still running there is known
                 // once connected; the pane looks then.)
                 if (alive && n.host) {
