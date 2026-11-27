@@ -421,20 +421,23 @@ Rectangle {
         if (size === 0) return null
         return { mode: tabs > 0 ? "mixed" : "spaces", size: size }
     }
-    readonly property int tabSize: detectedIndent ? detectedIndent.size : indentPref.size
+    // (A level: its size in spaces; with tabs, one tab.)
+    readonly property int tabSize: indentMode === "tabs" ? tabWidth : detectedIndent ? detectedIndent.size : indentPref.size
     // "spaces", "tabs", or "mixed" (levels of tabSize, every 8 columns a
     // tab, as Emacs and vi do it).
     readonly property string indentMode: detectedIndent ? detectedIndent.mode : indentPref.mode
     readonly property bool useTabs: indentMode === "tabs"
     // (A tab's width on screen: a level, but 8 when they're mixed.)
-    readonly property int tabWidth: indentMode === "mixed" ? 8 : tabSize
+    // (How wide a tab is drawn: editor_tab_width, 4 unless set; mixed puts
+    // a tab for every this many columns.)
+    readonly property int tabWidth: Math.max(1, Math.min(16, Number(edPrefs.editor_tab_width) || 4))
     readonly property string indentUnit: useTabs ? "\t" : " ".repeat(tabSize)
     // Leading whitespace <-> its width in columns.
     function colsOf(ws) { let c = 0; for (const ch of ws) { if (ch === "\t") c += tabWidth - c % tabWidth; else if (ch === " ") c++; else break } return c }
     function indentFor(cols) {
         cols = Math.max(0, cols)
         if (indentMode === "spaces") return " ".repeat(cols)
-        const w = indentMode === "mixed" ? 8 : tabSize
+        const w = tabWidth
         return "\t".repeat(Math.floor(cols / w)) + " ".repeat(cols % w)
     }
     // Replace the leading whitespace of the line at `a` with `cols` columns'.
@@ -1222,11 +1225,14 @@ Rectangle {
         const r = [{ header: "INDENT WITH", key: "Ctrl+Alt+S" },
                    { label: "Spaces", checked: p.mode === "spaces", act: set("mode", "spaces") },
                    { label: "Tabs", checked: p.mode === "tabs", act: set("mode", "tabs") },
-                   { label: "Mixed (a tab for every 8 columns)", checked: p.mode === "mixed", act: set("mode", "mixed") },
-                   { sep: true }, { header: "SIZE" }]
+                   { label: "Mixed (a tab for every " + box.tabWidth + " columns)", checked: p.mode === "mixed", act: set("mode", "mixed") },
+                   { sep: true }, { header: "SIZE OF A LEVEL" }]
         for (const n of [1, 2, 4, 8]) r.push({ label: String(n), checked: p.size === n, act: set("size", n) })
         r.push({ label: "Custom\u2026" + ([1, 2, 4, 8].indexOf(p.size) < 0 ? " (" + p.size + ")" : ""), checked: [1, 2, 4, 8].indexOf(p.size) < 0,
                  act: () => Window.window.askText("Indent size", "Columns per level for " + box.lang + ":", String(p.size), v => { const n = parseInt(v); if (n > 0 && n <= 32) box.setIndentPref("size", n) }) })
+        // (How wide a tab is drawn, in every language.)
+        r.push({ sep: true }, { header: "TAB WIDTH" })
+        for (const n of [2, 4, 8]) r.push({ label: n + " columns", checked: box.tabWidth === n, act: () => { if (box.controller) box.controller.setSetting("editor_tab_width", String(n)) } })
         r.push({ sep: true })
         r.push({ label: "Detect from the text", checked: box.edPrefs.editor_detect_indent !== false,
                  act: () => { if (box.controller) box.controller.setSetting("editor_detect_indent", JSON.stringify(box.edPrefs.editor_detect_indent === false)) } })

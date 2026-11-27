@@ -10,6 +10,15 @@ pub enum IndentMode {
     Mixed,
 }
 
+/// How wide a tab is drawn, in columns (editor_tab_width; 4 unless set).
+/// A level of tabs is one tab this wide; mixed puts a tab for every this
+/// many columns.
+pub static TAB_WIDTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(4);
+
+pub fn tab_width() -> usize {
+    TAB_WIDTH.load(std::sync::atomic::Ordering::Relaxed).clamp(1, 16)
+}
+
 #[derive(Clone)]
 pub struct Indent {
     pub mode: IndentMode,
@@ -18,11 +27,7 @@ pub struct Indent {
 
 impl Indent {
     pub fn tab_width(&self) -> usize {
-        if self.mode == IndentMode::Mixed {
-            8
-        } else {
-            self.size
-        }
+        tab_width()
     }
     pub fn unit(&self) -> String {
         if self.mode == IndentMode::Tabs {
@@ -48,7 +53,8 @@ impl Indent {
         match self.mode {
             IndentMode::Spaces => " ".repeat(cols),
             m => {
-                let w = if m == IndentMode::Mixed { 8 } else { self.size.max(1) };
+                let _ = m;
+                let w = tab_width();
                 "\t".repeat(cols / w) + &" ".repeat(cols % w)
             }
         }

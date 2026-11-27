@@ -70,6 +70,9 @@ pub struct Settings {
     pub editor_detect_indent: bool,
     /// Lines down the indentation, one per level, as VS Code draws them.
     pub editor_indent_guides: bool,
+    /// How wide a tab is drawn in the input editor, in columns (with tabs a
+    /// level is one; mixed puts one for every this many columns).
+    pub editor_tab_width: u32,
     /// Line numbers in the input editor once it has more than one line.
     pub editor_line_numbers: bool,
     /// A file card's terminal editor ("" = the shell's $VISUAL or $EDITOR).
@@ -150,6 +153,7 @@ impl Default for Settings {
             editor_indent_langs: serde_json::json!({}),
             editor_detect_indent: true,
             editor_indent_guides: true,
+            editor_tab_width: 4,
             editor_line_numbers: true,
             terminal_editor: String::new(),
             guide_contents_width: 230,

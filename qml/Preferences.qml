@@ -681,6 +681,16 @@ Window {
                                 hint: "Spaces, tabs or mixed, and the size of a level: the indent chip beside the input language, kept for each language (each starts with its usual one: 4 spaces for Python, tabs for Go, 2 spaces for JavaScript...)."
                                 Item { Layout.fillWidth: true }
                             }
+                            Row2 {
+                                label: "Tab width"
+                                hint: "How wide a tab is drawn, in columns. With tabs a level of indentation is one tab; mixed puts a tab for every this many columns. Also in the input's indentation menu (Ctrl+Alt+S)."
+                                ChoiceBox {
+                                    values: [["2", "2 columns"], ["4", "4 columns"], ["8", "8 columns"]]
+                                    value: String(prefs.settings.editor_tab_width || 4)
+                                    onChosen: (v) => prefs.setG("editor_tab_width", Number(v))
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
                             ToggleRow {
                                 label: "Indent guides"
                                 hint: "A faint line down each level of indentation, brighter for the block the cursor is in, as VS Code draws them."

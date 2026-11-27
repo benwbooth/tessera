@@ -102,6 +102,8 @@ fn apply_settings(ed: &mut crate::editor::core::Ed) {
     ed.line_numbers = get("editor_line_numbers").and_then(|v| v.as_bool()).unwrap_or(true);
     ed.indent_guides = get("editor_indent_guides").and_then(|v| v.as_bool()).unwrap_or(true);
     ed.detect = get("editor_detect_indent").and_then(|v| v.as_bool()).unwrap_or(true);
+    let tw = get("editor_tab_width").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
+    crate::editor::text::TAB_WIDTH.store(tw.clamp(1, 16), std::sync::atomic::Ordering::Relaxed);
     let langs = get("editor_indent_langs").unwrap_or(serde_json::json!({}));
     let m = langs.get("tessh").cloned().unwrap_or(serde_json::json!({}));
     let mode = match m.get("mode").and_then(|v| v.as_str()) {
@@ -136,11 +138,16 @@ fn indent_menu(ed: &crate::editor::core::Ed) -> Vec<MenuItem> {
     let mut v = vec![
         it("Indent with spaces".into(), "mode=spaces", p.mode == IndentMode::Spaces, true),
         it("Indent with tabs".into(), "mode=tabs", p.mode == IndentMode::Tabs, true),
-        it("Mixed (a tab for every 8 columns)".into(), "mode=mixed", p.mode == IndentMode::Mixed, true),
-        MenuItem { label: "Size".into(), section: true, ..Default::default() },
+        it(format!("Mixed (a tab for every {} columns)", crate::editor::text::tab_width()), "mode=mixed", p.mode == IndentMode::Mixed, true),
+        MenuItem { label: "Size of a level".into(), section: true, ..Default::default() },
     ];
     for n in [1, 2, 4, 8] {
         v.push(it(n.to_string(), &format!("size={n}"), p.size == n, true));
+    }
+    // (How wide a tab is drawn: every language.)
+    v.push(MenuItem { label: "Tab width".into(), section: true, ..Default::default() });
+    for n in [2, 4, 8] {
+        v.push(it(format!("{n} columns"), &format!("tab={n}"), crate::editor::text::tab_width() == n, true));
     }
     v.push(it("Detect from the text".into(), "detect", ed.detect, true));
     v.push(it("Use tessh's default (spaces, 2)".into(), "default", false, ed.indent_own));
@@ -365,6 +372,7 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                             Some(("mode", m)) => set_indent_pref("mode", serde_json::json!(m)),
                             Some(("size", n)) => set_indent_pref("size", serde_json::json!(n.parse::<u64>().unwrap_or(2))),
                             _ if arg == "detect" => save_own("editor_detect_indent", serde_json::json!(!editor.ed.detect)),
+                            Some(("tab", n)) => save_own("editor_tab_width", serde_json::json!(n.parse::<u64>().unwrap_or(4))),
                             _ if arg == "default" => {
                                 set_indent_pref("mode", serde_json::Value::Null);
                                 set_indent_pref("size", serde_json::Value::Null);
