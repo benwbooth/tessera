@@ -100,7 +100,7 @@ fn plus_button(ed: &Ed, v: &ViewIn) -> Vec<Span> {
     let lit = open || v.hovered == Some(&Hit::Chip("addwidget"));
     let bg = v.pal.mix(if lit { 0.30 } else { 0.18 }).or(Some(Col::Ansi(if lit { 7 } else { 8 })));
     let st = Sty { bold: true, fg: if v.pal.mix(0.1).is_none() { Some(Col::Ansi(15)) } else { None }, ..Sty::default() }.with_bg(bg);
-    vec![Span::new(" + ", st).hit(Hit::Chip("addwidget"))]
+    pill("+", st, bg, Hit::Chip("addwidget"))
 }
 
 /// The options menu's button: ▾, lit while hovered or open.
@@ -111,7 +111,16 @@ fn menu_button(ed: &Ed, v: &ViewIn) -> Vec<Span> {
     // theme's colors, the terminal's own greys.)
     let bg = v.pal.mix(if lit { 0.30 } else { 0.18 }).or(Some(Col::Ansi(if lit { 7 } else { 8 })));
     let st = Sty { bold: true, fg: if v.pal.mix(0.1).is_none() { Some(Col::Ansi(15)) } else { None }, ..Sty::default() }.with_bg(bg);
-    vec![Span::new(" ▾ ", st).hit(Hit::Chip("menu")), Span::new(" ", Sty::default())]
+    let mut v = pill("▾", st, bg, Hit::Chip("menu"));
+    v.push(Span::new(" ", Sty::default()));
+    v
+}
+
+/// A button as the prompt's pills are: round ends (Powerline's half
+/// circles, in its color) around its label, the same width as " x ".
+fn pill(label: &str, st: Sty, bg: Option<Col>, hit: Hit) -> Vec<Span> {
+    let cap = Sty { fg: bg, ..Sty::default() };
+    vec![Span::new("\u{e0b6}", cap).hit(hit.clone()), Span::new(label, st).hit(hit.clone()), Span::new("\u{e0b4}", cap).hit(hit)]
 }
 
 fn chip(label: &str, name: &'static str, v: &ViewIn) -> Vec<Span> {

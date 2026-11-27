@@ -1034,7 +1034,7 @@ impl Session {
     ) -> bool {
         let mods = keymap::mods(qt_mods);
         let tracking = self.opts.mouse_reporting && self.term.is_mouse_tracking().unwrap_or(false);
-        let report = tracking && !mods.contains(key::Mods::SHIFT);
+        let report = tracking && !keeps_mouse(mods);
         match action {
             0 if button > 0 && button < 4 => self.buttons |= 1 << button,
             1 if button > 0 && button < 4 => self.buttons &= !(1 << button),
@@ -1791,7 +1791,7 @@ impl Session {
     pub fn wants_mouse(&self, qt_mods: u32) -> bool {
         self.opts.mouse_reporting
             && self.term.is_mouse_tracking().unwrap_or(false)
-            && !keymap::mods(qt_mods).contains(key::Mods::SHIFT)
+            && !keeps_mouse(keymap::mods(qt_mods))
     }
 
     /// Fill `out` with the rows that changed. Returns false when nothing did.
@@ -2058,4 +2058,11 @@ mod scrollback_tests {
 
 fn r_path(r: &Option<crate::record::Recorder>) -> String {
     r.as_ref().map(|r| r.path.clone()).unwrap_or_default()
+}
+
+/// Modifiers that keep the mouse the terminal's while a program reads it:
+/// Shift (any terminal's way), and Ctrl+Alt (or Super+Alt), the rectangle
+/// selection, which went to tessh's editor instead of selecting.
+fn keeps_mouse(mods: key::Mods) -> bool {
+    mods.contains(key::Mods::SHIFT) || (mods.contains(key::Mods::ALT) && (mods.contains(key::Mods::CTRL) || mods.contains(key::Mods::SUPER)))
 }
