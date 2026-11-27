@@ -464,11 +464,13 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
         if any_long {
             let text = if !it.doc.is_empty() { it.doc.clone() } else { it.detail.clone() };
             let h = if any_doc { 13 } else { 5 };
-            let wrapped = wrap(&text, w.saturating_sub(2));
-            let scroll = ed.comp.doc_scroll.min(wrapped.len().saturating_sub(h));
+            // (Help is Markdown: laid out, not shown as written.)
+            let shown = md_lines(text.trim(), w.saturating_sub(2), spans_for);
+            let scroll = ed.comp.doc_scroll.min(shown.len().saturating_sub(h));
             for i in 0..h {
-                let l = wrapped.get(scroll + i).cloned().unwrap_or_default();
-                lines.push(vec![Span::new(format!(" {l}"), Sty::default()).hit(Hit::Doc)]);
+                let mut l = vec![Span::new(" ", Sty::default()).hit(Hit::Doc)];
+                l.extend(shown.get(scroll + i).cloned().unwrap_or_default());
+                lines.push(l);
             }
             lines.push(vec![Span::new("─".repeat(w), Sty { fg: Some(Col::Ansi(8)), ..Default::default() })]);
         }
@@ -506,8 +508,15 @@ fn popup(ed: &Ed, v: &ViewIn, anchor_col: usize, spans_for: &dyn Fn(&str) -> Vec
     }
     if let Some((_, doc)) = &ed.hover {
         let w = cols.saturating_sub(4).min(78);
-        let wrapped = wrap(doc.trim(), w.saturating_sub(2));
-        let lines: Vec<Line> = wrapped.into_iter().take(15).map(|l| vec![Span::new(format!(" {l}"), Sty::default()).hit(Hit::Doc)]).collect();
+        let lines: Vec<Line> = md_lines(doc.trim(), w.saturating_sub(2), spans_for)
+            .into_iter()
+            .take(15)
+            .map(|l| {
+                let mut r = vec![Span::new(" ", Sty::default()).hit(Hit::Doc)];
+                r.extend(l);
+                r
+            })
+            .collect();
         let x = anchor_col.saturating_sub(2).min(cols.saturating_sub(w + 2));
         return Some((boxed(lines, w, v), x));
     }
@@ -566,6 +575,84 @@ pub fn thumb_of(n: usize, room: usize, top: usize) -> (usize, usize) {
 }
 
 /// A text colored by highlight spans.
+/// Help text's Markdown laid out `w` wide: a heading bold, fenced code
+/// highlighted as tessh (its fences gone, not wrapped), `code` and **bold**
+/// in their styles (the marks gone), "- " items as bullets.
+fn md_lines(md: &str, w: usize, spans_for: &dyn Fn(&str) -> Vec<(usize, usize, &'static str)>) -> Vec<Line> {
+    let mut out: Vec<Line> = vec![];
+    let mut in_code = false;
+    let w = w.max(10);
+    for raw in md.split('\n') {
+        let t = raw.trim_end();
+        if t.trim_start().starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            let mut l = vec![Span::new("  ", Sty::default()).hit(Hit::Doc)];
+            l.extend(colored(t, &spans_for(t), None, Hit::Doc));
+            out.push(fit(l, w));
+            continue;
+        }
+        let hashes = t.chars().take_while(|c| *c == '#').count();
+        if hashes > 0 && t[hashes..].starts_with(' ') {
+            out.push(vec![Span::new(t[hashes..].trim().to_string(), Sty { bold: true, ..Sty::default() }).hit(Hit::Doc)]);
+            continue;
+        }
+        let (lead, body) = match t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+            Some(rest) => ("• ", rest),
+            None => ("", t),
+        };
+        let ind = if lead.is_empty() { 0 } else { 2 };
+        // (Inline marks carry over wrapped lines: a `code` broken in two.)
+        let (mut tick, mut bold) = (false, false);
+        for (i, wl) in wrap(body, w.saturating_sub(ind)).into_iter().enumerate() {
+            let mut l = vec![];
+            if ind > 0 {
+                l.push(Span::new(if i == 0 { lead } else { "  " }, Sty::default()).hit(Hit::Doc));
+            }
+            l.extend(md_inline(&wl, &mut tick, &mut bold));
+            out.push(l);
+        }
+    }
+    out
+}
+
+/// One line's `code` and **bold**, styled, their marks dropped.
+fn md_inline(s: &str, tick: &mut bool, bold: &mut bool) -> Line {
+    let mut out = vec![];
+    let mut cur = String::new();
+    let style = |tick: bool, bold: bool| Sty { bold, fg: if tick { Some(Col::Ansi(6)) } else { None }, ..Sty::default() };
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        let flip = if c == '`' {
+            Some(true)
+        } else if c == '*' && chars.peek() == Some(&'*') && !*tick {
+            chars.next();
+            Some(false)
+        } else {
+            None
+        };
+        match flip {
+            Some(is_tick) => {
+                if !cur.is_empty() {
+                    out.push(Span::new(std::mem::take(&mut cur), style(*tick, *bold)).hit(Hit::Doc));
+                }
+                if is_tick {
+                    *tick = !*tick;
+                } else {
+                    *bold = !*bold;
+                }
+            }
+            None => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(Span::new(cur, style(*tick, *bold)).hit(Hit::Doc));
+    }
+    out
+}
+
 fn colored(text: &str, spans: &[(usize, usize, &'static str)], bg: Option<Col>, hit: Hit) -> Line {
     let mut kinds: Vec<Option<&'static str>> = vec![None; text.len()];
     for &(s, e, k) in spans {
