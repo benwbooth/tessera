@@ -179,3 +179,40 @@ pub fn bundle_meaning(typed: &str, opts: &[(String, String)]) -> Option<(String,
     }
     Some((line.join(" · "), doc.join("\n")))
 }
+
+/// Shell builtins' options, which no man page or carapace has: cd's and
+/// the folder stack's (as tessh's and bash's take them). `oldpwd`: the
+/// folder `cd -` goes to, when known.
+pub fn builtin_options(cmd: &str, oldpwd: Option<&str>) -> Option<Vec<(String, String)>> {
+    let back = match oldpwd.filter(|p| !p.is_empty()) {
+        Some(p) => format!("back to the folder you were in: {p}"),
+        None => "back to the folder you were in before".to_string(),
+    };
+    let o = |f: &str, d: &str| (f.to_string(), d.to_string());
+    Some(match cmd {
+        "cd" => vec![
+            ("-".to_string(), back),
+            o("-L", "keep the path as written, symlinks and all (the default)"),
+            o("-P", "go by the real folders, symlinks resolved"),
+            o("-e", "with -P: fail if the folder it ends in can't be worked out"),
+            o("--", "the end of the options: a folder named with a - next"),
+        ],
+        "pushd" => vec![
+            o("-n", "change the stack only, not the folder"),
+            o("+1", "turn the stack so its 2nd folder (from the left of dirs) is on top"),
+            o("-0", "turn the stack so its last folder (from the right of dirs) is on top"),
+        ],
+        "popd" => vec![
+            o("-n", "change the stack only, not the folder"),
+            o("+1", "drop the 2nd folder of the stack (from the left of dirs)"),
+            o("-0", "drop the last folder of the stack (from the right of dirs)"),
+        ],
+        "dirs" => vec![
+            o("-c", "clear the stack"),
+            o("-l", "spell out ~ as the full path"),
+            o("-p", "one folder a line"),
+            o("-v", "one folder a line, numbered"),
+        ],
+        _ => return None,
+    })
+}

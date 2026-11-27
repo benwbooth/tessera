@@ -1087,6 +1087,17 @@ pub fn complete_items(py: Python<'_>, ns: &Bound<'_, PyDict>, text: &str, pos: u
         // subcommands, options (-la's bundles too) and values, each with
         // what it is. Not tessh's own names: they're not the program's.)
         let mut args = crate::carapace::line_words(&before[..start]);
+        // (cd's and the folder stack's own options: builtins, which no man
+        // page or carapace has. cd - with the folder it goes back to.)
+        if word.starts_with('-') || word.starts_with('+') {
+            let old = std::env::var("OLDPWD").ok();
+            if let Some(opts) = args.first().and_then(|c| crate::manopts::builtin_options(c, old.as_deref())) {
+                for (f, d) in opts.into_iter().filter(|(f, _)| f.starts_with(word)) {
+                    items.push(Item { insert: f.clone(), label: f, kind: "option", detail: d, doc: String::new() });
+                }
+                return (start, pos, items);
+            }
+        }
         let external = args.first().is_some_and(|c| !c.contains('=') && !runtime::COMMAND_BUILTINS.contains(&c.as_str()) && !matches!(ns.contains(c.as_str()), Ok(true)));
         if external {
             args.push(word.to_string());

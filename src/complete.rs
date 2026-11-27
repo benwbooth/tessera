@@ -1143,7 +1143,15 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
         let sub_known = sub.as_ref().is_some_and(|s| h.subcommands.iter().any(|(n, _)| n == s));
         // (carapace, when it's installed and knows the command: its
         // subcommands, options (bundles too) and values, each described.)
-        let cara = if cmd == "export" || cmd == "unset" || typed.starts_with('$') {
+        // (cd's and the folder stack's own options: builtins, which no man
+        // page or carapace has. cd - with the folder it goes back to.)
+        let builtin = if typed.starts_with('-') || typed.starts_with('+') {
+            let old = shell_vars().into_iter().find(|(k, _)| k == "OLDPWD").map(|(_, v)| v);
+            crate::manopts::builtin_options(&cmd, old.as_deref())
+        } else {
+            None
+        };
+        let cara = if builtin.is_some() || cmd == "export" || cmd == "unset" || typed.starts_with('$') {
             None
         } else {
             let mut a = vec![cmd.clone()];
@@ -1151,7 +1159,10 @@ pub fn complete(text: &str, cursor_u16: usize, cwd: &str, aliases: &serde_json::
             a.push(typed.clone());
             crate::carapace::complete(&a, cwd)
         };
-        if let Some(vals) = cara {
+        if let Some(opts) = builtin {
+            pending = false;
+            items = opts.into_iter().filter(|(f, _)| f.starts_with(&typed)).map(|(f, d)| Item { insert: f.clone(), label: f, detail: d, kind: "option", doc: String::new() }).collect();
+        } else if let Some(vals) = cara {
             pending = false;
             let q = |v: &str| if v.chars().any(|c| c.is_whitespace() || "'\"$`\\|&;()<>*?!#".contains(c)) { format!("'{}'", v.replace('\'', "'\\''")) } else { v.to_string() };
             items = vals
