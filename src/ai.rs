@@ -559,15 +559,22 @@ pub fn looks_tessh(line: &str) -> bool {
         || line.contains(['$', '(', '[', '{']) || line.contains(" = ") || line.contains(" == ")
 }
 
-/// A tessh suggestion without the bash a model adds anyway (`for f in *.png
-/// do echo $f done`): cut at the first do/then/done/fi. Never shorter than
-/// what was typed.
+/// tessh's block keywords: their lines end with no ':' and no do/then.
+const TESSH_BLOCKS: [&str; 13] = ["for", "if", "elif", "else", "while", "def", "with", "try", "except", "finally", "class", "match", "case"];
+
+/// A tessh suggestion without the bash or Python a model adds anyway: on a
+/// block line (`if`, `for`, `def`, …) cut at a top-level ':' (Python's) or
+/// do/then/done/fi/end (bash's); on any line at `do`/`done`. Never shorter
+/// than what was typed. (`x = if a then b else c` is tessh: kept.)
 pub fn tessh_suggestion(reply: &str, typed: &str) -> String {
+    let block = TESSH_BLOCKS.contains(&reply.split_whitespace().next().unwrap_or(""));
+    let start = typed.len().min(reply.len());
     let mut cut = reply.len();
-    for kw in ["do", "then", "done", "fi", "end"] {
+    let words: &[&str] = if block { &["do", "then", "done", "fi", "end"] } else { &["do", "done"] };
+    for kw in words {
         for sep in [" ", "; ", ";"] {
             let pat = format!("{sep}{kw}");
-            let mut from = typed.len().min(reply.len());
+            let mut from = start;
             while let Some(i) = reply.get(from..).and_then(|r| r.find(&pat)).map(|i| i + from) {
                 let end = i + pat.len();
                 if reply[end..].chars().next().is_none_or(|c| !c.is_alphanumeric() && c != '_') {
@@ -575,6 +582,24 @@ pub fn tessh_suggestion(reply: &str, typed: &str) -> String {
                     break;
                 }
                 from = end;
+            }
+        }
+    }
+    if block {
+        // (Brackets and quotes as typed so far, then the first ':' outside them.)
+        let (mut depth, mut quote) = (0i32, None::<char>);
+        for (i, c) in reply.char_indices() {
+            match (quote, c) {
+                (Some(q), _) if c == q => quote = None,
+                (Some(_), _) => {}
+                (None, '"' | '\'') => quote = Some(c),
+                (None, '(' | '[' | '{') => depth += 1,
+                (None, ')' | ']' | '}') => depth -= 1,
+                (None, ':') if depth <= 0 && i >= start => {
+                    cut = cut.min(i);
+                    break;
+                }
+                _ => {}
             }
         }
     }
@@ -615,6 +640,10 @@ mod tests {
         assert_eq!(tessh_suggestion("git log --oneline | head", "git log --oneline | he"), "git log --oneline | head");
         assert_eq!(tessh_suggestion("cd ~/src/dotfiles", "cd ~/src/do"), "cd ~/src/dotfiles");
         assert_eq!(tessh_suggestion("for f in (glob \"*.txt\") do echo $f end", "for f in (glob"), "for f in (glob \"*.txt\")");
+        assert_eq!(tessh_suggestion("if True:", "if True"), "if True");
+        assert_eq!(tessh_suggestion("if $n > 1: print(many)", "if $n"), "if $n > 1");
+        assert_eq!(tessh_suggestion("for [k v] in ({a: 1}.items):", "for [k v]"), "for [k v] in ({a: 1}.items)");
+        assert_eq!(tessh_suggestion("size = if $n > 2 then big else small", "size = if"), "size = if $n > 2 then big else small");
         assert!(looks_tessh("for [k v] in ($d.it") && looks_tessh("x = [1 2") && !looks_tessh("sudo nixos-reb"));
         assert!(tessh_primer().starts_with("# tessh in brief"));
     }

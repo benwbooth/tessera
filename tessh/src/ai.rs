@@ -80,6 +80,8 @@ def _provider(pid, s):
     return None
 
 def _key(p):
+    if p.get("token"):
+        return p["token"]
     stored = _load("secrets.json").get(p["id"], "")
     if isinstance(stored, str) and stored.startswith("env:"):
         return os.environ.get(stored[4:], "")
@@ -95,6 +97,17 @@ def _resolve(task):
         return None
     if task == "command" and s.get("natural_language") is False:
         return None
+    # Under Hearth (Tessera's "hearth" setting, on by default): commands use
+    # Hearth's assistant model; suggestions Tessera's model, loaded through
+    # the hub with the desktop's others (empty: the hub's "fast").
+    hub = _hub() if s.get("hearth", True) is not False else None
+    if hub:
+        if task == "command" or not ref:
+            return hub, ("default" if task == "command" else "fast")
+        pid = ref.split("/", 1)[0]
+        p = _provider(pid, s)
+        if p is None or p.get("local"):
+            return hub, ref
     if "/" not in ref:
         return None
     pid, model = ref.split("/", 1)
@@ -103,12 +116,65 @@ def _resolve(task):
         return None
     return p, model
 
+# tessh/doc/ai.md (a condensed guide for models), set from Rust.
+PRIMER = ""
+BLOCKS = {"for", "if", "elif", "else", "while", "def", "with", "try", "except", "finally", "class", "match", "case"}
+
+def looks_tessh(line):
+    """tessh's own (Python-ish) line rather than a plain command: only then
+    does a suggestion get the primer (it makes a request about 2x slower)."""
+    words = line.split()
+    return bool(words and words[0] in (BLOCKS | {"import", "from", "return"})) or any(c in line for c in "$([{") \
+        or " = " in line or " == " in line
+
+def tessh_suggestion(reply, typed):
+    """Without the bash or Python a model adds anyway (as Tessera's
+    ai::tessh_suggestion): a block line loses a top-level ':' and
+    do/then/done/fi/end; any line loses do/done."""
+    block = (reply.split() or [""])[0] in BLOCKS
+    start = min(len(typed), len(reply))
+    cut = len(reply)
+    for kw in (("do", "then", "done", "fi", "end") if block else ("do", "done")):
+        m = re.search(r"(?: |; |;)" + kw + r"(?!\w)", reply[start:])
+        if m:
+            cut = min(cut, start + m.start())
+    if block:
+        depth, quote = 0, None
+        for i, c in enumerate(reply):
+            if quote:
+                if c == quote:
+                    quote = None
+            elif c in "\"'":
+                quote = c
+            elif c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif c == ":" and depth <= 0 and i >= start:
+                cut = min(cut, i)
+                break
+    out = reply[:cut].rstrip().rstrip(";").rstrip()
+    return out if out.startswith(typed) else typed
+
+def _hub():
+    """Hearth's AI hub, when it runs here (README "AI" > Apps in hearth)."""
+    path = os.environ.get("HEARTH_AI_API_FILE") or os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "hearth", "ai-api.json")
+    try:
+        with open(path) as f:
+            d = json.load(f)
+        if d.get("pid") and not os.path.exists("/proc/%d" % d["pid"]):
+            return None
+        return {"id": "hearth", "kind": "openai", "base_url": d["url"], "local": True, "token": d.get("token", "")}
+    except Exception:
+        return None
+
 def ready(task):
     return _resolve(task) is not None
 
 def system_prompt(task, cwd):
     base = ("You are built into tessh, a shell language (bash-like commands work: pipes, redirections, globs, "
-            "&&, ||) that also runs Python. The user's OS is %s, current folder %s." % (os.uname().sysname, cwd))
+            "&&, ||) that also runs Python. The user's OS is %s, current folder %s. Its own lines are tessh, "
+            "not Python or bash: block lines (if, for, def, while) end with no ':' and no do/then." % (os.uname().sysname, cwd))
     return base + {
         "inline": " Complete the command the user is typing. Reply with ONLY the complete command line (including what they typed), "
                   "no explanation, no quotes, no code fence. If you have no good completion, reply with exactly what they typed.",
@@ -144,19 +210,23 @@ def ask(task, text, cwd, recent):
     key = _key(p)
     user = text
     if recent:
-        if task == "command":
+        if task == "inline":
+            user = "Recent commands:\n" + recent + "\n\nComplete this command line: " + text
+        elif task == "command":
             user = "Recent commands:\n" + recent + "\n\nWhat I want: " + text
         elif task == "request":
             user = "Recent commands:\n" + recent + "\n\nComplete this request: " + text
     system = system_prompt(task, cwd)
+    primer = PRIMER if PRIMER and (task != "inline" or looks_tessh(text)) else ""
     if p.get("kind") == "anthropic":
-        body = {"model": model, "max_tokens": 512, "temperature": 0.2, "system": system,
+        body = {"model": model, "max_tokens": 512, "temperature": 0.2, "system": (primer + "\n\n" + system).strip(),
                 "messages": [{"role": "user", "content": user}]}
         req = urllib.request.Request(base + "/messages", data=json.dumps(body).encode(), method="POST",
                                      headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     else:
         body = {"model": model, "temperature": 0.2, "max_tokens": 512,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+                "messages": ([{"role": "system", "content": primer}] if primer else []) +
+                            [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         if p.get("reasoning_effort"):
             body["reasoning_effort"] = p["reasoning_effort"]
         h = {"content-type": "application/json"}
@@ -170,7 +240,9 @@ def ask(task, text, cwd, recent):
     else:
         out = v["choices"][0]["message"].get("content") or ""
     out = strip_thinking(out)
-    return command_from(out) if task in ("command", "inline") else out.splitlines()[0].strip() if out else ""
+    if task == "inline":
+        return tessh_suggestion(command_from(out), text)
+    return command_from(out) if task == "command" else out.splitlines()[0].strip() if out else ""
 "#;
 
 fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
@@ -179,6 +251,8 @@ fn module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
         return Ok(m.cast_into()?);
     }
     let m = PyModule::from_code(py, &std::ffi::CString::new(CODE).unwrap(), c"<tessh ai>", c"__tessh_ai__")?;
+    let doc = include_str!("../doc/ai.md");
+    m.setattr("PRIMER", doc.split_once("-->").map(|(_, rest)| rest.trim()).unwrap_or(doc))?;
     sys.getattr("modules")?.set_item("__tessh_ai__", &m)?;
     Ok(m)
 }
