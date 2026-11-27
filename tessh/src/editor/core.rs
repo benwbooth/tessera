@@ -189,6 +189,9 @@ pub struct Ed {
     pub pointer: Option<(u16, u16, Instant)>,
     // mouse
     pub drag: Option<(usize, u8)>,
+    /// A rectangle selected (editor/block.rs), and whether Alt+drag is making one.
+    pub blk: Option<super::block::Blk>,
+    pub blk_drag: bool,
     pub last_click: Option<(Instant, u16, u16, u8)>,
     // taps
     pub shift_side: u8,
@@ -307,6 +310,8 @@ impl Ed {
             analyzed: true,
             pointer: None,
             drag: None,
+            blk: None,
+            blk_drag: false,
             last_click: None,
             shift_side: 0,
             shift_at: Instant::now(),
@@ -887,6 +892,10 @@ impl Ed {
         self.cmd.dismiss();
         if !matches!(k.code, KeyCode::Up | KeyCode::Down) {
             self.from_history = false;
+        }
+        // (A rectangle, or Ctrl+Shift+Alt+arrows making one: editor/block.rs.)
+        if !self.vi_normal() && self.blk_key(&k) {
+            return;
         }
         let m = k.modifiers;
         let ctrl = m.contains(KeyModifiers::CONTROL);
@@ -1779,7 +1788,17 @@ impl Ed {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.pressed = hit.clone();
                 match hit {
+                    // (Alt held (Ctrl+Alt where the terminal hands it on): a
+                    // rectangle, dragged out.)
+                    Some(Hit::Text(p)) if e.modifiers.contains(KeyModifiers::ALT) && !e.modifiers.contains(KeyModifiers::SHIFT) => {
+                        self.close_comp();
+                        self.menu = None;
+                        self.blk_start(p);
+                        self.blk_drag = true;
+                        true
+                    }
                     Some(Hit::Text(p)) => {
+                        self.blk = None;
                         let now = Instant::now();
                         let n = match self.last_click {
                             Some((t, c, r, n)) if t.elapsed() < Duration::from_millis(400) && c == e.column && r == e.row => n % 3 + 1,
@@ -1834,6 +1853,13 @@ impl Ed {
                 self.list_to((top0 as isize + moved).clamp(0, span as isize) as usize, room);
                 true
             }
+            MouseEventKind::Drag(MouseButton::Left) if self.blk_drag => {
+                if let Some(Hit::Text(p)) = hit {
+                    let (l, c) = self.line_col(p);
+                    self.blk_to(l, c);
+                }
+                true
+            }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if let (Some((anchor, n)), Some(Hit::Text(p))) = (self.drag, hit) {
                     if n == 2 {
@@ -1843,6 +1869,15 @@ impl Ed {
                     } else {
                         self.t.select(anchor, p);
                     }
+                }
+                true
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.blk_drag => {
+                // (A rectangle made: copied, as terminals do.)
+                self.blk_drag = false;
+                self.pressed = None;
+                if self.blk_ranges().iter().any(|(a, b)| b > a) && self.blk.is_some_and(|b| b.ac != b.cc) {
+                    super::term::Term::copy(&self.blk_copy_text());
                 }
                 true
             }

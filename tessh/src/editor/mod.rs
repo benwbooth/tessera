@@ -8,6 +8,7 @@
 //! Drawn inline at the bottom like any shell's prompt: no alternate screen,
 //! the terminal's scrollback stays as it is.
 
+pub mod block;
 pub mod core;
 pub mod pager;
 pub mod run;

@@ -616,7 +616,8 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
     let cur_line = ed.t.line_of(ed.t.cursor);
     let sel = ed.t.selection();
     // (vi's V-BLOCK: each line's part.)
-    let block: Vec<(usize, usize)> = if ed.keys == Keys::Vi && ed.vi.visual == Some(super::vi::BLOCK) { ed.vi.block_ranges(&ed.t) } else { vec![] };
+    // (And a rectangle outside vi: editor/block.rs.)
+    let block: Vec<(usize, usize)> = if ed.keys == Keys::Vi && ed.vi.visual == Some(super::vi::BLOCK) { ed.vi.block_ranges(&ed.t) } else { ed.blk_ranges() };
     // (Indent levels per line, blank lines as deep as the shallower of the lines around.)
     let size = ind.size.max(1);
     let depth: Vec<usize> = {
