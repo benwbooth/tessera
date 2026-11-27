@@ -484,7 +484,8 @@ impl Ed {
     fn want(&mut self, task: &'static str, text: &str) {
         let mut ai = self.ai.lock().unwrap();
         let ok = match task {
-            "inline" => ai.inline_ready && text.trim().chars().count() >= 2 && !text.starts_with('#') && !text.contains('\n'),
+            // (In a block, the line being typed: ai.ask completes the last line.)
+            "inline" => ai.inline_ready && text.rsplit('\n').next().unwrap_or("").trim().chars().count() >= 2 && !text.starts_with('#'),
             "request" => ai.inline_ready,
             _ => ai.command_ready,
         };
@@ -565,7 +566,8 @@ impl Ed {
     /// typed starts with, past what's typed (prin → t, for print, printf,
     /// printenv), in grey, as fish does. Instant, no AI.
     fn comp_ghost(&mut self) {
-        if !self.ghost.is_empty() || self.comp.hist || self.t.cursor != self.t.len() || self.t.text.contains('\n') || self.comp.end != self.t.cursor {
+        // (In a block too: the word is on the line being typed.)
+        if !self.ghost.is_empty() || self.comp.hist || self.t.cursor != self.t.len() || self.comp.end != self.t.cursor {
             return;
         }
         let typed = &self.t.text[self.comp.start.min(self.t.len())..self.comp.end.min(self.t.len())];

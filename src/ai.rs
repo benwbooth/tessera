@@ -559,6 +559,30 @@ pub fn looks_tessh(line: &str) -> bool {
         || line.contains(['$', '(', '[', '{']) || line.contains(" = ") || line.contains(" == ")
 }
 
+/// A block being typed (the inline task's text has lines above the cursor's):
+/// the message to send instead, asking for its last line only, and that
+/// line. The reply goes through `block_reply`.
+pub fn inline_block(asked: &str) -> Option<(String, String)> {
+    let (recent, typed) = asked.rsplit_once("Complete this command line: ")?;
+    let (_, last) = typed.rsplit_once('\n')?;
+    Some((
+        format!("{recent}The block so far (the cursor is at the end of its last line):\n{typed}\n\nComplete ONLY its last line. Reply with ONLY that line, completed: {}", last.trim()),
+        typed.to_string(),
+    ))
+}
+
+/// The whole text with its last line completed from a reply to
+/// `inline_block` (the completed line wherever it is in the reply, at the
+/// line's own indent); just `typed` when the reply has none.
+pub fn block_reply(reply: &str, typed: &str, tessh: bool) -> String {
+    let Some((head, last)) = typed.rsplit_once('\n') else { return typed.to_string() };
+    let want = last.trim();
+    let clean = strip_thinking(reply).replace('`', "");
+    let line = clean.lines().map(str::trim).find(|l| l.starts_with(want)).unwrap_or(want);
+    let done = if tessh { tessh_suggestion(line, want) } else { line.to_string() };
+    format!("{head}\n{}{done}", &last[..last.len() - last.trim_start().len()])
+}
+
 /// tessh's block keywords: their lines end with no ':' and no do/then.
 const TESSH_BLOCKS: [&str; 13] = ["for", "if", "elif", "else", "while", "def", "with", "try", "except", "finally", "class", "match", "case"];
 
@@ -644,6 +668,10 @@ mod tests {
         assert_eq!(tessh_suggestion("if $n > 1: print(many)", "if $n"), "if $n > 1");
         assert_eq!(tessh_suggestion("for [k v] in ({a: 1}.items):", "for [k v]"), "for [k v] in ({a: 1}.items)");
         assert_eq!(tessh_suggestion("size = if $n > 2 then big else small", "size = if"), "size = if $n > 2 then big else small");
+        assert_eq!(block_reply("print \"hello\"", "if True\n  prin", true), "if True\n  print \"hello\"");
+        assert_eq!(block_reply("if True\n  print hi:", "if True\n  prin", true), "if True\n  print hi");
+        assert_eq!(block_reply("nothing", "if True\n  prin", true), "if True\n  prin");
+        assert!(inline_block("Recent commands:\nls\n\nComplete this command line: if True\n  prin").is_some_and(|(m, _)| m.ends_with("completed: prin")));
         assert!(looks_tessh("for [k v] in ($d.it") && looks_tessh("x = [1 2") && !looks_tessh("sudo nixos-reb"));
         assert!(tessh_primer().starts_with("# tessh in brief"));
     }

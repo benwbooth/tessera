@@ -1525,6 +1525,15 @@ impl ffi::Controller {
         let ctx: serde_json::Value = serde_json::from_str(&ctx_json.to_string()).unwrap_or_default();
         let s = crate::settings::load();
         let (rtask, model_ref) = crate::ai::task_model(&s.ai, &task);
+        // (A block being typed: its last line is completed, the rest is context.)
+        let block = if task == "inline" && !crate::ai::is_completion_model(&model_ref) {
+            msgs.last().and_then(|m| m["content"].as_str()).and_then(crate::ai::inline_block)
+        } else {
+            None
+        };
+        if let (Some((ask, _)), Some(m)) = (&block, msgs.last_mut()) {
+            m["content"] = serde_json::json!(ask);
+        }
         let qt = self.qt_thread();
         let cancel = Arc::new(AtomicBool::new(false));
         if let Some(old) = ai_jobs().lock().unwrap().insert(key.clone(), cancel.clone()) {
@@ -1534,7 +1543,10 @@ impl ffi::Controller {
         // (tessh is new to every model: its condensed guide goes first, the
         // same text each time. Suggestions for plain commands go without.)
         if ctx["shell"] == "tessh" {
-            let typed = msgs.last().and_then(|m| m["content"].as_str()).and_then(|c| c.rsplit_once("Complete this command line: ")).map(|(_, t)| t).unwrap_or("");
+            let typed = match &block {
+                Some((_, t)) => t.as_str(),
+                None => msgs.last().and_then(|m| m["content"].as_str()).and_then(|c| c.rsplit_once("Complete this command line: ")).map(|(_, t)| t).unwrap_or(""),
+            };
             if task != "inline" || crate::ai::looks_tessh(typed) {
                 msgs.insert(0, serde_json::json!({"role": "system", "content": crate::ai::tessh_primer()}));
             }
@@ -1606,6 +1618,7 @@ impl ffi::Controller {
             }
             let (reply, err) = match result {
                 // (One command, for the tasks that want one.)
+                Ok(r) if block.is_some() => (crate::ai::block_reply(&r, &block.as_ref().unwrap().1, ctx["shell"] == "tessh"), String::new()),
                 Ok(r) if task == "inline" && ctx["shell"] == "tessh" => {
                     let typed = msgs.last().and_then(|m| m["content"].as_str()).and_then(|c| c.rsplit_once("Complete this command line: ")).map(|(_, t)| t).unwrap_or("");
                     (crate::ai::tessh_suggestion(&crate::ai::command_from(&r), typed), String::new())

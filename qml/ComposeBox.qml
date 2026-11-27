@@ -984,7 +984,8 @@ Rectangle {
     // typed starts with, past what's typed (prin → t), in grey, as fish
     // does. True when it set one.
     function compGhost() {
-        if (ghost !== "" || historyMode || !compCurrent() || edit.cursorPosition !== edit.length || edit.text.indexOf("\n") >= 0) return false
+        // (In a block too: the word is on the line being typed.)
+        if (ghost !== "" || historyMode || !compCurrent() || edit.cursorPosition !== edit.length) return false
         if (comp.end !== edit.cursorPosition) return false
         const typed = edit.text.substring(comp.start, comp.end)
         if (typed === "") return false
@@ -1559,7 +1560,8 @@ Rectangle {
         readonly property rect at: edit.positionToRectangle(edit.cursorPosition)
         visible: ghostText.visible && box.closers !== ""
         z: 1
-        x: at.x + box.ghostSkip
+        // (edit.x: past the line numbers a block shows.)
+        x: edit.x + at.x + box.ghostSkip
         y: at.y
         width: ghostRow.width
         height: at.height
@@ -1570,7 +1572,7 @@ Rectangle {
         parent: flick.contentItem
         z: 2
         readonly property rect at: edit.positionToRectangle(box.closers !== "" ? edit.cursorPosition : edit.length)
-        x: at.x + box.ghostSkip
+        x: edit.x + at.x + box.ghostSkip
         y: at.y
         Text {
             id: ghostText
@@ -1962,7 +1964,7 @@ Rectangle {
         onTriggered: {
             const t = box.suggestBase()
             if (!box.aiInline || !box.inlineReady || box.lang !== box.autoLang || t.trim().length < 2 || t.startsWith("#") || box.historyMode
-                    || !box.atSuggestEnd || t.indexOf("\n") >= 0) return
+                    || !box.atSuggestEnd || t.split("\n").pop().trim().length < 2) return
             box.ghostAsked = t
             box.controller.aiRun(box.aiKey + "-inline", "inline", JSON.stringify([{ role: "user", content: "Recent commands:\n" + box.recent(8) + "\n\nComplete this command line: " + t }]), box.aiContext())
         }

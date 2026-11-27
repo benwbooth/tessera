@@ -209,7 +209,13 @@ def ask(task, text, cwd, recent):
     base = p.get("base_url", "").rstrip("/")
     key = _key(p)
     user = text
-    if recent:
+    head, last = text.rsplit("\n", 1) if task == "inline" and "\n" in text else ("", text)
+    if head:
+        # A block being typed: complete its last line, the rest as context.
+        user = (("Recent commands:\n" + recent + "\n\n") if recent else "") + \
+            "The block so far (the cursor is at the end of its last line):\n" + text + \
+            "\n\nComplete ONLY its last line. Reply with ONLY that line, completed: " + last.strip()
+    elif recent:
         if task == "inline":
             user = "Recent commands:\n" + recent + "\n\nComplete this command line: " + text
         elif task == "command":
@@ -240,6 +246,12 @@ def ask(task, text, cwd, recent):
     else:
         out = v["choices"][0]["message"].get("content") or ""
     out = strip_thinking(out)
+    if task == "inline" and head:
+        # (The completed line, wherever it is in the reply, at the line's own indent.)
+        want = last.strip()
+        line = next((l.strip() for l in strip_thinking(out).replace("`", "").splitlines() if l.strip().startswith(want)), want)
+        done = tessh_suggestion(line, want)
+        return head + "\n" + last[:len(last) - len(last.lstrip())] + done
     if task == "inline":
         return tessh_suggestion(command_from(out), text)
     return command_from(out) if task == "command" else out.splitlines()[0].strip() if out else ""
