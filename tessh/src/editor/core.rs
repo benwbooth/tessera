@@ -1594,7 +1594,8 @@ impl Ed {
 
     /// The text's right-click menu, as a text field has it.
     pub fn open_context(&mut self) {
-        let sel = self.t.selection().is_some();
+        // (A rectangle counts: its menu cuts, copies and deletes it.)
+        let sel = self.t.selection().is_some() || self.blk.is_some_and(|b| b.ac != b.cc);
         let it = |label: &str, cmd: &str, enabled: bool| MenuItem { label: label.into(), cmd: cmd.into(), section: false, checked: false, enabled, key: String::new() };
         let items = vec![
             it("Undo", "undo", true),
@@ -1725,6 +1726,10 @@ impl Ed {
             MenuKind::Ls(_) => self.ls_pick(&it.cmd),
             MenuKind::Options => self.done = Some(Outcome::Host(it.cmd.clone())),
             MenuKind::AddWidget => self.done = Some(Outcome::Host(format!("addwidget:{}", it.cmd))),
+            MenuKind::Context if self.blk.is_some() && matches!(it.cmd.as_str(), "cut" | "copy" | "delete" | "paste") => {
+                // (On a rectangle: each line's part.)
+                self.blk_menu(&it.cmd);
+            }
             MenuKind::Context => {
                 let sel = self.t.selection();
                 match it.cmd.as_str() {

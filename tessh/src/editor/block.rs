@@ -145,6 +145,17 @@ impl Ed {
         self.blk_put(&|_| String::new());
     }
 
+    /// The right-click menu's Cut, Copy, Delete or Paste, on the rectangle.
+    pub fn blk_menu(&mut self, cmd: &str) {
+        let k = |c: char, m: KeyModifiers| KeyEvent::new(KeyCode::Char(c), m);
+        let _ = match cmd {
+            "copy" => self.blk_key(&k('c', KeyModifiers::CONTROL)),
+            "cut" => self.blk_key(&k('x', KeyModifiers::CONTROL)),
+            "paste" => self.blk_key(&k('v', KeyModifiers::CONTROL)),
+            _ => self.blk_key(&KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
+        };
+    }
+
     /// A key while there's a rectangle, or Ctrl+Shift+Alt+arrows to make or
     /// grow one. True when it was the block's.
     pub fn blk_key(&mut self, k: &KeyEvent) -> bool {

@@ -305,6 +305,18 @@ Rectangle {
     TextEdit { id: clipBuf; visible: false }
     function copyText(t) { clipBuf.text = t; clipBuf.selectAll(); clipBuf.copy() }
     function clipText() { clipBuf.text = ""; clipBuf.paste(); return clipBuf.text }
+    // The right-click menu's Cut, Copy, Paste or Delete, on the rectangle.
+    function blkMenu(cmd) {
+        if (cmd === "copy") copyText(blkText())
+        else if (cmd === "cut") { copyText(blkText()); blkDelete(false) }
+        else if (cmd === "delete") blkDelete(false)
+        else if (cmd === "paste") {
+            const c = clipText().replace(/\r\n/g, "\n"), parts = c.split("\n")
+            const n = Math.abs(blk.cl - blk.al) + 1
+            if (parts.length === n) blkPut(i => parts[i]); else { const one = c.replace(/\n/g, " "); blkPut(() => one) }
+        }
+        edit.forceActiveFocus()
+    }
     function blkKey(e) {
         const ctrl = e.modifiers & Qt.ControlModifier, alt = e.modifiers & Qt.AltModifier, shift = e.modifiers & Qt.ShiftModifier
         const arrow = [Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(e.key) >= 0
@@ -1527,10 +1539,12 @@ Rectangle {
                 SlimMenuItem { text: "Undo"; enabled: edit.canUndo; onTriggered: edit.undo() }
                 SlimMenuItem { text: "Redo"; enabled: edit.canRedo; onTriggered: edit.redo() }
                 Sep {}
-                SlimMenuItem { text: "Cut"; enabled: edit.selectedText !== ""; onTriggered: edit.cut() }
-                SlimMenuItem { text: "Copy"; enabled: edit.selectedText !== ""; onTriggered: edit.copy() }
-                SlimMenuItem { text: "Paste"; enabled: edit.canPaste; onTriggered: edit.paste() }
-                SlimMenuItem { text: "Delete"; enabled: edit.selectedText !== ""; onTriggered: edit.remove(edit.selectionStart, edit.selectionEnd) }
+                // (A rectangle counts: these act on each line's part of it.)
+                readonly property bool blkSel: box.blk !== null && box.blk.ac !== box.blk.cc
+                SlimMenuItem { text: "Cut"; enabled: edit.selectedText !== "" || editMenu.blkSel; onTriggered: box.blk ? box.blkMenu("cut") : edit.cut() }
+                SlimMenuItem { text: "Copy"; enabled: edit.selectedText !== "" || editMenu.blkSel; onTriggered: box.blk ? box.blkMenu("copy") : edit.copy() }
+                SlimMenuItem { text: "Paste"; enabled: edit.canPaste; onTriggered: box.blk ? box.blkMenu("paste") : edit.paste() }
+                SlimMenuItem { text: "Delete"; enabled: edit.selectedText !== "" || editMenu.blkSel; onTriggered: box.blk ? box.blkMenu("delete") : edit.remove(edit.selectionStart, edit.selectionEnd) }
                 Sep {}
                 SlimMenuItem { text: "Select All"; enabled: edit.text !== ""; onTriggered: edit.selectAll() }
             }
