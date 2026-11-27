@@ -793,6 +793,11 @@ pub mod ffi {
         /// This window was just used: later `tessera -e` launches come here.
         #[qinvokable]
         fn gui_link_touch(self: &Controller);
+        /// The xdg-activation token the next requestActivate() uses (a
+        /// `tessera -e` launcher's), or "" to clear it. Qt's Wayland window
+        /// takes it from XDG_ACTIVATION_TOKEN when asked to activate.
+        #[qinvokable]
+        fn set_activation_token(self: &Controller, token: QString);
 
         /// Testing: text typed into the focused terminal a few seconds later
         /// (--then), and how long to wait before the screenshot (ms).
@@ -2209,6 +2214,15 @@ impl ffi::Controller {
 
     fn gui_link_touch(&self) {
         crate::gui_link::touch();
+    }
+
+    fn set_activation_token(&self, token: ffi::QString) {
+        let t = token.to_string();
+        if t.is_empty() {
+            std::env::remove_var("XDG_ACTIVATION_TOKEN");
+        } else {
+            std::env::set_var("XDG_ACTIVATION_TOKEN", t);
+        }
     }
 }
 

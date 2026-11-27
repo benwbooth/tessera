@@ -1584,7 +1584,11 @@ ApplicationWindow {
         if (r.cmd) { opts.command = r.cmd; opts.title = r.cmd.length > 40 ? r.cmd.substring(0, 40) + "…" : r.cmd }
         newTab(opts)
         win.raise()
+        // (Wayland: only with the launcher's token may a window that isn't
+        // focused take the focus; Qt reads it as it asks. Not left set after.)
+        if (r.token) controller.setActivationToken(r.token)
         win.requestActivate()
+        if (r.token) controller.setActivationToken("")
     }
     Connections {
         target: controller

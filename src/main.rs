@@ -169,11 +169,12 @@ fn main() {
     // (src/gui_link.rs); else this new window runs it in its first tab.
     if !exec_argv.is_empty() || exec_dir.is_some() {
         let cwd = exec_dir.unwrap_or_else(|| std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
-        let e = if exec_argv.is_empty() { gui_link::Exec { cmd: String::new(), cwd, hold: true } } else { gui_link::Exec::new(&exec_argv, cwd, hold) };
+        let e = if exec_argv.is_empty() { gui_link::Exec { cmd: String::new(), cwd, hold: true, token: gui_link::launch_token() } } else { gui_link::Exec::new(&exec_argv, cwd, hold) };
         if std::env::var_os("TESSERA_NO_RESTORE").is_none() && gui_link::send(&e) {
             return;
         }
-        std::env::set_var("TESSERA_EXEC", e.to_json());
+        // (This window's own start uses the token from the environment.)
+        std::env::set_var("TESSERA_EXEC", gui_link::Exec { token: String::new(), ..e }.to_json());
     }
 
     set_qt_env("QT_QUICK_CONTROLS_STYLE", std::env::var("TESSERA_STYLE").unwrap_or_else(|_| "Basic".into()));

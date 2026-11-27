@@ -18,6 +18,11 @@ pub struct Exec {
     pub cmd: String,
     pub cwd: String,
     pub hold: bool,
+    /// The launcher's xdg-activation token (XDG_ACTIVATION_TOKEN, as arbor
+    /// and other compositors hand to what they start): with it, the window
+    /// that takes the command may come to the front although it isn't the
+    /// focused one (without it, Wayland only marks it as wanting attention).
+    pub token: String,
 }
 
 impl Exec {
@@ -36,11 +41,16 @@ impl Exec {
         } else {
             shell_words::join(argv)
         };
-        Exec { cmd, cwd, hold }
+        Exec { cmd, cwd, hold, token: launch_token() }
     }
     pub fn to_json(&self) -> String {
-        json!({"cmd": self.cmd, "cwd": self.cwd, "hold": self.hold}).to_string()
+        json!({"cmd": self.cmd, "cwd": self.cwd, "hold": self.hold, "token": self.token}).to_string()
     }
+}
+
+/// The activation token this launch was given, if any.
+pub fn launch_token() -> String {
+    std::env::var("XDG_ACTIVATION_TOKEN").unwrap_or_default()
 }
 
 fn dir() -> PathBuf {
@@ -88,7 +98,7 @@ pub fn send(_e: &Exec) -> bool {
 }
 
 /// This window takes commands from other launches: each arrives as JSON
-/// ({cmd, cwd, hold}) through `on`.
+/// ({cmd, cwd, hold, token}) through `on`.
 #[cfg(unix)]
 pub fn listen(on: impl Fn(String) + Send + 'static) {
     use std::io::{BufRead, BufReader, Write};
