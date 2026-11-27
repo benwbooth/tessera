@@ -154,9 +154,11 @@ Rectangle {
     // (The toolbar row (modeTag) on top, the prompt bar under it, then the
     // editor.)
     // (A problem with the text goes under it, so the prompt line stays put.)
-    implicitHeight: Math.ceil(Math.min(Math.max(edit.contentHeight, lineHeight), 10 * lineHeight)) + flickTop + 9 + noteH
-    readonly property real noteH: problemNote.visible ? problemNote.height + 4 : 0
-    readonly property real flickTop: promptBar.visible ? promptBar.y + promptBar.height + 4 : modeTag.y + modeTag.height + 4
+    implicitHeight: Math.ceil(Math.min(Math.max(edit.contentHeight, lineHeight), 10 * lineHeight)) + flickTop + 9
+    // (A problem goes over the prompt: the box grows up, the prompt and the
+    // text stay where they are.)
+    readonly property real noteH: 0
+    readonly property real flickTop: promptBar.visible ? promptBar.y + promptBar.height + 4 : problemNote.visible ? problemNote.y + problemNote.height + 4 : modeTag.y + modeTag.height + 4
 
     color: Theme.mix(Theme.bg, Theme.fg, Theme.dark ? 0.045 : 0.035)
     Rectangle { width: parent.width; height: edgeHover.hovered ? 2 : 1; color: edgeHover.hovered ? Theme.accent : Theme.divider }
@@ -1131,8 +1133,8 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: Math.max(optionsBtn.x + optionsBtn.width + 4, flick.x)
         anchors.right: parent.right
-        anchors.top: modeTag.visible ? modeTag.bottom : parent.top
-        anchors.topMargin: modeTag.visible ? 2 : 5
+        anchors.top: problemNote.visible ? problemNote.bottom : modeTag.visible ? modeTag.bottom : parent.top
+        anchors.topMargin: problemNote.visible ? 3 : modeTag.visible ? 2 : 5
         height: visible ? implicitHeight : 0
         view: box.view
         controller: box.controller
@@ -1614,15 +1616,16 @@ Rectangle {
     }
 
     // A problem with the text (tessh's or the shell's check, the language
-    // server's): under the editor, whole, wrapped; nothing above moves.
+    // server's): over the prompt, whole, wrapped. The box grows upward, so
+    // the prompt and the text don't move.
     Text {
         id: problemNote
         topPadding: 0.001
         readonly property string msg: box.problem !== "" ? box.problem : box.lspNote
         visible: msg !== ""
         x: flick.x + 0.001
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 5
+        y: modeTag.visible ? modeTag.y + modeTag.height + 3 : 5
+        height: visible ? implicitHeight : 0
         width: box.width - x - 10
         text: "\u26a0 " + msg
         color: box.problem !== "" ? box.ansi(9, "#e05a5a") : box.ansi(3, "#e5c07b")

@@ -396,7 +396,21 @@ pub fn check(py: Python<'_>, text: &str, filename: &str) -> Vec<(u32, u32, u32, 
     };
     let compile = py.import("builtins").and_then(|b| b.getattr("compile"));
     if let Ok(compile) = compile {
-        if let Err(e) = compile.call1((m, filename, "exec", TOP_LEVEL_AWAIT)) {
+        // (Python's warnings about the code, "'int' object is not
+        // callable; perhaps you missed a comma?": the problem shown, not
+        // printed to the terminal over the editor.)
+        let guard = py.import("warnings").and_then(|w| {
+            let cm = w.call_method0("catch_warnings")?;
+            cm.call_method0("__enter__")?;
+            w.call_method1("simplefilter", ("ignore",))?;
+            w.call_method1("filterwarnings", ("error", "", py.import("builtins")?.getattr("SyntaxWarning")?))?;
+            Ok(cm)
+        });
+        let r = compile.call1((m, filename, "exec", TOP_LEVEL_AWAIT));
+        if let Ok(cm) = guard {
+            let _ = cm.call_method1("__exit__", (py.None(), py.None(), py.None()));
+        }
+        if let Err(e) = r {
             let v = e.value(py);
             let line: u32 = v.getattr("lineno").and_then(|x| x.extract()).unwrap_or(1);
             let off: u32 = v.getattr("offset").and_then(|x| x.extract()).unwrap_or(1);

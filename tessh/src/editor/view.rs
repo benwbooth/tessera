@@ -763,7 +763,7 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
     // ---- the toolbar row ----
     if !v.final_ {
         // (A note wraps onto more rows, never cut short. A problem with the
-        // text goes under the editor instead: the prompt line stays put.)
+        // text goes between this and the prompt bar.)
         let note: Option<(String, Sty)> = if !v.ai_busy.is_empty() {
             let what = if v.ai_busy == "fix" { "fixing the command…" } else { "writing the command…" };
             Some((format!("◜ {what}  esc cancels"), Sty::fg(Col::Ansi(4))))
@@ -803,6 +803,14 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
         }
         }
     }
+    // ---- a problem with the text: over the prompt, whole, wrapped (the
+    // prompt line and the text below it stay where they are) ----
+    if !v.final_ && !ed.problem.is_empty() {
+        let sty = Sty { fg: Some(Col::Ansi(9)), bold: true, ..Default::default() };
+        for (i, t) in wrap_text(&format!("⚠ {}", ed.problem), cols.saturating_sub(4).max(10)).into_iter().enumerate() {
+            rows.push(vec![Span::new(if i == 0 { "  " } else { "    " }, Sty::default()), Span::new(t, sty.clone()).hit(Hit::Chip("note"))]);
+        }
+    }
     // ---- the prompt bar ----
     for (i, l) in v.bar.iter().enumerate() {
         // (The options menu's ▾ at its left.)
@@ -826,13 +834,6 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
     }
     let editor_top = rows.len();
     rows.extend(shown);
-    // ---- a problem with the text: under it, whole, wrapped ----
-    if !v.final_ && !ed.problem.is_empty() {
-        let sty = Sty { fg: Some(Col::Ansi(9)), bold: true, ..Default::default() };
-        for (i, t) in wrap_text(&format!("⚠ {}", ed.problem), cols.saturating_sub(4).max(10)).into_iter().enumerate() {
-            rows.push(vec![Span::new(if i == 0 { "  " } else { "    " }, Sty::default()), Span::new(t, sty.clone()).hit(Hit::Chip("note"))]);
-        }
-    }
     let cursor = if v.final_ { None } else { Some((editor_top + cur_r.saturating_sub(skip), text_x + cur_c)) };
 
     // ---- the popup: drawn over what's around the editor, never moving it ----
