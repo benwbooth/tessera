@@ -222,6 +222,119 @@ Rectangle {
 
     function focusEditor() { edit.forceActiveFocus() }
     function insert(t) { edit.insert(edit.cursorPosition, t) }
+
+    // ---- a rectangle of the text (column selection), as tessh's editor's
+    // (editor/block.rs): Alt+drag or Ctrl+Shift+Alt+arrows; Ctrl+C/X copy and
+    // cut each line's part, Delete/Backspace remove them, typing goes on every
+    // line, Ctrl+V a line each (else the same on each); Escape, a plain arrow
+    // or a click ends it. Corners: (line, column), columns past a short
+    // line's end allowed. ----
+    property var blk: null              // {al, ac, cl, cc}
+    function lineStartPos(l) {
+        let p = 0
+        for (let i = 0; i < l; i++) { const n = edit.text.indexOf("\n", p); if (n < 0) return p; p = n + 1 }
+        return p
+    }
+    function lineLen(l) { const s = lineStartPos(l), e = edit.text.indexOf("\n", s); return (e < 0 ? edit.text.length : e) - s }
+    function lineCol(p) { const t = edit.text.substring(0, p); return [t.split("\n").length - 1, p - (t.lastIndexOf("\n") + 1)] }
+    // (Under the pointer, the column counted on past the line's end.)
+    function lineColAt(x, y) {
+        const p = edit.positionAt(x, y), lc = lineCol(p)
+        const r = edit.positionToRectangle(p), cw = fm.advanceWidth(" ")
+        return [lc[0], lc[1] + (x > r.x + cw ? Math.round((x - r.x) / cw) : 0)]
+    }
+    function blkStart(p) { const lc = lineCol(p); blk = { al: lc[0], ac: lc[1], cl: lc[0], cc: lc[1] }; edit.deselect(); edit.cursorPosition = p }
+    function blkTo(l, c) {
+        if (!blk) return
+        const n = edit.text.split("\n").length
+        l = Math.max(0, Math.min(l, n - 1)); c = Math.max(0, c)
+        blk = { al: blk.al, ac: blk.ac, cl: l, cc: c }
+        edit.cursorPosition = lineStartPos(l) + Math.min(c, lineLen(l))
+    }
+    readonly property var blkRects: {
+        if (!blk) return []
+        void edit.text; void edit.width; void edit.contentHeight
+        const l1 = Math.min(blk.al, blk.cl), l2 = Math.max(blk.al, blk.cl)
+        const c1 = Math.min(blk.ac, blk.cc), c2 = Math.max(blk.ac, blk.cc)
+        const cw = fm.advanceWidth(" "), out = []
+        for (let l = l1; l <= l2; l++) {
+            const s = lineStartPos(l), len = lineLen(l)
+            const r = edit.positionToRectangle(s + Math.min(c1, len))
+            const x = r.x + Math.max(0, c1 - len) * cw
+            out.push({ x: x, y: r.y, w: Math.max(2, (c2 > c1 ? c2 - c1 : 1) * cw), h: r.height })
+        }
+        return out
+    }
+    function blkText() {
+        if (!blk) return ""
+        const l1 = Math.min(blk.al, blk.cl), l2 = Math.max(blk.al, blk.cl)
+        const c1 = Math.min(blk.ac, blk.cc), c2 = Math.max(blk.ac, blk.cc)
+        const lines = edit.text.split("\n"), out = []
+        for (let l = l1; l <= l2; l++) out.push((lines[l] || "").substring(c1, c2))
+        return out.join("\n")
+    }
+    // Each line's part replaced by put(i), a short line padded out to the
+    // left edge first; then the block is no columns wide, after what went in.
+    function blkPut(put) {
+        if (!blk) return
+        const l1 = Math.min(blk.al, blk.cl), l2 = Math.max(blk.al, blk.cl)
+        const c1 = Math.min(blk.ac, blk.cc), c2 = Math.max(blk.ac, blk.cc)
+        const lines = edit.text.split("\n")
+        let after = c1
+        for (let l = l1, i = 0; l <= l2 && l < lines.length; l++, i++) {
+            const line = lines[l], ins = put(i), pad = Math.max(0, c1 - line.length)
+            if (ins === "" && pad > 0) continue
+            lines[l] = line.substring(0, c1) + " ".repeat(pad) + ins + line.substring(Math.max(c1, c2))
+            after = c1 + ins.length
+        }
+        const cl = blk.cl
+        edit.remove(0, edit.length)
+        edit.insert(0, lines.join("\n"))
+        blk = { al: blk.al, ac: after, cl: cl, cc: after }
+        blkTo(cl, after)
+    }
+    function blkDelete(back) {
+        if (!blk) return
+        const c1 = Math.min(blk.ac, blk.cc), c2 = Math.max(blk.ac, blk.cc)
+        if (c2 === c1) {
+            if (back && c1 === 0) return
+            blk = back ? { al: blk.al, ac: c1 - 1, cl: blk.cl, cc: c1 } : { al: blk.al, ac: c1, cl: blk.cl, cc: c1 + 1 }
+        }
+        blkPut(() => "")
+    }
+    TextEdit { id: clipBuf; visible: false }
+    function copyText(t) { clipBuf.text = t; clipBuf.selectAll(); clipBuf.copy() }
+    function clipText() { clipBuf.text = ""; clipBuf.paste(); return clipBuf.text }
+    function blkKey(e) {
+        const ctrl = e.modifiers & Qt.ControlModifier, alt = e.modifiers & Qt.AltModifier, shift = e.modifiers & Qt.ShiftModifier
+        const arrow = [Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].indexOf(e.key) >= 0
+        if (ctrl && alt && shift && arrow) {
+            if (!blk) blkStart(edit.cursorPosition)
+            const b = blk
+            if (e.key === Qt.Key_Up) blkTo(b.cl - 1, b.cc)
+            else if (e.key === Qt.Key_Down) blkTo(b.cl + 1, b.cc)
+            else if (e.key === Qt.Key_Left) blkTo(b.cl, b.cc - 1)
+            else blkTo(b.cl, b.cc + 1)
+            return true
+        }
+        if (!blk) return false
+        if (e.key === Qt.Key_Escape) { blk = null; return true }
+        if (ctrl && !alt && e.key === Qt.Key_C) { copyText(blkText()); return true }
+        if (ctrl && !alt && e.key === Qt.Key_X) { copyText(blkText()); blkDelete(false); return true }
+        if (ctrl && !alt && e.key === Qt.Key_V) {
+            const c = clipText().replace(/\r\n/g, "\n"), parts = c.split("\n")
+            const n = Math.abs(blk.cl - blk.al) + 1
+            if (parts.length === n) blkPut(i => parts[i]); else { const one = c.replace(/\n/g, " "); blkPut(() => one) }
+            return true
+        }
+        if (e.key === Qt.Key_Backspace) { blkDelete(true); return true }
+        if (e.key === Qt.Key_Delete) { blkDelete(false); return true }
+        if (!ctrl && !alt && e.text.length === 1 && e.text >= " ") { const s = e.text; blkPut(() => s); return true }
+        // (Modifier keys alone wait; anything else ends it and does as always.)
+        if ([Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta].indexOf(e.key) >= 0) return false
+        blk = null
+        return false
+    }
     function setText(t) { edit.text = t; edit.cursorPosition = t.length }
 
     // The editor's keys, for the hint's tooltip: a table, keys on the left.
@@ -1345,6 +1458,31 @@ Rectangle {
                 }
             }
             ViBlock { vi: vik; color: Theme.accent }
+            // A rectangle (column selection): each line's part, and Alt+drag
+            // (or Ctrl+Alt+drag) to make one; other presses go to the text.
+            Repeater {
+                model: box.blkRects
+                Rectangle {
+                    required property var modelData
+                    z: -1
+                    x: modelData.x; y: modelData.y; width: modelData.w; height: modelData.h
+                    color: Theme.accent
+                    opacity: 0.35
+                }
+            }
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+                cursorShape: Qt.IBeamCursor
+                onPressed: (m) => {
+                    if (!(m.modifiers & Qt.AltModifier) || (m.modifiers & Qt.ShiftModifier)) { box.blk = null; m.accepted = false; return }
+                    edit.forceActiveFocus()
+                    box.blkStart(edit.positionAt(m.x, m.y))
+                }
+                onPositionChanged: (m) => { if (pressed && box.blk) { const lc = box.lineColAt(m.x, m.y); box.blkTo(lc[0], lc[1]) } }
+                onReleased: { if (box.blk && box.blk.ac !== box.blk.cc) box.copyText(box.blkText()) }
+            }
             cursorDelegate: Rectangle {
                 id: cur
                 readonly property string under: {
@@ -1498,7 +1636,8 @@ Rectangle {
                 if (e.key !== Qt.Key_Up && e.key !== Qt.Key_Down) box.fromHistory = false
                 if (e.key === Qt.Key_Shift && !e.isAutoRepeat) { shiftSide = shiftSideOf(e); shiftAt = Date.now() }
                 else shiftSide = 0
-                let done = false
+                // (A rectangle, or Ctrl+Shift+Alt+arrows making one.)
+                let done = !(box.keys === "vi" && box.viNormal) && box.blkKey(e)
                 const plain = !(e.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
                 if (box.ghost !== "" && box.atSuggestEnd && plain
                         && (e.key === Qt.Key_Right || e.key === Qt.Key_End))
