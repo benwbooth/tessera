@@ -91,6 +91,17 @@ pub struct ViewIn<'a> {
 
 /// How wide the options menu's button is, with the gap after it.
 pub const MENU_BUTTON_W: usize = 4;
+/// The + at the bar's right, with the gap before it.
+pub const PLUS_W: usize = 4;
+
+/// The + at the bar's right (Tessera's): a widget to add to the prompt.
+fn plus_button(ed: &Ed, v: &ViewIn) -> Vec<Span> {
+    let open = matches!(&ed.menu, Some(m) if m.kind == MenuKind::AddWidget);
+    let lit = open || v.hovered == Some(&Hit::Chip("addwidget"));
+    let bg = v.pal.mix(if lit { 0.30 } else { 0.18 }).or(Some(Col::Ansi(if lit { 7 } else { 8 })));
+    let st = Sty { bold: true, fg: if v.pal.mix(0.1).is_none() { Some(Col::Ansi(15)) } else { None }, ..Sty::default() }.with_bg(bg);
+    vec![Span::new(" + ", st).hit(Hit::Chip("addwidget"))]
+}
 
 /// The options menu's button: ▾, lit while hovered or open.
 fn menu_button(ed: &Ed, v: &ViewIn) -> Vec<Span> {
@@ -154,6 +165,7 @@ pub fn tooltip(ed: &Ed, hit: &Hit) -> String {
             ),
             "jobs" => format!("{} background job{} running ({} in all): click to show them (Ctrl+Alt+J)", ed.jobs.0, if ed.jobs.0 == 1 { "" } else { "s" }, ed.jobs.1),
             "keys" => "Editor keys: click for the next, Emacs, vi, VS Code (Ctrl+Alt+E)".into(),
+            "addwidget" => "Add a widget to the prompt: Tessera's own or a Starship module".into(),
             "menu" => "The input's menu: folders, history, the guide, indentation, editor keys; each with its shortcut (Ctrl+Alt+O)".into(),
             "hint" => keys_table(ed),
             "note" => if !ed.problem.is_empty() { ed.problem.clone() } else { ed.ai_note.clone() },
@@ -822,13 +834,21 @@ pub fn build(ed: &Ed, v: &ViewIn, spans_for: &dyn Fn(&str) -> Vec<(usize, usize,
         } else {
             fit(l.clone(), cols)
         };
+        // (The + at its right: room kept for it.)
+        let plus = i == 0 && !v.final_;
+        let room = if plus { cols.saturating_sub(PLUS_W) } else { cols };
         if i == 0 && !v.bar_right.is_empty() {
             let lw = super::width(&row);
             let rw = super::width(v.bar_right);
-            if lw + rw + 2 <= cols {
-                row.push(Span::new(" ".repeat(cols - lw - rw), Sty::default()));
+            if lw + rw + 2 <= room {
+                row.push(Span::new(" ".repeat(room - lw - rw), Sty::default()));
                 row.extend(v.bar_right.iter().cloned());
             }
+        }
+        if plus {
+            let lw = super::width(&row);
+            row.push(Span::new(" ".repeat(room.saturating_sub(lw) + 1), Sty::default()));
+            row.extend(plus_button(ed, v));
         }
         rows.push(row);
     }

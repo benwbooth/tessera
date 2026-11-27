@@ -410,8 +410,29 @@ pub fn run_term(ns: Py<PyDict>, hist: std::path::PathBuf, bar: Option<BarFn>) ->
                             let items = menu_of(crate::editor::promptbar::cd_history(&bar_ctx(&editor.ed)));
                             editor.ed.open_menu(MenuKind::Choices("dir".into()), items);
                         }
+                        // (The + at the bar's right: Tessera's widgets, then Starship's modules.)
+                        "addwidget" => {
+                            let items = crate::editor::promptbar::add_choices()
+                                .into_iter()
+                                .map(|(n, l, d, on)| {
+                                    if n.is_empty() {
+                                        MenuItem { label: l, section: true, ..Default::default() }
+                                    } else {
+                                        let label = if d.is_empty() { l } else { format!("{l} — {d}") };
+                                        MenuItem { label, cmd: n, checked: on, enabled: !on, ..Default::default() }
+                                    }
+                                })
+                                .collect();
+                            editor.ed.menu_x = Some(usize::MAX / 2);
+                            editor.ed.open_menu(MenuKind::AddWidget, items);
+                        }
                         _ => {}
                     },
+                    "addwidget" => {
+                        if let Err(e) = crate::editor::promptbar::add_widget(arg) {
+                            eprintln!("tessh: couldn't add {arg} to the prompt: {e}");
+                        }
+                    }
                     "widgets" => {
                         // (The prompt bar's widgets that offer choices: Ctrl+Alt+P.)
                         let set = crate::editor::promptbar::settings();

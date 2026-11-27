@@ -123,6 +123,8 @@ pub enum MenuKind {
     /// The ▾ at the prompt bar's left (Ctrl+Alt+O): folders, history, the
     /// guide, indentation, the editor's keys; each with its shortcut.
     Options,
+    /// The + at its right: a widget to add to the prompt.
+    AddWidget,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -544,8 +546,36 @@ impl Ed {
         if self.comp.index >= self.comp.items.len() {
             self.comp.index = 0;
         }
+        self.comp_ghost();
         if self.comp.items.is_empty() {
             self.close_comp();
+        }
+    }
+    /// With nothing else suggested: what every completion of the word being
+    /// typed starts with, past what's typed (prin → t, for print, printf,
+    /// printenv), in grey, as fish does. Instant, no AI.
+    fn comp_ghost(&mut self) {
+        if !self.ghost.is_empty() || self.comp.hist || self.t.cursor != self.t.len() || self.t.text.contains('\n') || self.comp.end != self.t.cursor {
+            return;
+        }
+        let typed = &self.t.text[self.comp.start.min(self.t.len())..self.comp.end.min(self.t.len())];
+        if typed.is_empty() {
+            return;
+        }
+        let mut cp: Option<&str> = None;
+        for i in self.comp.items.iter().filter(|i| i.insert.starts_with(typed)) {
+            cp = Some(match cp {
+                None => i.insert.as_str(),
+                Some(c) => {
+                    let n = c.char_indices().zip(i.insert.chars()).take_while(|((_, a), b)| a == b).last().map(|((at, a), _)| at + a.len_utf8()).unwrap_or(0);
+                    &c[..n]
+                }
+            });
+        }
+        if let Some(c) = cp.filter(|c| c.len() > typed.len()) {
+            self.ghost = c[typed.len()..].to_string();
+            self.ghost_base = self.t.text.clone();
+            self.dirty = true;
         }
     }
     pub fn accept_comp(&mut self, i: Option<usize>, h: &mut dyn Hooks) {
@@ -1677,6 +1707,7 @@ impl Ed {
             MenuKind::Widgets => self.done = Some(Outcome::Host(format!("widget:{}", it.cmd))),
             MenuKind::Ls(_) => self.ls_pick(&it.cmd),
             MenuKind::Options => self.done = Some(Outcome::Host(it.cmd.clone())),
+            MenuKind::AddWidget => self.done = Some(Outcome::Host(format!("addwidget:{}", it.cmd))),
             MenuKind::Context => {
                 let sel = self.t.selection();
                 match it.cmd.as_str() {
@@ -1890,6 +1921,7 @@ impl Ed {
                 // (Its list open: the click closes it. Another's: that goes first.)
                 let open = match &self.menu {
                     Some(m) if m.kind == MenuKind::Indent => "indent",
+                    Some(m) if m.kind == MenuKind::AddWidget => "addwidget",
                     Some(m) if m.kind == MenuKind::Choices("dir".into()) => "folders",
                     _ if self.comp.open && self.comp.hist => "history",
                     _ => "",
@@ -1967,8 +1999,13 @@ impl Ed {
             'n' if self.comp.open && self.shift_takes_item(h) => self.accept_comp(None, h),
             'n' => self.newline(),
             'g' => {
+                // (Nothing suggested yet: the completions' common start, at
+                // once; else the AI is asked.)
                 if !self.accept_ghost() {
-                    self.ask_ghost_now();
+                    self.request_complete(h);
+                    if !self.accept_ghost() {
+                        self.ask_ghost_now();
+                    }
                 }
             }
             _ => self.submit_background(),

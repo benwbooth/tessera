@@ -66,7 +66,7 @@ impl Editor {
         let seq = self.bar_seq;
         let (f, slot) = (self.bar_fn.clone(), self.bar.clone());
         // (Its first row has the options menu's ▾ at its left: made that much narrower.)
-        let (cwd, st, du, w, visited) = (self.ed.cwd.clone(), self.ed.status, self.ed.duration_ms, Term::size().0.saturating_sub(super::view::MENU_BUTTON_W as u16), self.ed.visited.clone());
+        let (cwd, st, du, w, visited) = (self.ed.cwd.clone(), self.ed.status, self.ed.duration_ms, Term::size().0.saturating_sub((super::view::MENU_BUTTON_W + super::view::PLUS_W) as u16), self.ed.visited.clone());
         let colors = self.term.fg.zip(self.term.bg);
         // (A folder been in before: its last bar at once, till the new one's
         // worked out, not the last folder's. One not been in: the last bar

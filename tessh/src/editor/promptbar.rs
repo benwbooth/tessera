@@ -1668,6 +1668,9 @@ pub fn shared_history() -> Vec<String> {
         lists.push(
             text.lines()
                 .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                // (A shell's lines only: Python's `if True:` offered its ':'
+                // to a tessh line.)
+                .filter(|v| matches!(v.get("lang").and_then(|x| x.as_str()).unwrap_or(""), "" | "bash" | "sh" | "zsh" | "fish" | "tessh" | "nu" | "nushell" | "powershell" | "pwsh" | "elvish" | "xonsh" | "dash" | "ksh" | "shell"))
                 .map(|v| (v.get("t").and_then(|x| x.as_u64()).unwrap_or(0), v.get("cmd").and_then(|x| x.as_str()).unwrap_or("").to_string()))
                 .collect(),
         );
@@ -1948,4 +1951,53 @@ mod tests {
         assert_eq!(c.iter().filter(|x| x.cmd == "cd /etc").count(), 1);
         assert_eq!(cd_history(&ctx).len(), c.len());
     }
+}
+
+// ---- adding a widget (the + at the bar's right, as Tessera's) -------------------
+
+/// What can be added: (name, label, note, already shown), Tessera's own
+/// first, then Starship's modules (`starship module --list`, when it's
+/// installed). Headings as ("", label, "", false).
+pub fn add_choices() -> Vec<(String, String, String, bool)> {
+    let s = settings();
+    let shown = layout(&s);
+    let on = |n: &str| shown.iter().any(|x| x == n);
+    let mut out = vec![(String::new(), "Tessera".to_string(), String::new(), false)];
+    for (n, l, d) in BUILTINS {
+        out.push((n.to_string(), l.to_string(), d.to_string(), on(n)));
+    }
+    if let Some(bin) = starship_bin() {
+        let list = std::process::Command::new(bin).args(["module", "--list"]).output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+        let mods: Vec<&str> = list.lines().map(str::trim).filter(|l| !l.is_empty() && l.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')).collect();
+        out.push((String::new(), format!("Starship modules ({})", mods.len()), String::new(), false));
+        for m in mods {
+            let n = format!("star:{m}");
+            let shown = on(&n);
+            out.push((n, m.replace('_', " "), String::new(), shown));
+        }
+    }
+    out
+}
+
+/// Add a widget to the bar's left side (before "|"), in Tessera's
+/// settings.json, which Tessera's bar reads too. Already there: nothing.
+pub fn add_widget(name: &str) -> std::io::Result<()> {
+    let p = config_dir().join("settings.json");
+    let mut v: serde_json::Value = std::fs::read(&p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| serde_json::json!({}));
+    let mut l = layout(&settings_from(Some(&v)));
+    if name.is_empty() || name == "|" || l.iter().any(|x| x == name) {
+        return Ok(());
+    }
+    if !l.iter().any(|x| x == "|") {
+        l.push("|".into());
+    }
+    let at = l.iter().position(|x| x == "|").unwrap_or(l.len());
+    l.insert(at, name.to_string());
+    v["prompt_layout"] = serde_json::json!(l);
+    if let Some(d) = p.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&v).unwrap_or_default())?;
+    std::fs::rename(&tmp, &p)
 }
