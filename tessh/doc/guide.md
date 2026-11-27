@@ -2689,7 +2689,7 @@ tessh notices it's being started while it reads the profile and doesn't
 start a second REPL.
 
 ## Scripts and checks
-<!-- help: scripts script running run check --check --py -c shebang -->
+<!-- help: scripts script running run check --check --py -c shebang debug debugger --dap -->
 
 ```text
 tessh file.tsh args…      run a script (#!/usr/bin/env tessh works)
@@ -2699,7 +2699,15 @@ tessh --check --json      the same as JSON
 tessh --py file.tsh       print the Python it compiles to
 tessh --guide [topic]     the guide, or a part of it, for the terminal
 tessh --kernel -f conn    the Jupyter kernel
+tessh --dap               the debugger, for editors (Debug Adapter Protocol)
 ```
+
+`tessh --dap` is how an editor debugs a tessh script (Turbine runs it for
+`.tsh` files; VS Code can with a launch configuration of type `tessh`):
+breakpoints, with conditions, hit counts and log messages (`{expr}` in
+them is evaluated), stepping in, over and out, pausing, the call stack
+and its variables. Its debug console takes Python or tessh, and what it
+assigns changes the running script.
 
 ## Notebooks
 <!-- help: notebooks notebook kernel jupyter display input rich html plots matplotlib -->
