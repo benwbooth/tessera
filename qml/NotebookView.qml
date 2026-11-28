@@ -2075,7 +2075,14 @@ FocusScope {
         cells.clear()
         metadata = nbj.metadata || {}
         const t = metadata.tessera || {}
-        if (keepTids && t.kernel_key) keyBase = t.kernel_key
+        // (Its kernels' key, kept with it: taken up, and them with it. The
+        // first attach can have gone out before the session was known, under
+        // a key of its own, and found nothing: no word of a cell ending, or
+        // of a tessh program it waits on, ever came.)
+        if (keepTids && t.kernel_key && t.kernel_key !== keyBase) {
+            keyBase = t.kernel_key
+            Qt.callLater(() => reattach())
+        }
         let maxCount = 0
         for (const c of nbj.cells || []) {
             const x = newCell(c.cell_type === "markdown" ? "markdown" : c.cell_type === "raw" ? "raw" : "code", joined(c.source))
@@ -2272,12 +2279,21 @@ FocusScope {
                 setLang(k.key.substring(key.length + 1), { name: k.name, display: k.display, state: up(k.state), message: "", queue: [] })
             }
         }
-        // (A cell left running whose kernel is gone: it ended unseen.)
-        const live = ((r && r.kernels) || []).map(k => k.key)
+        // (A cell left running whose kernel is gone, or is idle, running
+        // nothing: it ended unseen, its word that it was done lost to a
+        // window that was going.)
+        const ks = (r && r.kernels) || []
+        const live = ks.map(k => k.key)
+        const idle = ks.filter(k => up(k.state) === "idle").map(k => k.key)
         for (let i = 0; i < cells.count; ++i) {
             const c = cells.get(i)
             if (!c.running || c.tid > 0 || c.job > 0) continue
-            if (live.indexOf(c.lang !== "" ? langKey(c.lang) : key) < 0) cells.setProperty(i, "running", false)
+            const ck = c.lang !== "" ? langKey(c.lang) : key
+            if (live.indexOf(ck) < 0 || (idle.indexOf(ck) >= 0 && !(ttyRun && ttyRun.cid === c.cid))) {
+                cells.setProperty(i, "running", false)
+                // (Kept so, once it's loaded: before then it isn't saved.)
+                Qt.callLater(touch)
+            }
         }
     }
     function touch() {
