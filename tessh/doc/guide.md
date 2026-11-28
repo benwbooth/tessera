@@ -2713,7 +2713,8 @@ assigns changes the running script.
 `tessh --lsp` is the language server (Turbine starts it for `.tsh` files;
 any editor with LSP can run it over stdin and stdout): the problems
 `--check` finds as you type, completion of keywords, builtins, the file's
-own functions and variables and commands on PATH, the guide's help or a
+own functions and variables, commands on PATH, a program's options,
+subcommands and paths as the REPL completes them, the guide's help or a
 builtin's usage on hover, a function's `def` line and the `#` comments
 above it, the file's outline, and go to definition.
 

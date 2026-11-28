@@ -4,7 +4,8 @@
 //! - diagnostics on open and change: what `tessh --check` finds;
 //! - completion: keywords, tessh's and Python's builtins, the file's own
 //!   functions, classes and variables (a function's parameters inside it),
-//!   and commands on PATH as a line's first word;
+//!   commands on PATH as a line's first word, and a program's arguments
+//!   (options, subcommands, values) and paths, as the REPL completes them;
 //! - hover: the guide's topic for a keyword, a builtin's usage or docs, the
 //!   file's own functions' `def` lines and the comments above them;
 //! - document symbols (functions, macros, operators, classes, variables,
@@ -160,7 +161,7 @@ impl Server {
                 let text = self.docs.get(&uri).cloned().unwrap_or_default();
                 let (line, ch) = (p["position"]["line"].as_u64().unwrap_or(0) as usize, p["position"]["character"].as_u64().unwrap_or(0) as u32);
                 let r = match method.as_str() {
-                    "textDocument/completion" => self.completion(py, &text, line, ch),
+                    "textDocument/completion" => self.completion(py, &uri, &text, line, ch),
                     "textDocument/hover" => self.hover(py, &text, line, ch),
                     "textDocument/documentSymbol" => document_symbols(&text),
                     _ => definition(&uri, &text, line, ch),
@@ -183,7 +184,7 @@ impl Server {
         self.send(json!({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": uri, "diagnostics": diags}}));
     }
 
-    fn completion(&mut self, py: Python<'_>, text: &str, line: usize, ch: u32) -> Value {
+    fn completion(&mut self, py: Python<'_>, uri: &str, text: &str, line: usize, ch: u32) -> Value {
         let l = text.lines().nth(line).unwrap_or("");
         let at = byte_of_utf16(l, ch);
         let before = &l[..at];
@@ -192,6 +193,12 @@ impl Server {
         let var = before[..start].ends_with('$');
         let lead = before[..start].trim_end();
         let first = !var && (lead.is_empty() || lead.ends_with(['(', '|', ';', '{']) || lead.ends_with("&&") || lead.ends_with("||"));
+        // (A program's arguments, or a path anywhere: the REPL's completer.)
+        if !var && (!first || word.starts_with(['/', '~', '.']) || word.contains('/')) {
+            if let Some(r) = self.argument_completion(py, uri, text, l, line, at) {
+                return r;
+            }
+        }
         let mut items: Vec<Value> = vec![];
         let mut seen = std::collections::HashSet::new();
         let mut add = |items: &mut Vec<Value>, label: &str, kind: u32, detail: &str| {
@@ -252,6 +259,62 @@ impl Server {
             }
         }
         json!({"isIncomplete": incomplete, "items": items})
+    }
+
+    /// A program's arguments (its options, subcommands and values, from
+    /// carapace, bash-completion, `complete` or its man page, and files) or
+    /// a path being typed, as the REPL completes them, with paths from the
+    /// file's folder. None where the file's own names fit better: a tessh
+    /// function's or builtin's arguments that aren't paths.
+    fn argument_completion(&mut self, py: Python<'_>, uri: &str, text: &str, l: &str, line: usize, at: usize) -> Option<Value> {
+        let before = &l[..at];
+        let (wstart, word) = crate::repl::comp_word(before);
+        let words = crate::carapace::line_words(&before[..wstart]);
+        let ns = self.ns.bind(py);
+        let pathlike = word.starts_with(['/', '~', '.']) || word.contains('/');
+        // (A path as a line's first word: a script to run, a value.)
+        let none = String::new();
+        let cmd = words.first().unwrap_or(&none);
+        let ours = cmd.is_empty() || keywords().any(|k| k == cmd) || (ns.contains(cmd.as_str()).unwrap_or(false) && !runtime::is_command_builtin(cmd)) || definitions(text).iter().any(|d| &d.name == cmd) || cmd.contains('=') || cmd.starts_with(['$', '[', '{', '"', '\'']);
+        let program = !ours && (cmd.contains('/') || runtime::is_command_builtin(cmd) || self.commands.get_or_insert_with(path_commands).binary_search(cmd).is_ok());
+        if !program && !pathlike {
+            return None;
+        }
+        // (Paths from the file's folder, as it's usually run from there.)
+        let here = std::env::current_dir().ok();
+        if let Some(dir) = uri.strip_prefix("file://").map(percent_decode).and_then(|p| std::path::Path::new(&p).parent().map(|d| d.to_path_buf())) {
+            let _ = std::env::set_current_dir(&dir);
+        }
+        let (s, e, items) = crate::repl::complete_items(py, ns, l, at);
+        if let Some(h) = here {
+            let _ = std::env::set_current_dir(h);
+        }
+        let items: Vec<_> = items.into_iter().filter(|i| program || matches!(i.kind, "dir" | "file")).collect();
+        if items.is_empty() && !program {
+            return None;
+        }
+        let range = json!({"start": {"line": line, "character": utf16_col(l, s)}, "end": {"line": line, "character": utf16_col(l, e)}});
+        let items: Vec<Value> = items
+            .into_iter()
+            .enumerate()
+            .map(|(n, i)| {
+                let kind = match i.kind {
+                    "dir" => 19,
+                    "file" => 17,
+                    "option" | "partial" => 5,
+                    "subcommand" => 2,
+                    "variable" => 6,
+                    "value" => 12,
+                    _ => 3,
+                };
+                let mut v = json!({"label": i.label, "kind": kind, "detail": i.detail, "filterText": i.insert, "sortText": format!("{n:05}"), "textEdit": {"range": range, "newText": i.insert}});
+                if !i.doc.is_empty() {
+                    v["documentation"] = json!({"kind": "plaintext", "value": i.doc});
+                }
+                v
+            })
+            .collect();
+        Some(json!({"isIncomplete": true, "items": items}))
     }
 
     fn hover(&mut self, py: Python<'_>, text: &str, line: usize, ch: u32) -> Value {
@@ -613,6 +676,35 @@ mod tests {
         let at = byte_of_utf16(l, 6);
         let (s, e) = word_at(l, at).unwrap();
         assert_eq!(&l[s..e], "name");
+    }
+
+    /// A program's arguments and paths: the REPL's completer, from the
+    /// file's folder, replacing the whole word (dashes, folders and all);
+    /// a tessh function's arguments: the file's names, as before.
+    #[test]
+    fn arguments_and_paths_complete() {
+        let _g = runner::tests::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("tessh-lsp-args-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/foo.txt"), "").unwrap();
+        std::fs::write(dir.join("sub/fob.rs"), "").unwrap();
+        let uri = format!("file://{}/demo.tsh", dir.display());
+        let text = "cat sub/fo\ndef f x = $x\nf gr\n./sub/f\ncd su\n";
+        let cwd = std::env::current_dir().unwrap();
+        Python::attach(|py| {
+            let mut sv = Server::new(py, std::fs::File::create("/dev/null").unwrap()).unwrap();
+            let edits = |r: &Value| -> Vec<(u64, String)> { r["items"].as_array().unwrap().iter().filter_map(|i| Some((i["textEdit"]["range"]["start"]["character"].as_u64()?, i["textEdit"]["newText"].as_str()?.to_string()))).collect() };
+            let r = sv.completion(py, &uri, text, 0, 10);
+            assert_eq!(edits(&r), [(4, "sub/fob.rs".to_string()), (4, "sub/foo.txt".to_string())], "{r}");
+            let r = sv.completion(py, &uri, text, 3, 7);
+            assert_eq!(edits(&r), [(0, "./sub/fob.rs".to_string()), (0, "./sub/foo.txt".to_string())], "{r}");
+            let r = sv.completion(py, &uri, text, 4, 5);
+            assert_eq!(edits(&r), [(3, "sub/".to_string())], "{r}");
+            let r = sv.completion(py, &uri, text, 2, 4);
+            assert!(edits(&r).is_empty() && r["items"].as_array().unwrap().iter().any(|i| i["label"] == "group_by"), "{r}");
+        });
+        assert_eq!(std::env::current_dir().unwrap(), cwd, "the folder is put back");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
