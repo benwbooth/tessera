@@ -6,6 +6,7 @@
 //!     tessh --check [FILE]       check (stdin without FILE); --json for JSON
 //!     tessh --py FILE            print the Python it compiles to
 //!     tessh --dap                the debugger, for editors (Debug Adapter Protocol on stdin and stdout)
+//!     tessh --lsp                the language server, for editors (Language Server Protocol on stdin and stdout)
 //!     tessh --kernel -f CONN     the Jupyter kernel
 
 mod ai;
@@ -17,6 +18,7 @@ mod forms;
 mod help;
 mod kernel;
 mod login;
+mod lsp;
 mod pyforms;
 mod reader;
 mod repl;
@@ -60,6 +62,7 @@ tessh -s [ARGS…]           run the script on stdin (also: stdin not a terminal
 tessh --check [FILE]       check without running (stdin without FILE); --json for JSON
 tessh --py FILE            print the Python it compiles to
 tessh --dap                the debugger, for editors (Debug Adapter Protocol on stdin and stdout)
+tessh --lsp                the language server, for editors (Language Server Protocol on stdin and stdout)
 tessh --kernel -f CONN     the Jupyter kernel
 tessh --guide [TOPIC]      the guide (or a topic of it), drawn for the terminal; --keys: the editor's keys
 tessh --complete [DIR]     completions for {\"text\", \"cursor\"} on stdin, in DIR (Tessera's editor)
@@ -347,6 +350,7 @@ fn run(opts: login::Opts, args: Vec<String>) -> i32 {
                 py.detach(|| kernel::run(&conn))
             }
             "--dap" => dap::run(py),
+            "--lsp" => lsp::run(py),
             "--py" => {
                 let Some(f) = args.get(1) else {
                     eprintln!("tessh: --py FILE");

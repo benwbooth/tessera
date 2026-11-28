@@ -137,11 +137,11 @@ const FM: &str = "__tessh_forms__";
 const BINOPS: &[(&str, &str)] = &[("+", "Add"), ("-", "Sub"), ("*", "Mult"), ("/", "Div"), ("//", "FloorDiv"), ("%", "Mod"), ("@", "MatMult"), ("**", "Pow"), ("<<", "LShift"), (">>", "RShift"), ("^", "BitXor"), ("&", "BitAnd"), ("|", "BitOr"), ("=~", "Match"), ("!~", "NotMatch")];
 const CMPOPS: &[(&str, &str)] = &[("==", "Eq"), ("!=", "NotEq"), ("<", "Lt"), (">", "Gt"), ("<=", "LtE"), (">=", "GtE"), ("in", "In"), ("not in", "NotIn"), ("is", "Is"), ("is not", "IsNot")];
 const ASSIGN_OPS: &[(&str, &str)] = &[("=", ""), ("+=", "Add"), ("-=", "Sub"), ("*=", "Mult"), ("/=", "Div"), ("//=", "FloorDiv"), ("%=", "Mod"), ("**=", "Pow"), ("@=", "MatMult"), ("&=", "BitAnd"), ("|=", "BitOr"), ("^=", "BitXor"), ("<<=", "LShift"), (">>=", "RShift")];
-const WORD_OPS: &[&str] = &["and", "or", "not", "in", "is"];
+pub const WORD_OPS: &[&str] = &["and", "or", "not", "in", "is"];
 const SPACED_REDIRS: &[&str] = &[">", ">>", "<", "1>", "1>>", "2>", "2>>", "&>", "&>>"];
-const CONTINUATIONS: &[&str] = &["elif", "else", "except", "except*", "finally"];
+pub const CONTINUATIONS: &[&str] = &["elif", "else", "except", "except*", "finally"];
 pub const BLOCK_SPECIALS: &[&str] = &["def", "class", "if", "while", "for", "try", "with", "match", "defmacro", "quasi", "do", "async", "fn", "lambda", "let"];
-const OTHER_SPECIALS: &[&str] = &["return", "yield", "await", "raise", "assert", "del", "pass", "break", "continue", "global", "nonlocal", "import", "from", "quote", "defop", "->", "->>", "some->", "some->>", "as->", "doto", "py", "require", "elif", "else", "except", "except*", "finally", "case"];
+pub const OTHER_SPECIALS: &[&str] = &["return", "yield", "await", "raise", "assert", "del", "pass", "break", "continue", "global", "nonlocal", "import", "from", "quote", "defop", "->", "->>", "some->", "some->>", "as->", "doto", "py", "require", "elif", "else", "except", "except*", "finally", "case"];
 
 fn binop(n: &str) -> Option<&'static str> {
     BINOPS.iter().find(|(o, _)| *o == n).map(|(_, a)| *a)

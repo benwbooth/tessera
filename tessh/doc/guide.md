@@ -2689,7 +2689,7 @@ tessh notices it's being started while it reads the profile and doesn't
 start a second REPL.
 
 ## Scripts and checks
-<!-- help: scripts script running run check --check --py -c shebang debug debugger --dap -->
+<!-- help: scripts script running run check --check --py -c shebang debug debugger --dap lsp --lsp language-server editor -->
 
 ```text
 tessh file.tsh args…      run a script (#!/usr/bin/env tessh works)
@@ -2700,6 +2700,7 @@ tessh --py file.tsh       print the Python it compiles to
 tessh --guide [topic]     the guide, or a part of it, for the terminal
 tessh --kernel -f conn    the Jupyter kernel
 tessh --dap               the debugger, for editors (Debug Adapter Protocol)
+tessh --lsp               the language server, for editors (Language Server Protocol)
 ```
 
 `tessh --dap` is how an editor debugs a tessh script (Turbine runs it for
@@ -2708,6 +2709,13 @@ breakpoints, with conditions, hit counts and log messages (`{expr}` in
 them is evaluated), stepping in, over and out, pausing, the call stack
 and its variables. Its debug console takes Python or tessh, and what it
 assigns changes the running script.
+
+`tessh --lsp` is the language server (Turbine starts it for `.tsh` files;
+any editor with LSP can run it over stdin and stdout): the problems
+`--check` finds as you type, completion of keywords, builtins, the file's
+own functions and variables and commands on PATH, the guide's help or a
+builtin's usage on hover, a function's `def` line and the `#` comments
+above it, the file's outline, and go to definition.
 
 ## Notebooks
 <!-- help: notebooks notebook kernel jupyter display input rich html plots matplotlib -->
