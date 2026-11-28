@@ -132,7 +132,8 @@ Item {
         // (Back at the prompt after a command or a full-screen program like
         // vim: the editor takes the keys again if it had them before; keys
         // given to the terminal (a click there, a tap of Ctrl) stay there.)
-        if (editorOn && focused && preferEditor) Qt.callLater(compose.focusEditor)
+        // (Not while a notebook card has the terminal live: its program reads the keys.)
+        if (editorOn && focused && preferEditor && termSlot === null) Qt.callLater(compose.focusEditor)
         else if (!editorOn && compose.editing) term.forceActiveFocus()
     }
     // (A program that takes the screen: full-screen ones, or ones drawn in
@@ -361,7 +362,8 @@ Item {
         // pane remembers which, and goes back to it when it gets the keys
         // again (switching tabs or panes).
         onActiveFocusChanged: {
-            if (activeFocus && pane.editorOn && pane.preferEditor) Qt.callLater(compose.focusEditor)
+            // (Not while a notebook card has it live: its program reads the keys.)
+            if (activeFocus && pane.editorOn && pane.preferEditor && pane.termSlot === null) Qt.callLater(compose.focusEditor)
             // (A notebook over it takes the keys, when the editor doesn't.)
             else if (activeFocus && notebook.visible && pane.termSlot === null && !pane.runningLong) Qt.callLater(() => notebook.forceActiveFocus())
         }
@@ -637,7 +639,17 @@ Item {
     // keys go to it, as typed into the terminal; at the prompt again, back to
     // the editor.)
     onRunningLongChanged: if (runningLong && notebook.visible && !notebook.ownRun) term.forceActiveFocus()
-    onTermSlotChanged: if (termSlot !== null) Qt.callLater(() => term.forceActiveFocus())
+    // (Its program done, the keys go back where they'd be: the input box,
+    // else the notebook. Moving out of the card left them nowhere.)
+    onTermSlotChanged: {
+        if (termSlot !== null) { Qt.callLater(() => term.forceActiveFocus()); return }
+        Qt.callLater(() => {
+            const w = pane.Window.window
+            const f = w ? w.activeFocusItem : null
+            if (f && f !== term && f !== notebook && f !== w.contentItem) return
+            if (pane.editorShown) compose.focusEditor(); else notebook.forceActiveFocus()
+        })
+    }
     Connections {
         target: term
         function onCellsChanged(id, done) {

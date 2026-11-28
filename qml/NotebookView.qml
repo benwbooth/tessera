@@ -308,6 +308,8 @@ FocusScope {
                 // (Its program went to the background: the card is the job's now.)
                 if (cells.get(i).jobTty && cells.get(i).job > 0) { if (e.count !== null && e.count !== undefined) cells.setProperty(i, "count", e.count); return }
                 cells.setProperty(i, "running", false)
+                // (Whether a card still has the terminal: this one doesn't now.)
+                updateOwnRun()
                 if (e.count !== null && e.count !== undefined) cells.setProperty(i, "count", e.count)
                 cells.setProperty(i, "ended", Date.now())
                 cells.setProperty(i, "failed", e.status !== "ok" || (e.exit || 0) !== 0)
@@ -1501,10 +1503,11 @@ FocusScope {
         // (since: the terminal's newest command now; the one this starts comes
         // after it, and reads as cmd.)
         const ts = termCells()
-        ttyRun = { cid: cid, key: k, tid: 0, base: -1, before: "", cmd: cmd, since: ts.length ? ts[ts.length - 1].id : 0 }
+        ttyRun = { cid: cid, key: k, tid: 0, base: -1, before: "", cmd: cmd, since: ts.length ? ts[ts.length - 1].id : 0, left: false }
         updateOwnRun()
         touch()
         view.sendText(cmd + "\r")
+        ttyLiveTimer.restart()
         findLive()
         Qt.callLater(followLive)
     }
@@ -1567,7 +1570,34 @@ FocusScope {
             finishTty({ id: c.id, done: true, status: c.status, screen: true })
         })
     }
+    // (The shell back at its prompt after it: the program's done, whether or
+    // not its own terminal command was found, two sent quickly can land in
+    // one, and the cell would spin on until the next command. The shell's
+    // own mark says so; its status is the program's.)
+    Connections {
+        target: nb.view
+        enabled: nb.ttyRun !== null
+        function onPromptChanged() {
+            const r = nb.ttyRun
+            if (!r) return
+            if (!nb.view.atPrompt) { r.left = true; return }
+            if (r.left) Qt.callLater(() => {
+                if (nb.ttyRun === null || nb.ttyRun.key !== r.key) return
+                nb.syncTerm()
+                const now = nb.ttyRun
+                if (now === null || now.key !== r.key) return
+                const t = now.tid > 0 ? nb.termCells().find(x => x.id === now.tid) : null
+                if (t) { nb.finishTty(Object.assign({}, t, { status: t.done ? t.status : nb.view.lastStatus })); return }
+                nb.ttyRun = null
+                nb.updateOwnRun()
+                nb.touch()
+                controller.jupyterInput(r.key, String(nb.view.lastStatus))
+            })
+        }
+    }
     function finishTty(t) {
+        ttyLiveTimer.stop()
+        ttyLive = false
         ttyText(t, true)
         const r = ttyRun
         ttyRun = null
@@ -1679,7 +1709,19 @@ FocusScope {
     // (A terminal app's card: a regular card, 25 rows; less if the notebook
     // is smaller. Expand for more.)
     readonly property int liveHeight: Math.min(Math.round((outputRow > 0 ? outputRow : 18) * 25 + 12), Math.max(200, list.height - 120))
-    readonly property bool liveWanted: view !== null && view.fullScreen && shown
+    // (A full-screen program's, and any card's running in the pane's
+    // terminal past a moment, a tessh program, a shell cell, a job brought
+    // back: it has the terminal, a real one, to ask for a password or a
+    // finger, and you type into it there.)
+    readonly property bool liveWanted: view !== null && (view.fullScreen || ttyLive) && shown
+    property bool ttyLive: false
+    onOwnRunChanged: if (ownRun) ttyLiveTimer.restart(); else { ttyLiveTimer.stop(); ttyLive = false }
+    Timer {
+        id: ttyLiveTimer
+        // (Not for a quick one, date or ls: it'd flash a terminal.)
+        interval: 400
+        onTriggered: if (nb.ownRun) { nb.ttyLive = true; if (nb.view) Qt.callLater(() => nb.view.forceActiveFocus()) }
+    }
     property int liveIndex: -1
     property Item liveBox: null            // the card's place for it (set by the card)
     readonly property Item liveSlot: liveWanted && liveIndex >= 0 ? liveHost : null
@@ -1703,7 +1745,7 @@ FocusScope {
     // itself when the program ends.)
     property string autoExpanded: ""
     function autoExpand() {
-        if (!liveWanted || liveIndex < 0 || liveIndex >= cells.count) return
+        if (!liveWanted || !view.fullScreen || liveIndex < 0 || liveIndex >= cells.count) return
         const cid = cells.get(liveIndex).cid
         if (autoExpanded === cid) return
         autoExpanded = cid
