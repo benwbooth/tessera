@@ -1508,7 +1508,7 @@ FocusScope {
         touch()
         // (On a clean screen, the last one's kept in the scrollback: its card
         // shows only its own.)
-        if (view.atPrompt) view.clearScreen()
+        if (shellAtPrompt()) view.clearScreen()
         view.sendText(cmd + "\r")
         ttyLiveTimer.restart()
         findLive()
@@ -1637,9 +1637,17 @@ FocusScope {
         if (!view) return
         shellWaiting = shellWaiting.concat([cid])
         updateOwnRun()
-        if (view.atPrompt) view.clearScreen()
+        if (shellAtPrompt()) view.clearScreen()
         if (code.indexOf("\n") < 0) view.sendText(code + "\r")
         else { view.pasteText(code); view.sendText("\r") }
+    }
+    // The shell's waiting at its prompt: its marks say so, or, in a window
+    // just back (no mark has come since), its last command is done.
+    function shellAtPrompt() {
+        if (!view) return false
+        if (view.atPrompt) return true
+        const ts = termCells()
+        return ts.length === 0 || !!ts[ts.length - 1].done
     }
     function termCells() { try { return JSON.parse(view.cells()) } catch (e) { return [] } }
     function fromTerm(i, t) {
