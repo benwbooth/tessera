@@ -758,6 +758,10 @@ pub struct Kernel {
     running: Arc<Mutex<String>>,
     /// The header of the input request being answered.
     asking: Mutex<Option<Vec<u8>>>,
+    /// That request as the notebook was told it: told again to a window
+    /// that comes back while it's unanswered (a tessh program running in
+    /// the terminal waits on it; the window it was for may be gone).
+    asked: Mutex<Option<Value>>,
     /// Where its events go (to say it was stopped).
     sink: Sink,
     /// busy / idle, as it last said, and since when; when it started.
@@ -889,6 +893,7 @@ impl Kernel {
             ports: ports.clone(),
             started: Instant::now(),
             asking: Mutex::new(None),
+            asked: Mutex::new(None),
             running,
             child: Mutex::new(Some(child)),
             pending: Arc::default(),
@@ -1006,7 +1011,9 @@ impl Kernel {
                 }
                 *k.asking.lock().unwrap() = k.signer.header_of(&parts);
                 let cell = k.pending.lock().unwrap().get(&parent).cloned().unwrap_or_default();
-                sink(json!({"type": "input", "cell": cell, "prompt": c["prompt"], "password": c["password"].as_bool().unwrap_or(false), "tty": c["tessera_tty"]}));
+                let e = json!({"type": "input", "cell": cell, "prompt": c["prompt"], "password": c["password"].as_bool().unwrap_or(false), "tty": c["tessera_tty"]});
+                *k.asked.lock().unwrap() = Some(e.clone());
+                sink(e);
             }
         });
     }
@@ -1014,6 +1021,7 @@ impl Kernel {
     /// Answer the kernel's input request.
     pub fn input_reply(&self, value: &str) -> bool {
         let Some(parent) = self.asking.lock().unwrap().take() else { return false };
+        *self.asked.lock().unwrap() = None;
         let (_, parts) = self.signer.reply("input_reply", json!({"value": value}), &parent);
         self.stdin.lock().unwrap().as_mut().is_some_and(|s| s.send(&parts).is_ok())
     }
@@ -1547,6 +1555,13 @@ pub fn has(key: &str) -> bool {
 
 pub fn execute(key: &str, cell: &str, code: &str) -> bool {
     get(key).is_some_and(|k| k.execute(cell, code))
+}
+
+/// The input request a kernel is waiting on, if any, marked as told again.
+pub fn pending_ask(key: &str) -> Option<Value> {
+    let mut e = get(key)?.asked.lock().unwrap().clone()?;
+    e["again"] = json!(true);
+    Some(e)
 }
 
 /// Answer a kernel's input request (what was typed).

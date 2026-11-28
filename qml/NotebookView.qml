@@ -276,7 +276,7 @@ FocusScope {
             let tty = e.tty || null
             const M = "\x1b]tessera-tty;", p = e.prompt || ""
             if (!tty && p.startsWith(M)) { try { tty = JSON.parse(p.substring(M.length)) } catch (x) {} }
-            if (tty) { runTty(e.cell, tty, fromKey || key); return }
+            if (tty) { if (e.again) adoptTty(e.cell, tty, fromKey || key); else runTty(e.cell, tty, fromKey || key); return }
         }
         if (e.type === "input") { setAsking(e.cell, { prompt: e.prompt || "", password: !!e.password, key: fromKey || key }); return }
         if (e.type === "status") {
@@ -1513,6 +1513,31 @@ FocusScope {
         ttyLiveTimer.restart()
         findLive()
         Qt.callLater(followLive)
+    }
+    // A tessh program a window before this one sent to the terminal (the
+    // kernel still waits on it): taken up where it is, not run again. Done
+    // already, the shell back at its prompt: its status goes back now.
+    function adoptTty(cid, tty, k) {
+        if (!view || (ttyRun && ttyRun.key === k)) return
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        const cmd = (tty.cwd && tty.cwd !== shellDir ? "cd " + q(tty.cwd) + " && " : "") + tty.command
+        const ts = termCells()
+        let t = null
+        for (let i = ts.length - 1; i >= 0 && !t; --i) if ((ts[i].command || "").trim() === cmd.trim() || (ts[i].command || "").trim() === String(tty.command).trim()) t = ts[i]
+        ttyRun = { cid: cid, key: k, tid: t ? t.id : 0, base: -1, before: "", cmd: cmd, since: t ? t.id - 1 : 0, left: true }
+        updateOwnRun()
+        touch()
+        if (!view.atPrompt) return
+        Qt.callLater(() => {
+            const r = ttyRun
+            if (!r || r.key !== k) return
+            const tt = r.tid > 0 ? termCells().find(x => x.id === r.tid) : null
+            if (tt) { finishTty(Object.assign({}, tt, { status: tt.done ? tt.status : view.lastStatus })); return }
+            ttyRun = null
+            updateOwnRun()
+            touch()
+            controller.jupyterInput(k, String(view.lastStatus))
+        })
     }
     // (Its output so far, after what the card had before it.)
     // A folder card (ls, cd shown as the folder): what its program prints

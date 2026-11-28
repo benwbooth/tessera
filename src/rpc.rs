@@ -277,6 +277,15 @@ fn call(method: &str, p: &Value) -> Result<Value, String> {
                 for e in claim(&k, sub) {
                     events.push(json!({"key": k, "event": e}));
                 }
+                // (What it's waiting on, said to a window that's gone: again,
+                // for this one. A tessh program in the terminal is taken up
+                // where it is, not run again.)
+                let told = events.iter().any(|x| x["key"] == k && x["event"]["type"] == "input");
+                if !told {
+                    if let Some(e) = crate::jupyter::pending_ask(&k) {
+                        events.push(json!({"key": k, "event": e}));
+                    }
+                }
             }
             json!({"kernels": mine, "events": events})
         }
