@@ -160,6 +160,8 @@ public:
     Q_INVOKABLE void scrollLines(int n);
     Q_INVOKABLE void selectAll();
     Q_INVOKABLE void clearScrollback();
+    // The shell clears its screen and redraws its prompt at the top (Ctrl+L).
+    Q_INVOKABLE void clearScreen();
     Q_INVOKABLE void copyWithStyles();
     Q_INVOKABLE void copyWithControlSequences();
     Q_INVOKABLE void pasteSelection();

@@ -1506,6 +1506,9 @@ FocusScope {
         ttyRun = { cid: cid, key: k, tid: 0, base: -1, before: "", cmd: cmd, since: ts.length ? ts[ts.length - 1].id : 0, left: false }
         updateOwnRun()
         touch()
+        // (On a clean screen, the last one's kept in the scrollback: its card
+        // shows only its own.)
+        if (view.atPrompt) view.clearScreen()
         view.sendText(cmd + "\r")
         ttyLiveTimer.restart()
         findLive()
@@ -1609,6 +1612,7 @@ FocusScope {
         if (!view) return
         shellWaiting = shellWaiting.concat([cid])
         updateOwnRun()
+        if (view.atPrompt) view.clearScreen()
         if (code.indexOf("\n") < 0) view.sendText(code + "\r")
         else { view.pasteText(code); view.sendText("\r") }
     }

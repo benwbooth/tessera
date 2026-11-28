@@ -1376,6 +1376,14 @@ impl Session {
         self.write_input(b"\x0c");
     }
 
+    /// The shell clears its screen and redraws its prompt at the top (Ctrl+L,
+    /// its own way: moving the cursor under it confuses one that draws its
+    /// own editor, as tessh does). A notebook card's program starts on it,
+    /// its card showing only its own.
+    pub fn clear_screen(&mut self) {
+        self.write_input(b"\x0c");
+    }
+
     pub fn clear_selection(&mut self) {
         let _ = self.term.set_selection(None);
         self.selected.clear();

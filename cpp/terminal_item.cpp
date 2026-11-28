@@ -1752,6 +1752,14 @@ void TerminalItem::clearScrollback()
     polish();
 }
 
+void TerminalItem::clearScreen()
+{
+    if (!m_session) return;
+    m_session->clear_screen();
+    m_forceFull = true;
+    polish();
+}
+
 void TerminalItem::scrollToBottom()
 {
     if (!m_session) return;

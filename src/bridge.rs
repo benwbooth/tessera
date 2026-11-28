@@ -203,6 +203,7 @@ pub mod ffi {
         fn find_clear(self: &mut Session);
         fn select_all(self: &mut Session);
         fn clear_scrollback(self: &mut Session);
+        fn clear_screen(self: &mut Session);
         fn clear_selection(self: &mut Session);
         fn title(self: &Session) -> String;
         fn pwd(self: &Session) -> String;
