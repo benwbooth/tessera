@@ -263,6 +263,9 @@ FocusScope {
     function answer(cid, text) {
         const a = asking[cid]
         if (!a) return
+        // (A program in the cell's terminal asking: the answer is typed
+        // there, where it echoes, or doesn't, as the program says.)
+        if (a.tty) { setAsking(cid, null); ttySame = -1000; if (view) view.sendText(text + "\r"); return }
         controller.jupyterInput(a.key, text)
         // (What was asked and answered stays in the output, as Jupyter shows it.)
         const i = indexOf(cid)
@@ -1494,6 +1497,27 @@ FocusScope {
     // exit status goes back. {cid, key, tid (its terminal cell), base (the
     // card's outputs before it)}
     property var ttyRun: null
+    // A program in a cell's terminal waiting at a prompt (sudo's password,
+    // a y/n): its output ends mid-line and stays still for a moment. The
+    // card's answer field comes up (dotted for a password), and what's
+    // entered is typed into the terminal. More output puts it away.
+    property string ttyLast: ""
+    property int ttySame: 0
+    function ttyAsks(cid, text) {
+        if (text !== ttyLast) {
+            ttyLast = text
+            ttySame = 0
+            if (asking[cid] && asking[cid].tty) setAsking(cid, null)
+            return
+        }
+        ttySame++
+        const line = text.substring(text.lastIndexOf("\n") + 1)
+        if (ttySame === 2 && line.trim() !== "" && !asking[cid])
+            {
+            const pw = /pass(word|phrase)|\bPIN\b|secret|token/i.test(line)
+            setAsking(cid, { prompt: pw ? "Password:" : "Answer:", password: pw, key: "", tty: true })
+        }
+    }
     function runTty(cid, tty, k) {
         if (!view) { controller.jupyterInput(k, "127"); return }
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
@@ -1531,6 +1555,7 @@ FocusScope {
         }
         outs = outs.slice(0, r.base)
         let text = t.screen ? "" : view.cellOutput(t.id, "text")
+        if (!ended && !t.screen) ttyAsks(r.cid, text)
         if (folder && text.length > 65536) text = text.slice(-65536)
         text = text.trim() === "" ? "" : text.replace(/\n*$/, "\n")
         if (r.before + text !== "") outs.push({ output_type: "stream", name: "stdout", text: r.before + text })
@@ -1568,6 +1593,9 @@ FocusScope {
         })
     }
     function finishTty(t) {
+        if (ttyRun && asking[ttyRun.cid] && asking[ttyRun.cid].tty) setAsking(ttyRun.cid, null)
+        ttyLast = ""
+        ttySame = 0
         ttyText(t, true)
         const r = ttyRun
         ttyRun = null
