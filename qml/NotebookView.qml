@@ -1508,9 +1508,11 @@ FocusScope {
         touch()
         // (On a clean screen, the last one's kept in the scrollback: its card
         // shows only its own.)
-        if (shellAtPrompt()) view.clearScreen()
-        view.sendText(cmd + "\r")
-        ttyLiveTimer.restart()
+        atPromptThen(() => {
+            if (!view || !ttyRun || ttyRun.key !== k) return
+            view.sendText(cmd + "\r")
+            ttyLiveTimer.restart()
+        })
         findLive()
         Qt.callLater(followLive)
     }
@@ -1637,17 +1639,25 @@ FocusScope {
         if (!view) return
         shellWaiting = shellWaiting.concat([cid])
         updateOwnRun()
-        if (shellAtPrompt()) view.clearScreen()
-        if (code.indexOf("\n") < 0) view.sendText(code + "\r")
-        else { view.pasteText(code); view.sendText("\r") }
+        atPromptThen(() => {
+            if (!view) return
+            if (code.indexOf("\n") < 0) view.sendText(code + "\r")
+            else { view.pasteText(code); view.sendText("\r") }
+        })
     }
-    // The shell's waiting at its prompt: its marks say so, or, in a window
-    // just back (no mark has come since), its last command is done.
-    function shellAtPrompt() {
-        if (!view) return false
-        if (view.atPrompt) return true
-        const ts = termCells()
-        return ts.length === 0 || !!ts[ts.length - 1].done
+    // Clear the screen (a card's program on a clean one), then `then`:
+    // when the shell is waiting at its prompt. Its marks say so; a window
+    // just back hasn't heard one, so the terminal's foreground process is
+    // asked: none, or a shell (tessh under a login one), is its prompt.
+    readonly property var shellNamesRe: /^(bash|zsh|fish|nu|xonsh|tessh|tessh-static|sh|dash|ksh|mksh|elvish|pwsh)$/
+    function atPromptThen(then) {
+        if (!view) return
+        if (view.atPrompt || !controller || view.sessionId === "") { if (view.atPrompt) view.clearScreen(); then(); return }
+        const id = view.sessionId
+        Async.call(controller, k => controller.sessionJob(k, id), job => {
+            if (view && view.sessionId === id && (job === "" || shellNamesRe.test(job))) view.clearScreen()
+            then()
+        })
     }
     function termCells() { try { return JSON.parse(view.cells()) } catch (e) { return [] } }
     function fromTerm(i, t) {
