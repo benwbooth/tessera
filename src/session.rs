@@ -1378,8 +1378,9 @@ impl Session {
 
     /// The shell clears its screen and redraws its prompt at the top (Ctrl+L,
     /// its own way: moving the cursor under it confuses one that draws its
-    /// own editor, as tessh does). A notebook card's program starts on it,
-    /// its card showing only its own.
+    /// own editor, as tessh does). Its clear at a prompt is ghostty's scroll
+    /// clear (CSI 22 J), so what was on the screen goes into the scrollback.
+    /// A notebook card's program starts on it, its card showing only its own.
     pub fn clear_screen(&mut self) {
         self.write_input(b"\x0c");
     }
