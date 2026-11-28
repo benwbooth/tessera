@@ -1269,8 +1269,14 @@ ApplicationWindow {
     }
     Shortcut { sequence: "Ctrl+Shift+D"; autoRepeat: false; onActivated: splitPane(activePane, Qt.Horizontal) }
     Shortcut { sequence: "Ctrl+Shift+E"; autoRepeat: false; onActivated: splitPane(activePane, Qt.Vertical) }
-    Shortcut { sequence: "Ctrl+Shift+C"; onActivated: if (activeView) activeView.copy() }
-    Shortcut { sequence: "Ctrl+Shift+V"; onActivated: pasteClipboard(activeView) }
+    // (In a text field with the keys, the input box or a notebook cell's
+    // editor, they're its copy and paste; else the terminal's.)
+    function focusedField() {
+        const f = win.activeFocusItem
+        return f && f.cursorPosition !== undefined && typeof f.paste === "function" && typeof f.copy === "function" ? f : null
+    }
+    Shortcut { sequence: "Ctrl+Shift+C"; onActivated: { const f = focusedField(); if (f) { if (f.selectedText !== "") f.copy() } else if (activeView) activeView.copy() } }
+    Shortcut { sequence: "Ctrl+Shift+V"; onActivated: { const f = focusedField(); if (f) { if (!f.readOnly) f.paste() } else pasteClipboard(activeView) } }
     Shortcut { sequence: "Shift+Insert"; onActivated: if (activeView) activeView.pasteSelection() }
     Shortcut { sequence: "Ctrl+Shift+A"; onActivated: if (activeView) activeView.selectAll() }
     Shortcut { sequence: "Ctrl+Shift+K"; autoRepeat: false; onActivated: if (activeView) activeView.clearScrollback() }
@@ -2043,11 +2049,11 @@ ApplicationWindow {
                             lshift: [Qt.Key_Shift, 0, "", 50], rshift: [Qt.Key_Shift, 0, "", 62], esc: [Qt.Key_Escape, 0, "\x1b", 9], ctrl: [Qt.Key_Control, 0, "", 37], rctrl: [Qt.Key_Control, 0, "", 105], stab: [Qt.Key_Backtab, Qt.ShiftModifier, "", 23],
                             up: [Qt.Key_Up, 0, "", 111], down: [Qt.Key_Down, 0, "", 116],
                             pgup: [Qt.Key_PageUp, 0, "", 112], pgdn: [Qt.Key_PageDown, 0, "", 117] }
-            // (ca:x: Ctrl+Alt+x; ca:enter for Return. al:x: Alt+x. ct:x: Ctrl+x.)
-            const ca = k.startsWith("ca:"), al = k.startsWith("al:"), ct = k.startsWith("ct:")
-            const kk = ca || al || ct ? k.slice(3) : k
+            // (ca:x: Ctrl+Alt+x; ca:enter for Return. al:x: Alt+x. ct:x: Ctrl+x. cs:x: Ctrl+Shift+x.)
+            const ca = k.startsWith("ca:"), al = k.startsWith("al:"), ct = k.startsWith("ct:"), cs = k.startsWith("cs:")
+            const kk = ca || al || ct || cs ? k.slice(3) : k
             const d0 = named[kk] || [kk.toUpperCase().charCodeAt(0), 0, kk, 0]
-            const d = ca ? [d0[0], Qt.ControlModifier | Qt.AltModifier, "", d0[3]] : al ? [d0[0], Qt.AltModifier, "", d0[3]] : ct ? [d0[0], Qt.ControlModifier, "", d0[3]] : d0
+            const d = ca ? [d0[0], Qt.ControlModifier | Qt.AltModifier, "", d0[3]] : al ? [d0[0], Qt.AltModifier, "", d0[3]] : ct ? [d0[0], Qt.ControlModifier, "", d0[3]] : cs ? [d0[0], Qt.ControlModifier | Qt.ShiftModifier, "", d0[3]] : d0
             controller.testKey(d[0], d[1], d[2], d[3])
             if (activePane) console.log("key test: after " + k + " termFocus=" + activePane.view.activeFocus + " editorFocus=" + activePane.compose.editing + " focusItem=" + win.activeFocusItem + " editor=" + JSON.stringify(activePane.compose.text) + " ghost=" + JSON.stringify(activePane.compose.ghost) + " dropdown=" + activePane.compose.compOpen)
         }
